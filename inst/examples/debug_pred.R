@@ -1,0 +1,13 @@
+devtools::load_all()
+data(ovis_ammon)
+data(china_env_grid)
+split <- cast_prepare(ovis_ammon, seed = 42)
+dag <- cast_dag(split$train, R = 30, seed = 42)
+ate <- cast_ate(split$train, K = 2, num_trees = 100, seed = 42)
+screen <- cast_screen(dag, ate, split$train, seed = 42)
+fit <- cast_fit(split$train, screen = screen, dag = dag, ate = ate,
+                models = c("rf", "maxent", "brt"), seed = 42)
+pred <- cast_predict(fit, china_env_grid)
+cat("Models in fit:", names(fit$models), "\n")
+cat("Pred columns:", names(pred$predictions), "\n")
+cat("pred$models:", pred$models, "\n")

@@ -46,6 +46,7 @@ Suggests:
     pROC,
     ranger,
     rmarkdown,
+    scales,
     sf,
     terra,
     testthat (>= 3.0.0),

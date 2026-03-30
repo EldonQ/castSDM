@@ -4,15 +4,34 @@
 \alias{plot.cast_cate}
 \title{Plot Spatial CATE Map}
 \usage{
-\method{plot}{cast_cate}(x, variable = NULL, basemap = "world", ...)
+\method{plot}{cast_cate}(
+  x,
+  variable = NULL,
+  species = NULL,
+  basemap = "world",
+  var_labels = NULL,
+  point_size = 0.5,
+  legend_position = "bottom",
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{cast_cate} object.}
 
 \item{variable}{Character. Which treatment variable to plot. Default is
-the first variable.}
+the first variable. Use \code{x$variables} to see available options.}
+
+\item{species}{Character. Optional species name for the title.}
 
 \item{basemap}{Character. Basemap type: \code{"world"}, \code{"china"}, or \code{"none"}.}
+
+\item{var_labels}{Optional named character vector mapping variable names
+to display labels.}
+
+\item{point_size}{Numeric. Point size. Default \code{0.5}.}
+
+\item{legend_position}{Character. \code{"bottom"} (horizontal colorbar, like
+the reference figures) or \code{"right"}. Default \code{"bottom"}.}
 
 \item{...}{Ignored.}
 }
@@ -21,5 +40,6 @@ A \code{ggplot} object.
 }
 \description{
 Displays spatially varying Conditional Average Treatment Effects on a
-geographic map with a diverging color scale.
+geographic map with a diverging color scale (blue = negative, white =
+zero, red = positive effect on species presence).
 }

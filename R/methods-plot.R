@@ -309,7 +309,11 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
   hss_col <- paste0("HSS_", model)
 
   if (!hss_col %in% names(pred)) {
-    cli::cli_abort("Model {.val {model}} not found in predictions.")
+    cli::cli_abort(c(
+      "Model {.val {model}} not found in predictions.",
+      i = "Available models: {.val {x$models}}.",
+      i = "Use {.code plot(pred, model = \"{x$models[1]}\")}."
+    ))
   }
 
   title <- title %||% sprintf("Habitat Suitability - %s", toupper(model))
@@ -364,17 +368,27 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 #' Plot Spatial CATE Map
 #'
 #' Displays spatially varying Conditional Average Treatment Effects on a
-#' geographic map with a diverging color scale.
+#' geographic map with a diverging color scale (blue = negative, white =
+#' zero, red = positive effect on species presence).
 #'
 #' @param x A `cast_cate` object.
 #' @param variable Character. Which treatment variable to plot. Default is
-#'   the first variable.
+#'   the first variable. Use `x$variables` to see available options.
+#' @param species Character. Optional species name for the title.
 #' @param basemap Character. Basemap type: `"world"`, `"china"`, or `"none"`.
+#' @param var_labels Optional named character vector mapping variable names
+#'   to display labels.
+#' @param point_size Numeric. Point size. Default `0.5`.
+#' @param legend_position Character. `"bottom"` (horizontal colorbar, like
+#'   the reference figures) or `"right"`. Default `"bottom"`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_cate <- function(x, variable = NULL, basemap = "world", ...) {
+plot.cast_cate <- function(x, variable = NULL, species = NULL,
+                           basemap = "world", var_labels = NULL,
+                           point_size = 0.5,
+                           legend_position = "bottom", ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -382,18 +396,47 @@ plot.cast_cate <- function(x, variable = NULL, basemap = "world", ...) {
   df <- x$effects[x$effects$variable == variable, ]
 
   if (nrow(df) == 0) {
-    cli::cli_abort("Variable {.val {variable}} not found in CATE effects.")
+    cli::cli_abort(c(
+      "Variable {.val {variable}} not found in CATE effects.",
+      i = "Available variables: {.val {x$variables}}."
+    ))
   }
 
-  has_coords <- all(c("lon", "lat") %in% names(df))
-  if (!has_coords) {
+  if (!all(c("lon", "lat") %in% names(df))) {
     cli::cli_abort("CATE effects must contain lon/lat for spatial plotting.")
   }
 
-  max_abs <- max(abs(df$cate), na.rm = TRUE)
+  # Display label for variable
+  var_display <- if (!is.null(var_labels) &&
+                     variable %in% names(var_labels)) {
+    var_labels[variable]
+  } else {
+    variable
+  }
+
+  # Symmetric limits at 98th percentile (like fig6 reference)
+  cate_lim <- stats::quantile(abs(df$cate), 0.98, na.rm = TRUE)
+  if (cate_lim < 1e-10) cate_lim <- max(abs(df$cate), na.rm = TRUE)
+
+  # Title
+  sp_display <- if (!is.null(species)) {
+    gsub("_", " ", species)
+  } else {
+    NULL
+  }
+  main_title <- sprintf("Spatial CATE: %s", var_display)
+
+  sub_parts <- sprintf(
+    "Causal forest (%d trees) | n = %d cells",
+    x$n_trees, nrow(df)
+  )
+  if (!is.null(sp_display)) {
+    sub_parts <- paste0(sp_display, " | ", sub_parts)
+  }
 
   p <- ggplot2::ggplot()
 
+  # Basemap
   if (basemap != "none") {
     basemap_sf <- load_basemap(basemap)
     if (!is.null(basemap_sf)) {
@@ -404,34 +447,52 @@ plot.cast_cate <- function(x, variable = NULL, basemap = "world", ...) {
     }
   }
 
+  # CATE points with diverging RdBu scale
   p <- p +
     ggplot2::geom_point(
       data = df,
       ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$cate),
-      size = 0.4, alpha = 0.85
+      size = point_size, alpha = 0.85
     ) +
     ggplot2::scale_color_gradient2(
       low = "#2166AC", mid = "white", high = "#B2182B",
-      midpoint = 0, limits = c(-max_abs, max_abs),
+      midpoint = 0,
+      limits = c(-cate_lim, cate_lim),
+      oob = scales::squish,
       name = "CATE"
     ) +
-    ggplot2::labs(
-      title = sprintf("Spatial CATE: %s", variable),
-      subtitle = sprintf(
-        "Causal forest (%d trees) | Positive = promotes presence",
-        x$n_trees
-      )
-    ) +
+    ggplot2::labs(title = main_title, subtitle = sub_parts) +
     ggplot2::coord_sf(expand = FALSE) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
-      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
-      plot.subtitle = ggplot2::element_text(
-        hjust = 0.5, color = "grey40", size = 9
+      plot.title = ggplot2::element_text(
+        face = "bold", hjust = 0.5, size = 14
       ),
-      legend.position = "right"
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0.5, color = "grey40", size = 9, face = "italic"
+      ),
+      legend.position = legend_position
     )
 
+  # Legend styling based on position
+  if (legend_position == "bottom") {
+    p <- p + ggplot2::guides(
+      color = ggplot2::guide_colorbar(
+        barwidth = ggplot2::unit(8, "cm"),
+        barheight = ggplot2::unit(0.4, "cm"),
+        title.position = "top", title.hjust = 0.5
+      )
+    )
+  } else {
+    p <- p + ggplot2::guides(
+      color = ggplot2::guide_colorbar(
+        barwidth = ggplot2::unit(0.5, "cm"),
+        barheight = ggplot2::unit(4, "cm")
+      )
+    )
+  }
+
+  # China dashline overlay
   if (basemap == "china") {
     dash_sf <- load_basemap("dashline")
     if (!is.null(dash_sf)) {
