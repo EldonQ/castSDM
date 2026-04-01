@@ -508,14 +508,20 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
 
 #' Plot Evaluation Metrics Comparison
 #'
-#' Bar chart comparing AUC and TSS across fitted models.
+#' Multi-panel bar chart comparing AUC, TSS, CBI, SEDI, Kappa, and PRAUC
+#' across fitted models.
 #'
 #' @param x A `cast_eval` object.
+#' @param metrics Character vector. Which metrics to show. Default shows all
+#'   six: `c("auc","tss","cbi","sedi","kappa","prauc")`.
 #' @param ... Ignored.
 #'
-#' @return A `ggplot` object.
+#' @return A `ggplot` object (faceted).
 #' @export
-plot.cast_eval <- function(x, ...) {
+plot.cast_eval <- function(x,
+                           metrics = c("auc", "tss", "cbi",
+                                       "sedi", "kappa", "prauc"),
+                           ...) {
   check_suggested("ggplot2", "for plotting")
 
   m <- x$metrics
@@ -524,24 +530,161 @@ plot.cast_eval <- function(x, ...) {
     rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85"
   )
 
-  m$model <- factor(m$model, levels = names(model_colors))
+  src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test"
 
-  ggplot2::ggplot(m, ggplot2::aes(
-    x = .data$model, y = .data$auc_mean, fill = .data$model
+  # Build long format: metric × model
+  mean_cols <- paste0(metrics, "_mean")
+  present   <- intersect(mean_cols, names(m))
+  if (length(present) == 0) {
+    # Fallback: old-style object with only auc_mean / tss_mean
+    present <- intersect(c("auc_mean", "tss_mean"), names(m))
+  }
+
+  rows <- list()
+  for (col in present) {
+    metric_nm <- sub("_mean$", "", col)
+    rows[[col]] <- data.frame(
+      model  = m$model,
+      metric = toupper(metric_nm),
+      value  = m[[col]],
+      stringsAsFactors = FALSE
+    )
+  }
+  long <- do.call(rbind, rows)
+  long$metric <- factor(long$metric,
+                        levels = toupper(sub("_mean$", "", present)))
+  long$model  <- factor(long$model, levels = names(model_colors))
+
+  ggplot2::ggplot(long, ggplot2::aes(
+    x = .data$model, y = .data$value, fill = .data$model
   )) +
-    ggplot2::geom_col(width = 0.6, alpha = 0.9) +
+    ggplot2::geom_col(width = 0.65, alpha = 0.9) +
     ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("%.3f", .data$auc_mean)),
-      vjust = -0.5, size = 3.5, fontface = "bold"
+      ggplot2::aes(label = sprintf("%.3f", .data$value)),
+      vjust = -0.4, size = 2.8, fontface = "bold"
     ) +
+    ggplot2::facet_wrap(~ metric, scales = "free_y", nrow = 2) +
     ggplot2::scale_fill_manual(values = model_colors, guide = "none") +
     ggplot2::labs(
-      title = "Model Performance Comparison",
-      subtitle = "AUC on test set",
-      x = "", y = "AUC"
+      title    = "Model Performance Comparison",
+      subtitle = src,
+      x = "", y = "Score"
+    ) +
+    theme_cast() +
+    ggplot2::theme(
+      strip.text = ggplot2::element_text(face = "bold", size = 9),
+      axis.text.x = ggplot2::element_text(angle = 30, hjust = 1)
+    )
+}
+
+
+#' Plot Spatial CV Fold Map and Metrics
+#'
+#' Two-panel figure: (left) geographic fold assignment map; (right) per-fold
+#' metric box/dot plot.
+#'
+#' @param x A `cast_cv` object.
+#' @param lon Numeric vector. Longitudes of the data used in [cast_cv()].
+#' @param lat Numeric vector. Latitudes of the data used in [cast_cv()].
+#' @param metric Character. Metric to show in right panel. Default `"auc"`.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`. Default
+#'   `"world"`.
+#' @param ... Ignored.
+#'
+#' @return A `patchwork` combined plot, or single ggplot if patchwork absent.
+#' @export
+plot.cast_cv <- function(x, lon = NULL, lat = NULL,
+                         metric = "auc", basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+
+  model_colors <- c(
+    cast = "#E64B35", mlp_ate = "#F39B7F", mlp = "#91D1C2",
+    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85"
+  )
+
+  fold_colors <- c(
+    "#E41A1C", "#377EB8", "#4DAF4A",
+    "#984EA3", "#FF7F00", "#A65628",
+    "#F781BF", "#999999", "#66C2A5", "#FC8D62"
+  )
+
+  # ── Right panel: per-fold metric ────────────────────────────────────────────
+  fd   <- x$fold_metrics
+  mcol <- metric
+  if (!mcol %in% names(fd)) {
+    cli::cli_warn(
+      "Metric '{metric}' not in fold_metrics. Using 'auc'."
+    )
+    mcol <- "auc"
+  }
+
+  fd$model <- factor(fd$model, levels = names(model_colors))
+  fd$fold  <- factor(fd$fold)
+
+  p_metric <- ggplot2::ggplot(
+    fd,
+    ggplot2::aes(x = .data$fold, y = .data[[mcol]],
+                 color = .data$model, group = .data$model)
+  ) +
+    ggplot2::geom_line(linewidth = 0.7, alpha = 0.8) +
+    ggplot2::geom_point(size = 2.5) +
+    ggplot2::scale_color_manual(values = model_colors, name = "Model") +
+    ggplot2::labs(
+      title    = sprintf("Per-fold %s", toupper(mcol)),
+      subtitle = sprintf(
+        "%d-fold spatial %s CV", x$k, x$block_method
+      ),
+      x = "Fold", y = toupper(mcol)
     ) +
     ggplot2::coord_cartesian(ylim = c(0, 1)) +
     theme_cast()
+
+  # ── Left panel: fold map (optional) ─────────────────────────────────────────
+  if (is.null(lon) || is.null(lat)) {
+    return(p_metric)
+  }
+
+  map_df <- data.frame(
+    lon  = lon,
+    lat  = lat,
+    fold = factor(x$folds)
+  )
+
+  p_map <- ggplot2::ggplot()
+  if (basemap != "none") {
+    bm <- load_basemap(basemap)
+    if (!is.null(bm)) {
+      p_map <- p_map + ggplot2::geom_sf(
+        data = bm, fill = "#f4f6f7",
+        color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  p_map <- p_map +
+    ggplot2::geom_point(
+      data = map_df,
+      ggplot2::aes(x = .data$lon, y = .data$lat,
+                   color = .data$fold),
+      size = 0.8, alpha = 0.7
+    ) +
+    ggplot2::scale_color_manual(
+      values = fold_colors[seq_len(x$k)],
+      name = "Fold"
+    ) +
+    ggplot2::coord_sf(expand = FALSE) +
+    ggplot2::labs(title = "Spatial fold assignment") +
+    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(
+        face = "bold", hjust = 0.5
+      )
+    )
+
+  if (requireNamespace("patchwork", quietly = TRUE)) {
+    p_map + p_metric + patchwork::plot_layout(widths = c(1.4, 1))
+  } else {
+    p_metric
+  }
 }
 
 

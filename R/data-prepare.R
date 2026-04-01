@@ -125,8 +125,9 @@ cast_vif <- function(data,
 
     if (max_vif <= threshold) {
       if (verbose) {
+        n_remain <- length(current_vars)
         cli::cli_inform(
-          "VIF converged: all VIF <= {threshold} ({length(current_vars)} variables)."
+          "VIF converged: all VIF <= {threshold} ({n_remain} vars)."
         )
       }
       break
@@ -134,7 +135,7 @@ cast_vif <- function(data,
 
     if (verbose) {
       cli::cli_inform(
-        "Iter {iteration}: max VIF = {round(max_vif, 1)} -> remove {.val {max_var}}"
+        "Iter {iteration}: VIF = {round(max_vif, 1)} -> remove {.val {max_var}}"
       )
     }
     removed <- c(removed, max_var)
@@ -170,10 +171,19 @@ cast_vif <- function(data,
 #' Checks required columns, handles missing values, and splits into
 #' training/test sets.
 #'
+#' Auto-detects environmental variable columns by excluding coordinates,
+#' response, known metadata columns, and near-constant columns. If the
+#' detection is incorrect, pass `env_vars` explicitly to override.
+#'
 #' @param data A `data.frame` with columns: `lon`, `lat`, `presence` (0/1),
 #'   and environmental variables.
 #' @param train_fraction Numeric. Fraction for training set. Default `0.7`.
 #' @param seed Integer or `NULL`. Random seed for reproducible splitting.
+#' @param env_vars Character vector or `NULL`. Environmental variable names
+#'   to use. If `NULL` (default), auto-detected from `data`. Useful when
+#'   auto-detection picks up metadata columns (e.g., occurrence indicators).
+#' @param verbose Logical. Print detected variables and excluded columns.
+#'   Default `TRUE`.
 #'
 #' @return A list with components:
 #' \describe{
@@ -183,11 +193,79 @@ cast_vif <- function(data,
 #' }
 #'
 #' @export
-cast_prepare <- function(data, train_fraction = 0.7, seed = NULL) {
+cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
+                         env_vars = NULL, verbose = TRUE) {
   validate_species_data(data)
-  env_vars <- get_env_vars(data)
-  if (length(env_vars) == 0) {
-    cli::cli_abort("No numeric environmental variables found in {.arg data}.")
+
+  if (!is.null(env_vars)) {
+    # User-supplied: validate they all exist
+    missing_cols <- setdiff(env_vars, names(data))
+    if (length(missing_cols) > 0) {
+      cli::cli_abort(
+        "Columns specified in {.arg env_vars} not found in data: {.val {missing_cols}}."
+      )
+    }
+    non_numeric <- env_vars[!vapply(
+      data[env_vars], is.numeric, logical(1)
+    )]
+    if (length(non_numeric) > 0) {
+      cli::cli_warn(
+        "Non-numeric columns in {.arg env_vars} will be ignored: {.val {non_numeric}}."
+      )
+      env_vars <- setdiff(env_vars, non_numeric)
+    }
+    final_vars <- env_vars
+    if (verbose) {
+      cli::cli_inform(c(
+        "v" = "Using {length(final_vars)} user-specified environmental variable{?s}:",
+        " " = "{.val {final_vars}}"
+      ))
+    }
+  } else {
+    # Auto-detect
+    all_numeric <- names(data)[vapply(data, is.numeric, logical(1))]
+    final_vars  <- get_env_vars(data)
+
+    # Compute what was excluded and why
+    non_numeric_cols <- setdiff(names(data), all_numeric)
+    meta_excluded    <- setdiff(all_numeric, c(final_vars, "presence"))
+    const_excluded   <- meta_excluded[vapply(meta_excluded, function(v) {
+      vals <- data[[v]][!is.na(data[[v]])]
+      length(vals) > 0 && stats::var(vals) <= 1e-10
+    }, logical(1))]
+    name_excluded <- setdiff(meta_excluded, const_excluded)
+
+    if (length(final_vars) == 0) {
+      # Show diagnostics to help the user fix it
+      cli::cli_abort(c(
+        "No environmental variables detected in {.arg data}.",
+        "i" = "All numeric columns: {.val {all_numeric}}",
+        "i" = "Excluded (non-numeric): {.val {non_numeric_cols}}",
+        "i" = "Excluded (known metadata names): {.val {name_excluded}}",
+        "i" = "Excluded (near-constant / variance \u2248 0): {.val {const_excluded}}",
+        ">" = "Pass {.arg env_vars} to override: {.code cast_prepare(data, env_vars = c(...))}"
+      ))
+    }
+
+    if (verbose) {
+      cli::cli_inform(c(
+        "v" = "Detected {length(final_vars)} environmental variable{?s}:",
+        " " = "{.val {final_vars}}"
+      ))
+      if (length(name_excluded) > 0) {
+        cli::cli_inform(c(
+          "i" = "Excluded (metadata name): {.val {name_excluded}}"
+        ))
+      }
+      if (length(const_excluded) > 0) {
+        cli::cli_inform(c(
+          "i" = "Excluded (near-constant, likely metadata): {.val {const_excluded}}"
+        ))
+      }
+      cli::cli_inform(c(
+        "i" = "If incorrect, override with: {.code cast_prepare(data, env_vars = c(...))}"
+      ))
+    }
   }
 
   n <- nrow(data)
@@ -195,8 +273,8 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL) {
   train_idx <- sample.int(n, size = round(train_fraction * n))
 
   list(
-    train = data[train_idx, , drop = FALSE],
-    test = data[-train_idx, , drop = FALSE],
-    env_vars = env_vars
+    train    = data[train_idx, , drop = FALSE],
+    test     = data[-train_idx, , drop = FALSE],
+    env_vars = final_vars
   )
 }

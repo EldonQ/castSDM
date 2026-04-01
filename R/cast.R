@@ -22,6 +22,14 @@
 #' @param ate_folds Integer. DML cross-fitting folds. Default `2`.
 #' @param ate_alpha Numeric. ATE significance level. Default `0.05`.
 #' @param screen_min_vars Integer. Minimum retained variables. Default `5`.
+#' @param do_cv Logical. Whether to run spatial k-fold cross-validation for
+#'   honest model evaluation. Default `TRUE`. Results are stored in
+#'   `$cv` of the returned object. Setting `FALSE` falls back to a single
+#'   random hold-out evaluation via [cast_evaluate()].
+#' @param cv_k Integer. Number of spatial folds. Default `5`. Pass `3` for
+#'   small datasets (< 100 presences) or `10` for large ones.
+#' @param cv_block_method Character. Spatial blocking strategy: `"grid"`
+#'   (default) or `"cluster"`. See [cast_cv()] for details.
 #' @param do_predict Logical. Whether to generate spatial predictions using
 #'   `env_data`. Default `TRUE` if `env_data` is provided.
 #' @param do_cate Logical. Whether to estimate spatial CATE. Default `FALSE`.
@@ -46,6 +54,9 @@ cast <- function(species_data,
                  ate_folds = 2L,
                  ate_alpha = 0.05,
                  screen_min_vars = 5L,
+                 do_cv = TRUE,
+                 cv_k = 5L,
+                 cv_block_method = "grid",
                  do_predict = NULL,
                  do_cate = FALSE,
                  cate_top_n = 3L,
@@ -113,10 +124,43 @@ cast <- function(species_data,
     seed = seed, verbose = verbose
   )
 
-  # === Step 7: Evaluation ===
-  if (verbose) cli::cli_h2("Step 7: Evaluation")
+  # === Step 7: Model Evaluation ===
+  if (verbose) cli::cli_h2("Step 7: Model Evaluation")
+
+  cv_result <- NULL
+  if (do_cv) {
+    # Spatial k-fold CV on the full dataset (preferred: more data, honest geo)
+    if (verbose) {
+      cli::cli_inform(
+        "Running spatial {cv_k}-fold CV ({cv_block_method} blocks)..."
+      )
+    }
+    cv_result <- tryCatch(
+      cast_cv(
+        species_data,
+        screen       = screen,
+        dag          = dag,
+        ate          = ate,
+        k            = cv_k,
+        models       = models,
+        block_method = cv_block_method,
+        seed         = seed,
+        verbose      = FALSE
+      ),
+      error = function(e) {
+        cli::cli_warn(
+          "Spatial CV failed ({e$message}). Falling back to hold-out eval."
+        )
+        NULL
+      }
+    )
+  }
+
+  # Always compute hold-out eval on the random test split (complementary)
   eval_result <- cast_evaluate(fit, test_data)
-  if (verbose) print(eval_result)
+  if (verbose) {
+    if (!is.null(cv_result)) print(cv_result) else print(eval_result)
+  }
 
   # === Step 8: Spatial Prediction (optional) ===
   pred_result <- NULL
@@ -149,6 +193,7 @@ cast <- function(species_data,
   new_cast_result(
     dag = dag, ate = ate, screen = screen, roles = roles,
     fit = fit, eval = eval_result,
+    cv = cv_result,
     predict = pred_result, cate = cate_result
   )
 }

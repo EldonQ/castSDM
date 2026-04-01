@@ -47,11 +47,15 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
       error = function(e) rep(NA_real_, nrow(test_data))
     )
 
-    ev <- evaluate_model(preds, Y_test)
+    ev <- evaluate_model_full(preds, Y_test)
     results[[mdl_name]] <- data.frame(
-      model = mdl_name,
-      auc_mean = ev["auc"],
-      tss_mean = ev["tss"],
+      model       = mdl_name,
+      auc_mean    = ev["auc"],
+      tss_mean    = ev["tss"],
+      cbi_mean    = ev["cbi"],
+      sedi_mean   = ev["sedi"],
+      kappa_mean  = ev["kappa"],
+      prauc_mean  = ev["prauc"],
       stringsAsFactors = FALSE,
       row.names = NULL
     )
@@ -60,7 +64,7 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
   metrics_df <- do.call(rbind, results)
   rownames(metrics_df) <- NULL
 
-  new_cast_eval(metrics = metrics_df)
+  new_cast_eval(metrics = metrics_df, cv_source = FALSE)
 }
 
 

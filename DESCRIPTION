@@ -29,12 +29,12 @@ Depends:
     R (>= 4.1.0)
 Imports:
     cli,
+    coro,
     data.table,
     rlang
 Suggests:
     bnlearn,
     car,
-    coro,
     gbm,
     ggplot2,
     ggraph,

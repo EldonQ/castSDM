@@ -116,16 +116,47 @@ new_cast_fit <- function(models, cast_vars, env_vars, scaling,
 
 #' Create a cast_eval Object
 #'
-#' @param metrics A `data.frame` with columns: `model`, `auc_mean`, `auc_sd`,
-#'   `tss_mean`, `tss_sd`.
+#' @param metrics A `data.frame` with per-model evaluation metrics.
+#'   Columns: `model`, `auc_mean`, `tss_mean`, `cbi_mean`, `sedi_mean`,
+#'   `kappa_mean`, `prauc_mean` (and `_sd` counterparts).
+#' @param cv_source Logical. Whether metrics came from spatial CV.
+#'   Default `FALSE`.
 #'
 #' @return A `cast_eval` object.
 #' @keywords internal
 #' @export
-new_cast_eval <- function(metrics) {
+new_cast_eval <- function(metrics, cv_source = FALSE) {
   structure(
-    list(metrics = metrics),
+    list(metrics = metrics, cv_source = cv_source),
     class = "cast_eval"
+  )
+}
+
+
+#' Create a cast_cv Object
+#'
+#' @param metrics `data.frame`. Aggregated per-model metrics (mean ± SD).
+#' @param fold_metrics `data.frame`. Per-fold per-model raw metrics.
+#' @param folds Integer vector. Fold assignment for each data row.
+#' @param k Integer. Number of folds.
+#' @param block_method Character. Blocking strategy used.
+#' @param thresholds Named numeric. TSS-optimal threshold per model.
+#'
+#' @return A `cast_cv` object.
+#' @keywords internal
+#' @export
+new_cast_cv <- function(metrics, fold_metrics, folds,
+                        k, block_method, thresholds) {
+  structure(
+    list(
+      metrics      = metrics,
+      fold_metrics = fold_metrics,
+      folds        = folds,
+      k            = k,
+      block_method = block_method,
+      thresholds   = thresholds
+    ),
+    class = "cast_cv"
   )
 }
 
@@ -178,7 +209,8 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' @param screen A `cast_screen` object.
 #' @param roles A `cast_roles` object.
 #' @param fit A `cast_fit` object.
-#' @param eval A `cast_eval` object.
+#' @param eval A `cast_eval` object (hold-out evaluation).
+#' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param cate A `cast_cate` object (or `NULL`).
 #' @param call The original function call.
@@ -187,7 +219,8 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' @keywords internal
 #' @export
 new_cast_result <- function(dag, ate, screen, roles, fit, eval,
-                            predict = NULL, cate = NULL, call = NULL) {
+                            cv = NULL, predict = NULL,
+                            cate = NULL, call = NULL) {
   structure(
     list(
       dag = dag,
@@ -196,6 +229,7 @@ new_cast_result <- function(dag, ate, screen, roles, fit, eval,
       roles = roles,
       fit = fit,
       eval = eval,
+      cv = cv,
       predict = predict,
       cate = cate,
       call = call

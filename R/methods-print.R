@@ -62,8 +62,38 @@ print.cast_fit <- function(x, ...) {
 
 #' @export
 print.cast_eval <- function(x, ...) {
-  cli::cli_h1("CAST Model Evaluation")
+  src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test set"
+  cli::cli_h1("CAST Model Evaluation ({src})")
   print(x$metrics)
+  invisible(x)
+}
+
+#' @export
+print.cast_cv <- function(x, ...) {
+  cli::cli_h1("CAST Spatial Cross-Validation")
+  cli::cli_ul(c(
+    "Folds (k): {x$k}",
+    "Block method: {x$block_method}",
+    "Models: {.val {x$metrics$model}}"
+  ))
+  cli::cli_h2("Aggregated metrics (mean \u00b1 SD)")
+  m <- x$metrics
+  for (i in seq_len(nrow(m))) {
+    cli::cli_li(paste0(
+      m$model[i],
+      " | AUC=", round(m$auc_mean[i], 3),
+      " (", round(m$auc_sd[i], 3), ")",
+      " TSS=", round(m$tss_mean[i], 3),
+      " CBI=", round(m$cbi_mean[i], 3),
+      " SEDI=", round(m$sedi_mean[i], 3),
+      " Kappa=", round(m$kappa_mean[i], 3),
+      " PRAUC=", round(m$prauc_mean[i], 3)
+    ))
+  }
+  cli::cli_h2("Optimal thresholds (max TSS)")
+  for (nm in names(x$thresholds)) {
+    cli::cli_li("{nm}: {round(x$thresholds[nm], 3)}")
+  }
   invisible(x)
 }
 
