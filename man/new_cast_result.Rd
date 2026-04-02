@@ -11,6 +11,7 @@ new_cast_result(
   roles,
   fit,
   eval,
+  cv = NULL,
   predict = NULL,
   cate = NULL,
   call = NULL
@@ -27,7 +28,9 @@ new_cast_result(
 
 \item{fit}{A \code{cast_fit} object.}
 
-\item{eval}{A \code{cast_eval} object.}
+\item{eval}{A \code{cast_eval} object (hold-out evaluation).}
+
+\item{cv}{A \code{cast_cv} object (spatial CV), or \code{NULL}.}
 
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 

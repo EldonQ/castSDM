@@ -135,7 +135,7 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 
 #' Create a cast_cv Object
 #'
-#' @param metrics `data.frame`. Aggregated per-model metrics (mean ± SD).
+#' @param metrics `data.frame`. Aggregated per-model metrics (mean +/- SD).
 #' @param fold_metrics `data.frame`. Per-fold per-model raw metrics.
 #' @param folds Integer vector. Fold assignment for each data row.
 #' @param k Integer. Number of folds.

@@ -4,16 +4,20 @@
 \alias{plot.cast_eval}
 \title{Plot Evaluation Metrics Comparison}
 \usage{
-\method{plot}{cast_eval}(x, ...)
+\method{plot}{cast_eval}(x, metrics = c("auc", "tss", "cbi", "sedi", "kappa", "prauc"), ...)
 }
 \arguments{
 \item{x}{A \code{cast_eval} object.}
 
+\item{metrics}{Character vector. Which metrics to show. Default shows all
+six: \code{c("auc","tss","cbi","sedi","kappa","prauc")}.}
+
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object.
+A \code{ggplot} object (faceted).
 }
 \description{
-Bar chart comparing AUC and TSS across fitted models.
+Multi-panel bar chart comparing AUC, TSS, CBI, SEDI, Kappa, and PRAUC
+across fitted models.
 }

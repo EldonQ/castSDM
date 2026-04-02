@@ -23,6 +23,7 @@ cast_fit(
   dropout = 0.2,
   lr = 0.001,
   batch_size = NULL,
+  tune_grid = FALSE,
   seed = NULL,
   verbose = TRUE
 )
@@ -43,14 +44,16 @@ cast_fit(
 
 \item{n_epochs}{Integer. Training epochs for neural networks. Default \code{200}.}
 
-\item{n_runs}{Integer. Number of random seeds for NN ensembling. Default \code{3}.}
+\item{n_runs}{Integer. Number of random seeds for NN ensembling. Default
+\code{3}. Each run uses a different random seed; the best-AUC run is kept.}
 
 \item{patience}{Integer. Early stopping patience (epochs). Default \code{20}.}
 
 \item{val_fraction}{Numeric. Validation split for early stopping. Default
-\code{0.2}.}
+\code{0.2}. Split is stratified by presence/absence.}
 
-\item{focal_gamma}{Numeric. Focal loss gamma parameter. Default \code{2.0}.}
+\item{focal_gamma}{Numeric. Focal loss gamma parameter. Default \code{2.0}.
+Higher values down-weight easy negatives more aggressively.}
 
 \item{rf_ntree}{Integer. Number of RF trees. Default \code{300}.}
 
@@ -58,13 +61,20 @@ cast_fit(
 
 \item{brt_depth}{Integer. BRT tree depth. Default \code{5}.}
 
-\item{hidden_size}{Integer or \code{NULL}. NN hidden layer size. \code{NULL} for auto.}
+\item{hidden_size}{Integer or \code{NULL}. CI-MLP hidden layer size. \code{NULL} for
+auto (4x input features, capped at 128).}
 
-\item{dropout}{Numeric. NN dropout rate. Default \code{0.2}.}
+\item{dropout}{Numeric. CI-MLP dropout rate. Default \code{0.2}.}
 
-\item{lr}{Numeric. Learning rate. Default \code{1e-3}.}
+\item{lr}{Numeric. CI-MLP learning rate. Default \code{1e-3}.}
 
 \item{batch_size}{Integer or \code{NULL}. \code{NULL} for auto-tuning.}
+
+\item{tune_grid}{Logical. If \code{TRUE} (and \code{"cast"} or \code{"mlp*"} in models),
+performs a small grid search over \code{hidden_size} x \code{dropout} x \code{lr}
+on the internal validation split before the full training run. Best
+hyperparameters are then used for the \code{n_runs} ensemble. Default \code{FALSE}.
+Adds ~3x training time.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 

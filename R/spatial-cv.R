@@ -18,7 +18,7 @@
 #'   [cast_fit()]: `"cast"`, `"rf"`, `"brt"`, `"maxent"`. Default `c("rf")`.
 #' @param block_method Character. How to create spatial blocks:
 #'   \describe{
-#'     \item{`"grid"`}{(Default) Divide bounding box into a k×k grid, then
+#'     \item{`"grid"`}{(Default) Divide bounding box into a k-by-k grid, then
 #'       assign each point to the nearest grid cell, merging until k non-empty
 #'       folds are obtained. No external packages required.}
 #'     \item{`"cluster"`}{k-means clustering on lon/lat. Fast but ignores
@@ -34,12 +34,12 @@
 #'
 #' @return A `cast_cv` object with components:
 #' \describe{
-#'   \item{`metrics`}{`data.frame` — per-model mean ± SD for all metrics.}
-#'   \item{`fold_metrics`}{`data.frame` — per-fold per-model raw metrics.}
-#'   \item{`folds`}{Integer vector — fold assignment for each row of `data`.}
+#'   \item{`metrics`}{`data.frame` -- per-model mean +/- SD for all metrics.}
+#'   \item{`fold_metrics`}{`data.frame` -- per-fold per-model raw metrics.}
+#'   \item{`folds`}{Integer vector -- fold assignment for each row of `data`.}
 #'   \item{`k`}{Number of folds used.}
 #'   \item{`block_method`}{Blocking method used.}
-#'   \item{`thresholds`}{Named numeric — optimal threshold per model (from
+#'   \item{`thresholds`}{Named numeric -- optimal threshold per model (from
 #'     pooled OOF predictions, used by [cast_predict()] for binary maps).}
 #' }
 #'
@@ -48,7 +48,7 @@
 #' Random CV recycles nearby points across train/test splits, causing AUC
 #' inflation due to spatial autocorrelation (Roberts et al. 2017 MEE). Spatial
 #' CV ensures each test fold lies in a geographic region unseen during training,
-#' so metrics approximate true extrapolation ability — the same challenge faced
+#' so metrics approximate true extrapolation ability -- the same challenge faced
 #' when predicting the full environmental grid for HSS maps.
 #'
 #' ## Optimal threshold
@@ -86,7 +86,7 @@ cast_cv <- function(data,
 
   validate_species_data(data)
 
-  # ── 1. Build spatial folds ──────────────────────────────────────────────────
+  # -- 1. Build spatial folds ------------------------------------------------
   folds <- make_spatial_folds(data$lon, data$lat, k = k,
                                method = block_method, seed = seed)
   fold_sizes <- table(folds)
@@ -97,10 +97,10 @@ cast_cv <- function(data,
     ))
   }
 
-  # ── 2. Env vars ──────────────────────────────────────────────────────────────
+  # -- 2. Env vars -----------------------------------------------------------
   env_vars <- if (!is.null(dag)) dag$nodes else get_env_vars(data, response)
 
-  # ── 3. Cross-validate ────────────────────────────────────────────────────────
+  # -- 3. Cross-validate -----------------------------------------------------
   all_fold_rows <- list()
   # OOF container: for threshold calibration
   oof_preds  <- lapply(models, function(m) rep(NA_real_, nrow(data)))
@@ -143,7 +143,7 @@ cast_cv <- function(data,
         verbose  = FALSE
       ),
       error = function(e) {
-        cli::cli_warn("Fold {fold_i}: cast_fit failed — {e$message}")
+        cli::cli_warn("Fold {fold_i}: cast_fit failed -- {e$message}")
         NULL
       }
     )
@@ -191,7 +191,7 @@ cast_cv <- function(data,
     all_fold_rows <- c(all_fold_rows, fold_rows)
   }
 
-  # ── 4. Aggregate ─────────────────────────────────────────────────────────────
+  # -- 4. Aggregate ----------------------------------------------------------
   fold_df <- if (length(all_fold_rows) > 0) {
     do.call(rbind, all_fold_rows)
   } else {
@@ -227,7 +227,7 @@ cast_cv <- function(data,
   }
   rownames(metrics_df) <- NULL
 
-  # ── 5. OOF optimal thresholds ────────────────────────────────────────────────
+  # -- 5. OOF optimal thresholds ----------------------------------------------
   thresholds <- vapply(models, function(mdl) {
     p <- oof_preds[[mdl]]
     o <- oof_obs

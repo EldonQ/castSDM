@@ -15,6 +15,9 @@ cast(
   ate_folds = 2L,
   ate_alpha = 0.05,
   screen_min_vars = 5L,
+  do_cv = TRUE,
+  cv_k = 5L,
+  cv_block_method = "grid",
   do_predict = NULL,
   do_cate = FALSE,
   cate_top_n = 3L,
@@ -49,6 +52,17 @@ the same environmental columns as \code{species_data}.}
 \item{ate_alpha}{Numeric. ATE significance level. Default \code{0.05}.}
 
 \item{screen_min_vars}{Integer. Minimum retained variables. Default \code{5}.}
+
+\item{do_cv}{Logical. Whether to run spatial k-fold cross-validation for
+honest model evaluation. Default \code{TRUE}. Results are stored in
+\verb{$cv} of the returned object. Setting \code{FALSE} falls back to a single
+random hold-out evaluation via \code{\link[=cast_evaluate]{cast_evaluate()}}.}
+
+\item{cv_k}{Integer. Number of spatial folds. Default \code{5}. Pass \code{3} for
+small datasets (< 100 presences) or \code{10} for large ones.}
+
+\item{cv_block_method}{Character. Spatial blocking strategy: \code{"grid"}
+(default) or \code{"cluster"}. See \code{\link[=cast_cv]{cast_cv()}} for details.}
 
 \item{do_predict}{Logical. Whether to generate spatial predictions using
 \code{env_data}. Default \code{TRUE} if \code{env_data} is provided.}

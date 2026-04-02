@@ -117,12 +117,12 @@ evaluate_model_full <- function(pred, obs) {
   pred <- pmin(pmax(as.numeric(pred), 1e-7), 1 - 1e-7)
   obs  <- as.integer(obs)
 
-  # ── AUC (ROC) ───────────────────────────────────────────────────────────────
+  # -- AUC (ROC) -------------------------------------------------------------
   auc_val <- tryCatch({
     as.numeric(pROC::auc(pROC::roc(obs, pred, quiet = TRUE)))
   }, error = function(e) NA_real_)
 
-  # ── TSS (at threshold maximising sensitivity+specificity) ────────────────────
+  # -- TSS (at threshold maximising sensitivity+specificity) ------------------
   tss_val <- tryCatch({
     roc_obj <- pROC::roc(obs, pred, quiet = TRUE)
     coords  <- pROC::coords(roc_obj, "best",
@@ -130,7 +130,7 @@ evaluate_model_full <- function(pred, obs) {
     as.numeric(coords$sensitivity[1] + coords$specificity[1] - 1)
   }, error = function(e) NA_real_)
 
-  # ── PRAUC (Precision-Recall AUC) ────────────────────────────────────────────
+  # -- PRAUC (Precision-Recall AUC) -------------------------------------------
   # More informative than ROC-AUC under strong class imbalance (many backgrounds)
   prauc_val <- tryCatch({
     ord   <- order(pred, decreasing = TRUE)
@@ -149,7 +149,7 @@ evaluate_model_full <- function(pred, obs) {
     abs(sum(diff(rec) * (prec[-length(prec)] + prec[-1]) / 2))
   }, error = function(e) NA_real_)
 
-  # ── CBI (Continuous Boyce Index) ─────────────────────────────────────────────
+  # -- CBI (Continuous Boyce Index) -------------------------------------------
   # Measures habitat preference along the suitability gradient;
   # positive = model predictions align with presence distribution;
   # range (-1, 1), values > 0.5 indicate good predictive power.
@@ -157,7 +157,7 @@ evaluate_model_full <- function(pred, obs) {
     compute_cbi(pred, obs)
   }, error = function(e) NA_real_)
 
-  # ── SEDI (Symmetric Extremal Dependence Index) ───────────────────────────────
+  # -- SEDI (Symmetric Extremal Dependence Index) ----------------------------
   # Log-scale measure robust to prevalence; -1 (worst) to +1 (perfect).
   # Recommended for rare-species SDMs (Ferro & Stephenson 2011 MWR).
   sedi_val <- tryCatch({
@@ -176,7 +176,7 @@ evaluate_model_full <- function(pred, obs) {
       (log(fp_rate) + log(sens) + log(fn_rate) + log(spec))
   }, error = function(e) NA_real_)
 
-  # ── Cohen's Kappa ────────────────────────────────────────────────────────────
+  # -- Cohen's Kappa ---------------------------------------------------------
   kappa_val <- tryCatch({
     roc_obj  <- pROC::roc(obs, pred, quiet = TRUE)
     coords   <- pROC::coords(roc_obj, "best",

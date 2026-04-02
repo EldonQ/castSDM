@@ -20,8 +20,9 @@ test_that("validate_species_data passes with correct input", {
 
 test_that("get_env_vars extracts correct columns", {
   df <- data.frame(
-    lon = 1, lat = 2, presence = 1,
-    bio1 = 15.0, bio12 = 1200, name = "sp1"
+    lon = c(1, 2, 3), lat = c(2, 3, 4), presence = c(1, 0, 1),
+    bio1 = c(15.0, 18.0, 12.0), bio12 = c(1200, 800, 1500),
+    name = c("sp1", "sp2", "sp3")
   )
   result <- get_env_vars(df)
   expect_equal(result, c("bio1", "bio12"))

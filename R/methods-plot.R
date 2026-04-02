@@ -532,7 +532,7 @@ plot.cast_eval <- function(x,
 
   src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test"
 
-  # Build long format: metric × model
+  # Build long format: metric x model
   mean_cols <- paste0(metrics, "_mean")
   present   <- intersect(mean_cols, names(m))
   if (length(present) == 0) {
@@ -608,7 +608,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     "#F781BF", "#999999", "#66C2A5", "#FC8D62"
   )
 
-  # ── Right panel: per-fold metric ────────────────────────────────────────────
+  # -- Right panel: per-fold metric ------------------------------------------
   fd   <- x$fold_metrics
   mcol <- metric
   if (!mcol %in% names(fd)) {
@@ -639,7 +639,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     ggplot2::coord_cartesian(ylim = c(0, 1)) +
     theme_cast()
 
-  # ── Left panel: fold map (optional) ─────────────────────────────────────────
+  # -- Left panel: fold map (optional) ---------------------------------------
   if (is.null(lon) || is.null(lat)) {
     return(p_metric)
   }

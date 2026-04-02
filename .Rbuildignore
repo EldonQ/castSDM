@@ -7,3 +7,4 @@
 ^pkgdown$
 ^LICENSE\.md$
 ^\.claude$
+^README\.md$

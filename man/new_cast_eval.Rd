@@ -4,11 +4,15 @@
 \alias{new_cast_eval}
 \title{Create a cast_eval Object}
 \usage{
-new_cast_eval(metrics)
+new_cast_eval(metrics, cv_source = FALSE)
 }
 \arguments{
-\item{metrics}{A \code{data.frame} with columns: \code{model}, \code{auc_mean}, \code{auc_sd},
-\code{tss_mean}, \code{tss_sd}.}
+\item{metrics}{A \code{data.frame} with per-model evaluation metrics.
+Columns: \code{model}, \code{auc_mean}, \code{tss_mean}, \code{cbi_mean}, \code{sedi_mean},
+\code{kappa_mean}, \code{prauc_mean} (and \verb{_sd} counterparts).}
+
+\item{cv_source}{Logical. Whether metrics came from spatial CV.
+Default \code{FALSE}.}
 }
 \value{
 A \code{cast_eval} object.

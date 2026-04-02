@@ -4,7 +4,13 @@
 \alias{cast_prepare}
 \title{Prepare Species Data for Modeling}
 \usage{
-cast_prepare(data, train_fraction = 0.7, seed = NULL)
+cast_prepare(
+  data,
+  train_fraction = 0.7,
+  seed = NULL,
+  env_vars = NULL,
+  verbose = TRUE
+)
 }
 \arguments{
 \item{data}{A \code{data.frame} with columns: \code{lon}, \code{lat}, \code{presence} (0/1),
@@ -13,6 +19,13 @@ and environmental variables.}
 \item{train_fraction}{Numeric. Fraction for training set. Default \code{0.7}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed for reproducible splitting.}
+
+\item{env_vars}{Character vector or \code{NULL}. Environmental variable names
+to use. If \code{NULL} (default), auto-detected from \code{data}. Useful when
+auto-detection picks up metadata columns (e.g., occurrence indicators).}
+
+\item{verbose}{Logical. Print detected variables and excluded columns.
+Default \code{TRUE}.}
 }
 \value{
 A list with components:
@@ -26,4 +39,9 @@ A list with components:
 Validates and prepares species occurrence data for the CAST pipeline.
 Checks required columns, handles missing values, and splits into
 training/test sets.
+}
+\details{
+Auto-detects environmental variable columns by excluding coordinates,
+response, known metadata columns, and near-constant columns. If the
+detection is incorrect, pass \code{env_vars} explicitly to override.
 }

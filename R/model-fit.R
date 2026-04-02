@@ -23,15 +23,15 @@
 #' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
 #' @param hidden_size Integer or `NULL`. CI-MLP hidden layer size. `NULL` for
-#'   auto (4× input features, capped at 128).
+#'   auto (4x input features, capped at 128).
 #' @param dropout Numeric. CI-MLP dropout rate. Default `0.2`.
 #' @param lr Numeric. CI-MLP learning rate. Default `1e-3`.
 #' @param batch_size Integer or `NULL`. `NULL` for auto-tuning.
 #' @param tune_grid Logical. If `TRUE` (and `"cast"` or `"mlp*"` in models),
-#'   performs a small grid search over `hidden_size` × `dropout` × `lr`
+#'   performs a small grid search over `hidden_size` x `dropout` x `lr`
 #'   on the internal validation split before the full training run. Best
 #'   hyperparameters are then used for the `n_runs` ensemble. Default `FALSE`.
-#'   Adds ~3× training time.
+#'   Adds ~3x training time.
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
@@ -302,8 +302,8 @@ cast_fit <- function(data,
 
 #' Build CI-MLP torch Module with Residual Connections
 #'
-#' Architecture: input projection → 3 residual blocks (Linear + LayerNorm +
-#' SiLU + Dropout, with skip connection) → bottleneck → output logit.
+#' Architecture: input projection -> 3 residual blocks (Linear + LayerNorm +
+#' SiLU + Dropout, with skip connection) -> bottleneck -> output logit.
 #' Residual connections stabilise gradients and allow deeper effective
 #' representations without degradation.
 #'
@@ -339,7 +339,7 @@ build_ci_mlp <- function(n_input, hidden = 64L, dropout = 0.2) {
       self$res3_n2 <- torch::nn_layer_norm(h)
       self$res3_dr <- torch::nn_dropout(dr)
 
-      # Bottleneck → output
+      # Bottleneck -> output
       half_h      <- as.integer(h %/% 2)
       self$neck   <- torch::nn_linear(h, half_h)
       self$neck_n <- torch::nn_layer_norm(half_h)
