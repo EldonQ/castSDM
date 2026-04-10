@@ -10,6 +10,13 @@
 #   library(castSDM)
 #   source(system.file("examples/run_ovis_ammon.R", package = "castSDM"))
 # ==============================================================================
+#
+# # 方式一：开发模式 (推荐)
+# devtools::load_all("E:/Package/cast")
+#
+# # 方式二：重新安装后加载
+# devtools::install("E:/Package/cast")
+# library(castSDM)
 
 # 开发模式 (在 castSDM 项目目录下) 用 load_all(), 否则用 library()
 if (file.exists("DESCRIPTION") &&
@@ -52,11 +59,11 @@ dag <- cast_dag(split$train, R = 50, seed = 42)
 print(dag)
 
 # ── Step 3: ATE 因果效应估计 ─────────────────────────────────────────────────
-ate <- cast_ate(split$train, K = 2, num_trees = 200, seed = 42)
+ate <- cast_ate(split$train, K = 5, num_trees = 300L, parallel= TRUE, seed = 42)
 print(ate)
 
 # ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
-screen <- cast_screen(dag, ate, split$train, seed = 42)
+screen <- cast_screen(dag, ate, split$train, num_trees = 500L, seed = 42)
 print(screen)
 
 # ── Step 5: 因果角色分配 ─────────────────────────────────────────────────────
@@ -64,29 +71,21 @@ roles <- cast_roles(screen, dag)
 print(roles)
 
 # ── Step 6: 模型训练 ─────────────────────────────────────────────────────────
-# 仅跑 RF 快速验证 (不需要 torch)
-fit_rf <- cast_fit(
+# 如果已安装 torch, 取消下面注释跑完整 CAST:
+fit_full <- cast_fit(
   split$train,
   screen = screen, dag = dag, ate = ate,
-  models = c("rf"),
-  seed = 42
+  models = c("cast", "rf", "maxent", "brt"),
+  n_runs = 1, n_epochs = 50, seed = 42,  # 快速测试参数
+  tune_grid = FALSE
 )
-print(fit_rf)
-
-# 如果已安装 torch, 取消下面注释跑完整 CAST:
-# fit_full <- cast_fit(
-#   split$train,
-#   screen = screen, dag = dag, ate = ate,
-#   models = c("cast", "rf", "maxent", "brt"),
-#   n_runs = 1, n_epochs = 50, seed = 42  # 快速测试参数
-# )
 
 # ── Step 7: 模型评估 ─────────────────────────────────────────────────────────
-eval_result <- cast_evaluate(fit_rf, split$test)
+eval_result <- cast_evaluate(fit_full, split$test)
 print(eval_result)
 
 # ── Step 8: 空间预测 ─────────────────────────────────────────────────────────
-pred <- cast_predict(fit_rf, china_env_grid)
+pred <- cast_predict(fit_full, china_env_grid)
 print(pred)
 
 # ── Step 9: 绘图 ─────────────────────────────────────────────────────────────
@@ -110,7 +109,18 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   if (requireNamespace("sf", quietly = TRUE)) {
     plot(pred, model = "rf", basemap = "china")
   }
+    # 模型间空间一致性热力图 (需要 >= 2 个模型)
+  if (length(pred$models) >= 2 &&
+      requireNamespace("patchwork", quietly = TRUE)) {
+    consistency <- cast_consistency(pred)
+    print(consistency)
+    p_cons <- plot(consistency, species = "Ovis_ammon")
+    print(p_cons)
+    # ggsave("ovis_consistency.png", p_cons, width = 16, height = 5.5, dpi = 300)
+  }
 }
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

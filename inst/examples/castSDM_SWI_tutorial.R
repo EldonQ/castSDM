@@ -517,6 +517,15 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
     print(p_hss)
     # ggsave("swi_hss_rf.png", p_hss, width = 8, height = 5, dpi = 150)
   }
+    ## ── 16.5b 模型间空间一致性热力图 ──────────────────────────────────────────
+  if (length(pred$models) >= 2 &&
+      requireNamespace("patchwork", quietly = TRUE)) {
+    consistency <- cast_consistency(pred)
+    print(consistency)
+    p_cons <- plot(consistency, species = target_species)
+    print(p_cons)
+    # ggsave("swi_consistency.png", p_cons, width = 16, height = 5.5, dpi = 300)
+  }
 
 
   ## ── 16.6 CATE 空间异质性因果效应地图 ─────────────────────────────────────
