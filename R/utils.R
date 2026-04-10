@@ -34,17 +34,20 @@ validate_species_data <- function(data,
 
 #' Extract Environmental Variable Names
 #'
-#' Returns column names excluding coordinates, response, and non-numeric
-#' columns.
+#' Returns column names excluding coordinates, response, metadata, and
+#' non-numeric columns. Useful for identifying which columns in your
+#' data are environmental predictors.
 #'
 #' @param data A `data.frame`.
-#' @param response Character. Response column name.
-#' @param coords Character vector. Coordinate column names.
+#' @param response Character. Response column name. Default `"presence"`.
+#' @param coords Character vector. Coordinate column names. Default
+#'   `c("lon", "lat")`.
+#' @param meta Optional character vector of additional metadata column
+#'   names to exclude.
 #'
 #' @return Character vector of environmental variable names.
 #'
-#' @keywords internal
-#' @noRd
+#' @export
 get_env_vars <- function(data, response = "presence",
                          coords = c("lon", "lat"),
                          meta = NULL) {

@@ -74,12 +74,12 @@ fit_rf <- cast_fit(
 print(fit_rf)
 
 # 如果已安装 torch, 取消下面注释跑完整 CAST:
-fit_full <- cast_fit(
-  split$train,
-  screen = screen, dag = dag, ate = ate,
-  models = c("cast", "rf", "maxent", "brt"),
-  n_runs = 1, n_epochs = 50, seed = 42  # 快速测试参数
-)
+# fit_full <- cast_fit(
+#   split$train,
+#   screen = screen, dag = dag, ate = ate,
+#   models = c("cast", "rf", "maxent", "brt"),
+#   n_runs = 1, n_epochs = 50, seed = 42  # 快速测试参数
+# )
 
 # ── Step 7: 模型评估 ─────────────────────────────────────────────────────────
 eval_result <- cast_evaluate(fit_rf, split$test)

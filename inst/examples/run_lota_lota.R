@@ -47,8 +47,8 @@ MODEL_DIR    <- file.path(OUT_DIR, "model")
 PRED_DIR     <- file.path(OUT_DIR, "predictions")
 FIG_DIR      <- file.path(OUT_DIR, "figures")
 
-TRAIN_CSV    <- file.path(OUT_DIR, "CAST_Lota_lota.csv")
-META_CSV     <- file.path(OUT_DIR, "column_metadata.csv")
+TRAIN_CSV    <- file.path("E:/Package/testFish/output/CAST_Lota_lota.csv")
+META_CSV     <- file.path("E:/Package/testFish/output/column_metadata.csv")
 
 # ── Model selection ──────────────────────────────────────────────────────────
 # Options: "cast"(needs torch), "mlp_ate"(needs torch), "mlp"(needs torch),
