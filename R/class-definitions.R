@@ -237,3 +237,49 @@ new_cast_result <- function(dag, ate, screen, roles, fit, eval,
     class = "cast_result"
   )
 }
+
+#' Create a cast_consistency Object
+#'
+#' @param metrics A `data.frame` with pairwise consistency metrics.
+#'   Columns: `model_a`, `model_b`, `cosine_sim`, `warrens_I`,
+#'   `pearson_r`, `pearson_p`.
+#' @param models Character vector of models compared.
+#'
+#' @return A `cast_consistency` object.
+#' @keywords internal
+#' @export
+new_cast_consistency <- function(metrics, models) {
+  structure(
+    list(
+      metrics = metrics,
+      models = models
+    ),
+    class = "cast_consistency"
+  )
+}
+
+#' Create a cast_batch Object
+#'
+#' @param species_metrics A `data.frame` with per-species per-model
+#'   evaluation metrics.
+#' @param species Character vector of species names.
+#' @param models Character vector of model names.
+#' @param results Named list of per-species pipeline results (optional).
+#' @param output_dir Character. Output directory path.
+#'
+#' @return A `cast_batch` object.
+#' @keywords internal
+#' @export
+new_cast_batch <- function(species_metrics, species, models,
+                           results = NULL, output_dir = NULL) {
+  structure(
+    list(
+      species_metrics = species_metrics,
+      species = species,
+      models = models,
+      results = results,
+      output_dir = output_dir
+    ),
+    class = "cast_batch"
+  )
+}

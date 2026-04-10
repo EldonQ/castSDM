@@ -133,3 +133,40 @@ print.cast_result <- function(x, ...) {
   ))
   invisible(x)
 }
+
+#' @export
+print.cast_consistency <- function(x, ...) {
+  n_models <- length(x$models)
+  n_pairs  <- nrow(x$metrics)
+  cli::cli_h1("CAST Inter-model Consistency")
+  cli::cli_ul(c(
+    "Models compared: {.val {x$models}}",
+    "Pairwise comparisons: {n_pairs}"
+  ))
+  if (n_pairs > 0) {
+    cli::cli_text("  Cosine sim:  mean={round(mean(x$metrics$cosine_sim, na.rm=TRUE), 4)}")
+    cli::cli_text("  Warren's I:  mean={round(mean(x$metrics$warrens_I, na.rm=TRUE), 4)}")
+    cli::cli_text("  Pearson r:   mean={round(mean(x$metrics$pearson_r, na.rm=TRUE), 4)}")
+  }
+  invisible(x)
+}
+
+#' @export
+print.cast_batch <- function(x, ...) {
+  cli::cli_h1("CAST Batch Results")
+  cli::cli_ul(c(
+    "Species: {.val {x$species}}",
+    "Models: {.val {x$models}}"
+  ))
+  if (!is.null(x$output_dir)) {
+    cli::cli_text("  Output: {x$output_dir}")
+  }
+  if (!is.null(x$species_metrics) && nrow(x$species_metrics) > 0) {
+    cli::cli_h2("Summary metrics")
+    print(x$species_metrics[, intersect(
+      c("species", "model", "auc_mean", "tss_mean", "cbi_mean"),
+      names(x$species_metrics)
+    ), drop = FALSE], row.names = FALSE)
+  }
+  invisible(x)
+}

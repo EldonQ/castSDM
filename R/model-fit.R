@@ -11,14 +11,23 @@
 #' @param models Character vector. Models to fit: `"cast"`, `"mlp_ate"`,
 #'   `"mlp"`, `"rf"`, `"maxent"`, `"brt"`. Default `c("cast", "rf")`.
 #' @param response Character. Response column name. Default `"presence"`.
-#' @param n_epochs Integer. Training epochs for neural networks. Default `200`.
+#' @param n_epochs Integer. Training epochs for neural networks. Default `300`.
 #' @param n_runs Integer. Number of random seeds for NN ensembling. Default
-#'   `3`. Each run uses a different random seed; the best-AUC run is kept.
-#' @param patience Integer. Early stopping patience (epochs). Default `20`.
+#'   `5`. Each run uses a different random seed; the best-AUC run is kept.
+#' @param patience Integer. Early stopping patience (epochs). Default `40`.
+#'   Increased from the original 20 to avoid premature stopping during the
+#'   cosine-annealing tail of the schedule.
 #' @param val_fraction Numeric. Validation split for early stopping. Default
 #'   `0.2`. Split is stratified by presence/absence.
 #' @param focal_gamma Numeric. Focal loss gamma parameter. Default `2.0`.
 #'   Higher values down-weight easy negatives more aggressively.
+#' @param focal_alpha_mode Character. How to set the focal loss alpha weight.
+#'   `"sqrt"` (default) uses `sqrt(1 - prevalence)` which is less aggressive
+#'   than the original `1 - prevalence` and prevents over-focusing on
+#'   presences in highly imbalanced data. `"prevalence"` restores the original
+#'   `1 - prevalence` behaviour. `"fixed"` uses `focal_alpha` directly.
+#' @param focal_alpha Numeric. Used only when `focal_alpha_mode = "fixed"`.
+#'   Default `0.75`.
 #' @param rf_ntree Integer. Number of RF trees. Default `300`.
 #' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
@@ -27,6 +36,8 @@
 #' @param dropout Numeric. CI-MLP dropout rate. Default `0.2`.
 #' @param lr Numeric. CI-MLP learning rate. Default `1e-3`.
 #' @param batch_size Integer or `NULL`. `NULL` for auto-tuning.
+#' @param max_interactions Integer. Passed to [cast_features()]. Maximum DAG
+#'   interaction terms. Default `15L`.
 #' @param tune_grid Logical. If `TRUE` (and `"cast"` or `"mlp*"` in models),
 #'   performs a small grid search over `hidden_size` x `dropout` x `lr`
 #'   on the internal validation split before the full training run. Best
@@ -40,8 +51,8 @@
 #' @details
 #' ## CI-MLP Architecture (CAST, MLP_ATE, MLP)
 #' A 5-layer feedforward network with Layer Normalization, SiLU activation,
-#' and dropout. Trained with AdamW optimizer, warmup + cosine annealing
-#' schedule, and focal loss for class imbalance handling.
+#' residual connections, and dropout. Trained with AdamW optimizer, warmup +
+#' cosine annealing schedule, and focal loss for class imbalance handling.
 #'
 #' Requires the \pkg{torch} package. If \pkg{torch} is not installed, neural
 #' network models will be skipped with a warning.
@@ -55,26 +66,30 @@
 #'
 #' @export
 cast_fit <- function(data,
-                     screen = NULL,
-                     dag = NULL,
-                     ate = NULL,
-                     models = c("cast", "rf"),
-                     response = "presence",
-                     n_epochs = 200L,
-                     n_runs = 3L,
-                     patience = 20L,
-                     val_fraction = 0.2,
-                     focal_gamma = 2.0,
-                     rf_ntree = 300L,
-                     brt_n_trees = 500L,
-                     brt_depth = 5L,
-                     hidden_size = NULL,
-                     dropout = 0.2,
-                     lr = 1e-3,
-                     batch_size = NULL,
-                     tune_grid = FALSE,
-                     seed = NULL,
-                     verbose = TRUE) {
+                     screen           = NULL,
+                     dag              = NULL,
+                     ate              = NULL,
+                     models           = c("cast", "rf"),
+                     response         = "presence",
+                     n_epochs         = 300L,
+                     n_runs           = 5L,
+                     patience         = 40L,
+                     val_fraction     = 0.2,
+                     focal_gamma      = 2.0,
+                     focal_alpha_mode = c("sqrt", "prevalence", "fixed"),
+                     focal_alpha      = 0.75,
+                     rf_ntree         = 300L,
+                     brt_n_trees      = 500L,
+                     brt_depth        = 5L,
+                     hidden_size      = NULL,
+                     dropout          = 0.2,
+                     lr               = 1e-3,
+                     batch_size       = NULL,
+                     max_interactions = 15L,
+                     tune_grid        = FALSE,
+                     seed             = NULL,
+                     verbose          = TRUE) {
+  focal_alpha_mode <- match.arg(focal_alpha_mode)
   models <- tolower(models)
   nn_models <- intersect(models, c("cast", "mlp_ate", "mlp"))
   trad_models <- intersect(models, c("rf", "maxent", "brt"))
@@ -118,7 +133,12 @@ cast_fit <- function(data,
   y_val <- Y[val_idx]
   y_tr <- Y[-val_idx]
 
-  focal_alpha <- 1 - mean(y_tr)
+  prevalence <- mean(y_tr)
+  focal_alpha_used <- switch(focal_alpha_mode,
+    sqrt       = sqrt(1 - prevalence),
+    prevalence = 1 - prevalence,
+    fixed      = focal_alpha
+  )
   bs <- batch_size %||%
     min(128L, max(32L, as.integer(length(y_tr) / 100)))
 
@@ -152,7 +172,8 @@ cast_fit <- function(data,
                              cast = "cast", mlp_ate = "mlp_ate", "mlp")
     if (tune_feat_type != "mlp") {
       tf <- cast_features(X_sc, screen, dag, ate,
-                          model_type = tune_feat_type)
+                          model_type       = tune_feat_type,
+                          max_interactions = max_interactions)
       x_tune <- tf$features
     } else {
       x_tune <- X_sc
@@ -180,7 +201,7 @@ cast_fit <- function(data,
               epochs = tune_epochs,
               lr = lr_i,
               patience = as.integer(tune_epochs / 2),
-              focal_alpha = focal_alpha,
+              focal_alpha = focal_alpha_used,
               focal_gamma = focal_gamma
             ),
             error = function(e) list(best_val_auc = -Inf)
@@ -207,7 +228,9 @@ cast_fit <- function(data,
     # Build features
     feat_type <- switch(mdl, cast = "cast", mlp_ate = "mlp_ate", "mlp")
     if (feat_type != "mlp") {
-      feat_all <- cast_features(X_sc, screen, dag, ate, model_type = feat_type)
+      feat_all <- cast_features(X_sc, screen, dag, ate,
+                                model_type       = feat_type,
+                                max_interactions = max_interactions)
       X_feat <- feat_all$features
     } else {
       X_feat <- X_sc
@@ -241,7 +264,7 @@ cast_fit <- function(data,
         res <- train_ci_mlp(
           m, dl, vt, y_val,
           epochs = n_epochs, lr = run_lr, patience = patience,
-          focal_alpha = focal_alpha, focal_gamma = focal_gamma
+          focal_alpha = focal_alpha_used, focal_gamma = focal_gamma
         )
 
         run_aucs[ri] <- res$best_val_auc
@@ -302,10 +325,16 @@ cast_fit <- function(data,
 
 #' Build CI-MLP torch Module with Residual Connections
 #'
-#' Architecture: input projection -> 3 residual blocks (Linear + LayerNorm +
-#' SiLU + Dropout, with skip connection) -> bottleneck -> output logit.
-#' Residual connections stabilise gradients and allow deeper effective
-#' representations without degradation.
+#' Architecture: input projection -> 3 residual blocks -> bottleneck -> output.
+#'
+#' Each residual block follows the Pre-Norm pattern:
+#'   F(z) = dropout( SiLU( LayerNorm( Linear_b( SiLU( LayerNorm( Linear_a(z) ) ) ) ) ) )
+#'   z    = z + F(z)
+#'
+#' Both linear layers inside each block now have activations, fixing the
+#' original design where the second linear had no activation before the
+#' skip-add. The pre-norm pattern (LayerNorm before activation) is more
+#' stable than the original post-norm variant.
 #'
 #' @keywords internal
 #' @noRd
@@ -315,68 +344,80 @@ build_ci_mlp <- function(n_input, hidden = 64L, dropout = 0.2) {
     "CI_MLP_Res",
     initialize = function(n_in, h, dr) {
       # Input projection (aligns dim for residuals)
-      self$proj  <- torch::nn_linear(n_in, h)
+      self$proj      <- torch::nn_linear(n_in, h)
       self$proj_norm <- torch::nn_layer_norm(h)
 
-      # Residual block 1
+      # Residual block 1 (pre-norm: LN -> act -> linear -> LN -> act -> linear)
+      self$res1_n1 <- torch::nn_layer_norm(h)
       self$res1_a  <- torch::nn_linear(h, h)
-      self$res1_n  <- torch::nn_layer_norm(h)
-      self$res1_b  <- torch::nn_linear(h, h)
       self$res1_n2 <- torch::nn_layer_norm(h)
+      self$res1_b  <- torch::nn_linear(h, h)
       self$res1_dr <- torch::nn_dropout(dr)
 
       # Residual block 2
+      self$res2_n1 <- torch::nn_layer_norm(h)
       self$res2_a  <- torch::nn_linear(h, h)
-      self$res2_n  <- torch::nn_layer_norm(h)
-      self$res2_b  <- torch::nn_linear(h, h)
       self$res2_n2 <- torch::nn_layer_norm(h)
+      self$res2_b  <- torch::nn_linear(h, h)
       self$res2_dr <- torch::nn_dropout(dr)
 
       # Residual block 3
+      self$res3_n1 <- torch::nn_layer_norm(h)
       self$res3_a  <- torch::nn_linear(h, h)
-      self$res3_n  <- torch::nn_layer_norm(h)
-      self$res3_b  <- torch::nn_linear(h, h)
       self$res3_n2 <- torch::nn_layer_norm(h)
+      self$res3_b  <- torch::nn_linear(h, h)
       self$res3_dr <- torch::nn_dropout(dr)
 
       # Bottleneck -> output
-      half_h      <- as.integer(h %/% 2)
-      self$neck   <- torch::nn_linear(h, half_h)
-      self$neck_n <- torch::nn_layer_norm(half_h)
+      half_h       <- as.integer(h %/% 2)
+      self$neck_n  <- torch::nn_layer_norm(h)
+      self$neck    <- torch::nn_linear(h, half_h)
       self$neck_dr <- torch::nn_dropout(dr * 0.5)
-      self$head   <- torch::nn_linear(half_h, 1L)
-
-      # Store for forward
-      self$dr <- dr
+      self$head    <- torch::nn_linear(half_h, 1L)
     },
     forward = function(x) {
       # Input projection
       z <- torch::nnf_silu(self$proj_norm(self$proj(x)))
 
-      # Residual block 1: z = z + F(z)
+      # Residual block 1 (pre-norm): F(z) = dr( silu( ln( b( silu( ln( a(z) ) ) ) ) ) )
       r <- self$res1_dr(
-        torch::nnf_silu(self$res1_n(self$res1_a(z)))
+        torch::nnf_silu(
+          self$res1_n2(
+            self$res1_b(
+              torch::nnf_silu(self$res1_n1(self$res1_a(z)))
+            )
+          )
+        )
       )
-      r <- self$res1_n2(self$res1_b(r))
-      z <- torch::nnf_silu(z + r)
+      z <- z + r
 
       # Residual block 2
       r <- self$res2_dr(
-        torch::nnf_silu(self$res2_n(self$res2_a(z)))
+        torch::nnf_silu(
+          self$res2_n2(
+            self$res2_b(
+              torch::nnf_silu(self$res2_n1(self$res2_a(z)))
+            )
+          )
+        )
       )
-      r <- self$res2_n2(self$res2_b(r))
-      z <- torch::nnf_silu(z + r)
+      z <- z + r
 
       # Residual block 3
       r <- self$res3_dr(
-        torch::nnf_silu(self$res3_n(self$res3_a(z)))
+        torch::nnf_silu(
+          self$res3_n2(
+            self$res3_b(
+              torch::nnf_silu(self$res3_n1(self$res3_a(z)))
+            )
+          )
+        )
       )
-      r <- self$res3_n2(self$res3_b(r))
-      z <- torch::nnf_silu(z + r)
+      z <- z + r
 
       # Bottleneck
       z <- self$neck_dr(
-        torch::nnf_silu(self$neck_n(self$neck(z)))
+        torch::nnf_silu(self$neck(torch::nnf_silu(self$neck_n(z))))
       )
       self$head(z)
     }

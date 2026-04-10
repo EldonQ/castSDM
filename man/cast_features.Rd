@@ -4,7 +4,14 @@
 \alias{cast_features}
 \title{Causal Feature Engineering}
 \usage{
-cast_features(data, screen, dag, ate, model_type = "cast")
+cast_features(
+  data,
+  screen,
+  dag,
+  ate,
+  model_type = "cast",
+  max_interactions = 15L
+)
 }
 \arguments{
 \item{data}{A \code{data.frame} of standardized environmental variables.}
@@ -18,13 +25,18 @@ cast_features(data, screen, dag, ate, model_type = "cast")
 \item{model_type}{Character. Which feature set to build: \code{"cast"} (all
 layers), \code{"mlp_ate"} (ATE-weighted only), \code{"mlp"} (raw only). Default
 \code{"cast"}.}
+
+\item{max_interactions}{Integer. Maximum number of DAG interaction features
+to add. Edges are ranked by bootstrap strength and only the top-K are
+used. This prevents dimension explosion when the DAG is dense. Default
+\code{15L}. Set to \code{Inf} to use all edges (original behaviour).}
 }
 \value{
 A list with:
 \describe{
 \item{\code{features}}{A \code{data.frame} of engineered features.}
 \item{\code{n_base}}{Number of base variables.}
-\item{\code{n_interactions}}{Number of DAG interaction features.}
+\item{\code{n_interactions}}{Number of DAG interaction features actually added.}
 \item{\code{n_total}}{Total number of features.}
 \item{\code{ate_weights}}{Named numeric vector of ATE weights applied.}
 \item{\code{interaction_names}}{Names of interaction columns (if any).}
@@ -35,8 +47,8 @@ Constructs augmented feature matrices using ATE-weighted variables and
 DAG-guided interaction terms. Three feature layers are produced:
 \enumerate{
 \item \strong{ATE-weighted}: Base variables scaled by causal effect magnitude.
-\item \strong{DAG interactions}: Pairwise products of connected variables weighted
-by edge strength (CAST model only).
+\item \strong{DAG interactions}: Pairwise products of the top-K strongest connected
+variable pairs, weighted by edge strength (CAST model only).
 \item \strong{Raw}: Unmodified variables (for baseline models).
 }
 }

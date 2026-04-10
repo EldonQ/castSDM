@@ -25,10 +25,18 @@
 #'       spatial extent balance.}
 #'   }
 #' @param response Character. Response column. Default `"presence"`.
-#' @param n_epochs Integer. Epochs for CI-MLP per fold. Default `100`.
-#' @param n_runs Integer. NN ensemble runs per fold. Default `2`.
+#' @param n_epochs Integer. Epochs for CI-MLP per fold. Default `200`.
+#'   Aligned with [cast_fit()] default to ensure comparable training depth
+#'   in each CV fold.
+#' @param n_runs Integer. NN ensemble runs per fold. Default `3`. Aligned
+#'   with [cast_fit()] default.
 #' @param rf_ntree Integer. RF trees per fold. Default `300`.
 #' @param brt_n_trees Integer. BRT iterations per fold. Default `500`.
+#' @param parallel Logical. If `TRUE`, run folds in parallel using
+#'   \pkg{future.apply}. Set a [future::plan()] before calling. Note:
+#'   torch-based models (`"cast"`, `"mlp_ate"`, `"mlp"`) are not
+#'   fork-safe; use `plan(multisession)` when including NN models.
+#'   Default `FALSE`.
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Print fold progress. Default `TRUE`.
 #'
@@ -73,10 +81,11 @@ cast_cv <- function(data,
                     models  = c("rf"),
                     block_method = c("grid", "cluster"),
                     response     = "presence",
-                    n_epochs     = 100L,
-                    n_runs       = 2L,
+                    n_epochs     = 200L,
+                    n_runs       = 3L,
                     rf_ntree     = 300L,
                     brt_n_trees  = 500L,
+                    parallel     = FALSE,
                     seed         = NULL,
                     verbose      = TRUE) {
 
@@ -101,32 +110,22 @@ cast_cv <- function(data,
   env_vars <- if (!is.null(dag)) dag$nodes else get_env_vars(data, response)
 
   # -- 3. Cross-validate -----------------------------------------------------
-  all_fold_rows <- list()
-  # OOF container: for threshold calibration
-  oof_preds  <- lapply(models, function(m) rep(NA_real_, nrow(data)))
-  names(oof_preds) <- models
-  oof_obs    <- data[[response]]
+  oof_obs <- data[[response]]
 
-  for (fold_i in seq_len(k)) {
+  # Worker: fit and evaluate one fold, returns list(fold_rows, oof_updates)
+  cv_one_fold <- function(fold_i, data, folds, screen, dag, ate, models,
+                          response, env_vars, n_epochs, n_runs, rf_ntree,
+                          brt_n_trees, seed) {
     test_idx  <- which(folds == fold_i)
     train_idx <- which(folds != fold_i)
 
     if (length(test_idx) == 0 || sum(data[[response]][train_idx]) < 5) {
-      if (verbose) cli::cli_warn("Fold {fold_i}: skipping (too few presences).")
-      next
-    }
-
-    if (verbose) {
-      n_pres_test <- sum(data[[response]][test_idx])
-      cli::cli_inform(
-        "Fold {fold_i}/{k}: train n={length(train_idx)}, test n={length(test_idx)} (pres={n_pres_test})"
-      )
+      return(NULL)
     }
 
     train_fold <- data[train_idx, , drop = FALSE]
     test_fold  <- data[test_idx,  , drop = FALSE]
 
-    # Fit on this fold
     fold_fit <- tryCatch(
       cast_fit(
         train_fold,
@@ -142,15 +141,12 @@ cast_cv <- function(data,
         seed     = if (!is.null(seed)) seed + fold_i else NULL,
         verbose  = FALSE
       ),
-      error = function(e) {
-        cli::cli_warn("Fold {fold_i}: cast_fit failed -- {e$message}")
-        NULL
-      }
+      error = function(e) NULL
     )
-    if (is.null(fold_fit)) next
+    if (is.null(fold_fit)) return(NULL)
 
-    # Evaluate each model
     fold_rows <- list()
+    oof_updates <- list()
     for (mdl in models) {
       if (!mdl %in% names(fold_fit$models)) next
       mdl_info <- fold_fit$models[[mdl]]
@@ -172,8 +168,7 @@ cast_cv <- function(data,
         error = function(e) rep(NA_real_, nrow(test_fold))
       )
 
-      # Store OOF
-      oof_preds[[mdl]][test_idx] <- preds
+      oof_updates[[mdl]] <- list(idx = test_idx, preds = preds)
 
       m <- evaluate_model_full(preds, test_fold[[response]])
       fold_rows[[mdl]] <- data.frame(
@@ -188,7 +183,49 @@ cast_cv <- function(data,
         row.names = NULL
       )
     }
-    all_fold_rows <- c(all_fold_rows, fold_rows)
+    list(fold_rows = fold_rows, oof_updates = oof_updates)
+  }
+
+  if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
+    if (verbose) cli::cli_inform("Running {k}-fold CV in parallel...")
+    fold_results <- future.apply::future_lapply(
+      seq_len(k), cv_one_fold,
+      data = data, folds = folds, screen = screen, dag = dag, ate = ate,
+      models = models, response = response, env_vars = env_vars,
+      n_epochs = n_epochs, n_runs = n_runs, rf_ntree = rf_ntree,
+      brt_n_trees = brt_n_trees, seed = seed,
+      future.seed = TRUE
+    )
+  } else {
+    fold_results <- vector("list", k)
+    for (fold_i in seq_len(k)) {
+      if (verbose) {
+        test_idx_v  <- which(folds == fold_i)
+        train_idx_v <- which(folds != fold_i)
+        n_pres_test <- sum(data[[response]][test_idx_v])
+        cli::cli_inform(
+          "Fold {fold_i}/{k}: train n={length(train_idx_v)}, test n={length(test_idx_v)} (pres={n_pres_test})"
+        )
+      }
+      fold_results[[fold_i]] <- cv_one_fold(
+        fold_i, data, folds, screen, dag, ate, models, response,
+        env_vars, n_epochs, n_runs, rf_ntree, brt_n_trees, seed
+      )
+    }
+  }
+
+  # Collect results from all folds
+  all_fold_rows <- list()
+  oof_preds <- lapply(models, function(m) rep(NA_real_, nrow(data)))
+  names(oof_preds) <- models
+
+  for (fr in fold_results) {
+    if (is.null(fr)) next
+    all_fold_rows <- c(all_fold_rows, fr$fold_rows)
+    for (mdl in names(fr$oof_updates)) {
+      upd <- fr$oof_updates[[mdl]]
+      oof_preds[[mdl]][upd$idx] <- upd$preds
+    }
   }
 
   # -- 4. Aggregate ----------------------------------------------------------

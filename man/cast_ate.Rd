@@ -8,9 +8,12 @@ cast_ate(
   data,
   response = "presence",
   variables = NULL,
-  K = 2L,
+  K = 5L,
   num_trees = 300L,
   alpha = 0.05,
+  quantile_cuts = c(0.25, 0.5, 0.75),
+  bonferroni = TRUE,
+  parallel = FALSE,
   seed = NULL,
   verbose = TRUE
 )
@@ -24,12 +27,28 @@ variables.}
 \item{variables}{Character vector of variable names to test. Default
 \code{NULL} (all numeric columns except \code{response}, \code{lon}, \code{lat}).}
 
-\item{K}{Integer. Number of cross-fitting folds. Default \code{2}.}
+\item{K}{Integer. Number of cross-fitting folds. Default \code{5}. The original
+default of 2 produced high-variance residual estimates; 5 is the standard
+recommendation from the DML literature.}
 
 \item{num_trees}{Integer. Number of trees for nuisance Random Forests.
 Default \code{300}.}
 
-\item{alpha}{Numeric. Significance level. Default \code{0.05}.}
+\item{alpha}{Numeric. Significance level \strong{after Bonferroni correction}.
+Default \code{0.05}.}
+
+\item{quantile_cuts}{Numeric vector. Quantile thresholds used to binarize
+each treatment variable. ATEs from all cuts are averaged before
+significance testing. Default \code{c(0.25, 0.50, 0.75)}. Set to \code{0.5} to
+recover the original single-median behaviour.}
+
+\item{bonferroni}{Logical. Apply Bonferroni correction for the number of
+variables tested. Default \code{TRUE}.}
+
+\item{parallel}{Logical. If \code{TRUE}, estimate ATEs for each variable in
+parallel using \pkg{future.apply}. The user must set up a
+\code{\link[future:plan]{future::plan()}} beforehand (e.g.,
+\code{future::plan(future::multisession, workers = 4)}). Default \code{FALSE}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed.}
 
@@ -41,20 +60,32 @@ A \link{cast_ate} object.
 \description{
 For each environmental variable, estimates the Average Treatment Effect
 (ATE) on species presence using Double/Debiased Machine Learning
-(Chernozhukov et al. 2018). Variables are binarized at their median,
-and Random Forests are used as nuisance functions with K-fold
-cross-fitting.
+(Chernozhukov et al. 2018). To handle non-linear ecological responses,
+binarization is repeated at multiple quantile thresholds and the results
+are averaged, greatly reducing the information loss of a single median cut.
+Random Forests are used as nuisance functions with K-fold cross-fitting.
 }
 \details{
-The DML procedure for each variable \eqn{X}:
+\subsection{Multi-quantile DML procedure}{
+
+For each variable \eqn{X} and each quantile threshold \eqn{q}:
 \enumerate{
-\item Binarize \eqn{X} at its median to create treatment
-\eqn{T \in \{0,1\}}.
-\item K-fold cross-fitting: train RF models for \eqn{E[Y|W]} and
-\eqn{E[T|W]} on training folds, compute residuals on held-out folds.
-\item Estimate ATE =
-\eqn{\sum(\tilde{T} \cdot \tilde{Y}) / \sum(\tilde{T}^2)}.
-\item Compute standard error via the influence function.
+\item Binarize: \eqn{T^{(q)} = \mathbf{1}[X > Q_q(X)]}.
+\item K-fold cross-fitting: RF nuisances for \eqn{E[Y|W]} and
+\eqn{E[T^{(q)}|W]}; compute residuals on held-out folds.
+\item Estimate \eqn{\widehat{ATE}^{(q)}} via the DML moment condition.
+}
+
+Final coefficient: \eqn{\bar{ATE} = \text{mean}_q(\widehat{ATE}^{(q)})}.
+Final SE: \eqn{\bar{SE} = \text{mean}_q(\widehat{SE}^{(q)})}.
+This captures both lower-tail and upper-tail effects, substantially
+improving detection of non-linear (e.g. Gaussian, threshold) responses.
+}
+
+\subsection{Bonferroni correction}{
+
+When \code{bonferroni = TRUE} the significance threshold is divided by the
+number of variables tested, controlling the family-wise error rate.
 }
 }
 \references{

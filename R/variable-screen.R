@@ -128,21 +128,32 @@ cast_screen <- function(dag,
   scr <- scr[order(-scr$score_total), ]
   rownames(scr) <- NULL
 
-  # -- K-means selection --
+  # -- Score-gap selection (replaces k-means(k=2)) --
+  # Rank variables by composite score and find the largest drop between
+  # consecutive scores.  Variables above the largest gap are retained.
+  # This is more stable than k-means because it does not depend on random
+  # initialisation and does not assume a bimodal score distribution.
   min_keep <- max(min_vars, ceiling(length(env_vars) * min_fraction))
+  max_keep <- nrow(scr)
 
-  if (length(unique(scr$score_total)) >= 2) {
-    km <- stats::kmeans(scr$score_total, centers = 2, nstart = 10)
-    high_cluster <- which.max(km$centers)
-    selected_km <- scr$variable[km$cluster == high_cluster]
-  } else {
-    selected_km <- scr$variable
-  }
+  scores_sorted <- scr$score_total  # already sorted descending
 
-  selected <- if (length(selected_km) < min_keep) {
-    scr$variable[seq_len(min(min_keep, nrow(scr)))]
+  selected <- if (max_keep <= min_keep) {
+    # Too few variables to search for a gap — keep all
+    scr$variable
   } else {
-    selected_km
+    # Compute consecutive score differences (positive = big drop)
+    gaps      <- scores_sorted[-max_keep] - scores_sorted[-1L]
+    # Only consider cut-points that respect min/max bounds
+    valid_idx <- seq_len(max_keep - 1L)
+    valid_idx <- valid_idx[valid_idx >= min_keep & valid_idx < max_keep]
+
+    if (length(valid_idx) == 0L) {
+      scr$variable[seq_len(min_keep)]
+    } else {
+      cut_at <- valid_idx[which.max(gaps[valid_idx])]
+      scr$variable[seq_len(cut_at)]
+    }
   }
 
   weights <- c(w_dag = w_dag, w_ate = w_ate, w_imp = w_imp)

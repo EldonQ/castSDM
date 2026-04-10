@@ -7,6 +7,7 @@
 cast_dag(
   data,
   response = "presence",
+  env_vars = NULL,
   R = 100L,
   algorithm = "hc",
   score = "bic-g",
@@ -24,13 +25,22 @@ environmental variables. Must be numeric (no factors).}
 \item{response}{Character. Name of the response column. Default
 \code{"presence"}.}
 
+\item{env_vars}{Character vector or \code{NULL}. Environmental variable names
+to include in DAG learning. When \code{NULL} (default), all numeric columns
+in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used. \strong{Always pass
+this explicitly} when \code{data} contains columns beyond the intended
+predictors (e.g., after \code{\link[=cast_prepare]{cast_prepare()}}, which preserves all original
+columns). Typical usage: \code{env_vars = split$env_vars}.}
+
 \item{R}{Integer. Number of bootstrap replicates. Default \code{100}.}
 
 \item{algorithm}{Character. Structure learning algorithm. Default \code{"hc"}
 (Hill-Climbing). See \code{\link[bnlearn:arc.strength]{bnlearn::boot.strength()}} for options.}
 
 \item{score}{Character. Scoring criterion. Default \code{"bic-g"} (BIC for
-Gaussian data).}
+Gaussian data). Note: the DAG is learned on \strong{environmental variables
+only} (presence excluded), so \code{bic-g} is appropriate for the continuous
+predictors.}
 
 \item{strength_threshold}{Numeric. Minimum edge strength (proportion of
 bootstrap replicates). Default \code{0.7}.}
@@ -49,27 +59,27 @@ exceeded. Default \code{8000}.}
 A \link{cast_dag} object.
 }
 \description{
-Discovers species-specific causal structure among environmental variables
-and species presence using bootstrap-aggregated Hill-Climbing with the
-BIC-Gaussian score. Edges are retained based on strength and direction
-consistency thresholds.
+Discovers the causal structure among environmental variables using
+bootstrap-aggregated Hill-Climbing (HC). Edges are retained based on
+bootstrap strength and direction consistency thresholds.
 }
 \details{
-The DAG is learned \strong{with the presence variable included} in the network.
-This ensures the learned structure reflects how environmental variables
-influence species occurrence, not just inter-variable correlations.
+\subsection{Why presence is excluded from DAG learning}{
 
-The bootstrap procedure (Friedman et al. 1999) provides confidence measures
-for each edge:
+The DAG is learned on \strong{environmental variables only}, not on \code{presence}.
+The original design included \code{presence} in the network but then discarded
+all edges touching it. This was inconsistent: the \code{bic-g} (Gaussian BIC)
+score treats \code{presence} as a continuous variable, corrupting edge weights
+involving nearby nodes. Excluding \code{presence} from the start keeps the
+Gaussian assumption valid for the continuous environmental predictors
+and avoids spurious confounding of the env-env edge strengths.
+
+The bootstrap procedure (Friedman et al. 1999) provides confidence measures:
 \itemize{
 \item \strong{Strength}: Proportion of bootstrap replicates containing the edge.
-\item \strong{Direction}: Proportion of times the edge points from A -> B
-(vs B -> A).
+\item \strong{Direction}: Proportion of times the edge points from A -> B.
 }
-
-After learning, edges connecting to the \code{presence} node are excluded from
-the returned DAG, so that only environmental causal structure is retained
-for downstream feature engineering.
+}
 }
 \references{
 Pearl, J. (2000). \emph{Causality: Models, Reasoning, and Inference}.

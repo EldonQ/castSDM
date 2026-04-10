@@ -13,10 +13,11 @@ cast_cv(
   models = c("rf"),
   block_method = c("grid", "cluster"),
   response = "presence",
-  n_epochs = 100L,
-  n_runs = 2L,
+  n_epochs = 200L,
+  n_runs = 3L,
   rf_ntree = 300L,
   brt_n_trees = 500L,
+  parallel = FALSE,
   seed = NULL,
   verbose = TRUE
 )
@@ -49,13 +50,22 @@ spatial extent balance.}
 
 \item{response}{Character. Response column. Default \code{"presence"}.}
 
-\item{n_epochs}{Integer. Epochs for CI-MLP per fold. Default \code{100}.}
+\item{n_epochs}{Integer. Epochs for CI-MLP per fold. Default \code{200}.
+Aligned with \code{\link[=cast_fit]{cast_fit()}} default to ensure comparable training depth
+in each CV fold.}
 
-\item{n_runs}{Integer. NN ensemble runs per fold. Default \code{2}.}
+\item{n_runs}{Integer. NN ensemble runs per fold. Default \code{3}. Aligned
+with \code{\link[=cast_fit]{cast_fit()}} default.}
 
 \item{rf_ntree}{Integer. RF trees per fold. Default \code{300}.}
 
 \item{brt_n_trees}{Integer. BRT iterations per fold. Default \code{500}.}
+
+\item{parallel}{Logical. If \code{TRUE}, run folds in parallel using
+\pkg{future.apply}. Set a \code{\link[future:plan]{future::plan()}} before calling. Note:
+torch-based models (\code{"cast"}, \code{"mlp_ate"}, \code{"mlp"}) are not
+fork-safe; use \code{plan(multisession)} when including NN models.
+Default \code{FALSE}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 

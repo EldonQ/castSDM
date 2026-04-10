@@ -35,4 +35,4 @@
 NULL
 
 # Suppress R CMD check NOTEs for non-standard evaluation variables
-utils::globalVariables(c("self", ".data", "index"))
+utils::globalVariables(c("self", ".data", "index", "edge_strength"))

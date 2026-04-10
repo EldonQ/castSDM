@@ -35,6 +35,8 @@ Imports:
 Suggests:
     bnlearn,
     car,
+    future,
+    future.apply,
     gbm,
     ggplot2,
     ggraph,

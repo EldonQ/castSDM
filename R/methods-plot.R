@@ -4,18 +4,22 @@
 #'
 #' Visualizes the learned causal DAG using ggraph. Nodes are colored by
 #' causal role, sized by degree, and edges weighted by bootstrap strength.
+#' Follows the single-species showcase style (Fig 2) with edge alpha mapped
+#' to actual bootstrap strength.
 #'
 #' @param x A `cast_dag` object.
 #' @param roles Optional [cast_roles] object for node coloring.
 #' @param screen Optional [cast_screen] object to mark selected variables.
 #' @param var_labels Optional named character vector mapping variable names
 #'   to display labels (e.g., `c(bio02 = "Diurnal Temp Range")`).
+#' @param species Optional character string. Species name for the title
+#'   (underscores are converted to spaces and italicized).
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_dag <- function(x, roles = NULL, screen = NULL,
-                          var_labels = NULL, ...) {
+                          var_labels = NULL, species = NULL, ...) {
   check_suggested("ggraph", "for DAG plotting")
   check_suggested("igraph", "for DAG plotting")
   check_suggested("ggplot2", "for plotting")
@@ -41,7 +45,7 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
   )
 
   node_names <- igraph::V(g)$name
-  igraph::E(g)$strength <- edges$strength
+  igraph::E(g)$edge_strength <- edges$strength
   igraph::V(g)$deg <- igraph::degree(g, mode = "all")
 
   # Causal roles
@@ -78,10 +82,30 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     Terminal = "#27AE60", Unscreened = "grey75"
   )
 
+  # Title and subtitle
+  n_nodes <- length(unique(c(edges$from, edges$to)))
+  dag_density <- if (n_nodes > 1) {
+    nrow(edges) / (n_nodes * (n_nodes - 1))
+  } else {
+    0
+  }
+
+  if (!is.null(species)) {
+    sp_display <- gsub("_", " ", species)
+    main_title <- sprintf("Causal DAG \u2014 %s", sp_display)
+  } else {
+    main_title <- "Causal DAG"
+  }
+
+  sub_title <- sprintf(
+    "%d edges | density = %.3f | HC bootstrap R = %d",
+    nrow(edges), dag_density, x$boot_R
+  )
+
   set.seed(42)
   p <- ggraph::ggraph(g, layout = "fr") +
     ggraph::geom_edge_arc(
-      ggplot2::aes(alpha = ggplot2::after_stat(index)),
+      ggplot2::aes(alpha = edge_strength),
       arrow = grid::arrow(length = grid::unit(2.5, "mm"), type = "closed"),
       end_cap = ggraph::circle(4, "mm"),
       strength = 0.15, color = "grey40"
@@ -103,13 +127,7 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     ggraph::scale_edge_alpha_continuous(
       range = c(0.3, 0.9), name = "Bootstrap\nStrength"
     ) +
-    ggplot2::labs(
-      title = "Causal DAG",
-      subtitle = sprintf(
-        "%d edges | strength >= %.2f | R = %d",
-        nrow(edges), x$strength_threshold, x$boot_R
-      )
-    ) +
+    ggplot2::labs(title = main_title, subtitle = sub_title) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = 0, size = 11),

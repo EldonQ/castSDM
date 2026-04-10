@@ -11,11 +11,13 @@ cast_fit(
   ate = NULL,
   models = c("cast", "rf"),
   response = "presence",
-  n_epochs = 200L,
-  n_runs = 3L,
-  patience = 20L,
+  n_epochs = 300L,
+  n_runs = 5L,
+  patience = 40L,
   val_fraction = 0.2,
   focal_gamma = 2,
+  focal_alpha_mode = c("sqrt", "prevalence", "fixed"),
+  focal_alpha = 0.75,
   rf_ntree = 300L,
   brt_n_trees = 500L,
   brt_depth = 5L,
@@ -23,6 +25,7 @@ cast_fit(
   dropout = 0.2,
   lr = 0.001,
   batch_size = NULL,
+  max_interactions = 15L,
   tune_grid = FALSE,
   seed = NULL,
   verbose = TRUE
@@ -42,18 +45,29 @@ cast_fit(
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
 
-\item{n_epochs}{Integer. Training epochs for neural networks. Default \code{200}.}
+\item{n_epochs}{Integer. Training epochs for neural networks. Default \code{300}.}
 
 \item{n_runs}{Integer. Number of random seeds for NN ensembling. Default
-\code{3}. Each run uses a different random seed; the best-AUC run is kept.}
+\code{5}. Each run uses a different random seed; the best-AUC run is kept.}
 
-\item{patience}{Integer. Early stopping patience (epochs). Default \code{20}.}
+\item{patience}{Integer. Early stopping patience (epochs). Default \code{40}.
+Increased from the original 20 to avoid premature stopping during the
+cosine-annealing tail of the schedule.}
 
 \item{val_fraction}{Numeric. Validation split for early stopping. Default
 \code{0.2}. Split is stratified by presence/absence.}
 
 \item{focal_gamma}{Numeric. Focal loss gamma parameter. Default \code{2.0}.
 Higher values down-weight easy negatives more aggressively.}
+
+\item{focal_alpha_mode}{Character. How to set the focal loss alpha weight.
+\code{"sqrt"} (default) uses \code{sqrt(1 - prevalence)} which is less aggressive
+than the original \code{1 - prevalence} and prevents over-focusing on
+presences in highly imbalanced data. \code{"prevalence"} restores the original
+\code{1 - prevalence} behaviour. \code{"fixed"} uses \code{focal_alpha} directly.}
+
+\item{focal_alpha}{Numeric. Used only when \code{focal_alpha_mode = "fixed"}.
+Default \code{0.75}.}
 
 \item{rf_ntree}{Integer. Number of RF trees. Default \code{300}.}
 
@@ -69,6 +83,9 @@ auto (4x input features, capped at 128).}
 \item{lr}{Numeric. CI-MLP learning rate. Default \code{1e-3}.}
 
 \item{batch_size}{Integer or \code{NULL}. \code{NULL} for auto-tuning.}
+
+\item{max_interactions}{Integer. Passed to \code{\link[=cast_features]{cast_features()}}. Maximum DAG
+interaction terms. Default \code{15L}.}
 
 \item{tune_grid}{Logical. If \code{TRUE} (and \code{"cast"} or \code{"mlp*"} in models),
 performs a small grid search over \code{hidden_size} x \code{dropout} x \code{lr}
@@ -92,8 +109,8 @@ BRT).
 \subsection{CI-MLP Architecture (CAST, MLP_ATE, MLP)}{
 
 A 5-layer feedforward network with Layer Normalization, SiLU activation,
-and dropout. Trained with AdamW optimizer, warmup + cosine annealing
-schedule, and focal loss for class imbalance handling.
+residual connections, and dropout. Trained with AdamW optimizer, warmup +
+cosine annealing schedule, and focal loss for class imbalance handling.
 
 Requires the \pkg{torch} package. If \pkg{torch} is not installed, neural
 network models will be skipped with a warning.
