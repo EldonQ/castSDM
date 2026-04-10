@@ -7,18 +7,26 @@
 #   - Gazella subgutturosa (Goitered Gazelle / 鹅喉羚)
 #   - Pseudois nayaur (Blue Sheep / 岩羊)
 #
-# Workflow:
-#   1. Load species data from inst/extdata/ CSVs
-#   2. Set up parallel backend (future)
-#   3. Run cast_batch() for all species
-#   4. Compare model performance across species (boxplot)
-#   5. Compute inter-model spatial consistency per species
-#   6. Save all outputs
+# Output structure:
+#   castSDM_multi_species/
+#   ├── figures/                    # Cross-species comparison plots
+#   │   └── multi_species_comparison.png
+#   ├── Ovis_ammon/                 # Per-species results
+#   │   ├── cast_result.rds
+#   │   └── figures/
+#   │       ├── causal_dag.png
+#   │       ├── ate_forest_plot.png
+#   │       ├── variable_screening.png
+#   │       ├── model_evaluation.png
+#   │       ├── spatial_cv_map.png
+#   │       ├── HSS_rf.png, HSS_maxent.png, ...
+#   │       ├── CATE_<var>.png
+#   │       └── model_consistency.png
+#   ├── Gazella_subgutturosa/       # (same structure)
+#   └── Pseudois_nayaur/            # (same structure)
 #
 # Requirements:
-#   install.packages(c("future", "future.apply"))
-#   # For full CAST model: install torch
-#   # For MaxEnt: install.packages("maxnet")
+#   install.packages(c("future", "future.apply", "ggplot2", "patchwork"))
 #
 # Run:
 #   library(castSDM)
@@ -27,11 +35,11 @@
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-# Models: remove "cast" if torch is not installed
-MODELS     <- c("rf", "maxent", "brt")
-OUTPUT_DIR <- "castSDM_multi_species"
-N_WORKERS  <- 3L
-SEED       <- 42L
+MODELS      <- c("rf", "maxent", "brt")   # add "cast" if torch is installed
+OUTPUT_DIR  <- "castSDM_multi_species"
+N_WORKERS   <- 3L
+SEED        <- 42L
+FIG_DPI     <- 300L    # unified DPI for all saved figures
 
 # ── Load castSDM ─────────────────────────────────────────────────────────────
 
@@ -42,7 +50,7 @@ if (file.exists("DESCRIPTION") &&
   library(castSDM)
 }
 
-for (pkg in c("ggplot2", "future", "future.apply")) {
+for (pkg in c("ggplot2", "future", "future.apply", "patchwork")) {
   if (!requireNamespace(pkg, quietly = TRUE))
     install.packages(pkg, repos = "https://cloud.r-project.org")
 }
@@ -90,6 +98,10 @@ future::plan(future::multisession, workers = N_WORKERS)
 
 
 # ── Step 3: Run batch pipeline ───────────────────────────────────────────────
+# cast_batch() runs the full pipeline per species:
+#   prepare → DAG → ATE → screen → roles → fit → evaluate → CV
+#   → predict → CATE → consistency
+# All per-species plots are saved automatically to <output>/<species>/figures/
 
 cat("\nRunning cast_batch()...\n\n")
 
@@ -100,6 +112,8 @@ batch_result <- cast_batch(
   output_dir   = OUTPUT_DIR,
   do_cv        = TRUE,
   cv_k         = 5L,
+  n_bootstrap  = 50L,       # increase to 100+ for publication
+  fig_dpi      = FIG_DPI,
   parallel     = TRUE,
   seed         = SEED
 )
@@ -107,78 +121,20 @@ batch_result <- cast_batch(
 print(batch_result)
 
 
-# ── Step 4: Model performance comparison boxplot ─────────────────────────────
-
-cat("\n[Plot] Multi-species model performance comparison...\n")
+# ── Step 4: Cross-species comparison plots (shared figures/) ─────────────────
+# These go in the top-level figures/ directory, not per-species folders.
 
 fig_dir <- file.path(OUTPUT_DIR, "figures")
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 
+cat("\n[Plot] Multi-species model performance comparison...\n")
+
 p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi", "sedi"))
 ggplot2::ggsave(
   file.path(fig_dir, "multi_species_comparison.png"),
-  p_compare, width = 14, height = 6, dpi = 300
+  p_compare, width = 14, height = 6, dpi = FIG_DPI
 )
 cat("  [OK] multi_species_comparison.png\n")
-
-
-# ── Step 5: Inter-model consistency per species ──────────────────────────────
-
-cat("\n[Plot] Inter-model spatial consistency heatmaps...\n")
-
-for (sp in names(batch_result$results)) {
-  r <- batch_result$results[[sp]]
-  if (is.null(r) || is.null(r$predict)) next
-
-  consistency <- tryCatch(
-    cast_consistency(r$predict),
-    error = function(e) {
-      message(sprintf("  [skip] %s: %s", sp, e$message))
-      NULL
-    }
-  )
-
-  if (!is.null(consistency)) {
-    print(consistency)
-
-    p_cons <- tryCatch(
-      plot(consistency, species = sp),
-      error = function(e) NULL
-    )
-    if (!is.null(p_cons)) {
-      ggplot2::ggsave(
-        file.path(fig_dir, sprintf("consistency_%s.png", sp)),
-        p_cons, width = 16, height = 5.5, dpi = 300
-      )
-      cat(sprintf("  [OK] consistency_%s.png\n", sp))
-    }
-  }
-}
-
-
-# ── Step 6: Per-species DAG plots ────────────────────────────────────────────
-
-cat("\n[Plot] Per-species causal DAG plots...\n")
-
-for (sp in names(batch_result$results)) {
-  r <- batch_result$results[[sp]]
-  if (is.null(r) || is.null(r$dag)) next
-
-  if (requireNamespace("ggraph", quietly = TRUE) &&
-      requireNamespace("igraph", quietly = TRUE)) {
-    p_dag <- tryCatch(
-      plot(r$dag, roles = r$roles, screen = r$screen, species = sp),
-      error = function(e) NULL
-    )
-    if (!is.null(p_dag)) {
-      ggplot2::ggsave(
-        file.path(fig_dir, sprintf("dag_%s.png", sp)),
-        p_dag, width = 14, height = 10, dpi = 300
-      )
-      cat(sprintf("  [OK] dag_%s.png\n", sp))
-    }
-  }
-}
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
@@ -188,4 +144,14 @@ future::plan(future::sequential)
 cat("\n============================================================\n")
 cat("Multi-species batch modeling complete!\n")
 cat(sprintf("Output directory: %s\n", OUTPUT_DIR))
-cat("============================================================\n")
+cat("============================================================\n\n")
+
+# List all generated per-species plots
+for (sp in names(batch_result$results)) {
+  sp_figs <- file.path(OUTPUT_DIR, sp, "figures")
+  if (dir.exists(sp_figs)) {
+    figs <- list.files(sp_figs, pattern = "\\.png$")
+    cat(sprintf("  %s: %d figures\n", sp, length(figs)))
+    for (f in figs) cat(sprintf("    %s\n", f))
+  }
+}

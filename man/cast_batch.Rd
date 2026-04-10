@@ -11,6 +11,8 @@ cast_batch(
   output_dir = "castSDM_batch_output",
   do_cv = TRUE,
   cv_k = 5L,
+  n_bootstrap = 100L,
+  fig_dpi = 300L,
   parallel = TRUE,
   seed = NULL,
   verbose = TRUE,
@@ -28,12 +30,16 @@ If \code{NULL}, spatial prediction is skipped.}
 \item{models}{Character vector. Models to fit per species. Default
 \code{c("cast", "rf", "maxent", "brt")}.}
 
-\item{output_dir}{Character. Directory for per-species RDS outputs.
+\item{output_dir}{Character. Directory for per-species outputs.
 Default \code{"castSDM_batch_output"}.}
 
 \item{do_cv}{Logical. Run spatial CV per species. Default \code{TRUE}.}
 
 \item{cv_k}{Integer. Number of spatial CV folds. Default \code{5}.}
+
+\item{n_bootstrap}{Integer. DAG bootstrap replicates. Default \code{100}.}
+
+\item{fig_dpi}{Integer. DPI for all saved figures. Default \code{300}.}
 
 \item{parallel}{Logical. If \code{TRUE}, run species in parallel using
 \pkg{future}. Set a \code{\link[future:plan]{future::plan()}} before calling. Default \code{TRUE}.}
@@ -43,7 +49,8 @@ Default \code{"castSDM_batch_output"}.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
 
-\item{...}{Additional arguments passed to \code{\link[=cast]{cast()}}.}
+\item{...}{Additional arguments passed to \code{\link[=cast_fit]{cast_fit()}} (e.g.,
+\code{n_epochs}, \code{n_runs}, \code{tune_grid}).}
 }
 \value{
 A \code{cast_batch} object with components:
@@ -52,15 +59,15 @@ A \code{cast_batch} object with components:
 evaluation metrics (from spatial CV when available).}
 \item{\code{species}}{Character vector of species names.}
 \item{\code{models}}{Character vector of model names.}
-\item{\code{results}}{Named list of \code{cast_result} objects (see \code{\link[=cast]{cast()}}).}
+\item{\code{results}}{Named list of per-species result lists.}
 \item{\code{output_dir}}{Output directory path.}
 }
 }
 \description{
 Runs the full castSDM pipeline on multiple species, optionally in
 parallel. Each species is processed independently and results are saved
-to separate subdirectories. A comparative summary of model performance
-across species is returned.
+to separate subdirectories with all diagnostic plots. A comparative
+summary of model performance across species is returned.
 }
 \seealso{
 \code{\link[=cast]{cast()}}, \code{\link[=plot.cast_batch]{plot.cast_batch()}}, \code{\link[=cast_consistency]{cast_consistency()}}

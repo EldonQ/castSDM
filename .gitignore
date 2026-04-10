@@ -6,3 +6,5 @@ docs/
 inst/doc
 Meta/
 output/
+castSDM_batch_output/
+castSDM_multi_species/

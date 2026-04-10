@@ -9,3 +9,5 @@
 ^\.claude$
 ^README\.md$
 ^output$
+^castSDM_batch_output$
+^castSDM_multi_species$
