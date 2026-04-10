@@ -1,9 +1,33 @@
 #' Batch Multi-Species Modeling
 #'
-#' Runs the full castSDM pipeline on multiple species, optionally in
-#' parallel. Each species is processed independently and results are saved
-#' to separate subdirectories with all diagnostic plots. A comparative
-#' summary of model performance across species is returned.
+#' One-stop interface that runs the full castSDM pipeline on multiple
+#' species, optionally in parallel. Every pipeline parameter can be
+#' configured from this single function call. Each species is processed
+#' independently and results (RDS + all diagnostic figures) are saved
+#' to separate subdirectories. A comparative summary of model performance
+#' across species is returned.
+#'
+#' @section Pipeline parameters:
+#' All major stages of the castSDM pipeline are configurable through
+#' explicit arguments. Parameters are grouped by prefix:
+#' \itemize{
+#'   \item **General**: `models`, `train_fraction`, `output_dir`,
+#'     `fig_dpi`, `parallel`, `seed`, `verbose`.
+#'   \item **DAG** (`dag_*`): Bootstrap replicates, edge thresholds,
+#'     structure learning algorithm and scoring criterion.
+#'   \item **ATE** (`ate_*`): Cross-fitting folds, significance level,
+#'     nuisance model trees, quantile discretization, Bonferroni,
+#'     parallel ATE estimation.
+#'   \item **Screen** (`screen_*`): Minimum retained variables, fraction,
+#'     importance trees.
+#'   \item **CV** (`cv_*`): Whether to run, folds, blocking method.
+#'   \item **CATE** (`cate_*`): Whether to run, number of variables,
+#'     causal forest trees.
+#'   \item **Fit** (via `...`): Model hyper-parameters such as
+#'     `n_epochs`, `n_runs`, `patience`, `rf_ntree`, `brt_n_trees`,
+#'     `brt_depth`, `hidden_size`, `dropout`, `lr`, `batch_size`,
+#'     `max_interactions`, `tune_grid` are forwarded to [cast_fit()].
+#' }
 #'
 #' @param species_list A named list of `data.frame`s. Each element is a
 #'   species dataset with `lon`, `lat`, `presence`, and environmental
@@ -12,19 +36,63 @@
 #'   If `NULL`, spatial prediction is skipped.
 #' @param models Character vector. Models to fit per species. Default
 #'   `c("cast", "rf", "maxent", "brt")`.
-#' @param output_dir Character. Directory for per-species outputs.
-#'   Default `"castSDM_batch_output"`.
-#' @param do_cv Logical. Run spatial CV per species. Default `TRUE`.
-#' @param cv_k Integer. Number of spatial CV folds. Default `5`.
-#' @param n_bootstrap Integer. DAG bootstrap replicates. Default `100`.
+#' @param train_fraction Numeric. Train/test split ratio. Default `0.7`.
+#' @param output_dir Character. Top-level directory for per-species
+#'   outputs. Default `"castSDM_batch_output"`.
 #' @param fig_dpi Integer. DPI for all saved figures. Default `300`.
 #' @param parallel Logical. If `TRUE`, run species in parallel using
 #'   \pkg{future}. Set a [future::plan()] before calling. Default `TRUE`.
 #' @param seed Integer or `NULL`. Base seed. Each species gets
 #'   `seed + species_index` for reproducibility.
 #' @param verbose Logical. Default `TRUE`.
-#' @param ... Additional arguments passed to [cast_fit()] (e.g.,
-#'   `n_epochs`, `n_runs`, `tune_grid`).
+#'
+#' @param dag_R Integer. Number of DAG bootstrap replicates.
+#'   Default `100`.
+#' @param dag_algorithm Character. Structure learning algorithm
+#'   (`"hc"`). Default `"hc"`.
+#' @param dag_score Character. Scoring criterion for structure
+#'   learning. Default `"bic-g"`.
+#' @param dag_strength_threshold Numeric. Minimum bootstrap edge
+#'   strength to retain. Default `0.7`.
+#' @param dag_direction_threshold Numeric. Minimum direction
+#'   consistency to retain. Default `0.6`.
+#' @param dag_max_rows Integer. Subsample size for DAG learning.
+#'   Default `8000`.
+#'
+#' @param ate_K Integer. DML cross-fitting folds. Default `5`.
+#' @param ate_alpha Numeric. Significance level for ATE tests.
+#'   Default `0.05`.
+#' @param ate_num_trees Integer. Trees per nuisance RF model.
+#'   Default `300`.
+#' @param ate_quantile_cuts Numeric vector. Quantile thresholds for
+#'   binarization. Default `c(0.25, 0.50, 0.75)`.
+#' @param ate_bonferroni Logical. Apply Bonferroni correction.
+#'   Default `TRUE`.
+#' @param ate_parallel Logical. Parallel ATE estimation within each
+#'   species (via \pkg{future}). Default `FALSE`.
+#'
+#' @param screen_min_vars Integer. Minimum variables to retain.
+#'   Default `5`.
+#' @param screen_min_fraction Numeric. Minimum fraction of variables.
+#'   Default `0.5`.
+#' @param screen_num_trees Integer. RF trees for importance ranking.
+#'   Default `300`.
+#'
+#' @param do_cv Logical. Run spatial block CV. Default `TRUE`.
+#' @param cv_k Integer. Number of spatial CV folds. Default `5`.
+#' @param cv_block_method Character. Blocking strategy: `"grid"` or
+#'   `"cluster"`. Default `"grid"`.
+#'
+#' @param do_cate Logical. Estimate CATE via causal forests.
+#'   Default `TRUE`.
+#' @param cate_top_n Integer. Number of top variables for CATE.
+#'   Default `3`.
+#' @param cate_n_trees Integer. Trees in each causal forest.
+#'   Default `1000`.
+#'
+#' @param ... Additional arguments forwarded to [cast_fit()] for
+#'   model hyper-parameter tuning (e.g., `n_epochs`, `n_runs`,
+#'   `rf_ntree`, `brt_n_trees`, `tune_grid`).
 #'
 #' @return A `cast_batch` object with components:
 #' \describe{
@@ -36,20 +104,46 @@
 #'   \item{`output_dir`}{Output directory path.}
 #' }
 #'
-#' @seealso [cast()], [plot.cast_batch()], [cast_consistency()]
+#' @seealso [cast()], [plot.cast_batch()], [cast_consistency()],
+#'   [cast_fit()], [cast_dag()], [cast_ate()], [cast_screen()],
+#'   [cast_cv()], [cast_cate()]
 #'
 #' @export
 cast_batch <- function(species_list,
                        env_data    = NULL,
                        models      = c("cast", "rf", "maxent", "brt"),
+                       train_fraction = 0.7,
                        output_dir  = "castSDM_batch_output",
-                       do_cv       = TRUE,
-                       cv_k        = 5L,
-                       n_bootstrap = 100L,
                        fig_dpi     = 300L,
                        parallel    = TRUE,
                        seed        = NULL,
                        verbose     = TRUE,
+                       # ── DAG ──
+                       dag_R                  = 100L,
+                       dag_algorithm          = "hc",
+                       dag_score              = "bic-g",
+                       dag_strength_threshold = 0.7,
+                       dag_direction_threshold = 0.6,
+                       dag_max_rows           = 8000L,
+                       # ── ATE ──
+                       ate_K              = 5L,
+                       ate_alpha          = 0.05,
+                       ate_num_trees      = 300L,
+                       ate_quantile_cuts  = c(0.25, 0.50, 0.75),
+                       ate_bonferroni     = TRUE,
+                       ate_parallel       = FALSE,
+                       # ── Screen ──
+                       screen_min_vars     = 5L,
+                       screen_min_fraction = 0.5,
+                       screen_num_trees    = 300L,
+                       # ── CV ──
+                       do_cv           = TRUE,
+                       cv_k            = 5L,
+                       cv_block_method = "grid",
+                       # ── CATE ──
+                       do_cate      = TRUE,
+                       cate_top_n   = 3L,
+                       cate_n_trees = 1000L,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -68,9 +162,30 @@ cast_batch <- function(species_list,
 
   fit_args <- list(...)
 
-  run_one_species <- function(sp_name, sp_data, env_data, models, output_dir,
-                              do_cv, cv_k, n_bootstrap, fig_dpi, seed_i,
-                              fit_args) {
+  # Pack all pipeline config so workers receive a single list
+  cfg <- list(
+    train_fraction = train_fraction,
+    dag_R = dag_R, dag_algorithm = dag_algorithm,
+    dag_score = dag_score,
+    dag_strength_threshold = dag_strength_threshold,
+    dag_direction_threshold = dag_direction_threshold,
+    dag_max_rows = dag_max_rows,
+    ate_K = ate_K, ate_alpha = ate_alpha,
+    ate_num_trees = ate_num_trees,
+    ate_quantile_cuts = ate_quantile_cuts,
+    ate_bonferroni = ate_bonferroni,
+    ate_parallel = ate_parallel,
+    screen_min_vars = screen_min_vars,
+    screen_min_fraction = screen_min_fraction,
+    screen_num_trees = screen_num_trees,
+    do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
+    do_cate = do_cate, cate_top_n = cate_top_n,
+    cate_n_trees = cate_n_trees
+  )
+
+  run_one_species <- function(sp_name, sp_data, env_data, models,
+                              output_dir, fig_dpi, seed_i,
+                              cfg, fit_args) {
     sp_dir  <- file.path(output_dir, sp_name)
     fig_dir <- file.path(sp_dir, "figures")
     dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
@@ -85,24 +200,33 @@ cast_batch <- function(species_list,
     }
 
     result <- tryCatch({
-      # Step 1: Prepare
-      split <- cast_prepare(sp_data, train_fraction = 0.7, seed = seed_i)
+      split <- cast_prepare(sp_data, train_fraction = cfg$train_fraction,
+                            seed = seed_i)
 
-      # Step 2: DAG
-      dag <- cast_dag(split$train, R = n_bootstrap, seed = seed_i,
-                       verbose = FALSE)
+      dag <- cast_dag(split$train, R = cfg$dag_R,
+                       algorithm = cfg$dag_algorithm,
+                       score = cfg$dag_score,
+                       strength_threshold = cfg$dag_strength_threshold,
+                       direction_threshold = cfg$dag_direction_threshold,
+                       max_rows = cfg$dag_max_rows,
+                       seed = seed_i, verbose = FALSE)
 
-      # Step 3: ATE
-      ate <- cast_ate(split$train, K = 5L, seed = seed_i, verbose = FALSE)
+      ate <- cast_ate(split$train, K = cfg$ate_K,
+                       alpha = cfg$ate_alpha,
+                       num_trees = cfg$ate_num_trees,
+                       quantile_cuts = cfg$ate_quantile_cuts,
+                       bonferroni = cfg$ate_bonferroni,
+                       parallel = cfg$ate_parallel,
+                       seed = seed_i, verbose = FALSE)
 
-      # Step 4: Screen
-      screen <- cast_screen(dag, ate, split$train, seed = seed_i,
-                             verbose = FALSE)
+      screen <- cast_screen(dag, ate, split$train,
+                             min_vars = cfg$screen_min_vars,
+                             min_fraction = cfg$screen_min_fraction,
+                             num_trees = cfg$screen_num_trees,
+                             seed = seed_i, verbose = FALSE)
 
-      # Step 5: Roles
       roles <- cast_roles(screen, dag)
 
-      # Step 6: Fit
       fit_call_args <- c(
         list(data = split$train, screen = screen, dag = dag, ate = ate,
              models = models, seed = seed_i, verbose = FALSE),
@@ -110,21 +234,19 @@ cast_batch <- function(species_list,
       )
       fit <- do.call(cast_fit, fit_call_args)
 
-      # Step 7: Evaluate (hold-out)
       eval_result <- cast_evaluate(fit, split$test)
 
-      # Step 8: Spatial CV
       cv_result <- NULL
-      if (do_cv) {
+      if (cfg$do_cv) {
         cv_result <- tryCatch(
           cast_cv(sp_data, screen = screen, dag = dag, ate = ate,
-                  k = cv_k, models = models, block_method = "grid",
+                  k = cfg$cv_k, models = models,
+                  block_method = cfg$cv_block_method,
                   seed = seed_i, verbose = FALSE),
           error = function(e) NULL
         )
       }
 
-      # Step 9: Predict
       pred_result <- NULL
       if (!is.null(env_data)) {
         pred_result <- tryCatch(
@@ -133,16 +255,18 @@ cast_batch <- function(species_list,
         )
       }
 
-      # Step 10: CATE
-      cate_result <- tryCatch({
-        check_suggested("grf", "for CATE")
-        pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-        cast_cate(split$train, ate = ate, screen = screen,
-                  predict_data = pred_for_cate, top_n = 3L,
-                  seed = seed_i, verbose = FALSE)
-      }, error = function(e) NULL)
+      cate_result <- NULL
+      if (cfg$do_cate) {
+        cate_result <- tryCatch({
+          check_suggested("grf", "for CATE")
+          pred_for_cate <- if (!is.null(env_data)) env_data else NULL
+          cast_cate(split$train, ate = ate, screen = screen,
+                    predict_data = pred_for_cate, top_n = cfg$cate_top_n,
+                    n_trees = cfg$cate_n_trees,
+                    seed = seed_i, verbose = FALSE)
+        }, error = function(e) NULL)
+      }
 
-      # Step 11: Consistency
       cons_result <- NULL
       if (!is.null(pred_result) && length(pred_result$models) >= 2) {
         cons_result <- tryCatch(cast_consistency(pred_result),
@@ -152,7 +276,6 @@ cast_batch <- function(species_list,
       # ── Save ALL plots ────────────────────────────────────────────────
       check_suggested("ggplot2", "for plotting")
 
-      # DAG
       if (requireNamespace("ggraph", quietly = TRUE) &&
           requireNamespace("igraph", quietly = TRUE)) {
         p <- tryCatch(plot(dag, roles = roles, screen = screen,
@@ -160,19 +283,15 @@ cast_batch <- function(species_list,
         save_fig(p, "causal_dag.png", w = 14, h = 10)
       }
 
-      # ATE
       p <- tryCatch(plot(ate), error = function(e) NULL)
       save_fig(p, "ate_forest_plot.png", w = 10, h = 7)
 
-      # Screen
       p <- tryCatch(plot(screen), error = function(e) NULL)
       save_fig(p, "variable_screening.png", w = 10, h = 7)
 
-      # Eval
       p <- tryCatch(plot(eval_result), error = function(e) NULL)
       save_fig(p, "model_evaluation.png", w = 10, h = 6)
 
-      # CV
       if (!is.null(cv_result)) {
         p <- tryCatch(
           plot(cv_result, lon = sp_data$lon, lat = sp_data$lat,
@@ -182,7 +301,6 @@ cast_batch <- function(species_list,
         save_fig(p, "spatial_cv_map.png", w = 14, h = 8)
       }
 
-      # HSS maps (one per model)
       if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
         for (mdl in pred_result$models) {
           p <- tryCatch(
@@ -195,7 +313,6 @@ cast_batch <- function(species_list,
         }
       }
 
-      # CATE maps (one per variable)
       if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
         for (cv in cate_result$variables) {
           p <- tryCatch(
@@ -207,7 +324,6 @@ cast_batch <- function(species_list,
         }
       }
 
-      # Consistency heatmap
       if (!is.null(cons_result) &&
           requireNamespace("patchwork", quietly = TRUE)) {
         p <- tryCatch(plot(cons_result, species = sp_name),
@@ -215,7 +331,7 @@ cast_batch <- function(species_list,
         save_fig(p, "model_consistency.png", w = 16, h = 5.5)
       }
 
-      # ── Save RDS results ──────────────────────────────────────────────
+      # ── Save RDS ──────────────────────────────────────────────────────
       sp_result <- list(
         dag = dag, ate = ate, screen = screen, roles = roles,
         fit = fit, eval = eval_result, cv = cv_result,
@@ -242,14 +358,12 @@ cast_batch <- function(species_list,
       seed_i   = if (!is.null(seed)) seed + seq_along(sp_names) else
                    rep(list(NULL), n_sp),
       MoreArgs = list(
-        env_data    = env_data,
-        models      = models,
-        output_dir  = output_dir,
-        do_cv       = do_cv,
-        cv_k        = cv_k,
-        n_bootstrap = n_bootstrap,
-        fig_dpi     = fig_dpi,
-        fit_args    = fit_args
+        env_data   = env_data,
+        models     = models,
+        output_dir = output_dir,
+        fig_dpi    = fig_dpi,
+        cfg        = cfg,
+        fit_args   = fit_args
       ),
       SIMPLIFY = FALSE,
       future.seed = TRUE
@@ -263,7 +377,7 @@ cast_batch <- function(species_list,
       seed_i <- if (!is.null(seed)) seed + i else NULL
       results[[i]] <- run_one_species(
         sp, species_list[[sp]], env_data, models, output_dir,
-        do_cv, cv_k, n_bootstrap, fig_dpi, seed_i, fit_args
+        fig_dpi, seed_i, cfg, fit_args
       )
     }
   }

@@ -8,14 +8,33 @@ cast_batch(
   species_list,
   env_data = NULL,
   models = c("cast", "rf", "maxent", "brt"),
+  train_fraction = 0.7,
   output_dir = "castSDM_batch_output",
-  do_cv = TRUE,
-  cv_k = 5L,
-  n_bootstrap = 100L,
   fig_dpi = 300L,
   parallel = TRUE,
   seed = NULL,
   verbose = TRUE,
+  dag_R = 100L,
+  dag_algorithm = "hc",
+  dag_score = "bic-g",
+  dag_strength_threshold = 0.7,
+  dag_direction_threshold = 0.6,
+  dag_max_rows = 8000L,
+  ate_K = 5L,
+  ate_alpha = 0.05,
+  ate_num_trees = 300L,
+  ate_quantile_cuts = c(0.25, 0.5, 0.75),
+  ate_bonferroni = TRUE,
+  ate_parallel = FALSE,
+  screen_min_vars = 5L,
+  screen_min_fraction = 0.5,
+  screen_num_trees = 300L,
+  do_cv = TRUE,
+  cv_k = 5L,
+  cv_block_method = "grid",
+  do_cate = TRUE,
+  cate_top_n = 3L,
+  cate_n_trees = 1000L,
   ...
 )
 }
@@ -30,14 +49,10 @@ If \code{NULL}, spatial prediction is skipped.}
 \item{models}{Character vector. Models to fit per species. Default
 \code{c("cast", "rf", "maxent", "brt")}.}
 
-\item{output_dir}{Character. Directory for per-species outputs.
-Default \code{"castSDM_batch_output"}.}
+\item{train_fraction}{Numeric. Train/test split ratio. Default \code{0.7}.}
 
-\item{do_cv}{Logical. Run spatial CV per species. Default \code{TRUE}.}
-
-\item{cv_k}{Integer. Number of spatial CV folds. Default \code{5}.}
-
-\item{n_bootstrap}{Integer. DAG bootstrap replicates. Default \code{100}.}
+\item{output_dir}{Character. Top-level directory for per-species
+outputs. Default \code{"castSDM_batch_output"}.}
 
 \item{fig_dpi}{Integer. DPI for all saved figures. Default \code{300}.}
 
@@ -49,8 +64,69 @@ Default \code{"castSDM_batch_output"}.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
 
-\item{...}{Additional arguments passed to \code{\link[=cast_fit]{cast_fit()}} (e.g.,
-\code{n_epochs}, \code{n_runs}, \code{tune_grid}).}
+\item{dag_R}{Integer. Number of DAG bootstrap replicates.
+Default \code{100}.}
+
+\item{dag_algorithm}{Character. Structure learning algorithm
+(\code{"hc"}). Default \code{"hc"}.}
+
+\item{dag_score}{Character. Scoring criterion for structure
+learning. Default \code{"bic-g"}.}
+
+\item{dag_strength_threshold}{Numeric. Minimum bootstrap edge
+strength to retain. Default \code{0.7}.}
+
+\item{dag_direction_threshold}{Numeric. Minimum direction
+consistency to retain. Default \code{0.6}.}
+
+\item{dag_max_rows}{Integer. Subsample size for DAG learning.
+Default \code{8000}.}
+
+\item{ate_K}{Integer. DML cross-fitting folds. Default \code{5}.}
+
+\item{ate_alpha}{Numeric. Significance level for ATE tests.
+Default \code{0.05}.}
+
+\item{ate_num_trees}{Integer. Trees per nuisance RF model.
+Default \code{300}.}
+
+\item{ate_quantile_cuts}{Numeric vector. Quantile thresholds for
+binarization. Default \code{c(0.25, 0.50, 0.75)}.}
+
+\item{ate_bonferroni}{Logical. Apply Bonferroni correction.
+Default \code{TRUE}.}
+
+\item{ate_parallel}{Logical. Parallel ATE estimation within each
+species (via \pkg{future}). Default \code{FALSE}.}
+
+\item{screen_min_vars}{Integer. Minimum variables to retain.
+Default \code{5}.}
+
+\item{screen_min_fraction}{Numeric. Minimum fraction of variables.
+Default \code{0.5}.}
+
+\item{screen_num_trees}{Integer. RF trees for importance ranking.
+Default \code{300}.}
+
+\item{do_cv}{Logical. Run spatial block CV. Default \code{TRUE}.}
+
+\item{cv_k}{Integer. Number of spatial CV folds. Default \code{5}.}
+
+\item{cv_block_method}{Character. Blocking strategy: \code{"grid"} or
+\code{"cluster"}. Default \code{"grid"}.}
+
+\item{do_cate}{Logical. Estimate CATE via causal forests.
+Default \code{TRUE}.}
+
+\item{cate_top_n}{Integer. Number of top variables for CATE.
+Default \code{3}.}
+
+\item{cate_n_trees}{Integer. Trees in each causal forest.
+Default \code{1000}.}
+
+\item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}} for
+model hyper-parameter tuning (e.g., \code{n_epochs}, \code{n_runs},
+\code{rf_ntree}, \code{brt_n_trees}, \code{tune_grid}).}
 }
 \value{
 A \code{cast_batch} object with components:
@@ -64,11 +140,39 @@ evaluation metrics (from spatial CV when available).}
 }
 }
 \description{
-Runs the full castSDM pipeline on multiple species, optionally in
-parallel. Each species is processed independently and results are saved
-to separate subdirectories with all diagnostic plots. A comparative
-summary of model performance across species is returned.
+One-stop interface that runs the full castSDM pipeline on multiple
+species, optionally in parallel. Every pipeline parameter can be
+configured from this single function call. Each species is processed
+independently and results (RDS + all diagnostic figures) are saved
+to separate subdirectories. A comparative summary of model performance
+across species is returned.
 }
+\section{Pipeline parameters}{
+
+All major stages of the castSDM pipeline are configurable through
+explicit arguments. Parameters are grouped by prefix:
+\itemize{
+\item \strong{General}: \code{models}, \code{train_fraction}, \code{output_dir},
+\code{fig_dpi}, \code{parallel}, \code{seed}, \code{verbose}.
+\item \strong{DAG} (\verb{dag_*}): Bootstrap replicates, edge thresholds,
+structure learning algorithm and scoring criterion.
+\item \strong{ATE} (\verb{ate_*}): Cross-fitting folds, significance level,
+nuisance model trees, quantile discretization, Bonferroni,
+parallel ATE estimation.
+\item \strong{Screen} (\verb{screen_*}): Minimum retained variables, fraction,
+importance trees.
+\item \strong{CV} (\verb{cv_*}): Whether to run, folds, blocking method.
+\item \strong{CATE} (\verb{cate_*}): Whether to run, number of variables,
+causal forest trees.
+\item \strong{Fit} (via \code{...}): Model hyper-parameters such as
+\code{n_epochs}, \code{n_runs}, \code{patience}, \code{rf_ntree}, \code{brt_n_trees},
+\code{brt_depth}, \code{hidden_size}, \code{dropout}, \code{lr}, \code{batch_size},
+\code{max_interactions}, \code{tune_grid} are forwarded to \code{\link[=cast_fit]{cast_fit()}}.
+}
+}
+
 \seealso{
-\code{\link[=cast]{cast()}}, \code{\link[=plot.cast_batch]{plot.cast_batch()}}, \code{\link[=cast_consistency]{cast_consistency()}}
+\code{\link[=cast]{cast()}}, \code{\link[=plot.cast_batch]{plot.cast_batch()}}, \code{\link[=cast_consistency]{cast_consistency()}},
+\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}},
+\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
 }
