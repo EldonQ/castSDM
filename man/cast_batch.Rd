@@ -17,7 +17,9 @@ cast_batch(
   dag_R = 100L,
   dag_structure_method = "bootstrap_hc",
   dag_pc_alpha = 0.05,
+  dag_pc_test = "zf",
   dag_fci_alpha = 0.05,
+  dag_fci_test = "zf",
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
   dag_notears_lambda = 0.03,
@@ -85,6 +87,9 @@ Default \code{100}.}
 
 \item{dag_pc_alpha, dag_fci_alpha}{PC/FCI alpha levels. Defaults \code{0.05}.}
 
+\item{dag_pc_test, dag_fci_test}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{pc_test} /
+\code{fci_test}. Defaults \code{"zf"}.}
+
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
 
 \item{dag_notears_lambda}{NOTEARS L1 penalty (see \code{cast_dag()}).}
@@ -99,11 +104,12 @@ Default \code{100}.}
 
 \item{dag_notears_alpha_mult}{Rho multiplier for NOTEARS.}
 
-\item{dag_algorithm}{Character. Structure learning algorithm
-(\code{"hc"}). Default \code{"hc"}.}
+\item{dag_algorithm}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{algorithm}.
+\strong{Only} used when \code{dag_structure_method = "bootstrap_hc"} (score-based
+learner inside each bootstrap, e.g. \code{"hc"}, \code{"tabu"}). Default \code{"hc"}.}
 
-\item{dag_score}{Character. Scoring criterion for structure
-learning. Default \code{"bic-g"}.}
+\item{dag_score}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{score} for
+bootstrap HC only. Default \code{"bic-g"}.}
 
 \item{dag_strength_threshold}{Numeric. Minimum bootstrap edge
 strength to retain. Default \code{0.7}.}

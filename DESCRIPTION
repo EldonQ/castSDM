@@ -32,6 +32,7 @@ Imports:
     coro,
     data.table,
     grid,
+    methods,
     rlang,
     scales
 Suggests:
@@ -48,6 +49,7 @@ Suggests:
     knitr,
     maxnet,
     patchwork,
+    pcalg,
     pROC,
     ranger,
     rmarkdown,

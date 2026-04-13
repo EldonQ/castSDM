@@ -19,10 +19,16 @@
 #'   in `data` excluding `response`, `lon`, and `lat` are used.
 #' @param R Integer. Number of bootstrap replicates for `structure_method =
 #'   "bootstrap_hc"`. Ignored otherwise (stored as `NA` for documentation).
-#' @param algorithm Character. Score-based algorithm passed to
-#'   \code{bnlearn::boot.strength()} when `structure_method = "bootstrap_hc"`.
-#'   Default `"hc"`.
-#' @param score Character. Scoring criterion for bootstrap HC. Default `"bic-g"`.
+#' @param algorithm Character. **Only used** when `structure_method =
+#'   "bootstrap_hc"`: score-based learner passed to
+#'   \code{bnlearn::boot.strength()} (e.g. `"hc"`, `"tabu"`, `"mmhc"`,
+#'   `"pc.stable"`). Ignored for `"pc"`, `"fci"`, `"bidag_bge"`, and
+#'   `"notears_linear"`. Do not set this to `"pc"` or `"fci"` here; those
+#'   names refer to constraint-based algorithms and require
+#'   `structure_method = "pc"` or `"fci"` instead.
+#' @param score Character. **Only used** when `structure_method =
+#'   "bootstrap_hc"`: scoring criterion in `algorithm.args` for
+#'   \code{bnlearn::boot.strength()}. Default `"bic-g"`. Ignored otherwise.
 #' @param strength_threshold Numeric. Minimum edge strength (bootstrap HC) or
 #'   auxiliary threshold metadata for other methods. Default `0.7`.
 #' @param direction_threshold Numeric. Minimum direction consistency (bootstrap
@@ -32,13 +38,23 @@
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #' @param structure_method Character. One of `"bootstrap_hc"` (default),
 #'   `"pc"`, `"fci"`, `"bidag_bge"`, `"notears_linear"`.
-#' @param pc_alpha Significance level for \code{bnlearn::pc()} (Gaussian CI test).
-#'   Default `0.05`.
-#' @param fci_alpha Significance level for \code{bnlearn::fci()}. Default `0.05`.
+#' @param pc_alpha Significance level for constraint-based PC. Default `0.05`.
+#'   Used only when `structure_method = "pc"`.
+#' @param pc_test Conditional-independence test passed as `test` to
+#'   \code{bnlearn::pc.stable()} (e.g. `"zf"` for Gaussian data). Default
+#'   `"zf"`. Used only when `structure_method = "pc"`.
+#' @param fci_alpha Significance level for FCI. Default `0.05`. Used only when
+#'   `structure_method = "fci"`.
+#' @param fci_test Passed as `test` to \code{bnlearn::fci()} when that function
+#'   exists (older **bnlearn**). With **bnlearn** >= 5.0, FCI is run via
+#'   \pkg{pcalg}::\code{fci()} with \code{gaussCItest} and this argument is
+#'   currently ignored (Gaussian CI tests are fixed by pcalg).
 #' @param bidag_algorithm Passed to \code{BiDAG::learnBN()}: `"order"` or
 #'   `"orderIter"`. Default `"order"`.
-#' @param bidag_iterations Optional integer MCMC iterations for BiDAG. `NULL`
-#'   uses BiDAG defaults (data-driven).
+#' @param bidag_iterations Optional integer MCMC iterations for BiDAG.
+#'   `NULL` uses a **bounded** default derived from the number of nodes (avoids
+#'   BiDAG's internal `6 n^2 log(n)` blowing up when `n` is mis-resolved as
+#'   sample size). Explicit values are clamped to a safe range.
 #' @param notears_lambda L1 penalty weight for `notears_linear`. Default `0.03`.
 #' @param notears_max_iter Maximum optimization steps. Default `2000`.
 #' @param notears_lr Adam learning rate. Default `0.02`.
@@ -80,7 +96,9 @@ cast_dag <- function(data,
                        "bidag_bge", "notears_linear"
                      ),
                      pc_alpha = 0.05,
+                     pc_test = "zf",
                      fci_alpha = 0.05,
+                     fci_test = "zf",
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
                      notears_lambda = 0.03,
@@ -91,6 +109,34 @@ cast_dag <- function(data,
                      notears_alpha_mult = 1.01) {
   structure_method <- match.arg(structure_method)
   bidag_algorithm <- match.arg(bidag_algorithm)
+
+  # --- bootstrap_hc only: valid bnlearn learners for boot.strength() ----------
+  boot_learners <- c(
+    "gs", "iamb", "fast.iamb", "inter.iamb", "iamb.fdr", "pc.stable", "mmpc",
+    "si.hiton.pc", "hpc", "hc", "tabu", "rsmax2", "mmhc", "h2pc",
+    "chow.liu", "aracne", "naive.bayes", "tree.bayes", "structural.em"
+  )
+  if (structure_method == "bootstrap_hc") {
+    algo_lc <- tolower(trimws(as.character(algorithm)))
+    if (algo_lc %in% c("pc", "fci")) {
+      cli::cli_abort(c(
+        "{.arg algorithm} = {.val {algorithm}} is not valid for {.code structure_method = \"bootstrap_hc\"}.",
+        "i" = "Use {.code structure_method = \"{algorithm}\"} for the constraint-based {.val {algorithm}} algorithm (and keep {.arg algorithm} at a bootstrap learner like {.val hc}, or omit it).",
+        "i" = "For PC *inside* each bootstrap replicate, use {.code algorithm = \"pc.stable\"} instead."
+      ))
+    }
+    if (!algorithm %in% boot_learners) {
+      cli::cli_abort(c(
+        "{.arg algorithm} = {.val {algorithm}} is not a valid learner for {.fn bnlearn::boot.strength}.",
+        "i" = "See {.pkg bnlearn} documentation (e.g. {.code ?bnlearn::bnlearn-package}) for allowed names.",
+        "i" = "Examples: {.val hc}, {.val tabu}, {.val mmhc}, {.val pc.stable}."
+      ))
+    }
+  } else if (isTRUE(verbose) && (algorithm != "hc" || score != "bic-g")) {
+    cli::cli_inform(c(
+      "i" = "Ignoring {.arg algorithm} and {.arg score} (only apply to {.code structure_method = \"bootstrap_hc\"})."
+    ))
+  }
 
   env_vars <- env_vars %||% get_env_vars(data, response = response)
   if (length(env_vars) < 3) {
@@ -127,8 +173,14 @@ cast_dag <- function(data,
       direction_threshold = direction_threshold,
       seed = seed, verbose = verbose
     ),
-    pc = .dag_pc_edges(dag_df, alpha = pc_alpha, seed = seed, verbose = verbose),
-    fci = .dag_fci_edges(dag_df, alpha = fci_alpha, seed = seed, verbose = verbose),
+    pc = .dag_pc_edges(
+      dag_df, alpha = pc_alpha, test = pc_test,
+      seed = seed, verbose = verbose
+    ),
+    fci = .dag_fci_edges(
+      dag_df, alpha = fci_alpha, test = fci_test,
+      seed = seed, verbose = verbose
+    ),
     bidag_bge = .dag_bidag_edges(
       dag_df,
       algorithm = bidag_algorithm,
@@ -199,23 +251,116 @@ cast_dag <- function(data,
 
 #' @keywords internal
 #' @noRd
-.dag_pc_edges <- function(dag_df, alpha, seed, verbose) {
+.dag_pc_edges <- function(dag_df, alpha, test, seed, verbose) {
   check_suggested("bnlearn", "for PC algorithm")
   if (!is.null(seed)) set.seed(seed)
-  pc_fun <- utils::getFromNamespace("pc", "bnlearn")
-  learned <- pc_fun(dag_df, test = "zf", alpha = alpha, debug = FALSE)
+  # bnlearn >= 5.0: constraint-based PC is pc.stable(); bnlearn::pc() was removed.
+  pc_fun <- tryCatch(
+    utils::getFromNamespace("pc.stable", "bnlearn"),
+    error = function(e) {
+      cli::cli_abort(c(
+        "Could not load {.fn bnlearn::pc.stable} from {.pkg bnlearn}.",
+        "i" = "Update {.pkg bnlearn} to a recent CRAN version."
+      ))
+    }
+  )
+  learned <- pc_fun(dag_df, test = test, alpha = alpha, debug = FALSE)
   .bn_arcs_to_cast_edges(learned)
 }
 
 
 #' @keywords internal
 #' @noRd
-.dag_fci_edges <- function(dag_df, alpha, seed, verbose) {
-  check_suggested("bnlearn", "for FCI algorithm")
+.pag_amat_to_directed_edges <- function(amat_int, labels) {
+  labels <- as.character(labels)
+  p <- nrow(amat_int)
+  rows <- list()
+  k <- 0L
+  for (i in seq_len(p)) {
+    for (j in seq_len(p)) {
+      if (i == j) next
+      # amat.pag (pcalg): amat[i,j]=2, amat[j,i]=3 => i --> j
+      if (amat_int[i, j] == 2L && amat_int[j, i] == 3L) {
+        k <- k + 1L
+        rows[[k]] <- data.frame(
+          from = labels[i],
+          to = labels[j],
+          strength = 1,
+          direction = 1,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (k == 0L) {
+    return(data.frame(
+      from = character(), to = character(),
+      strength = numeric(), direction = numeric(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out
+}
+
+
+#' @keywords internal
+#' @noRd
+.dag_fci_edges <- function(dag_df, alpha, test, seed, verbose) {
   if (!is.null(seed)) set.seed(seed)
-  fci_fun <- utils::getFromNamespace("fci", "bnlearn")
-  learned <- fci_fun(dag_df, test = "zf", alpha = alpha, debug = FALSE)
-  .bn_arcs_to_cast_edges(learned)
+
+  ns_bn <- asNamespace("bnlearn")
+  if (exists("fci", envir = ns_bn, inherits = FALSE)) {
+    check_suggested("bnlearn", "for FCI algorithm")
+    fci_fun <- get("fci", envir = ns_bn)
+    learned <- fci_fun(dag_df, test = test, alpha = alpha, debug = FALSE)
+    return(.bn_arcs_to_cast_edges(learned))
+  }
+
+  check_suggested(
+    "pcalg",
+    paste0(
+      "for FCI: {.pkg bnlearn} (>= 5.0) no longer provides {.code bnlearn::fci()}; ",
+      "castSDM uses {.pkg pcalg}::{.fn fci} with Gaussian CI tests instead"
+    )
+  )
+
+  if (isTRUE(verbose) && !identical(test, "zf")) {
+    cli::cli_inform(c(
+      "i" = "Note: {.arg fci_test} = {.val {test}} applies only to legacy {.code bnlearn::fci()}; the {.pkg pcalg} path uses {.fn pcalg::gaussCItest}."
+    ))
+  }
+
+  p <- ncol(dag_df)
+  labels <- names(dag_df)
+  Cmat <- stats::cor(dag_df, use = "pairwise.complete.obs")
+  Cmat[!is.finite(Cmat)] <- 0
+  diag(Cmat) <- 1
+  suffStat <- list(C = Cmat, n = as.integer(nrow(dag_df)))
+
+  res <- tryCatch(
+    pcalg::fci(
+      suffStat,
+      indepTest = pcalg::gaussCItest,
+      alpha = alpha,
+      labels = labels,
+      p = as.integer(p),
+      verbose = FALSE
+    ),
+    error = function(e) {
+      cli::cli_abort(c(
+        "{.pkg pcalg}::{.fn fci} failed: {e$message}",
+        "i" = "Try {.code structure_method = \"pc\"} or {.code \"bootstrap_hc\"}, or check data (finite numeric columns, enough rows)."
+      ))
+    }
+  )
+
+  Araw <- methods::as(res, "amat")
+  u <- unclass(Araw)
+  Amat <- matrix(as.integer(round(u)), nrow = nrow(u), ncol = ncol(u))
+  dimnames(Amat) <- dimnames(u)
+  .pag_amat_to_directed_edges(Amat, labels)
 }
 
 
@@ -246,25 +391,105 @@ cast_dag <- function(data,
 
 #' @keywords internal
 #' @noRd
+.bidag_stabilize_df <- function(dag_df, max_rows = 1000L, seed = NULL) {
+  dag_df <- as.data.frame(dag_df, stringsAsFactors = FALSE)
+  for (nm in names(dag_df)) {
+    dag_df[[nm]] <- suppressWarnings(as.numeric(dag_df[[nm]]))
+  }
+  dag_df <- stats::na.omit(dag_df)
+  if (nrow(dag_df) < 10L) {
+    cli::cli_abort("BiDAG: need at least 10 complete rows after NA removal.")
+  }
+  for (nm in names(dag_df)) {
+    x <- dag_df[[nm]]
+    rep_val <- stats::median(x[is.finite(x)], na.rm = TRUE)
+    if (!is.finite(rep_val)) rep_val <- 0
+    x[!is.finite(x)] <- rep_val
+    dag_df[[nm]] <- x
+  }
+  sdv <- vapply(dag_df, stats::sd, numeric(1), na.rm = TRUE)
+  keep <- names(dag_df)[is.finite(sdv) & sdv >= 1e-12]
+  if (length(keep) < 3L) {
+    cli::cli_abort("BiDAG: need at least 3 non-constant numeric columns.")
+  }
+  dag_df <- dag_df[, keep, drop = FALSE]
+  nr <- nrow(dag_df)
+  if (nr > max_rows) {
+    if (!is.null(seed)) set.seed(seed)
+    dag_df <- dag_df[sample.int(nr, max_rows), , drop = FALSE]
+  }
+  sc <- as.data.frame(
+    lapply(dag_df, function(z) {
+      z <- as.numeric(z)
+      s <- stats::sd(z, na.rm = TRUE)
+      if (!is.finite(s) || s < 1e-12) {
+        return(z)
+      }
+      as.numeric(scale.default(z, center = TRUE, scale = TRUE))
+    }),
+    stringsAsFactors = FALSE
+  )
+  colnames(sc) <- names(dag_df)
+  stats::na.omit(sc)
+}
+
+
+#' @keywords internal
+#' @noRd
+.bidag_safe_iterations <- function(p, iterations) {
+  logp <- if (p <= 1L) 0 else log(as.numeric(p))
+  n_mc <- 6 * (as.numeric(p)^2) * logp
+  if (!is.finite(n_mc) || n_mc < 1) {
+    n_mc <- 200
+  }
+  it_default <- max(200L, min(4000L, as.integer(round(n_mc))))
+  it_use <- if (is.null(iterations)) {
+    it_default
+  } else {
+    max(100L, min(5000L, suppressWarnings(as.integer(iterations))))
+  }
+  if (length(it_use) != 1L || is.na(it_use) || it_use < 50L) {
+    it_use <- 500L
+  }
+  stepsave <- max(1L, min(it_use, as.integer(it_use / 200L)))
+  list(iterations = it_use, stepsave = stepsave)
+}
+
+
+#' @keywords internal
+#' @noRd
 .dag_bidag_edges <- function(dag_df, algorithm, iterations, seed, verbose) {
   check_suggested("BiDAG", "for BiDAG / high-dimensional Bayesian DAG search")
   if (!is.null(seed)) set.seed(seed)
+
+  dag_df <- .bidag_stabilize_df(dag_df, max_rows = 1000L, seed = seed)
 
   scoreparameters <- utils::getFromNamespace("scoreparameters", "BiDAG")
   learn_bn <- utils::getFromNamespace("learnBN", "BiDAG")
   get_dag <- utils::getFromNamespace("getDAG", "BiDAG")
 
   scorepar <- scoreparameters("bge", dag_df)
-  it <- iterations
+  p <- ncol(dag_df)
+  it_ctl <- .bidag_safe_iterations(p, iterations)
+
   learn_args <- list(
     scorepar = scorepar,
     algorithm = algorithm,
     verbose = verbose,
-    chainout = FALSE
+    chainout = FALSE,
+    iterations = it_ctl$iterations,
+    stepsave = it_ctl$stepsave
   )
-  if (!is.null(it)) learn_args$iterations <- it
 
-  fit <- do.call(learn_bn, learn_args)
+  fit <- tryCatch(
+    do.call(learn_bn, learn_args),
+    error = function(e) {
+      cli::cli_abort(c(
+        "{.pkg BiDAG}::{.fn learnBN} failed: {e$message}",
+        "i" = "Try fewer variables, smaller {.arg max_rows} before BiDAG, or {.code structure_method = \"bootstrap_hc\"}."
+      ))
+    }
+  )
   Amat <- as.matrix(get_dag(fit))
   if (is.null(rownames(Amat))) {
     rownames(Amat) <- colnames(Amat) <- names(dag_df)
@@ -296,6 +521,31 @@ cast_dag <- function(data,
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
   out
+}
+
+
+#' Resolve matrix exponential for NOTEARS across torch R package versions
+#' @keywords internal
+#' @noRd
+.notears_matrix_exp_fun <- function() {
+  ex <- tryCatch(getNamespaceExports("torch"), error = function(e) character(0))
+  if ("linalg_matrix_exp" %in% ex) {
+    return(utils::getFromNamespace("linalg_matrix_exp", "torch"))
+  }
+  if ("torch_matrix_exp" %in% ex) {
+    return(utils::getFromNamespace("torch_matrix_exp", "torch"))
+  }
+  ns <- asNamespace("torch")
+  if (exists("linalg_matrix_exp", envir = ns, inherits = FALSE)) {
+    return(get("linalg_matrix_exp", envir = ns))
+  }
+  if (exists("torch_matrix_exp", envir = ns, inherits = FALSE)) {
+    return(get("torch_matrix_exp", envir = ns))
+  }
+  cli::cli_abort(c(
+    "NOTEARS needs a matrix exponential in {.pkg torch} (not found).",
+    "i" = "Install/update {.pkg torch} from CRAN, or use {.code structure_method = 'bidag_bge'} / {.code 'bootstrap_hc'}."
+  ))
 }
 
 
@@ -339,15 +589,7 @@ notears_learn_edges <- function(dag_df,
   W <- torch::torch_zeros(p, p, requires_grad = TRUE)
   opt <- torch::optim_adam(list(W), lr = lr)
 
-  torch_ns <- asNamespace("torch")
-  mxexp <- if (exists("linalg_matrix_exp", torch_ns, inherits = FALSE)) {
-    get("linalg_matrix_exp", envir = torch_ns)
-  } else {
-    cli::cli_abort(c(
-      "NOTEARS requires a recent {.pkg torch} with matrix exponential.",
-      i = "Update torch or use {.code structure_method = 'bidag_bge'}."
-    ))
-  }
+  mxexp <- .notears_matrix_exp_fun()
 
   mu <- mu_init
   h_np <- NA_real_

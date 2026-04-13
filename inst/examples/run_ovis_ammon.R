@@ -9,6 +9,13 @@
 # 或者已安装包后直接：
 #   library(castSDM)
 #   source(system.file("examples/run_ovis_ammon.R", package = "castSDM"))
+#
+# DAG 五种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
+# 依赖 (自检 + 后续 ATE 必用 ranger): 建议一次安装
+#   install.packages(c("bnlearn", "pcalg", "BiDAG", "torch", "ranger"))
+# 说明: fci 在 bnlearn>=5 且无 bnlearn::fci 时需 pcalg; bidag_bge 需 BiDAG;
+# notears_linear 需 torch。仅想跑主流程、不做 DAG 五法自检可设
+#   RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 # ==============================================================================
 #
 # # 方式一：开发模式 (推荐)
@@ -24,6 +31,29 @@ if (file.exists("DESCRIPTION") &&
   devtools::load_all()
 } else {
   library(castSDM)
+}
+
+# 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
+OVIS_FIG_DIR <- file.path(getwd(), "cast_ovis_ammon_figures")
+OVIS_FIG_DPI <- 600L
+dir.create(OVIS_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
+
+ovis_save_plot <- function(plot_obj, filename, width, height) {
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    return(invisible(NULL))
+  }
+  fp <- file.path(OVIS_FIG_DIR, filename)
+  ggplot2::ggsave(
+    filename = fp,
+    plot = plot_obj,
+    width = width,
+    height = height,
+    dpi = OVIS_FIG_DPI,
+    bg = "white",
+    limitsize = FALSE
+  )
+  message("Saved figure: ", normalizePath(fp, winslash = "/", mustWork = FALSE))
+  invisible(fp)
 }
 
 # ── Step 0: 加载示例数据 ─────────────────────────────────────────────────────
@@ -43,93 +73,488 @@ var_labels <- c(
   etccdi_cwd = "连续湿日", landcover_igbp = "土地覆盖"
 )
 
+# ==============================================================================
+# cast_dag()：五种 structure_method 的参数与依赖（正式跑前必读）
+# ==============================================================================
+# 入口：cast_dag(data, response = "presence", env_vars = NULL, ...,
+#               structure_method = "<下列之一>", ...)
+#
+# (1) bootstrap_hc — 自助法 + 打分搜索（默认 CAST 流程）
+#     依赖：bnlearn
+#     生效参数：R, algorithm, score, strength_threshold, direction_threshold,
+#               max_rows, seed, verbose, env_vars, response
+#     algorithm：传给 bnlearn::boot.strength() 的学习器，如 "hc","tabu",
+#                 "mmhc","pc.stable"（注意：选约束型 PC 本体应设
+#                 structure_method="pc"，不要把 algorithm 写成 "pc"）
+#     忽略：pc_alpha/pc_test、fci_*、bidag_*、notears_*（仍会传入，包内忽略）
+#
+# (2) pc — 约束型 PC（bnlearn::pc.stable）
+#     依赖：bnlearn
+#     生效参数：pc_alpha, pc_test（如连续高斯常用 "zf"）, max_rows, seed,
+#               verbose, env_vars, response
+#     忽略：R, algorithm, score, strength_threshold, direction_threshold,
+#           fci_*, bidag_*, notears_*
+#
+# (3) fci — FCI（bnlearn 旧版有 bnlearn::fci；bnlearn >= 5 走 pcalg::fci）
+#     依赖：bnlearn；若 bnlearn 无 fci() 则需再装 pcalg
+#     生效参数：fci_alpha, max_rows, seed, verbose, env_vars, response
+#     fci_test：仅旧版 bnlearn::fci 使用；pcalg 路径下当前固定 gaussCItest
+#     忽略：R, algorithm, score, pc_*, bidag_*, notears_*
+#
+# (4) bidag_bge — BiDAG + BGe 分数
+#     依赖：BiDAG（及数据矩阵）
+#     生效参数：bidag_algorithm ("order"|"orderIter"), bidag_iterations,
+#               max_rows, seed, verbose, env_vars, response
+#     忽略：R, algorithm, score, pc_*, fci_*, notears_*
+#
+# (5) notears_linear — 线性 NOTEARS（torch 实现）
+#     依赖：torch；变量数 p 不宜过大（包内约 p<=60）
+#     生效参数：notears_lambda, notears_max_iter, notears_lr, notears_tol,
+#               notears_rho_init, notears_alpha_mult, max_rows, seed, verbose
+#     忽略：R, algorithm, score, pc_*, fci_*, bidag_*
+#
+# 一键安装常用建议包（按需删减后运行）：
+#   install.packages(c("bnlearn", "pcalg", "BiDAG", "torch"))
+# ==============================================================================
+
+# ── 集中配置: 与 cast_prepare / cast_dag / cast_ate / cast_screen / cast_fit /
+#    cast_evaluate / cast_predict / cast_cv / cast_cate / cast_shap_xgb 等
+#    的形参一一对应, 便于对照帮助文档调参 ───────────────────────────────────
+CONFIG <- list(
+  response          = "presence",
+  seed              = 42L,
+  # cast_prepare
+  prepare_train_fraction = 0.7,
+  prepare_env_vars       = NULL,
+  prepare_verbose        = TRUE,
+  # cast_dag (注意: 选 PC/FCI/NOTEARS/BiDAG 时改 dag_structure_method;
+  #   dag_algorithm / dag_score 仅当 structure_method = "bootstrap_hc" 时生效)
+  dag_env_vars            = NULL,
+  dag_R                   = 50L,
+  dag_algorithm           = "hc",
+  dag_score               = "bic-g",
+  dag_strength_threshold  = 0.7,
+  dag_direction_threshold = 0.6,
+  dag_max_rows            = 8000L,
+  dag_verbose             = TRUE,
+  dag_structure_method    = "pc",
+  dag_pc_alpha            = 0.05,
+  dag_pc_test             = "zf",
+  dag_fci_alpha           = 0.05,
+  dag_fci_test            = "zf",
+  dag_bidag_algorithm     = "order",
+  dag_bidag_iterations    = NULL,
+  dag_notears_lambda      = 0.03,
+  dag_notears_max_iter    = 2000L,
+  dag_notears_lr          = 0.02,
+  dag_notears_tol         = 1e-3,
+  dag_notears_rho_init    = 0.1,
+  dag_notears_alpha_mult  = 1.01,
+  # cast_ate
+  ate_variables     = NULL,
+  ate_K             = 5L,
+  ate_num_trees     = 300L,
+  ate_alpha         = 0.05,
+  ate_quantile_cuts = c(0.25, 0.5, 0.75),
+  ate_bonferroni    = TRUE,
+  ate_parallel      = TRUE,
+  ate_verbose       = TRUE,
+  # cast_screen
+  screen_min_vars     = 5L,
+  screen_min_fraction = 0.5,
+  screen_num_trees    = 500L,
+  screen_verbose      = TRUE,
+  # cast_fit (快速演示: n_epochs / n_runs 较小; 正式分析请增大并打开 tune_grid)
+  fit_models            = c("cast", "rf", "maxent", "brt"),
+  fit_n_epochs          = 50L,
+  fit_n_runs            = 1L,
+  fit_patience          = 40L,
+  fit_val_fraction      = 0.2,
+  fit_focal_gamma       = 2.0,
+  fit_focal_alpha_mode  = "sqrt",
+  fit_focal_alpha       = 0.75,
+  fit_rf_ntree          = 300L,
+  fit_brt_n_trees       = 500L,
+  fit_brt_depth         = 5L,
+  fit_hidden_size       = NULL,
+  fit_dropout           = 0.2,
+  fit_lr                = 1e-3,
+  fit_batch_size        = NULL,
+  fit_max_interactions  = 15L,
+  fit_tune_grid         = FALSE,
+  fit_verbose           = TRUE,
+  # cast_evaluate
+  eval_response = "presence",
+  # cast_predict
+  predict_models = NULL,
+  # cast_cv (可选 Step 6b)
+  cv_k             = 5L,
+  cv_models        = c("rf", "maxent", "brt"),
+  cv_block_method  = "grid",
+  cv_n_epochs      = 120L,
+  cv_n_runs        = 2L,
+  cv_rf_ntree      = 300L,
+  cv_brt_n_trees   = 500L,
+  cv_parallel      = TRUE,
+  cv_verbose       = TRUE,
+  run_spatial_cv   = FALSE,
+  # cast_cate
+  cate_variables   = NULL,
+  cate_top_n       = 2L,
+  cate_n_trees     = 300L,
+  cate_verbose     = FALSE,
+  # cast_shap_xgb
+  shap_nrounds          = 200L,
+  shap_max_depth        = 6L,
+  shap_eta              = 0.05,
+  shap_subsample        = 0.8,
+  shap_colsample_bytree = 0.8,
+  shap_test_fraction    = 0.2,
+  shap_verbose          = FALSE,
+  shap_plot_top_n       = 15L
+)
+
+# 是否对五种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
+RUN_DAG_SELFTEST_ALL_METHODS <- TRUE
+
+#' 盘羊示例：五种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
+#' @noRd
+ovis_dag_selftest_all <- function(train_df, cfg) {
+  if (!requireNamespace("ranger", quietly = TRUE)) {
+    stop(
+      "cast_ate 需要 ranger。install.packages(\"ranger\")",
+      call. = FALSE
+    )
+  }
+
+  ncap <- min(1600L, nrow(train_df))
+  d <- train_df[seq_len(ncap), , drop = FALSE]
+  methods <- c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear")
+
+  for (sm in methods) {
+    miss <- character(0)
+    if (!requireNamespace("bnlearn", quietly = TRUE)) {
+      miss <- c(miss, "bnlearn")
+    }
+    if (identical(sm, "fci")) {
+      has_bn_fci <- FALSE
+      if (requireNamespace("bnlearn", quietly = TRUE)) {
+        has_bn_fci <- exists("fci", envir = asNamespace("bnlearn"), inherits = FALSE)
+      }
+      if (!has_bn_fci && !requireNamespace("pcalg", quietly = TRUE)) {
+        miss <- c(miss, "pcalg")
+      }
+    }
+    if (identical(sm, "bidag_bge") && !requireNamespace("BiDAG", quietly = TRUE)) {
+      miss <- c(miss, "BiDAG")
+    }
+    if (identical(sm, "notears_linear") && !requireNamespace("torch", quietly = TRUE)) {
+      miss <- c(miss, "torch")
+    }
+    if (length(miss)) {
+      stop(
+        "DAG 全算法自检未满足依赖 (方法 ", encodeString(sm, quote = "\""), "): ",
+        paste(miss, collapse = ", "),
+        "\n请安装: install.packages(c(",
+        paste(paste0("\"", miss, "\""), collapse = ", "), "))",
+        call. = FALSE
+      )
+    }
+
+    dag <- tryCatch(
+      cast_dag(
+        data = d,
+        response = cfg$response,
+        env_vars = cfg$dag_env_vars,
+        R = if (identical(sm, "bootstrap_hc")) 15L else cfg$dag_R,
+        algorithm = cfg$dag_algorithm,
+        score = cfg$dag_score,
+        strength_threshold = if (identical(sm, "bootstrap_hc")) {
+          0.45
+        } else {
+          cfg$dag_strength_threshold
+        },
+        direction_threshold = if (identical(sm, "bootstrap_hc")) {
+          0.35
+        } else {
+          cfg$dag_direction_threshold
+        },
+        max_rows = min(if (identical(sm, "bidag_bge")) 1800L else 2500L, ncap),
+        seed = cfg$seed,
+        verbose = FALSE,
+        structure_method = sm,
+        pc_alpha = cfg$dag_pc_alpha,
+        pc_test = cfg$dag_pc_test,
+        fci_alpha = cfg$dag_fci_alpha,
+        fci_test = cfg$dag_fci_test,
+        bidag_algorithm = cfg$dag_bidag_algorithm,
+        bidag_iterations = if (identical(sm, "bidag_bge")) {
+          if (!is.null(cfg$dag_bidag_iterations)) {
+            cfg$dag_bidag_iterations
+          } else {
+            80L
+          }
+        } else {
+          cfg$dag_bidag_iterations
+        },
+        notears_lambda = cfg$dag_notears_lambda,
+        notears_max_iter = if (identical(sm, "notears_linear")) {
+          min(700L, cfg$dag_notears_max_iter)
+        } else {
+          cfg$dag_notears_max_iter
+        },
+        notears_lr = cfg$dag_notears_lr,
+        notears_tol = if (identical(sm, "notears_linear")) {
+          max(0.01, cfg$dag_notears_tol)
+        } else {
+          cfg$dag_notears_tol
+        },
+        notears_rho_init = cfg$dag_notears_rho_init,
+        notears_alpha_mult = cfg$dag_notears_alpha_mult
+      ),
+      error = function(e) {
+        stop(
+          "cast_dag(structure_method=",
+          encodeString(sm, quote = "\""),
+          "): ",
+          conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+
+    if (!inherits(dag, "cast_dag") || length(dag$nodes) < 3L) {
+      stop("DAG 自检返回异常: ", sm, call. = FALSE)
+    }
+
+    ate <- tryCatch(
+      cast_ate(
+        data = d,
+        response = cfg$response,
+        variables = dag$nodes,
+        K = 3L,
+        num_trees = 120L,
+        alpha = cfg$ate_alpha,
+        quantile_cuts = cfg$ate_quantile_cuts,
+        bonferroni = cfg$ate_bonferroni,
+        parallel = FALSE,
+        seed = cfg$seed,
+        verbose = FALSE
+      ),
+      error = function(e) {
+        stop("cast_ate (", sm, "): ", conditionMessage(e), call. = FALSE)
+      }
+    )
+
+    screen <- tryCatch(
+      cast_screen(
+        dag = dag,
+        ate = ate,
+        data = d,
+        response = cfg$response,
+        min_vars = cfg$screen_min_vars,
+        min_fraction = cfg$screen_min_fraction,
+        num_trees = 180L,
+        seed = cfg$seed,
+        verbose = FALSE
+      ),
+      error = function(e) {
+        stop("cast_screen (", sm, "): ", conditionMessage(e), call. = FALSE)
+      }
+    )
+
+    roles <- cast_roles(screen = screen, dag = dag)
+    if (length(screen$selected) < 1L) {
+      stop("cast_screen 未保留任何变量 (", sm, ")", call. = FALSE)
+    }
+
+    message(
+      "✔ DAG 闭环自检: ", sm,
+      " | edges=", nrow(dag$edges),
+      " | selected=", length(screen$selected),
+      " | roles=", nrow(roles$roles)
+    )
+  }
+
+  message("cast_dag 五种 structure_method 自检均通过 (bootstrap_hc, pc, fci, bidag_bge, notears_linear)。")
+  invisible(TRUE)
+}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 方式 A: 模块化逐步运行 (推荐初次使用, 便于理解每一步)
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Step 1: 数据准备 ─────────────────────────────────────────────────────────
-split <- cast_prepare(ovis_ammon, train_fraction = 0.7, seed = 42)
+split <- cast_prepare(
+  data           = ovis_ammon,
+  train_fraction = CONFIG$prepare_train_fraction,
+  seed           = CONFIG$seed,
+  env_vars       = CONFIG$prepare_env_vars,
+  verbose        = CONFIG$prepare_verbose
+)
 cat("训练集:", nrow(split$train), "| 测试集:", nrow(split$test), "\n")
 cat("环境变量:", paste(split$env_vars, collapse = ", "), "\n")
+
+# ── DAG 五种算法 + ATE/screen/roles 最小闭环自检 (默认必须全部通过) ─────────
+if (isTRUE(RUN_DAG_SELFTEST_ALL_METHODS)) {
+  ovis_dag_selftest_all(split$train, CONFIG)
+}
+
+# 可选: 多重共线性筛查 (需建议包 car)
+if (requireNamespace("car", quietly = TRUE)) {
+  vif_tbl <- cast_vif(
+    data          = split$train,
+    threshold     = 10,
+    exclude       = c("lon", "lat", CONFIG$response),
+    expert_filter = NULL,
+    verbose       = TRUE
+  )
+  print(vif_tbl)
+}
 
 # ── Step 2: DAG 因果结构学习 ─────────────────────────────────────────────────
 # structure_method 可选:
 #   "bootstrap_hc"(默认), "pc", "fci", "bidag_bge"(需 BiDAG), "notears_linear"(需 torch)
-# 下面展示 cast_dag() 主要参数; R 仅对 bootstrap_hc 有效。
+# 下面列出 cast_dag() 全部形参; R / algorithm / score 仅用于 bootstrap_hc。
 dag <- cast_dag(
-  split$train,
-  response              = "presence",
-  env_vars              = NULL,
-  R                     = 50L,
-  algorithm             = "hc",
-  score                 = "bic-g",
-  strength_threshold      = 0.7,
-  direction_threshold     = 0.6,
-  max_rows              = 8000L,
-  seed                  = 42L,
-  verbose               = TRUE,
-  structure_method      = "bootstrap_hc",
-  pc_alpha              = 0.05,
-  fci_alpha             = 0.05,
-  bidag_algorithm       = "order",
-  bidag_iterations      = NULL,
-  notears_lambda        = 0.03,
-  notears_max_iter      = 2000L,
-  notears_lr            = 0.02,
-  notears_tol           = 1e-3,
-  notears_rho_init      = 0.1,
-  notears_alpha_mult    = 1.01
+  data                 = split$train,
+  response             = CONFIG$response,
+  env_vars             = CONFIG$dag_env_vars,
+  R                    = CONFIG$dag_R,
+  algorithm            = CONFIG$dag_algorithm,
+  score                = CONFIG$dag_score,
+  strength_threshold   = CONFIG$dag_strength_threshold,
+  direction_threshold  = CONFIG$dag_direction_threshold,
+  max_rows             = CONFIG$dag_max_rows,
+  seed                 = CONFIG$seed,
+  verbose              = CONFIG$dag_verbose,
+  structure_method     = CONFIG$dag_structure_method,
+  pc_alpha             = CONFIG$dag_pc_alpha,
+  pc_test              = CONFIG$dag_pc_test,
+  fci_alpha            = CONFIG$dag_fci_alpha,
+  fci_test             = CONFIG$dag_fci_test,
+  bidag_algorithm      = CONFIG$dag_bidag_algorithm,
+  bidag_iterations     = CONFIG$dag_bidag_iterations,
+  notears_lambda       = CONFIG$dag_notears_lambda,
+  notears_max_iter     = CONFIG$dag_notears_max_iter,
+  notears_lr           = CONFIG$dag_notears_lr,
+  notears_tol          = CONFIG$dag_notears_tol,
+  notears_rho_init     = CONFIG$dag_notears_rho_init,
+  notears_alpha_mult   = CONFIG$dag_notears_alpha_mult
 )
 print(dag)
 
 # ── Step 3: ATE 因果效应估计 ─────────────────────────────────────────────────
 ate <- cast_ate(
-  split$train,
-  variables      = NULL,
-  K              = 5L,
-  alpha          = 0.05,
-  num_trees      = 300L,
-  quantile_cuts  = c(0.25, 0.5, 0.75),
-  bonferroni     = TRUE,
-  parallel       = TRUE,
-  seed           = 42L,
-  verbose        = TRUE
+  data          = split$train,
+  response      = CONFIG$response,
+  variables     = CONFIG$ate_variables,
+  K             = CONFIG$ate_K,
+  num_trees     = CONFIG$ate_num_trees,
+  alpha         = CONFIG$ate_alpha,
+  quantile_cuts = CONFIG$ate_quantile_cuts,
+  bonferroni    = CONFIG$ate_bonferroni,
+  parallel      = CONFIG$ate_parallel,
+  seed          = CONFIG$seed,
+  verbose       = CONFIG$ate_verbose
 )
 print(ate)
 
 # ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
 screen <- cast_screen(
-  dag, ate, split$train,
-  response     = "presence",
-  min_vars      = 5L,
-  min_fraction  = 0.5,
-  num_trees     = 500L,
-  seed          = 42L,
-  verbose       = TRUE
+  dag            = dag,
+  ate            = ate,
+  data           = split$train,
+  response       = CONFIG$response,
+  min_vars       = CONFIG$screen_min_vars,
+  min_fraction   = CONFIG$screen_min_fraction,
+  num_trees      = CONFIG$screen_num_trees,
+  seed           = CONFIG$seed,
+  verbose        = CONFIG$screen_verbose
 )
 print(screen)
 
 # ── Step 5: 因果角色分配 ─────────────────────────────────────────────────────
-roles <- cast_roles(screen, dag)
+roles <- cast_roles(screen = screen, dag = dag)
 print(roles)
 
 # ── Step 6: 模型训练 ─────────────────────────────────────────────────────────
-# 如果已安装 torch, 取消下面注释跑完整 CAST:
+# 若已安装 torch, 可将 fit_models 设为含 "cast" / "mlp_ate" 等并增大 n_epochs。
 fit_full <- cast_fit(
-  split$train,
-  screen = screen, dag = dag, ate = ate,
-  models = c("cast", "rf", "maxent", "brt"),
-  n_runs = 1, n_epochs = 50, seed = 42,  # 快速测试参数
-  tune_grid = FALSE
+  data               = split$train,
+  screen             = screen,
+  dag                = dag,
+  ate                = ate,
+  models             = CONFIG$fit_models,
+  response           = CONFIG$response,
+  n_epochs           = CONFIG$fit_n_epochs,
+  n_runs             = CONFIG$fit_n_runs,
+  patience           = CONFIG$fit_patience,
+  val_fraction       = CONFIG$fit_val_fraction,
+  focal_gamma        = CONFIG$fit_focal_gamma,
+  focal_alpha_mode   = CONFIG$fit_focal_alpha_mode,
+  focal_alpha        = CONFIG$fit_focal_alpha,
+  rf_ntree           = CONFIG$fit_rf_ntree,
+  brt_n_trees        = CONFIG$fit_brt_n_trees,
+  brt_depth          = CONFIG$fit_brt_depth,
+  hidden_size        = CONFIG$fit_hidden_size,
+  dropout            = CONFIG$fit_dropout,
+  lr                 = CONFIG$fit_lr,
+  batch_size         = CONFIG$fit_batch_size,
+  max_interactions   = CONFIG$fit_max_interactions,
+  tune_grid          = CONFIG$fit_tune_grid,
+  seed               = CONFIG$seed,
+  verbose            = CONFIG$fit_verbose
 )
 
+# ── Step 6b (可选): 空间交叉验证 ────────────────────────────────────────────
+if (isTRUE(CONFIG$run_spatial_cv)) {
+  cv_ovis <- cast_cv(
+    data         = ovis_ammon,
+    screen       = screen,
+    dag          = dag,
+    ate          = ate,
+    k            = CONFIG$cv_k,
+    models       = CONFIG$cv_models,
+    block_method = CONFIG$cv_block_method,
+    response     = CONFIG$response,
+    n_epochs     = CONFIG$cv_n_epochs,
+    n_runs       = CONFIG$cv_n_runs,
+    rf_ntree     = CONFIG$cv_rf_ntree,
+    brt_n_trees  = CONFIG$cv_brt_n_trees,
+    parallel     = CONFIG$cv_parallel,
+    seed         = CONFIG$seed,
+    verbose      = CONFIG$cv_verbose
+  )
+  print(cv_ovis)
+  if (requireNamespace("ggplot2", quietly = TRUE) &&
+      all(c("lon", "lat") %in% names(ovis_ammon))) {
+    p_cv <- plot(
+      cv_ovis,
+      lon = ovis_ammon$lon,
+      lat = ovis_ammon$lat,
+      basemap = "china"
+    )
+    print(p_cv)
+    ovis_save_plot(p_cv, "ovis_cv_spatial.png", width = 12, height = 5.5)
+  }
+}
+
 # ── Step 7: 模型评估 ─────────────────────────────────────────────────────────
-eval_result <- cast_evaluate(fit_full, split$test)
+eval_result <- cast_evaluate(
+  fit       = fit_full,
+  test_data = split$test,
+  response  = CONFIG$eval_response
+)
 print(eval_result)
 
 # ── Step 8: 空间预测 ─────────────────────────────────────────────────────────
-pred <- cast_predict(fit_full, china_env_grid)
+pred <- cast_predict(
+  fit      = fit_full,
+  new_data = china_env_grid,
+  models   = CONFIG$predict_models
+)
 print(pred)
 
 # ── Step 9: 绘图 ─────────────────────────────────────────────────────────────
@@ -138,22 +563,39 @@ print(pred)
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   # DAG 网络图
-  plot(dag, roles = roles, screen = screen, var_labels = var_labels)
+  p_dag <- plot(
+    dag,
+    roles = roles,
+    screen = screen,
+    var_labels = var_labels,
+    species = "Ovis_ammon"
+  )
+  print(p_dag)
+  ovis_save_plot(p_dag, "ovis_dag.png", width = 12, height = 9)
 
   # ATE 森林图
-  plot(ate, var_labels = var_labels)
+  p_ate <- plot(ate, var_labels = var_labels)
+  print(p_ate)
+  ovis_save_plot(p_ate, "ovis_ate.png", width = 8, height = 10)
 
   # 筛选分数分解图
-  plot(screen, var_labels = var_labels)
+  p_screen <- plot(screen, var_labels = var_labels)
+  print(p_screen)
+  ovis_save_plot(p_screen, "ovis_screen.png", width = 10, height = 8)
 
   # 评估对比图
-  plot(eval_result)
+  p_eval <- plot(eval_result)
+  print(p_eval)
+  ovis_save_plot(p_eval, "ovis_evaluate.png", width = 10, height = 7)
 
   # 空间栖息地适宜性地图 (需要 sf)
   if (requireNamespace("sf", quietly = TRUE)) {
-    plot(pred, model = "rf", basemap = "china")
+    p_pred <- plot(pred, model = "rf", basemap = "china")
+    print(p_pred)
+    ovis_save_plot(p_pred, "ovis_predict_rf_china.png", width = 10, height = 7)
   }
-    # 模型间空间一致性热力图 (需要 >= 2 个模型)
+
+  # 模型间空间一致性热力图 (需要 >= 2 个模型)
   if (length(pred$models) >= 2 &&
       requireNamespace("patchwork", quietly = TRUE)) {
     consistency <- cast_consistency(pred)
@@ -173,22 +615,22 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       text_white_above = 0.7
     )
     print(p_cons)
-    # ggsave("ovis_consistency.png", p_cons, width = 16, height = 5.5, dpi = 300)
+    ovis_save_plot(p_cons, "ovis_consistency.png", width = 16, height = 5.5)
   }
 
   # 空间 CATE + 按 HSS 截断出图 (需 grf; HSS 模型默认 cast, 阈值 0.1)
   if (requireNamespace("grf", quietly = TRUE)) {
     cate <- cast_cate(
-      split$train,
-      variables    = NULL,
+      data           = split$train,
+      variables      = CONFIG$cate_variables,
       ate            = ate,
       screen         = screen,
-      response       = "presence",
-      top_n          = 2L,
-      n_trees        = 300L,
+      response       = CONFIG$response,
+      top_n          = CONFIG$cate_top_n,
+      n_trees        = CONFIG$cate_n_trees,
       predict_data   = china_env_grid,
-      seed           = 42L,
-      verbose        = FALSE
+      seed           = CONFIG$seed,
+      verbose        = CONFIG$cate_verbose
     )
     if (!is.null(cate)) {
       for (v in cate$variables) {
@@ -205,6 +647,12 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
           hss_threshold    = 0.1
         )
         print(pc)
+        ovis_save_plot(
+          pc,
+          sprintf("ovis_cate_%s.png", v),
+          width = 10,
+          height = 7
+        )
       }
     }
   }
@@ -212,21 +660,29 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   # XGBoost + SHAP 可解释性 (需 xgboost; 与 SDM 共用 presence + 环境变量)
   if (requireNamespace("xgboost", quietly = TRUE)) {
     sh <- cast_shap_xgb(
-      split$train,
-      response           = "presence",
+      data               = split$train,
+      response           = CONFIG$response,
       env_vars           = NULL,
       screen             = screen,
-      nrounds            = 200L,
-      max_depth          = 6L,
-      eta                = 0.05,
-      subsample          = 0.8,
-      colsample_bytree   = 0.8,
-      test_fraction      = 0.2,
-      seed               = 42L,
-      verbose            = FALSE
+      nrounds            = CONFIG$shap_nrounds,
+      max_depth          = CONFIG$shap_max_depth,
+      eta                = CONFIG$shap_eta,
+      subsample          = CONFIG$shap_subsample,
+      colsample_bytree   = CONFIG$shap_colsample_bytree,
+      test_fraction      = CONFIG$shap_test_fraction,
+      seed               = CONFIG$seed,
+      verbose            = CONFIG$shap_verbose
     )
-    print(plot(sh, type = "interaction_network", top_n = 15L))
-    print(plot(sh, type = "waterfall", top_n = 15L))
+    p_sh_net <- plot(
+      sh,
+      type = "interaction_network",
+      top_n = CONFIG$shap_plot_top_n
+    )
+    print(p_sh_net)
+    ovis_save_plot(p_sh_net, "ovis_shap_interaction_network.png", 9, 9)
+    p_sh_wf <- plot(sh, type = "waterfall", top_n = CONFIG$shap_plot_top_n)
+    print(p_sh_wf)
+    ovis_save_plot(p_sh_wf, "ovis_shap_waterfall.png", 10, 6)
     # cast_shap_write_csv(sh, file.path(getwd(), "shap_export_ovis"))
   }
 }
@@ -235,67 +691,127 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 方式 B: 一键 Pipeline (等价于上面全部步骤)
+# 方式 B: 一键 Pipeline cast() (与上面模块化等价; 列出 cast() 全部形参)
 # ══════════════════════════════════════════════════════════════════════════════
-# 注意: 这会跑完整流程, 包含 DAG + ATE + Screening + 模型训练, 需要几分钟
-#
-# result <- cast(
-#   species_data = ovis_ammon,
-#   env_data = china_env_grid,
-#   models = c("rf", "maxent", "brt"),
-#   train_fraction = 0.7,
-#   n_bootstrap = 50L,
-#   dag_structure_method = "bootstrap_hc",
-#   dag_pc_alpha = 0.05, dag_fci_alpha = 0.05,
-#   dag_bidag_algorithm = "order", dag_bidag_iterations = NULL,
-#   dag_notears_lambda = 0.03, dag_notears_max_iter = 2000L,
-#   dag_notears_lr = 0.02, dag_notears_tol = 1e-3,
-#   dag_notears_rho_init = 0.1, dag_notears_alpha_mult = 1.01,
-#   strength_threshold = 0.7, direction_threshold = 0.6,
-#   ate_folds = 2L, ate_alpha = 0.05, screen_min_vars = 5L,
-#   do_cv = TRUE, cv_k = 5L, cv_block_method = "grid",
-#   do_cate = TRUE, cate_top_n = 3L,
-#   seed = 42L, verbose = TRUE
-# )
-# summary(result)
-# plot(result, var_labels = var_labels)
+# 注意: 完整流程含空间 CV 时耗时较长。将 RUN_CAST_PIPELINE 改为 TRUE 再运行本段。
+RUN_CAST_PIPELINE <- FALSE
+
+if (isTRUE(RUN_CAST_PIPELINE)) {
+  result <- cast(
+    species_data           = ovis_ammon,
+    env_data               = china_env_grid,
+    models                 = c("rf", "maxent", "brt"),
+    train_fraction         = CONFIG$prepare_train_fraction,
+    n_bootstrap            = CONFIG$dag_R,
+    dag_structure_method   = CONFIG$dag_structure_method,
+    dag_pc_alpha           = CONFIG$dag_pc_alpha,
+    dag_pc_test            = CONFIG$dag_pc_test,
+    dag_fci_alpha          = CONFIG$dag_fci_alpha,
+    dag_fci_test           = CONFIG$dag_fci_test,
+    dag_bidag_algorithm    = CONFIG$dag_bidag_algorithm,
+    dag_bidag_iterations   = CONFIG$dag_bidag_iterations,
+    dag_notears_lambda     = CONFIG$dag_notears_lambda,
+    dag_notears_max_iter   = CONFIG$dag_notears_max_iter,
+    dag_notears_lr         = CONFIG$dag_notears_lr,
+    dag_notears_tol        = CONFIG$dag_notears_tol,
+    dag_notears_rho_init   = CONFIG$dag_notears_rho_init,
+    dag_notears_alpha_mult = CONFIG$dag_notears_alpha_mult,
+    strength_threshold     = CONFIG$dag_strength_threshold,
+    direction_threshold    = CONFIG$dag_direction_threshold,
+    ate_folds                = 2L,
+    ate_alpha                = CONFIG$ate_alpha,
+    screen_min_vars          = CONFIG$screen_min_vars,
+    do_cv                    = TRUE,
+    cv_k                     = CONFIG$cv_k,
+    cv_block_method          = CONFIG$cv_block_method,
+    do_predict               = NULL,
+    do_cate                  = TRUE,
+    cate_top_n               = 3L,
+    seed                     = CONFIG$seed,
+    verbose                  = TRUE
+  )
+  print(summary(result))
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    p_cast <- plot(result, var_labels = var_labels)
+    print(p_cast)
+    ovis_save_plot(p_cast, "ovis_cast_pipeline.png", 12, 10)
+  }
+}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 方式 C: 不同 DAG structure_method 各跑一遍并保存图 (与当次 ATE/screen/roles 衔接)
+# 方式 C (可选): 将五种 DAG 网络图落盘 (依赖已通过上面自检)
 # ══════════════════════════════════════════════════════════════════════════════
-# 将 RUN_DAG_METHOD_SHOWCASE 改为 TRUE 可执行 (除 bootstrap 外部分依赖 BiDAG/torch)
-RUN_DAG_METHOD_SHOWCASE <- FALSE
+# 与「全算法自检」重复时可关；需要对比图时改为 TRUE。
+RUN_DAG_METHOD_SHOWCASE <- TRUE
 
 if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
-  out_d <- file.path(getwd(), "figures_ovis_dag_by_method")
-  dir.create(out_d, FALSE, TRUE)
   methods <- c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear")
   for (sm in methods) {
     dm <- tryCatch(
       cast_dag(
-        split$train,
-        R = 40L,
-        seed = 42L,
+        data = split$train,
+        response = CONFIG$response,
+        env_vars = CONFIG$dag_env_vars,
+        R = CONFIG$dag_R,
+        algorithm = CONFIG$dag_algorithm,
+        score = CONFIG$dag_score,
+        strength_threshold = CONFIG$dag_strength_threshold,
+        direction_threshold = CONFIG$dag_direction_threshold,
+        max_rows = CONFIG$dag_max_rows,
+        seed = CONFIG$seed,
         verbose = FALSE,
-        structure_method = sm
+        structure_method = sm,
+        pc_alpha = CONFIG$dag_pc_alpha,
+        pc_test = CONFIG$dag_pc_test,
+        fci_alpha = CONFIG$dag_fci_alpha,
+        fci_test = CONFIG$dag_fci_test,
+        bidag_algorithm = CONFIG$dag_bidag_algorithm,
+        bidag_iterations = CONFIG$dag_bidag_iterations,
+        notears_lambda = CONFIG$dag_notears_lambda,
+        notears_max_iter = CONFIG$dag_notears_max_iter,
+        notears_lr = CONFIG$dag_notears_lr,
+        notears_tol = CONFIG$dag_notears_tol,
+        notears_rho_init = CONFIG$dag_notears_rho_init,
+        notears_alpha_mult = CONFIG$dag_notears_alpha_mult
       ),
       error = function(e) {
-        message("cast_dag skipped (", sm, "): ", conditionMessage(e))
+        message("cast_dag (", sm, ") 出图跳过: ", conditionMessage(e))
         NULL
       }
     )
     if (is.null(dm)) next
-    am <- cast_ate(split$train, variables = dm$nodes, K = 5L,
-                   num_trees = 200L, parallel = FALSE, seed = 42L,
-                   verbose = FALSE)
-    smc <- cast_screen(dm, am, split$train, num_trees = 300L,
-                       seed = 42L, verbose = FALSE)
-    rm <- cast_roles(smc, dm)
-    p <- plot(dm, roles = rm, screen = smc, var_labels = var_labels,
-              species = "Ovis_ammon")
-    ggplot2::ggsave(file.path(out_d, paste0("dag_", sm, ".png")),
-                     p, width = 12, height = 9, dpi = 200)
+    am <- cast_ate(
+      data = split$train,
+      response = CONFIG$response,
+      variables = dm$nodes,
+      K = 5L,
+      num_trees = 200L,
+      parallel = FALSE,
+      seed = CONFIG$seed,
+      verbose = FALSE
+    )
+    smc <- cast_screen(
+      dag = dm,
+      ate = am,
+      data = split$train,
+      response = CONFIG$response,
+      num_trees = 300L,
+      seed = CONFIG$seed,
+      verbose = FALSE
+    )
+    rm <- cast_roles(screen = smc, dag = dm)
+    p <- plot(
+      dm,
+      roles = rm,
+      screen = smc,
+      var_labels = var_labels,
+      species = "Ovis_ammon"
+    )
+    ovis_save_plot(p, paste0("ovis_dag_showcase_", sm, ".png"), 12, 9)
   }
-  message("Saved under: ", normalizePath(out_d, winslash = "/", mustWork = FALSE))
+  message(
+    "DAG showcase figures saved under: ",
+    normalizePath(OVIS_FIG_DIR, winslash = "/", mustWork = FALSE)
+  )
 }

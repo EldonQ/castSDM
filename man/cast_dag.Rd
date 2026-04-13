@@ -18,7 +18,9 @@ cast_dag(
   verbose = TRUE,
   structure_method = c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear"),
   pc_alpha = 0.05,
+  pc_test = "zf",
   fci_alpha = 0.05,
+  fci_test = "zf",
   bidag_algorithm = c("order", "orderIter"),
   bidag_iterations = NULL,
   notears_lambda = 0.03,
@@ -42,11 +44,15 @@ in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
 
 \item{R}{Integer. Number of bootstrap replicates for \code{structure_method = "bootstrap_hc"}. Ignored otherwise (stored as \code{NA} for documentation).}
 
-\item{algorithm}{Character. Score-based algorithm passed to
-\code{bnlearn::boot.strength()} when \code{structure_method = "bootstrap_hc"}.
-Default \code{"hc"}.}
+\item{algorithm}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: score-based learner passed to
+\code{bnlearn::boot.strength()} (e.g. \code{"hc"}, \code{"tabu"}, \code{"mmhc"},
+\code{"pc.stable"}). Ignored for \code{"pc"}, \code{"fci"}, \code{"bidag_bge"}, and
+\code{"notears_linear"}. Do not set this to \code{"pc"} or \code{"fci"} here; those
+names refer to constraint-based algorithms and require
+\code{structure_method = "pc"} or \code{"fci"} instead.}
 
-\item{score}{Character. Scoring criterion for bootstrap HC. Default \code{"bic-g"}.}
+\item{score}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: scoring criterion in \code{algorithm.args} for
+\code{bnlearn::boot.strength()}. Default \code{"bic-g"}. Ignored otherwise.}
 
 \item{strength_threshold}{Numeric. Minimum edge strength (bootstrap HC) or
 auxiliary threshold metadata for other methods. Default \code{0.7}.}
@@ -63,16 +69,28 @@ HC only). Default \code{0.6}.}
 \item{structure_method}{Character. One of \code{"bootstrap_hc"} (default),
 \code{"pc"}, \code{"fci"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
 
-\item{pc_alpha}{Significance level for \code{bnlearn::pc()} (Gaussian CI test).
-Default \code{0.05}.}
+\item{pc_alpha}{Significance level for constraint-based PC. Default \code{0.05}.
+Used only when \code{structure_method = "pc"}.}
 
-\item{fci_alpha}{Significance level for \code{bnlearn::fci()}. Default \code{0.05}.}
+\item{pc_test}{Conditional-independence test passed as \code{test} to
+\code{bnlearn::pc.stable()} (e.g. \code{"zf"} for Gaussian data). Default
+\code{"zf"}. Used only when \code{structure_method = "pc"}.}
+
+\item{fci_alpha}{Significance level for FCI. Default \code{0.05}. Used only when
+\code{structure_method = "fci"}.}
+
+\item{fci_test}{Passed as \code{test} to \code{bnlearn::fci()} when that function
+exists (older \strong{bnlearn}). With \strong{bnlearn} >= 5.0, FCI is run via
+\pkg{pcalg}::\code{fci()} with \code{gaussCItest} and this argument is
+currently ignored (Gaussian CI tests are fixed by pcalg).}
 
 \item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
 \code{"orderIter"}. Default \code{"order"}.}
 
-\item{bidag_iterations}{Optional integer MCMC iterations for BiDAG. \code{NULL}
-uses BiDAG defaults (data-driven).}
+\item{bidag_iterations}{Optional integer MCMC iterations for BiDAG.
+\code{NULL} uses a \strong{bounded} default derived from the number of nodes (avoids
+BiDAG's internal \verb{6 n^2 log(n)} blowing up when \code{n} is mis-resolved as
+sample size). Explicit values are clamped to a safe range.}
 
 \item{notears_lambda}{L1 penalty weight for \code{notears_linear}. Default \code{0.03}.}
 

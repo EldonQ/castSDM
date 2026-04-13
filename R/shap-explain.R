@@ -234,37 +234,67 @@ plot.cast_shap <- function(x,
     c("#edf8e9", "#31a354")
   )(64)
 
-  p <- ggplot2::ggplot()
+  # Single ggplot + one coord_fixed (avoids "coordinate system already present"
+  # noise). scale_linewidth() does not support `oob` on all ggplot2 versions.
+  p <- ggplot2::ggplot(
+    pos,
+    ggplot2::aes(x = .data$x, y = .data$y)
+  )
+
   if (!is.null(seg) && nrow(seg) > 0) {
-    seg$lw <- 0.5 + 6 * (seg$w - wmin) / (wmax - wmin + 1e-8)
-    p <- p + ggplot2::geom_segment(
-      data = seg,
-      ggplot2::aes(
-        x = .data$x, y = .data$y,
-        xend = .data$xend, yend = .data$yend,
-        linewidth = .data$w
-      ),
-      lineend = "round", alpha = 0.85, color = "#7b3294"
-    ) +
+    seg$lw_map <- 0.4 + 4.6 * (seg$w - wmin) / (wmax - wmin + 1e-8)
+    seg$w_n <- (seg$w - wmin) / (wmax - wmin + 1e-8)
+    purples <- grDevices::colorRampPalette(
+      c("#fcfbfd", "#dadaeb", "#9e9ac8", "#6a51a3", "#3f007d")
+    )(64)
+    p <- p +
+      ggplot2::geom_segment(
+        data = seg,
+        ggplot2::aes(
+          x = .data$x, y = .data$y,
+          xend = .data$xend, yend = .data$yend,
+          linewidth = .data$lw_map,
+          colour = .data$w_n
+        ),
+        inherit.aes = FALSE,
+        lineend = "round",
+        alpha = 0.92
+      ) +
       ggplot2::scale_linewidth(
-        range = c(0.4, 5),
         name = "Vint",
+        range = c(0.35, 5.2),
+        guide = "none"
+      ) +
+      ggplot2::scale_colour_gradientn(
+        colours = purples,
+        limits = c(0, 1),
+        name = "Vint",
+        breaks = c(0, 0.25, 0.5, 0.75, 1),
+        labels = c("0", "0.25", "0.5", "0.75", "1"),
         oob = scales::squish
       )
   }
 
   p <- p +
     ggplot2::geom_point(
-      data = pos,
-      ggplot2::aes(x = .data$x, y = .data$y, size = .data$importance,
-                    fill = .data$importance),
-      shape = 21, color = "#2f2f2f", stroke = 0.4
+      ggplot2::aes(
+        size = .data$importance,
+        fill = .data$importance
+      ),
+      shape = 21,
+      color = "#2f2f2f",
+      stroke = 0.4
     ) +
     ggplot2::geom_text(
-      data = pos,
-      ggplot2::aes(x = .data$label_x, y = .data$label_y,
-                   label = .data$feature),
-      size = 3.2, fontface = "bold", hjust = 0.5
+      ggplot2::aes(
+        x = .data$label_x,
+        y = .data$label_y,
+        label = .data$feature
+      ),
+      inherit.aes = TRUE,
+      size = 3.2,
+      fontface = "bold",
+      hjust = 0.5
     ) +
     ggplot2::scale_fill_gradientn(
       colours = greens,
@@ -273,17 +303,54 @@ plot.cast_shap <- function(x,
       oob = scales::squish
     ) +
     ggplot2::scale_size(range = c(2, 10), guide = "none") +
-    ggplot2::coord_fixed(xlim = c(-1.55, 1.55), ylim = c(-1.55, 1.55)) +
-    ggplot2::labs(
-      title = sprintf("Impact intensity (Top %d)", n),
-      x = NULL, y = NULL
+    ggplot2::coord_fixed(
+      xlim = c(-1.55, 1.55),
+      ylim = c(-1.55, 1.55),
+      expand = FALSE
     ) +
+    ggplot2::labs(
+      title = sprintf("Impact intensity (Top %d features)", n),
+      x = NULL, y = NULL
+    )
+
+  if (!is.null(seg) && nrow(seg) > 0) {
+    p <- p + ggplot2::guides(
+      fill = ggplot2::guide_colorbar(
+        title = "Vimp",
+        barwidth = ggplot2::unit(3.2, "cm"),
+        barheight = ggplot2::unit(0.35, "cm"),
+        title.position = "top",
+        order = 1L
+      ),
+      colour = ggplot2::guide_colorbar(
+        title = "Vint",
+        barwidth = ggplot2::unit(3.2, "cm"),
+        barheight = ggplot2::unit(0.35, "cm"),
+        title.position = "top",
+        order = 2L
+      )
+    )
+  } else {
+    p <- p + ggplot2::guides(
+      fill = ggplot2::guide_colorbar(
+        title = "Vimp",
+        barwidth = ggplot2::unit(3.2, "cm"),
+        barheight = ggplot2::unit(0.35, "cm"),
+        title.position = "top"
+      )
+    )
+  }
+
+  p <- p +
     ggplot2::theme_void(base_size = 11) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(
         face = "bold", hjust = 0, size = 12
       ),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      legend.box = "horizontal",
+      legend.justification = "center",
+      plot.margin = ggplot2::margin(8, 8, 8, 8)
     )
 
   p
@@ -302,7 +369,7 @@ plot.cast_shap <- function(x,
   base <- as.numeric(x$base_score)[1]
 
   ends <- cumsum(ms) + base
-  starts <- c(base, head(ends, -1))
+  starts <- c(base, utils::head(ends, -1L))
   df <- data.frame(
     feature = feats,
     start = starts,
@@ -310,49 +377,152 @@ plot.cast_shap <- function(x,
     val = ms,
     ymin = pmin(starts, ends),
     ymax = pmax(starts, ends),
-    col = ifelse(ms >= 0, pos_color, neg_color),
+    x = seq_along(feats),
+    direction = ifelse(ms >= 0, "Positive", "Negative"),
     stringsAsFactors = FALSE
   )
-  df$x <- seq_len(nrow(df))
-  final_val <- tail(ends, 1)
+  final_val <- utils::tail(ends, 1L)
+  df$val_lab <- ifelse(
+    df$val >= 0,
+    sprintf("+%.4g", df$val),
+    sprintf("%.4g", df$val)
+  )
 
-  ggplot2::ggplot(df) +
+  y_rng <- range(c(df$ymin, df$ymax, base, final_val))
+  y_pad <- max(diff(y_rng) * 0.06, 1e-6)
+  y_top <- max(df$ymax) + y_pad * 2.2
+  y_bot <- min(df$ymin) - y_pad * 0.5
+
+  bridge <- if (nrow(df) > 1L) {
+    data.frame(
+      x = utils::head(df$x, -1L) + 0.22,
+      xend = utils::tail(df$x, -1L) - 0.22,
+      y = utils::head(df$end, -1L),
+      yend = utils::head(df$end, -1L),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    NULL
+  }
+
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$x)) +
     ggplot2::geom_vline(
-      ggplot2::aes(xintercept = .data$x),
-      color = "#9a9a9a", linewidth = 0.35, alpha = 0.35
+      xintercept = df$x,
+      color = "#e0e0e0",
+      linewidth = 0.28
     ) +
+    ggplot2::geom_hline(
+      ggplot2::aes(yintercept = base),
+      linetype = "dotted",
+      color = "gray40",
+      linewidth = 0.35
+    )
+
+  if (!is.null(bridge)) {
+    p <- p + ggplot2::geom_segment(
+      data = bridge,
+      ggplot2::aes(
+        x = .data$x, xend = .data$xend,
+        y = .data$y, yend = .data$yend
+      ),
+      inherit.aes = FALSE,
+      linetype = "dashed",
+      color = "grey50",
+      linewidth = 0.35,
+      lineend = "round"
+    )
+  }
+
+  p <- p +
     ggplot2::geom_rect(
       ggplot2::aes(
-        xmin = .data$x - 0.18, xmax = .data$x + 0.18,
-        ymin = .data$ymin, ymax = .data$ymax,
-        fill = .data$col
+        xmin = .data$x - 0.18,
+        xmax = .data$x + 0.18,
+        ymin = .data$ymin,
+        ymax = .data$ymax,
+        fill = .data$direction
       ),
-      color = "#2f2f2f", linewidth = 0.25
+      color = "#2a2a2a",
+      linewidth = 0.28
     ) +
-    ggplot2::scale_fill_identity(guide = "none") +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        y = ifelse(.data$val >= 0, .data$ymax + y_pad * 0.55, .data$ymin - y_pad * 0.55),
+        label = .data$val_lab
+      ),
+      size = 3.1,
+      color = "#1a1a1a",
+      inherit.aes = TRUE
+    ) +
+    ggplot2::scale_fill_manual(
+      name = NULL,
+      values = c("Positive" = pos_color, "Negative" = neg_color),
+      breaks = c("Positive", "Negative"),
+      drop = FALSE
+    ) +
     ggplot2::scale_x_continuous(
       breaks = df$x,
-      labels = df$feature
+      labels = df$feature,
+      expand = ggplot2::expansion(mult = 0.05)
+    ) +
+    ggplot2::expand_limits(
+      y = c(y_bot, y_top),
+      x = c(0.55, max(df$x) + 0.45)
+    ) +
+    ggplot2::annotate(
+      "text",
+      x = 0.65,
+      y = y_top,
+      label = sprintf("E[f(x)] = %.4f", base),
+      hjust = 0,
+      size = 3.4,
+      color = "gray20",
+      fontface = "plain"
+    ) +
+    ggplot2::annotate(
+      "text",
+      x = max(df$x) + 0.35,
+      y = y_top,
+      label = sprintf("f(x) = %.4f", final_val),
+      hjust = 1,
+      size = 3.4,
+      color = "gray20",
+      fontface = "plain"
     ) +
     ggplot2::labs(
       title = "Impact direction",
-      subtitle = sprintf(
-        "E[f(x)]=%.4f   f(x)=%.4f (mean SHAP path)",
-        base, final_val
-      ),
-      x = NULL, y = NULL
+      x = NULL,
+      y = "SHAP value"
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::coord_cartesian(clip = "off") +
+    ggplot2::theme_minimal(base_size = 11.5) +
     ggplot2::theme(
       axis.text.x = ggplot2::element_text(
-        angle = 90, vjust = 0.5, hjust = 1, size = 9
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1,
+        size = 8.5,
+        color = "gray15"
       ),
       panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank(),
       plot.title = ggplot2::element_text(
-        face = "bold", hjust = 0, size = 14
+        face = "bold",
+        hjust = 0,
+        size = 13.5,
+        margin = ggplot2::margin(b = 4)
       ),
-      plot.subtitle = ggplot2::element_text(size = 9, color = "grey35")
+      plot.margin = ggplot2::margin(10, 14, 10, 10),
+      legend.position = "bottom",
+      legend.title = ggplot2::element_blank(),
+      axis.title.y = ggplot2::element_text(
+        color = "gray35",
+        size = 9.5,
+        angle = 90
+      )
     )
+
+  p
 }
 
 

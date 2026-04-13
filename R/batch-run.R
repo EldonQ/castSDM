@@ -51,6 +51,8 @@
 #' @param dag_structure_method Character. Passed to [cast_dag()] as
 #'   `structure_method`. Default `"bootstrap_hc"`.
 #' @param dag_pc_alpha,dag_fci_alpha PC/FCI alpha levels. Defaults `0.05`.
+#' @param dag_pc_test,dag_fci_test Passed to [cast_dag()] as `pc_test` /
+#'   `fci_test`. Defaults `"zf"`.
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
 #' @param dag_notears_lambda NOTEARS L1 penalty (see \code{cast_dag()}).
 #' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
@@ -58,10 +60,11 @@
 #' @param dag_notears_tol Acyclicity tolerance for NOTEARS.
 #' @param dag_notears_rho_init Initial augmented-Lagrangian rho for NOTEARS.
 #' @param dag_notears_alpha_mult Rho multiplier for NOTEARS.
-#' @param dag_algorithm Character. Structure learning algorithm
-#'   (`"hc"`). Default `"hc"`.
-#' @param dag_score Character. Scoring criterion for structure
-#'   learning. Default `"bic-g"`.
+#' @param dag_algorithm Character. Passed to [cast_dag()] as `algorithm`.
+#'   **Only** used when `dag_structure_method = "bootstrap_hc"` (score-based
+#'   learner inside each bootstrap, e.g. `"hc"`, `"tabu"`). Default `"hc"`.
+#' @param dag_score Character. Passed to [cast_dag()] as `score` for
+#'   bootstrap HC only. Default `"bic-g"`.
 #' @param dag_strength_threshold Numeric. Minimum bootstrap edge
 #'   strength to retain. Default `0.7`.
 #' @param dag_direction_threshold Numeric. Minimum direction
@@ -135,7 +138,9 @@ cast_batch <- function(species_list,
                        dag_R                  = 100L,
                        dag_structure_method   = "bootstrap_hc",
                        dag_pc_alpha           = 0.05,
+                       dag_pc_test            = "zf",
                        dag_fci_alpha          = 0.05,
+                       dag_fci_test           = "zf",
                        dag_bidag_algorithm    = "order",
                        dag_bidag_iterations   = NULL,
                        dag_notears_lambda     = 0.03,
@@ -194,7 +199,9 @@ cast_batch <- function(species_list,
     dag_R = dag_R,
     dag_structure_method = dag_structure_method,
     dag_pc_alpha = dag_pc_alpha,
+    dag_pc_test = dag_pc_test,
     dag_fci_alpha = dag_fci_alpha,
+    dag_fci_test = dag_fci_test,
     dag_bidag_algorithm = dag_bidag_algorithm,
     dag_bidag_iterations = dag_bidag_iterations,
     dag_notears_lambda = dag_notears_lambda,
@@ -255,7 +262,9 @@ cast_batch <- function(species_list,
         verbose = FALSE,
         structure_method = cfg$dag_structure_method,
         pc_alpha = cfg$dag_pc_alpha,
+        pc_test = cfg$dag_pc_test,
         fci_alpha = cfg$dag_fci_alpha,
+        fci_test = cfg$dag_fci_test,
         bidag_algorithm = cfg$dag_bidag_algorithm,
         bidag_iterations = cfg$dag_bidag_iterations,
         notears_lambda = cfg$dag_notears_lambda,
