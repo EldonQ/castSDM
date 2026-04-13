@@ -31,8 +31,11 @@ Imports:
     cli,
     coro,
     data.table,
-    rlang
+    grid,
+    rlang,
+    scales
 Suggests:
+    BiDAG,
     bnlearn,
     car,
     future,
@@ -48,11 +51,11 @@ Suggests:
     pROC,
     ranger,
     rmarkdown,
-    scales,
     sf,
     terra,
     testthat (>= 3.0.0),
     torch,
-    viridisLite
+    viridisLite,
+    xgboost
 Config/testthat/edition: 3
 VignetteBuilder: knitr

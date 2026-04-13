@@ -4,12 +4,59 @@
 \alias{plot.cast_consistency}
 \title{Plot Inter-model Consistency Heatmaps}
 \usage{
-\method{plot}{cast_consistency}(x, species = NULL, ...)
+\method{plot}{cast_consistency}(
+  x,
+  species = NULL,
+  font_family = "sans",
+  use_bold = TRUE,
+  font_base = 11L,
+  font_main_title = 14L,
+  font_panel_title = 11L,
+  font_axis = 8L,
+  font_cell_value = 3.5,
+  value_decimals = 3L,
+  tile_linewidth = 0.5,
+  text_white_above = 0.7,
+  consistency_colors = c("#F7FBFF", "#DEEBF7", "#C6DBEF", "#9ECAE1", "#6BAED6",
+    "#4292C6", "#2171B5", "#084594"),
+  fill_limits = c(0, 1),
+  color_stops = seq(0, 1, length.out = length(consistency_colors)),
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{cast_consistency} object.}
 
 \item{species}{Optional character. Species name for the title.}
+
+\item{font_family}{Base font family (passed to ggplot2). Default \code{"sans"}.}
+
+\item{use_bold}{Logical. Use bold face for titles, axes, legend, and cell
+values. Default \code{TRUE}.}
+
+\item{font_base}{Base theme size. Default \code{11}.}
+
+\item{font_main_title}{Outer patchwork title size. Default \code{14}.}
+
+\item{font_panel_title}{Panel title size. Default \code{11}.}
+
+\item{font_axis}{Axis label size (model names). Default \code{8}.}
+
+\item{font_cell_value}{Text size inside tiles. Default \code{3.5}.}
+
+\item{value_decimals}{Decimals printed in each cell. Default \code{3L}.}
+
+\item{tile_linewidth}{Grid line width between tiles. Default \code{0.5}.}
+
+\item{text_white_above}{Values above this threshold use white cell text.
+Default \code{0.7}.}
+
+\item{consistency_colors}{Colours for the shared gradient (low to high).}
+
+\item{fill_limits}{Numeric vector of length 2, fill scale limits. Default
+\code{c(0, 1)}.}
+
+\item{color_stops}{Positions in \verb{[0, 1]} matching \code{consistency_colors}.}
 
 \item{...}{Ignored.}
 }
@@ -19,6 +66,9 @@ A \code{ggplot} object (or \code{patchwork} composite).
 \description{
 Generates a 1x3 panel of heatmap matrices showing pairwise Cosine
 similarity, Warren's I, and Pearson's r between all model pairs.
-Follows the fig8 Part C visualization style with annotated cell values
-and a YlGnBu color scale.
+Default typography and colour layout follow the high-resolution reference
+style used in \code{inst/examples/replot_model_consistency_from_rds.R} (shared
+colour scale via \pkg{patchwork}, framed vertical colour bar, larger axis
+fonts). All parameters are exposed so you can reproduce publication exports
+without sourcing the example script.
 }

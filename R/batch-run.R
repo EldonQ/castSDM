@@ -48,6 +48,16 @@
 #'
 #' @param dag_R Integer. Number of DAG bootstrap replicates.
 #'   Default `100`.
+#' @param dag_structure_method Character. Passed to [cast_dag()] as
+#'   `structure_method`. Default `"bootstrap_hc"`.
+#' @param dag_pc_alpha,dag_fci_alpha PC/FCI alpha levels. Defaults `0.05`.
+#' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
+#' @param dag_notears_lambda NOTEARS L1 penalty (see \code{cast_dag()}).
+#' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
+#' @param dag_notears_lr Adam learning rate for NOTEARS.
+#' @param dag_notears_tol Acyclicity tolerance for NOTEARS.
+#' @param dag_notears_rho_init Initial augmented-Lagrangian rho for NOTEARS.
+#' @param dag_notears_alpha_mult Rho multiplier for NOTEARS.
 #' @param dag_algorithm Character. Structure learning algorithm
 #'   (`"hc"`). Default `"hc"`.
 #' @param dag_score Character. Scoring criterion for structure
@@ -58,6 +68,9 @@
 #'   consistency to retain. Default `0.6`.
 #' @param dag_max_rows Integer. Subsample size for DAG learning.
 #'   Default `8000`.
+#' @param cate_hss_model,cate_hss_threshold When saving CATE maps, pass to
+#'   [plot.cast_cate()] to mask by `HSS_<model> >= threshold`. Defaults
+#'   `cast` and `0.1`. Set `cate_hss_model = NULL` to disable masking.
 #'
 #' @param ate_K Integer. DML cross-fitting folds. Default `5`.
 #' @param ate_alpha Numeric. Significance level for ATE tests.
@@ -120,6 +133,17 @@ cast_batch <- function(species_list,
                        verbose     = TRUE,
                        # ── DAG ──
                        dag_R                  = 100L,
+                       dag_structure_method   = "bootstrap_hc",
+                       dag_pc_alpha           = 0.05,
+                       dag_fci_alpha          = 0.05,
+                       dag_bidag_algorithm    = "order",
+                       dag_bidag_iterations   = NULL,
+                       dag_notears_lambda     = 0.03,
+                       dag_notears_max_iter   = 2000L,
+                       dag_notears_lr         = 0.02,
+                       dag_notears_tol        = 1e-3,
+                       dag_notears_rho_init   = 0.1,
+                       dag_notears_alpha_mult = 1.01,
                        dag_algorithm          = "hc",
                        dag_score              = "bic-g",
                        dag_strength_threshold = 0.7,
@@ -144,6 +168,8 @@ cast_batch <- function(species_list,
                        do_cate      = TRUE,
                        cate_top_n   = 3L,
                        cate_n_trees = 1000L,
+                       cate_hss_model = "cast",
+                       cate_hss_threshold = 0.1,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -165,7 +191,19 @@ cast_batch <- function(species_list,
   # Pack all pipeline config so workers receive a single list
   cfg <- list(
     train_fraction = train_fraction,
-    dag_R = dag_R, dag_algorithm = dag_algorithm,
+    dag_R = dag_R,
+    dag_structure_method = dag_structure_method,
+    dag_pc_alpha = dag_pc_alpha,
+    dag_fci_alpha = dag_fci_alpha,
+    dag_bidag_algorithm = dag_bidag_algorithm,
+    dag_bidag_iterations = dag_bidag_iterations,
+    dag_notears_lambda = dag_notears_lambda,
+    dag_notears_max_iter = dag_notears_max_iter,
+    dag_notears_lr = dag_notears_lr,
+    dag_notears_tol = dag_notears_tol,
+    dag_notears_rho_init = dag_notears_rho_init,
+    dag_notears_alpha_mult = dag_notears_alpha_mult,
+    dag_algorithm = dag_algorithm,
     dag_score = dag_score,
     dag_strength_threshold = dag_strength_threshold,
     dag_direction_threshold = dag_direction_threshold,
@@ -180,7 +218,9 @@ cast_batch <- function(species_list,
     screen_num_trees = screen_num_trees,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
     do_cate = do_cate, cate_top_n = cate_top_n,
-    cate_n_trees = cate_n_trees
+    cate_n_trees = cate_n_trees,
+    cate_hss_model = cate_hss_model,
+    cate_hss_threshold = cate_hss_threshold
   )
 
   run_one_species <- function(sp_name, sp_data, env_data, models,
@@ -203,13 +243,28 @@ cast_batch <- function(species_list,
       split <- cast_prepare(sp_data, train_fraction = cfg$train_fraction,
                             seed = seed_i)
 
-      dag <- cast_dag(split$train, R = cfg$dag_R,
-                       algorithm = cfg$dag_algorithm,
-                       score = cfg$dag_score,
-                       strength_threshold = cfg$dag_strength_threshold,
-                       direction_threshold = cfg$dag_direction_threshold,
-                       max_rows = cfg$dag_max_rows,
-                       seed = seed_i, verbose = FALSE)
+      dag <- cast_dag(
+        split$train,
+        R = cfg$dag_R,
+        algorithm = cfg$dag_algorithm,
+        score = cfg$dag_score,
+        strength_threshold = cfg$dag_strength_threshold,
+        direction_threshold = cfg$dag_direction_threshold,
+        max_rows = cfg$dag_max_rows,
+        seed = seed_i,
+        verbose = FALSE,
+        structure_method = cfg$dag_structure_method,
+        pc_alpha = cfg$dag_pc_alpha,
+        fci_alpha = cfg$dag_fci_alpha,
+        bidag_algorithm = cfg$dag_bidag_algorithm,
+        bidag_iterations = cfg$dag_bidag_iterations,
+        notears_lambda = cfg$dag_notears_lambda,
+        notears_max_iter = cfg$dag_notears_max_iter,
+        notears_lr = cfg$dag_notears_lr,
+        notears_tol = cfg$dag_notears_tol,
+        notears_rho_init = cfg$dag_notears_rho_init,
+        notears_alpha_mult = cfg$dag_notears_alpha_mult
+      )
 
       ate <- cast_ate(split$train, K = cfg$ate_K,
                        alpha = cfg$ate_alpha,
@@ -315,11 +370,30 @@ cast_batch <- function(species_list,
 
       if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
         for (cv in cate_result$variables) {
-          p <- tryCatch(
-            plot(cate_result, variable = cv, species = sp_name,
-                 basemap = "world", legend_position = "bottom"),
-            error = function(e) NULL
-          )
+          p <- tryCatch({
+            pm <- cfg$cate_hss_model
+            if (!is.null(pm) && !is.null(pred_result) &&
+                pm %in% pred_result$models) {
+              plot(
+                cate_result,
+                variable = cv,
+                species = sp_name,
+                basemap = "world",
+                legend_position = "bottom",
+                hss_predict = pred_result,
+                hss_model = pm,
+                hss_threshold = cfg$cate_hss_threshold
+              )
+            } else {
+              plot(
+                cate_result,
+                variable = cv,
+                species = sp_name,
+                basemap = "world",
+                legend_position = "bottom"
+              )
+            }
+          }, error = function(e) NULL)
           save_fig(p, sprintf("CATE_%s.png", cv), w = 14, h = 8)
         }
       }

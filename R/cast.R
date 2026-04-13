@@ -14,8 +14,19 @@
 #'   `"mlp_ate"`, `"mlp"`, `"rf"`, `"maxent"`, `"brt"`. Default is
 #'   `c("cast", "rf", "maxent", "brt")`.
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
-#' @param n_bootstrap Integer. Number of bootstrap replicates for DAG. Default
-#'   `100`.
+#' @param n_bootstrap Integer. Number of bootstrap replicates for DAG when
+#'   `dag_structure_method = "bootstrap_hc"`. Default `100`.
+#' @param dag_structure_method Character passed to [cast_dag()] as
+#'   `structure_method`. Default `"bootstrap_hc"`. Alternatives: `"pc"`,
+#'   `"fci"`, `"bidag_bge"`, `"notears_linear"`.
+#' @param dag_pc_alpha,dag_fci_alpha Significance levels for PC / FCI.
+#' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG options.
+#' @param dag_notears_lambda NOTEARS L1 penalty; passed to \code{cast_dag()}.
+#' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
+#' @param dag_notears_lr Adam learning rate for NOTEARS.
+#' @param dag_notears_tol Acyclicity tolerance for NOTEARS.
+#' @param dag_notears_rho_init Initial augmented-Lagrangian rho for NOTEARS.
+#' @param dag_notears_alpha_mult Rho multiplier (every 100 steps) for NOTEARS.
 #' @param strength_threshold Numeric. Minimum edge strength. Default `0.7`.
 #' @param direction_threshold Numeric. Minimum direction consistency. Default
 #'   `0.6`.
@@ -49,6 +60,17 @@ cast <- function(species_data,
                  models = c("cast", "rf", "maxent", "brt"),
                  train_fraction = 0.7,
                  n_bootstrap = 100L,
+                 dag_structure_method = "bootstrap_hc",
+                 dag_pc_alpha = 0.05,
+                 dag_fci_alpha = 0.05,
+                 dag_bidag_algorithm = "order",
+                 dag_bidag_iterations = NULL,
+                 dag_notears_lambda = 0.03,
+                 dag_notears_max_iter = 2000L,
+                 dag_notears_lr = 0.02,
+                 dag_notears_tol = 1e-3,
+                 dag_notears_rho_init = 0.1,
+                 dag_notears_alpha_mult = 1.01,
                  strength_threshold = 0.7,
                  direction_threshold = 0.6,
                  ate_folds = 2L,
@@ -86,7 +108,19 @@ cast <- function(species_data,
     R = n_bootstrap,
     strength_threshold = strength_threshold,
     direction_threshold = direction_threshold,
-    seed = seed, verbose = verbose
+    seed = seed,
+    verbose = verbose,
+    structure_method = dag_structure_method,
+    pc_alpha = dag_pc_alpha,
+    fci_alpha = dag_fci_alpha,
+    bidag_algorithm = dag_bidag_algorithm,
+    bidag_iterations = dag_bidag_iterations,
+    notears_lambda = dag_notears_lambda,
+    notears_max_iter = dag_notears_max_iter,
+    notears_lr = dag_notears_lr,
+    notears_tol = dag_notears_tol,
+    notears_rho_init = dag_notears_rho_init,
+    notears_alpha_mult = dag_notears_alpha_mult
   )
 
   # === Step 3: ATE Estimation ===

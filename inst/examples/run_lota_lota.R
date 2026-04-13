@@ -10,6 +10,13 @@
 #   2. RiverATLAS v1.0 regional shapefiles (one per study region)
 #      Download from: https://www.hydrosheds.org/products/riveratlas
 #
+# ── MULTI-SPECIES (folder of occurrence CSVs) ───────────────────────────────
+# Set OCC_CSV_DIR to a directory of GBIF-style CSVs (one species per file).
+# Recommended: run cast_batch() on a *named list* of already-prepared
+# data.frames (see inst/examples/run_multi_species.R), or launch one
+# subprocess per species with this script after setting OCC_CSV and OUT_DIR
+# per species. PARALLEL_SPECIES + future.apply runs separate Rscript calls.
+#
 # ── WORKFLOW ─────────────────────────────────────────────────────────────────
 #   Phase 1 — Data Preparation (from raw CSV):
 #     Load occurrences → Load RiverATLAS shapefiles → Snap to reaches
@@ -33,8 +40,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Raw occurrence data ──────────────────────────────────────────────────────
-# Your GBIF CSV must have: taxon, longitude, latitude, occurrenceStatus
-OCC_CSV  <- "E:/Package/testFish/Lota_lota.csv"
+# Single species: set OCC_CSV to one GBIF-style CSV (taxon, longitude, latitude,
+# occurrenceStatus). Multi-species: set OCC_CSV_DIR to a folder where each
+# *.csv is one species (file name without extension = species tag, e.g.
+# Lota_lota.csv). Leave OCC_CSV_DIR NULL for the classic single-species run.
+OCC_CSV     <- "E:/Package/testFish/Lota_lota.csv"
+OCC_CSV_DIR <- NULL
+# Optional filter when using OCC_CSV_DIR (character vector of stems, or NULL)
+SPECIES_FILTER <- NULL
+# Parallel species (requires future.apply; each species runs in a separate R process)
+PARALLEL_SPECIES   <- FALSE
+N_PARALLEL_WORKERS <- 2L
 
 # ── RiverATLAS shapefiles ───────────────────────────────────────────────────
 # Each region file: RiverATLAS_v10_<region>.shp
@@ -121,8 +137,45 @@ DAG_SCORE               <- "bic-g"
 DAG_STRENGTH_THRESHOLD  <- 0.7
 DAG_DIRECTION_THRESHOLD <- 0.6
 DAG_MAX_ROWS            <- 8000L
+# cast_dag() structure_method: "bootstrap_hc" | "pc" | "fci" | "bidag_bge" | "notears_linear"
+DAG_STRUCTURE_METHOD    <- "bootstrap_hc"
+DAG_PC_ALPHA            <- 0.05
+DAG_FCI_ALPHA           <- 0.05
+DAG_BIDAG_ALGORITHM     <- "order"
+DAG_BIDAG_ITERATIONS    <- NULL
+DAG_NOTEARS_LAMBDA      <- 0.03
+DAG_NOTEARS_MAX_ITER    <- 2000L
+DAG_NOTEARS_LR          <- 0.02
+DAG_NOTEARS_TOL         <- 1e-3
+DAG_NOTEARS_RHO_INIT    <- 0.1
+DAG_NOTEARS_ALPHA_MULT  <- 1.01
 
 SEED <- 2024L
+
+# ── cast_prepare() ────────────────────────────────────────────────────────────
+TRAIN_FRACTION <- 0.7
+
+# ── cast_ate() ───────────────────────────────────────────────────────────────
+ATE_K              <- 5L
+ATE_QUANTILE_CUTS  <- c(0.25, 0.50, 0.75)
+ATE_BONFERRONI     <- TRUE
+ATE_NUM_TREES      <- 300L
+ATE_PARALLEL       <- TRUE
+
+# ── cast_screen() ────────────────────────────────────────────────────────────
+SCREEN_MIN_VARS     <- 5L
+SCREEN_MIN_FRACTION <- 0.5
+SCREEN_NUM_TREES    <- 300L
+
+# ── cast_fit() ───────────────────────────────────────────────────────────────
+FIT_N_EPOCHS   <- 400L
+FIT_N_RUNS     <- 5L
+FIT_PATIENCE   <- 40L
+FIT_TUNE_GRID  <- TRUE
+
+# ── CATE maps: mask by HSS (plot.cast_cate) when global predictions exist ────
+CATE_HSS_MODEL     <- "cast"
+CATE_HSS_THRESHOLD <- 0.1
 
 # ── Figure output ────────────────────────────────────────────────────────────
 FIG_DPI        <- 600L
@@ -178,7 +231,8 @@ cat("=============================================================\n")
 #  PHASE 1: DATA PREPARATION  (raw GBIF CSV → castSDM training data)
 # ==========================================================================
 
-TRAIN_CSV <- file.path(OUT_DIR, "CAST_Lota_lota.csv")
+SPECIES_TAG <- tools::file_path_sans_ext(basename(OCC_CSV))
+TRAIN_CSV <- file.path(OUT_DIR, paste0("CAST_", SPECIES_TAG, ".csv"))
 
 if (file.exists(TRAIN_CSV)) {
   # ── Fast path: training data already prepared ─────────────────────────────
@@ -440,7 +494,7 @@ message(sprintf("  VIF: %d -> %d variables retained",
 message("\n[3/9] cast_prepare(): data split...")
 
 split <- checkpoint(file.path(MODEL_DIR, "split.rds"), {
-  cast_prepare(cast_data, train_fraction = 0.7, seed = SEED,
+  cast_prepare(cast_data, train_fraction = TRAIN_FRACTION, seed = SEED,
                env_vars = env_vars_screened)
 })
 
@@ -459,15 +513,26 @@ message("\n[4/9] cast_dag(): learning causal DAG...")
 dag_result <- checkpoint(file.path(MODEL_DIR, "dag_result.rds"), {
   cast_dag(
     train_data,
-    env_vars            = split$env_vars,
-    R                   = DAG_R,
-    algorithm           = DAG_ALGORITHM,
-    score               = DAG_SCORE,
-    strength_threshold  = DAG_STRENGTH_THRESHOLD,
-    direction_threshold = DAG_DIRECTION_THRESHOLD,
-    max_rows            = DAG_MAX_ROWS,
-    seed                = SEED,
-    verbose             = TRUE
+    env_vars              = split$env_vars,
+    R                     = DAG_R,
+    algorithm             = DAG_ALGORITHM,
+    score                 = DAG_SCORE,
+    strength_threshold    = DAG_STRENGTH_THRESHOLD,
+    direction_threshold   = DAG_DIRECTION_THRESHOLD,
+    max_rows              = DAG_MAX_ROWS,
+    seed                  = SEED,
+    verbose               = TRUE,
+    structure_method      = DAG_STRUCTURE_METHOD,
+    pc_alpha              = DAG_PC_ALPHA,
+    fci_alpha             = DAG_FCI_ALPHA,
+    bidag_algorithm       = DAG_BIDAG_ALGORITHM,
+    bidag_iterations      = DAG_BIDAG_ITERATIONS,
+    notears_lambda        = DAG_NOTEARS_LAMBDA,
+    notears_max_iter      = DAG_NOTEARS_MAX_ITER,
+    notears_lr            = DAG_NOTEARS_LR,
+    notears_tol           = DAG_NOTEARS_TOL,
+    notears_rho_init      = DAG_NOTEARS_RHO_INIT,
+    notears_alpha_mult    = DAG_NOTEARS_ALPHA_MULT
   )
 })
 
@@ -484,11 +549,11 @@ message("\n[5/9] cast_ate(): DML ATE estimation...")
 ate_result <- checkpoint(file.path(MODEL_DIR, "ate_result.rds"), {
   cast_ate(train_data,
            variables     = dag_result$nodes,
-           K             = 5L,
-           quantile_cuts = c(0.25, 0.50, 0.75),
-           bonferroni    = TRUE,
-           num_trees     = 300L,
-           parallel      = TRUE,
+           K             = ATE_K,
+           quantile_cuts = ATE_QUANTILE_CUTS,
+           bonferroni    = ATE_BONFERRONI,
+           num_trees     = ATE_NUM_TREES,
+           parallel      = ATE_PARALLEL,
            seed          = SEED,
            verbose       = TRUE)
 })
@@ -505,7 +570,16 @@ message(sprintf("  ATE: %d / %d variables significant (Bonferroni)",
 message("\n[6/9] cast_screen() + cast_roles()...")
 
 screened <- checkpoint(file.path(MODEL_DIR, "screened_result.rds"), {
-  cast_screen(dag_result, ate_result, train_data, seed = SEED, verbose = TRUE)
+  cast_screen(
+    dag_result,
+    ate_result,
+    train_data,
+    min_vars     = SCREEN_MIN_VARS,
+    min_fraction = SCREEN_MIN_FRACTION,
+    num_trees    = SCREEN_NUM_TREES,
+    seed         = SEED,
+    verbose      = TRUE
+  )
 })
 
 roles_data <- checkpoint(file.path(MODEL_DIR, "roles_result.rds"), {
@@ -532,10 +606,10 @@ fit_result <- checkpoint(file.path(MODEL_DIR, "fit_result.rds"), {
     models    = MODELS,
     seed      = SEED,
     verbose   = TRUE,
-    n_epochs  = 400L,
-    n_runs    = 5L,
-    patience  = 40L,
-    tune_grid = TRUE
+    n_epochs  = FIT_N_EPOCHS,
+    n_runs    = FIT_N_RUNS,
+    patience  = FIT_PATIENCE,
+    tune_grid = FIT_TUNE_GRID
   )
 })
 
@@ -605,7 +679,7 @@ save_plot <- function(plot_obj, filename, width = 12, height = 8,
 if (requireNamespace("ggraph", quietly = TRUE) &&
     requireNamespace("igraph", quietly = TRUE)) {
   p_dag <- plot(dag_result, roles = roles_data, screen = screened,
-                species = "Lota_lota")
+                species = SPECIES_TAG)
   save_plot(p_dag, "causal_dag.png", width = 16, height = 12)
 }
 
@@ -650,9 +724,9 @@ if (!is.null(PREDICT_REGIONS) && length(PREDICT_REGIONS) > 0) {
 
   for (reg in PREDICT_REGIONS) {
     out_pred     <- file.path(PRED_DIR,
-                              paste0("Lota_lota_HSS_", reg, ".csv"))
+                              paste0(SPECIES_TAG, "_HSS_", reg, ".csv"))
     out_pred_rds <- file.path(PRED_DIR,
-                              paste0("Lota_lota_pred_", reg, ".rds"))
+                              paste0(SPECIES_TAG, "_pred_", reg, ".rds"))
 
     if (!file.exists(out_pred)) {
       env_grid_file <- file.path(OUT_DIR,
@@ -790,8 +864,20 @@ if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
     fig_name <- paste0("cate_", cv, ".png")
     if (file.exists(file.path(FIG_DIR, fig_name))) next
     p_cate <- tryCatch(
-      plot(cate_result, variable = cv, species = "Lota_lota",
-           basemap = "world", legend_position = "bottom"),
+      plot(
+        cate_result,
+        variable = cv,
+        species = SPECIES_TAG,
+        basemap = "world",
+        legend_position = "bottom",
+        hss_predict = if (exists("global_pred_obj") && !is.null(global_pred_obj)) {
+          global_pred_obj
+        } else {
+          NULL
+        },
+        hss_model = CATE_HSS_MODEL,
+        hss_threshold = CATE_HSS_THRESHOLD
+      ),
       error = function(e) {
         message(sprintf("  [skip] CATE %s: %s", cv, conditionMessage(e)))
         NULL
@@ -818,7 +904,7 @@ message("\n[Global] Merging regional predictions...")
 
 # ── 12a. Global HSS maps ─────────────────────────────────────────────────────
 hss_parts <- lapply(PREDICT_REGIONS, function(reg) {
-  f <- file.path(PRED_DIR, paste0("Lota_lota_HSS_", reg, ".csv"))
+  f <- file.path(PRED_DIR, paste0(SPECIES_TAG, "_HSS_", reg, ".csv"))
   if (!file.exists(f)) return(NULL)
   data.table::fread(f, data.table = FALSE)
 })
@@ -838,7 +924,7 @@ if (length(hss_parts) > 0 && requireNamespace("sf", quietly = TRUE)) {
     fig_name <- sprintf("HSS_GLOBAL_%s.png", mdl)
     p_glob <- tryCatch(
       plot(global_pred_obj, model = mdl, basemap = "world",
-           title = sprintf("Lota lota - Global HSS (%s)", toupper(mdl))),
+           title = sprintf("%s - Global HSS (%s)", SPECIES_TAG, toupper(mdl))),
       error = function(e) {
         message(sprintf("  [skip] %s: %s", fig_name, conditionMessage(e)))
         NULL
@@ -855,8 +941,20 @@ if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
   for (cv in cate_result$variables) {
     fig_name <- sprintf("CATE_GLOBAL_%s.png", cv)
     p_cate_glob <- tryCatch(
-      plot(cate_result, variable = cv, species = "Lota_lota",
-           basemap = "world", legend_position = "bottom"),
+      plot(
+        cate_result,
+        variable = cv,
+        species = SPECIES_TAG,
+        basemap = "world",
+        legend_position = "bottom",
+        hss_predict = if (exists("global_pred_obj") && !is.null(global_pred_obj)) {
+          global_pred_obj
+        } else {
+          NULL
+        },
+        hss_model = CATE_HSS_MODEL,
+        hss_threshold = CATE_HSS_THRESHOLD
+      ),
       error = function(e) {
         message(sprintf("  [skip] %s: %s", fig_name, conditionMessage(e)))
         NULL
@@ -883,7 +981,7 @@ if (!is.null(global_pred_obj) && length(global_pred_obj$models) >= 2 &&
 
   if (!is.null(global_cons)) {
     print(global_cons)
-    p_cons <- plot(global_cons, species = "Lota_lota")
+    p_cons <- plot(global_cons, species = SPECIES_TAG)
     save_plot(p_cons, "model_consistency_GLOBAL.png",
               width = 16, height = 5.5, dpi = FIG_DPI_GLOBAL)
   }
@@ -895,7 +993,7 @@ if (!is.null(global_pred_obj) && length(global_pred_obj$models) >= 2 &&
 # ─────────────────────────────────────────────────────────────────────────────
 
 cat("\n", strrep("=", 60), "\n")
-cat("castSDM modeling complete: Lota lota (Burbot)\n")
+cat("castSDM modeling complete:", SPECIES_TAG, "\n")
 cat(strrep("=", 60), "\n\n")
 cat(sprintf("  Models          : %s\n", paste(MODELS, collapse = ", ")))
 cat(sprintf("  Active env vars : %d (after VIF + cast_screen)\n",

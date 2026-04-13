@@ -15,6 +15,17 @@ cast_batch(
   seed = NULL,
   verbose = TRUE,
   dag_R = 100L,
+  dag_structure_method = "bootstrap_hc",
+  dag_pc_alpha = 0.05,
+  dag_fci_alpha = 0.05,
+  dag_bidag_algorithm = "order",
+  dag_bidag_iterations = NULL,
+  dag_notears_lambda = 0.03,
+  dag_notears_max_iter = 2000L,
+  dag_notears_lr = 0.02,
+  dag_notears_tol = 0.001,
+  dag_notears_rho_init = 0.1,
+  dag_notears_alpha_mult = 1.01,
   dag_algorithm = "hc",
   dag_score = "bic-g",
   dag_strength_threshold = 0.7,
@@ -35,6 +46,8 @@ cast_batch(
   do_cate = TRUE,
   cate_top_n = 3L,
   cate_n_trees = 1000L,
+  cate_hss_model = "cast",
+  cate_hss_threshold = 0.1,
   ...
 )
 }
@@ -66,6 +79,25 @@ outputs. Default \code{"castSDM_batch_output"}.}
 
 \item{dag_R}{Integer. Number of DAG bootstrap replicates.
 Default \code{100}.}
+
+\item{dag_structure_method}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as
+\code{structure_method}. Default \code{"bootstrap_hc"}.}
+
+\item{dag_pc_alpha, dag_fci_alpha}{PC/FCI alpha levels. Defaults \code{0.05}.}
+
+\item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
+
+\item{dag_notears_lambda}{NOTEARS L1 penalty (see \code{cast_dag()}).}
+
+\item{dag_notears_max_iter}{Maximum NOTEARS optimization steps.}
+
+\item{dag_notears_lr}{Adam learning rate for NOTEARS.}
+
+\item{dag_notears_tol}{Acyclicity tolerance for NOTEARS.}
+
+\item{dag_notears_rho_init}{Initial augmented-Lagrangian rho for NOTEARS.}
+
+\item{dag_notears_alpha_mult}{Rho multiplier for NOTEARS.}
 
 \item{dag_algorithm}{Character. Structure learning algorithm
 (\code{"hc"}). Default \code{"hc"}.}
@@ -123,6 +155,10 @@ Default \code{3}.}
 
 \item{cate_n_trees}{Integer. Trees in each causal forest.
 Default \code{1000}.}
+
+\item{cate_hss_model, cate_hss_threshold}{When saving CATE maps, pass to
+\code{\link[=plot.cast_cate]{plot.cast_cate()}} to mask by \verb{HSS_<model> >= threshold}. Defaults
+\code{cast} and \code{0.1}. Set \code{cate_hss_model = NULL} to disable masking.}
 
 \item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}} for
 model hyper-parameter tuning (e.g., \code{n_epochs}, \code{n_runs},

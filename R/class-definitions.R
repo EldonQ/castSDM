@@ -14,7 +14,8 @@
 #' @keywords internal
 #' @export
 new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
-                         direction_threshold, score = "bic-g") {
+                         direction_threshold, score = "bic-g",
+                         structure_method = "bootstrap_hc") {
   structure(
     list(
       edges = edges,
@@ -22,7 +23,8 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
       boot_R = boot_R,
       strength_threshold = strength_threshold,
       direction_threshold = direction_threshold,
-      score = score
+      score = score,
+      structure_method = structure_method
     ),
     class = "cast_dag"
   )

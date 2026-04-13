@@ -54,16 +54,60 @@ cat("训练集:", nrow(split$train), "| 测试集:", nrow(split$test), "\n")
 cat("环境变量:", paste(split$env_vars, collapse = ", "), "\n")
 
 # ── Step 2: DAG 因果结构学习 ─────────────────────────────────────────────────
-# R=50 加速测试; 正式分析用 R=100+
-dag <- cast_dag(split$train, R = 50, seed = 42)
+# structure_method 可选:
+#   "bootstrap_hc"(默认), "pc", "fci", "bidag_bge"(需 BiDAG), "notears_linear"(需 torch)
+# 下面展示 cast_dag() 主要参数; R 仅对 bootstrap_hc 有效。
+dag <- cast_dag(
+  split$train,
+  response              = "presence",
+  env_vars              = NULL,
+  R                     = 50L,
+  algorithm             = "hc",
+  score                 = "bic-g",
+  strength_threshold      = 0.7,
+  direction_threshold     = 0.6,
+  max_rows              = 8000L,
+  seed                  = 42L,
+  verbose               = TRUE,
+  structure_method      = "bootstrap_hc",
+  pc_alpha              = 0.05,
+  fci_alpha             = 0.05,
+  bidag_algorithm       = "order",
+  bidag_iterations      = NULL,
+  notears_lambda        = 0.03,
+  notears_max_iter      = 2000L,
+  notears_lr            = 0.02,
+  notears_tol           = 1e-3,
+  notears_rho_init      = 0.1,
+  notears_alpha_mult    = 1.01
+)
 print(dag)
 
 # ── Step 3: ATE 因果效应估计 ─────────────────────────────────────────────────
-ate <- cast_ate(split$train, K = 5, num_trees = 300L, parallel= TRUE, seed = 42)
+ate <- cast_ate(
+  split$train,
+  variables      = NULL,
+  K              = 5L,
+  alpha          = 0.05,
+  num_trees      = 300L,
+  quantile_cuts  = c(0.25, 0.5, 0.75),
+  bonferroni     = TRUE,
+  parallel       = TRUE,
+  seed           = 42L,
+  verbose        = TRUE
+)
 print(ate)
 
 # ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
-screen <- cast_screen(dag, ate, split$train, num_trees = 500L, seed = 42)
+screen <- cast_screen(
+  dag, ate, split$train,
+  response     = "presence",
+  min_vars      = 5L,
+  min_fraction  = 0.5,
+  num_trees     = 500L,
+  seed          = 42L,
+  verbose       = TRUE
+)
 print(screen)
 
 # ── Step 5: 因果角色分配 ─────────────────────────────────────────────────────
@@ -114,9 +158,76 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       requireNamespace("patchwork", quietly = TRUE)) {
     consistency <- cast_consistency(pred)
     print(consistency)
-    p_cons <- plot(consistency, species = "Ovis_ammon")
+    p_cons <- plot(
+      consistency,
+      species = "Ovis_ammon",
+      font_family = "sans",
+      use_bold = TRUE,
+      font_base = 11L,
+      font_main_title = 14L,
+      font_panel_title = 11L,
+      font_axis = 8L,
+      font_cell_value = 3.5,
+      value_decimals = 3L,
+      tile_linewidth = 0.5,
+      text_white_above = 0.7
+    )
     print(p_cons)
     # ggsave("ovis_consistency.png", p_cons, width = 16, height = 5.5, dpi = 300)
+  }
+
+  # 空间 CATE + 按 HSS 截断出图 (需 grf; HSS 模型默认 cast, 阈值 0.1)
+  if (requireNamespace("grf", quietly = TRUE)) {
+    cate <- cast_cate(
+      split$train,
+      variables    = NULL,
+      ate            = ate,
+      screen         = screen,
+      response       = "presence",
+      top_n          = 2L,
+      n_trees        = 300L,
+      predict_data   = china_env_grid,
+      seed           = 42L,
+      verbose        = FALSE
+    )
+    if (!is.null(cate)) {
+      for (v in cate$variables) {
+        pc <- plot(
+          cate,
+          variable         = v,
+          species          = "Ovis_ammon",
+          basemap          = "china",
+          var_labels       = var_labels,
+          point_size       = 0.45,
+          legend_position  = "bottom",
+          hss_predict      = pred,
+          hss_model        = "cast",
+          hss_threshold    = 0.1
+        )
+        print(pc)
+      }
+    }
+  }
+
+  # XGBoost + SHAP 可解释性 (需 xgboost; 与 SDM 共用 presence + 环境变量)
+  if (requireNamespace("xgboost", quietly = TRUE)) {
+    sh <- cast_shap_xgb(
+      split$train,
+      response           = "presence",
+      env_vars           = NULL,
+      screen             = screen,
+      nrounds            = 200L,
+      max_depth          = 6L,
+      eta                = 0.05,
+      subsample          = 0.8,
+      colsample_bytree   = 0.8,
+      test_fraction      = 0.2,
+      seed               = 42L,
+      verbose            = FALSE
+    )
+    print(plot(sh, type = "interaction_network", top_n = 15L))
+    print(plot(sh, type = "waterfall", top_n = 15L))
+    # cast_shap_write_csv(sh, file.path(getwd(), "shap_export_ovis"))
   }
 }
 
@@ -131,9 +242,60 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 # result <- cast(
 #   species_data = ovis_ammon,
 #   env_data = china_env_grid,
-#   models = c("rf", "maxent", "brt"),  # 不含 cast 以避免 torch 依赖
-#   n_bootstrap = 50,
-#   seed = 42
+#   models = c("rf", "maxent", "brt"),
+#   train_fraction = 0.7,
+#   n_bootstrap = 50L,
+#   dag_structure_method = "bootstrap_hc",
+#   dag_pc_alpha = 0.05, dag_fci_alpha = 0.05,
+#   dag_bidag_algorithm = "order", dag_bidag_iterations = NULL,
+#   dag_notears_lambda = 0.03, dag_notears_max_iter = 2000L,
+#   dag_notears_lr = 0.02, dag_notears_tol = 1e-3,
+#   dag_notears_rho_init = 0.1, dag_notears_alpha_mult = 1.01,
+#   strength_threshold = 0.7, direction_threshold = 0.6,
+#   ate_folds = 2L, ate_alpha = 0.05, screen_min_vars = 5L,
+#   do_cv = TRUE, cv_k = 5L, cv_block_method = "grid",
+#   do_cate = TRUE, cate_top_n = 3L,
+#   seed = 42L, verbose = TRUE
 # )
 # summary(result)
 # plot(result, var_labels = var_labels)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 方式 C: 不同 DAG structure_method 各跑一遍并保存图 (与当次 ATE/screen/roles 衔接)
+# ══════════════════════════════════════════════════════════════════════════════
+# 将 RUN_DAG_METHOD_SHOWCASE 改为 TRUE 可执行 (除 bootstrap 外部分依赖 BiDAG/torch)
+RUN_DAG_METHOD_SHOWCASE <- FALSE
+
+if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
+  out_d <- file.path(getwd(), "figures_ovis_dag_by_method")
+  dir.create(out_d, FALSE, TRUE)
+  methods <- c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear")
+  for (sm in methods) {
+    dm <- tryCatch(
+      cast_dag(
+        split$train,
+        R = 40L,
+        seed = 42L,
+        verbose = FALSE,
+        structure_method = sm
+      ),
+      error = function(e) {
+        message("cast_dag skipped (", sm, "): ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(dm)) next
+    am <- cast_ate(split$train, variables = dm$nodes, K = 5L,
+                   num_trees = 200L, parallel = FALSE, seed = 42L,
+                   verbose = FALSE)
+    smc <- cast_screen(dm, am, split$train, num_trees = 300L,
+                       seed = 42L, verbose = FALSE)
+    rm <- cast_roles(smc, dm)
+    p <- plot(dm, roles = rm, screen = smc, var_labels = var_labels,
+              species = "Ovis_ammon")
+    ggplot2::ggsave(file.path(out_d, paste0("dag_", sm, ".png")),
+                     p, width = 12, height = 9, dpi = 200)
+  }
+  message("Saved under: ", normalizePath(out_d, winslash = "/", mustWork = FALSE))
+}

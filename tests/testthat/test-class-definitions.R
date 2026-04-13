@@ -10,6 +10,7 @@ test_that("cast_dag constructor creates correct class", {
   expect_s3_class(dag, "cast_dag")
   expect_equal(nrow(dag$edges), 1)
   expect_equal(dag$boot_R, 100L)
+  expect_equal(dag$structure_method, "bootstrap_hc")
 })
 
 test_that("cast_ate constructor creates correct class", {

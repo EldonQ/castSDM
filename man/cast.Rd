@@ -10,6 +10,17 @@ cast(
   models = c("cast", "rf", "maxent", "brt"),
   train_fraction = 0.7,
   n_bootstrap = 100L,
+  dag_structure_method = "bootstrap_hc",
+  dag_pc_alpha = 0.05,
+  dag_fci_alpha = 0.05,
+  dag_bidag_algorithm = "order",
+  dag_bidag_iterations = NULL,
+  dag_notears_lambda = 0.03,
+  dag_notears_max_iter = 2000L,
+  dag_notears_lr = 0.02,
+  dag_notears_tol = 0.001,
+  dag_notears_rho_init = 0.1,
+  dag_notears_alpha_mult = 1.01,
   strength_threshold = 0.7,
   direction_threshold = 0.6,
   ate_folds = 2L,
@@ -39,8 +50,28 @@ the same environmental columns as \code{species_data}.}
 
 \item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
 
-\item{n_bootstrap}{Integer. Number of bootstrap replicates for DAG. Default
-\code{100}.}
+\item{n_bootstrap}{Integer. Number of bootstrap replicates for DAG when
+\code{dag_structure_method = "bootstrap_hc"}. Default \code{100}.}
+
+\item{dag_structure_method}{Character passed to \code{\link[=cast_dag]{cast_dag()}} as
+\code{structure_method}. Default \code{"bootstrap_hc"}. Alternatives: \code{"pc"},
+\code{"fci"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
+
+\item{dag_pc_alpha, dag_fci_alpha}{Significance levels for PC / FCI.}
+
+\item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG options.}
+
+\item{dag_notears_lambda}{NOTEARS L1 penalty; passed to \code{cast_dag()}.}
+
+\item{dag_notears_max_iter}{Maximum NOTEARS optimization steps.}
+
+\item{dag_notears_lr}{Adam learning rate for NOTEARS.}
+
+\item{dag_notears_tol}{Acyclicity tolerance for NOTEARS.}
+
+\item{dag_notears_rho_init}{Initial augmented-Lagrangian rho for NOTEARS.}
+
+\item{dag_notears_alpha_mult}{Rho multiplier (every 100 steps) for NOTEARS.}
 
 \item{strength_threshold}{Numeric. Minimum edge strength. Default \code{0.7}.}
 

@@ -2,7 +2,7 @@
 % Please edit documentation in R/dag-learn.R
 \name{cast_dag}
 \alias{cast_dag}
-\title{Learn Causal DAG via Bootstrap Hill-Climbing}
+\title{Learn Causal DAG (Multiple Structure Learning Methods)}
 \usage{
 cast_dag(
   data,
@@ -15,7 +15,18 @@ cast_dag(
   direction_threshold = 0.6,
   max_rows = 8000L,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  structure_method = c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear"),
+  pc_alpha = 0.05,
+  fci_alpha = 0.05,
+  bidag_algorithm = c("order", "orderIter"),
+  bidag_iterations = NULL,
+  notears_lambda = 0.03,
+  notears_max_iter = 2000L,
+  notears_lr = 0.02,
+  notears_tol = 0.001,
+  notears_rho_init = 0.1,
+  notears_alpha_mult = 1.01
 )
 }
 \arguments{
@@ -27,67 +38,82 @@ environmental variables. Must be numeric (no factors).}
 
 \item{env_vars}{Character vector or \code{NULL}. Environmental variable names
 to include in DAG learning. When \code{NULL} (default), all numeric columns
-in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used. \strong{Always pass
-this explicitly} when \code{data} contains columns beyond the intended
-predictors (e.g., after \code{\link[=cast_prepare]{cast_prepare()}}, which preserves all original
-columns). Typical usage: \code{env_vars = split$env_vars}.}
+in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
 
-\item{R}{Integer. Number of bootstrap replicates. Default \code{100}.}
+\item{R}{Integer. Number of bootstrap replicates for \code{structure_method = "bootstrap_hc"}. Ignored otherwise (stored as \code{NA} for documentation).}
 
-\item{algorithm}{Character. Structure learning algorithm. Default \code{"hc"}
-(Hill-Climbing). See \code{\link[bnlearn:arc.strength]{bnlearn::boot.strength()}} for options.}
+\item{algorithm}{Character. Score-based algorithm passed to
+\code{bnlearn::boot.strength()} when \code{structure_method = "bootstrap_hc"}.
+Default \code{"hc"}.}
 
-\item{score}{Character. Scoring criterion. Default \code{"bic-g"} (BIC for
-Gaussian data). Note: the DAG is learned on \strong{environmental variables
-only} (presence excluded), so \code{bic-g} is appropriate for the continuous
-predictors.}
+\item{score}{Character. Scoring criterion for bootstrap HC. Default \code{"bic-g"}.}
 
-\item{strength_threshold}{Numeric. Minimum edge strength (proportion of
-bootstrap replicates). Default \code{0.7}.}
+\item{strength_threshold}{Numeric. Minimum edge strength (bootstrap HC) or
+auxiliary threshold metadata for other methods. Default \code{0.7}.}
 
-\item{direction_threshold}{Numeric. Minimum direction consistency. Default
-\code{0.6}.}
+\item{direction_threshold}{Numeric. Minimum direction consistency (bootstrap
+HC only). Default \code{0.6}.}
 
-\item{max_rows}{Integer. Maximum rows for DAG learning; subsample if
-exceeded. Default \code{8000}.}
+\item{max_rows}{Integer. Maximum rows; subsample if exceeded. Default \code{8000}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed. Default \code{NULL}.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
+
+\item{structure_method}{Character. One of \code{"bootstrap_hc"} (default),
+\code{"pc"}, \code{"fci"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
+
+\item{pc_alpha}{Significance level for \code{bnlearn::pc()} (Gaussian CI test).
+Default \code{0.05}.}
+
+\item{fci_alpha}{Significance level for \code{bnlearn::fci()}. Default \code{0.05}.}
+
+\item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
+\code{"orderIter"}. Default \code{"order"}.}
+
+\item{bidag_iterations}{Optional integer MCMC iterations for BiDAG. \code{NULL}
+uses BiDAG defaults (data-driven).}
+
+\item{notears_lambda}{L1 penalty weight for \code{notears_linear}. Default \code{0.03}.}
+
+\item{notears_max_iter}{Maximum optimization steps. Default \code{2000}.}
+
+\item{notears_lr}{Adam learning rate. Default \code{0.02}.}
+
+\item{notears_tol}{Stop when acyclicity metric \verb{|h(W)| < notears_tol}.
+Default \code{1e-3}.}
+
+\item{notears_rho_init}{Initial augmented-Lagrangian rho. Default \code{0.1}.}
+
+\item{notears_alpha_mult}{Multiplier on rho each 100 steps. Default \code{1.01}.}
 }
 \value{
-A \link{cast_dag} object.
+A \code{cast_dag} object (\code{structure_method} is stored on the object).
 }
 \description{
-Discovers the causal structure among environmental variables using
-bootstrap-aggregated Hill-Climbing (HC). Edges are retained based on
-bootstrap strength and direction consistency thresholds.
+Discovers the causal structure among environmental variables. The default
+(\code{structure_method = "bootstrap_hc"}) uses bootstrap-aggregated
+Hill-Climbing as in the original CAST workflow. Alternative \strong{constraint-based}
+(\code{"pc"}, \code{"fci"}), \strong{Bayesian MAP search} via \pkg{BiDAG} (\code{"bidag_bge"},
+recommended for many variables), and \strong{continuous optimization} linear NOTEARS
+(\code{"notears_linear"}, requires \pkg{torch}) are also available.
 }
 \details{
-\subsection{Why presence is excluded from DAG learning}{
-
-The DAG is learned on \strong{environmental variables only}, not on \code{presence}.
-The original design included \code{presence} in the network but then discarded
-all edges touching it. This was inconsistent: the \code{bic-g} (Gaussian BIC)
-score treats \code{presence} as a continuous variable, corrupting edge weights
-involving nearby nodes. Excluding \code{presence} from the start keeps the
-Gaussian assumption valid for the continuous environmental predictors
-and avoids spurious confounding of the env-env edge strengths.
-
-The bootstrap procedure (Friedman et al. 1999) provides confidence measures:
-\itemize{
-\item \strong{Strength}: Proportion of bootstrap replicates containing the edge.
-\item \strong{Direction}: Proportion of times the edge points from A -> B.
-}
-}
+The DAG is always learned on \strong{environmental variables only} (presence
+excluded); see Details in previous versions for rationale.
 }
 \references{
-Pearl, J. (2000). \emph{Causality: Models, Reasoning, and Inference}.
-Cambridge University Press.
-
 Scutari, M. (2010). Learning Bayesian Networks with the bnlearn R Package.
 \emph{Journal of Statistical Software}, 35(3), 1-22.
+
+Zheng, X., Aragam, B., Ravikumar, P., & Xing, E. P. (2018). DAGs with NO
+TEARS: Continuous Optimization for Structure Learning. \emph{NeurIPS}.
+
+Suter, P., Kuipers, J., Moffa, G., & Beerenwinkel, N. (2023). Bayesian
+structure learning and sampling of Bayesian networks with the R package
+BiDAG. \emph{Journal of Statistical Software}, 105(9), 1-32.
 }
 \seealso{
-\code{\link[bnlearn:arc.strength]{bnlearn::boot.strength()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}}
+\pkg{bnlearn} (\code{boot.strength}, \code{pc}, \code{fci}),
+\pkg{BiDAG} (\code{learnBN}).
 }

@@ -4,12 +4,15 @@
 print.cast_dag <- function(x, ...) {
   n_edges <- if (is.null(x$edges)) 0L else nrow(x$edges)
   n_nodes <- length(x$nodes)
+  sm <- x$structure_method %||% "bootstrap_hc"
   cli::cli_h1("CAST DAG")
   cli::cli_ul(c(
+    "Method: {sm}",
     "Nodes: {n_nodes}",
     "Edges: {n_edges} (strength >= {x$strength_threshold})",
-    "Bootstrap replicates: {x$boot_R}",
-    "Score: {x$score}"
+    if (isTRUE(!is.na(x$boot_R))) "Bootstrap replicates: {x$boot_R}" else
+      "Bootstrap replicates: n/a (not used for this method)",
+    "Score / criterion label: {x$score}"
   ))
   invisible(x)
 }

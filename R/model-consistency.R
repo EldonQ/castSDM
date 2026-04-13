@@ -128,22 +128,62 @@ pearson_r <- function(p1, p2) {
 #'
 #' Generates a 1x3 panel of heatmap matrices showing pairwise Cosine
 #' similarity, Warren's I, and Pearson's r between all model pairs.
-#' Follows the fig8 Part C visualization style with annotated cell values
-#' and a YlGnBu color scale.
+#' Default typography and colour layout follow the high-resolution reference
+#' style used in `inst/examples/replot_model_consistency_from_rds.R` (shared
+#' colour scale via \pkg{patchwork}, framed vertical colour bar, larger axis
+#' fonts). All parameters are exposed so you can reproduce publication exports
+#' without sourcing the example script.
 #'
 #' @param x A `cast_consistency` object.
 #' @param species Optional character. Species name for the title.
+#' @param font_family Base font family (passed to ggplot2). Default `"sans"`.
+#' @param use_bold Logical. Use bold face for titles, axes, legend, and cell
+#'   values. Default `TRUE`.
+#' @param font_base Base theme size. Default `11`.
+#' @param font_main_title Outer patchwork title size. Default `14`.
+#' @param font_panel_title Panel title size. Default `11`.
+#' @param font_axis Axis label size (model names). Default `8`.
+#' @param font_cell_value Text size inside tiles. Default `3.5`.
+#' @param value_decimals Decimals printed in each cell. Default `3L`.
+#' @param tile_linewidth Grid line width between tiles. Default `0.5`.
+#' @param text_white_above Values above this threshold use white cell text.
+#'   Default `0.7`.
+#' @param consistency_colors Colours for the shared gradient (low to high).
+#' @param fill_limits Numeric vector of length 2, fill scale limits. Default
+#'   `c(0, 1)`.
+#' @param color_stops Positions in `[0, 1]` matching `consistency_colors`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object (or `patchwork` composite).
 #' @export
-plot.cast_consistency <- function(x, species = NULL, ...) {
+plot.cast_consistency <- function(x,
+                                  species = NULL,
+                                  font_family = "sans",
+                                  use_bold = TRUE,
+                                  font_base = 11L,
+                                  font_main_title = 14L,
+                                  font_panel_title = 11L,
+                                  font_axis = 8L,
+                                  font_cell_value = 3.5,
+                                  value_decimals = 3L,
+                                  tile_linewidth = 0.5,
+                                  text_white_above = 0.7,
+                                  consistency_colors = c(
+                                    "#F7FBFF", "#DEEBF7", "#C6DBEF",
+                                    "#9ECAE1", "#6BAED6", "#4292C6",
+                                    "#2171B5", "#084594"
+                                  ),
+                                  fill_limits = c(0, 1),
+                                  color_stops = seq(0, 1,
+                                                    length.out = length(
+                                                      consistency_colors
+                                                    )),
+                                  ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("patchwork", "for multi-panel layout")
 
   models <- x$models
   metrics_df <- x$metrics
-  n <- length(models)
 
   metric_defs <- list(
     list(key = "cosine_sim", label = "Cosine Similarity"),
@@ -151,13 +191,21 @@ plot.cast_consistency <- function(x, species = NULL, ...) {
     list(key = "pearson_r",  label = "Pearson's r")
   )
 
-  panels <- list()
+  face_plain_or_bold <- if (isTRUE(use_bold)) "bold" else "plain"
+
+  fmt_val <- function(v) {
+    ifelse(
+      is.na(v), "",
+      format(round(v, value_decimals), nsmall = value_decimals)
+    )
+  }
+
+  panels <- vector("list", length(metric_defs))
 
   for (mi in seq_along(metric_defs)) {
     mkey   <- metric_defs[[mi]]$key
     mlabel <- metric_defs[[mi]]$label
 
-    # Build symmetric matrix
     mat_df <- expand.grid(
       model_x = factor(models, levels = models),
       model_y = factor(models, levels = rev(models)),
@@ -173,7 +221,8 @@ plot.cast_consistency <- function(x, species = NULL, ...) {
       } else {
         row <- metrics_df[
           (metrics_df$model_a == mx & metrics_df$model_b == my) |
-          (metrics_df$model_a == my & metrics_df$model_b == mx), ,
+            (metrics_df$model_a == my & metrics_df$model_b == mx),
+          ,
           drop = FALSE
         ]
         if (nrow(row) > 0) {
@@ -184,39 +233,63 @@ plot.cast_consistency <- function(x, species = NULL, ...) {
     }
 
     mat_df$text_color <- ifelse(
-      !is.na(mat_df$value) & mat_df$value > 0.7, "white", "black"
+      !is.na(mat_df$value) & mat_df$value > text_white_above, "white", "black"
     )
-    mat_df$label_text <- ifelse(
-      is.na(mat_df$value), "", sprintf("%.3f", mat_df$value)
-    )
+    mat_df$label_text <- fmt_val(mat_df$value)
 
-    p <- ggplot2::ggplot(mat_df, ggplot2::aes(
-      x = .data$model_x, y = .data$model_y, fill = .data$value
-    )) +
-      ggplot2::geom_tile(color = "white", linewidth = 0.5) +
+    p <- ggplot2::ggplot(
+      mat_df,
+      ggplot2::aes(x = .data$model_x, y = .data$model_y, fill = .data$value)
+    ) +
+      ggplot2::geom_tile(
+        color = "white",
+        linewidth = tile_linewidth
+      ) +
       ggplot2::geom_text(
         ggplot2::aes(label = .data$label_text, color = .data$text_color),
-        size = 3.5, fontface = "bold", show.legend = FALSE
-      ) +
-      ggplot2::scale_fill_gradientn(
-        colors = c("#F7FBFF", "#DEEBF7", "#C6DBEF", "#9ECAE1",
-                   "#6BAED6", "#4292C6", "#2171B5", "#084594"),
-        limits = c(0, 1), na.value = "grey90", name = NULL
+        size = font_cell_value,
+        family = font_family,
+        fontface = face_plain_or_bold,
+        show.legend = FALSE
       ) +
       ggplot2::scale_color_identity() +
-      ggplot2::labs(title = mlabel, x = "", y = "") +
-      ggplot2::coord_fixed() +
-      ggplot2::theme_minimal(base_size = 10) +
+      ggplot2::labs(title = mlabel, x = NULL, y = NULL) +
+      ggplot2::coord_fixed(expand = FALSE) +
+      ggplot2::theme_minimal(
+        base_size = font_base,
+        base_family = font_family
+      ) +
       ggplot2::theme(
+        text = ggplot2::element_text(family = font_family),
         plot.title = ggplot2::element_text(
-          face = "bold", hjust = 0.5, size = 11
+          family = font_family,
+          face = face_plain_or_bold,
+          hjust = 0.5,
+          size = font_panel_title
         ),
         axis.text.x = ggplot2::element_text(
-          angle = 45, hjust = 1, size = 8
+          family = font_family,
+          face = face_plain_or_bold,
+          angle = 45,
+          hjust = 1,
+          size = font_axis
         ),
-        axis.text.y = ggplot2::element_text(size = 8),
+        axis.text.y = ggplot2::element_text(
+          family = font_family,
+          face = face_plain_or_bold,
+          size = font_axis
+        ),
+        legend.text = ggplot2::element_text(
+          family = font_family,
+          face = face_plain_or_bold
+        ),
+        legend.title = ggplot2::element_text(
+          family = font_family,
+          face = face_plain_or_bold
+        ),
         panel.grid = ggplot2::element_blank(),
-        legend.position = if (mi == length(metric_defs)) "right" else "none"
+        legend.position = "right",
+        plot.margin = ggplot2::margin(8, 8, 8, 8)
       )
 
     panels[[mi]] <- p
@@ -229,13 +302,34 @@ plot.cast_consistency <- function(x, species = NULL, ...) {
   }
 
   combined <- panels[[1]] + panels[[2]] + panels[[3]] +
-    patchwork::plot_layout(nrow = 1) +
+    patchwork::plot_layout(nrow = 1, guides = "collect") +
     patchwork::plot_annotation(
       title = sp_title,
       theme = ggplot2::theme(
+        text = ggplot2::element_text(family = font_family),
         plot.title = ggplot2::element_text(
-          face = "bold", size = 14, hjust = 0.5
+          family = font_family,
+          face = face_plain_or_bold,
+          size = font_main_title,
+          hjust = 0.5
         )
+      )
+    ) &
+    ggplot2::scale_fill_gradientn(
+      colours   = consistency_colors,
+      values    = color_stops,
+      limits    = fill_limits,
+      breaks    = seq(fill_limits[1], fill_limits[2], by = 0.1),
+      na.value  = "grey90",
+      name      = NULL,
+      oob       = scales::squish,
+      guide     = ggplot2::guide_colorbar(
+        frame.colour    = "black",
+        ticks.colour    = "black",
+        ticks.linewidth = 0.5,
+        frame.linewidth = 0.5,
+        barheight       = grid::unit(10, "cm"),
+        barwidth        = grid::unit(0.6, "cm")
       )
     )
 

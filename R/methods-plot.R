@@ -97,9 +97,16 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     main_title <- "Causal DAG"
   }
 
+  sm <- x$structure_method %||% "bootstrap_hc"
+  br <- x$boot_R
+  boot_txt <- if (isTRUE(!is.na(br))) {
+    sprintf("HC bootstrap R = %d", br)
+  } else {
+    "bootstrap n/a"
+  }
   sub_title <- sprintf(
-    "%d edges | density = %.3f | HC bootstrap R = %d",
-    nrow(edges), dag_density, x$boot_R
+    "%d edges | density = %.3f | %s | method = %s",
+    nrow(edges), dag_density, boot_txt, sm
   )
 
   set.seed(42)
@@ -399,6 +406,13 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 #' @param point_size Numeric. Point size. Default `0.5`.
 #' @param legend_position Character. `"bottom"` (horizontal colorbar, like
 #'   the reference figures) or `"right"`. Default `"bottom"`.
+#' @param hss_predict Optional [cast_predict] object. When provided together
+#'   with `hss_model`, CATE values are set to `NA` wherever the chosen model's
+#'   habitat suitability (`HSS_<model>`) is below `hss_threshold` (spatial
+#'   masking by suitability).
+#' @param hss_model Character. Which model's HSS column to use for masking.
+#'   Default `"cast"`.
+#' @param hss_threshold Numeric in `[0, 1]`. Default `0.1`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
@@ -406,7 +420,11 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 plot.cast_cate <- function(x, variable = NULL, species = NULL,
                            basemap = "world", var_labels = NULL,
                            point_size = 0.5,
-                           legend_position = "bottom", ...) {
+                           legend_position = "bottom",
+                           hss_predict = NULL,
+                           hss_model = "cast",
+                           hss_threshold = 0.1,
+                           ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -422,6 +440,10 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
 
   if (!all(c("lon", "lat") %in% names(df))) {
     cli::cli_abort("CATE effects must contain lon/lat for spatial plotting.")
+  }
+
+  if (!is.null(hss_predict)) {
+    df <- .cate_mask_by_hss(df, hss_predict, hss_model, hss_threshold)
   }
 
   # Display label for variable
@@ -444,10 +466,17 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
   }
   main_title <- sprintf("Spatial CATE: %s", var_display)
 
+  n_vis <- sum(!is.na(df$cate))
   sub_parts <- sprintf(
-    "Causal forest (%d trees) | n = %d cells",
-    x$n_trees, nrow(df)
+    "Causal forest (%d trees) | n = %d cells displayed",
+    x$n_trees, n_vis
   )
+  if (!is.null(hss_predict)) {
+    sub_parts <- paste0(
+      sub_parts,
+      sprintf(" | HSS_%s >= %.2f", hss_model, hss_threshold)
+    )
+  }
   if (!is.null(sp_display)) {
     sub_parts <- paste0(sp_display, " | ", sub_parts)
   }
@@ -470,7 +499,7 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
     ggplot2::geom_point(
       data = df,
       ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$cate),
-      size = point_size, alpha = 0.85
+      size = point_size, alpha = 0.85, na.rm = TRUE
     ) +
     ggplot2::scale_color_gradient2(
       low = "#2166AC", mid = "white", high = "#B2182B",
@@ -734,6 +763,31 @@ plot.cast_result <- function(x, var_labels = NULL, ...) {
 # ========================================================================
 # Internal helpers
 # ========================================================================
+
+#' Mask CATE rows by HSS threshold (match lon/lat to cast_predict grid)
+#' @keywords internal
+#' @noRd
+.cate_mask_by_hss <- function(df, hss_predict, hss_model, hss_threshold) {
+  if (!inherits(hss_predict, "cast_predict")) {
+    cli::cli_abort("{.arg hss_predict} must be a {.cls cast_predict} object.")
+  }
+  pred <- hss_predict$predictions
+  hss_col <- paste0("HSS_", hss_model)
+  if (!hss_col %in% names(pred)) {
+    cli::cli_abort(c(
+      "Model {.val {hss_model}} not found for HSS masking.",
+      i = "Available: {.val {hss_predict$models}}."
+    ))
+  }
+  key_df <- paste0(signif(df$lon, 8), "_", signif(df$lat, 8))
+  key_pr <- paste0(signif(pred$lon, 8), "_", signif(pred$lat, 8))
+  mi <- match(key_df, key_pr)
+  hss_vals <- pred[[hss_col]][mi]
+  low <- is.na(hss_vals) | (as.numeric(hss_vals) < hss_threshold)
+  df$cate[low] <- NA_real_
+  df
+}
+
 
 #' CAST Publication Theme
 #' @keywords internal

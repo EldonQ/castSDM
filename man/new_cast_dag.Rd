@@ -10,7 +10,8 @@ new_cast_dag(
   boot_R,
   strength_threshold,
   direction_threshold,
-  score = "bic-g"
+  score = "bic-g",
+  structure_method = "bootstrap_hc"
 )
 }
 \arguments{
