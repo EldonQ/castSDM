@@ -214,11 +214,17 @@ Earlier checks may not have mentioned Pandoc because:
    flags triggers a full source build including vignettes — that is when
    the Pandoc requirement appears.
 
-To check without Pandoc locally:
+To check without Pandoc locally (recommended mirror of a lean CI run):
 
 ``` r
 devtools::check("path/to/cast", vignettes = FALSE,
                   args = c("--no-manual", "--no-build-vignettes"))
+```
+
+From a shell (example R 4.4.3 on Windows):
+
+``` text
+"D:\R\R-4.4.3\bin\Rscript.exe" -e "devtools::check('e:/Package/cast', vignettes=FALSE, args=c('--no-manual','--no-build-vignettes'))"
 ```
 
 To enable full checks: install [Pandoc](https://pandoc.org/installing.html)
