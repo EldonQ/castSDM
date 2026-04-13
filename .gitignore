@@ -8,3 +8,11 @@ Meta/
 output/
 castSDM_batch_output/
 castSDM_multi_species/
+
+# Local copies of multi-species CAST grids (optional; keep repo lean — tracked
+# examples remain: CAST_Ovis_ammon*, CAST_Gazella*, CAST_Pseudois*, China_Env*)
+inst/extdata/CAST_*_Res9_screened.csv
+!inst/extdata/CAST_Ovis_ammon_Res9_screened.csv
+!inst/extdata/CAST_Gazella_subgutturosa_Res9_screened.csv
+!inst/extdata/CAST_Pseudois_nayaur_Res9_screened.csv
+Package/cast/inst/extdata/
