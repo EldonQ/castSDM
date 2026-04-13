@@ -4,13 +4,22 @@
 #' same columns used elsewhere in castSDM). Computes SHAP contributions and
 #' SHAP interaction values on a held-out subset, then [plot.cast_shap()] can
 #' reproduce the **Impact intensity** network and **Impact direction** waterfall
-#' layouts from the Python reference (see `inst/examples/../Ref/DAG图.md`).
+#' (single hold-out row by default: bias + feature SHAPs add to the logit margin;
+#' not the same as column means across rows).
 #'
 #' @param data A `data.frame` with `presence` (0/1) and numeric predictors.
 #' @param response Name of the binary response column. Default `"presence"`.
-#' @param env_vars Predictor column names; `NULL` uses [get_env_vars()].
-#' @param screen Optional [cast_screen]; when set, only `screen$selected`
-#'   variables are used (aligned with CAST screening).
+#' @param env_vars Predictor column names. If `NULL`, columns are chosen in
+#'   order: (1) if `dag` is set, **`intersect(dag$nodes, names(data))`** — the
+#'   same convention as [cast_fit()] for traditional models; (2) else if
+#'   `screen` is set, `intersect(get_env_vars(), screen$selected)`; (3) else
+#'   [get_env_vars()].
+#' @param dag Optional [cast_dag]; when supplied with `env_vars = NULL`,
+#'   fixes SHAP inputs to **DAG nodes** so the XGBoost surrogate uses the **same
+#'   raw environmental columns** as `cast_fit(..., models = "rf", ...)` (not
+#'   `cast_features()` interaction columns).
+#' @param screen Optional [cast_screen]; used only when `dag` is `NULL` and
+#'   `env_vars` is `NULL` (legacy screening of numeric env names).
 #' @param nrounds Maximum boosting rounds. Default `400`.
 #' @param max_depth,eta,subsample,colsample_bytree Passed to \pkg{xgboost}
 #'   (see [xgboost::xgb.train()]).
@@ -18,10 +27,15 @@
 #' @param seed Optional integer seed.
 #' @param verbose Passed to [xgboost::xgb.train()].
 #'
-#' @return A `cast_shap` object: `shap` (matrix, rows = test samples),
-#'   `shap_interaction` (averaged absolute interaction matrix `p x p`),
-#'   `feature_names`, `base_score`, `xgb_model`, `expected_value` (mean
-#'   prediction on probability scale for reference), `train_matrix`, `label`.
+#' @return A `cast_shap` object: `shap` (matrix, rows = test samples, columns =
+#'   features only), `bias_shap` (numeric vector, length `nrow(shap)`: TreeSHAP
+#'   bias / baseline margin contribution per row, sums with `shap` to the
+#'   logit margin), `shap_interaction` (averaged absolute interaction matrix
+#'   `p x p`), `feature_names`, `base_score` (mean of `bias_shap`), `xgb_model`,
+#'   `expected_value` (mean predicted probability on test rows), `train_matrix`,
+#'   `label`, `engine` (`"xgboost"`), `method` (`"xgboost"`), `fitted_model`
+#'   (`NULL`), `shap_engine_note` (`NULL`). Objects from [cast_shap_fit()]
+#'   reuse the same slots with `engine`/`method` describing the source model.
 #'
 #' @seealso [plot.cast_shap()], [cast_fit()], [cast_screen()]
 #'
@@ -30,6 +44,7 @@ cast_shap_xgb <- function(data,
                           response = "presence",
                           env_vars = NULL,
                           screen = NULL,
+                          dag = NULL,
                           nrounds = 400L,
                           max_depth = 6L,
                           eta = 0.05,
@@ -40,9 +55,17 @@ cast_shap_xgb <- function(data,
                           verbose = FALSE) {
   check_suggested("xgboost", "for SHAP explainability")
 
-  env_vars <- env_vars %||% get_env_vars(data, response = response)
-  if (!is.null(screen)) {
-    env_vars <- intersect(env_vars, screen$selected)
+  if (!is.null(env_vars)) {
+    env_vars <- intersect(env_vars, names(data))
+  } else if (!is.null(dag)) {
+    env_vars <- intersect(dag$nodes, names(data))
+  } else if (!is.null(screen)) {
+    env_vars <- intersect(
+      get_env_vars(data, response = response),
+      screen$selected
+    )
+  } else {
+    env_vars <- get_env_vars(data, response = response)
   }
   if (length(env_vars) < 2L) {
     cli::cli_abort("Need at least 2 predictor columns for SHAP.")
@@ -99,6 +122,12 @@ cast_shap_xgb <- function(data,
     colnames(shap_only) <- env_vars
   }
 
+  bias_per_obs <- if (length(bias_col)) {
+    as.numeric(shap_mat[, bias_col[1L]])
+  } else {
+    rep(NA_real_, nrow(shap_only))
+  }
+
   p <- ncol(X_te)
   shap_int_raw <- tryCatch(
     predict(fit, dtest, predinteraction = TRUE),
@@ -128,14 +157,22 @@ cast_shap_xgb <- function(data,
   }
 
   base_score <- if (length(bias_col)) {
-    mean(shap_mat[, bias_col[1]])
+    mean(bias_per_obs, na.rm = TRUE)
   } else {
     mean(predict(fit, dtest))
   }
 
+  cap <- paste0(
+    "Separate XGBoost classifier (not cast_fit RF/CAST). ",
+    "TreeSHAP on p=", length(env_vars), " raw env columns",
+    if (!is.null(dag)) " (= intersect(dag$nodes, names(data)))" else "",
+    ". Waterfall: y = logit margin; P(presence) from plogis in subtitle."
+  )
+
   structure(
     list(
       shap = shap_only,
+      bias_shap = bias_per_obs,
       shap_interaction = mean_inter,
       feature_names = colnames(X_te),
       base_score = base_score,
@@ -143,7 +180,16 @@ cast_shap_xgb <- function(data,
       expected_value = mean(predict(fit, dtest)),
       train_matrix = X_te,
       label = y_te,
-      response = response
+      response = response,
+      engine = "xgboost",
+      method = "xgboost",
+      fitted_model = NULL,
+      shap_engine_note = NULL,
+      feature_space = "raw_env",
+      shap_scale = "logit_margin",
+      n_features = length(env_vars),
+      n_interactions = 0L,
+      shap_plot_caption = cap
     ),
     class = "cast_shap"
   )
@@ -152,12 +198,20 @@ cast_shap_xgb <- function(data,
 
 #' Plot SHAP diagnostics (interaction network or waterfall)
 #'
-#' @param x Object returned by \code{\link{cast_shap_xgb}}.
+#' @param x Object from \code{\link{cast_shap_xgb}} or \code{\link{cast_shap_fit}}.
 #' @param type `"interaction_network"` (circular impact-intensity style) or
-#'   `"waterfall"` (mean SHAP contributions, impact-direction style).
+#'   `"waterfall"` (additive SHAP decomposition, impact-direction style).
 #' @param top_n Number of features in the figure. Default `20`.
 #' @param pos_color,neg_color Waterfall bar colours. Defaults match the
 #'   reference (`#f1696d`, `#44c3df`).
+#' @param waterfall_row Integer in `1:nrow(x$shap)` (a **hold-out test row**
+#'   used only for SHAP). Used when `type = "waterfall"` and
+#'   `waterfall_aggregate` is `FALSE`. The waterfall then matches the usual
+#'   **single-observation** SHAP path (bias + feature SHAPs = logit margin for
+#'   that row). Default `1`.
+#' @param waterfall_aggregate If `TRUE`, bars use **column means** of `x$shap`
+#'   and `base_score` as baseline (a summary across the hold-out set, **not** a
+#'   single prediction path). Default `FALSE`.
 #' @param ... Reserved.
 #'
 #' @return A `ggplot` object.
@@ -167,12 +221,18 @@ plot.cast_shap <- function(x,
                            top_n = 20L,
                            pos_color = "#f1696d",
                            neg_color = "#44c3df",
+                           waterfall_row = 1L,
+                           waterfall_aggregate = FALSE,
                            ...) {
   type <- match.arg(type)
   check_suggested("ggplot2", "for plotting")
 
   if (type == "waterfall") {
-    return(.plot_shap_waterfall(x, top_n, pos_color, neg_color))
+    return(.plot_shap_waterfall(
+      x, top_n, pos_color, neg_color,
+      waterfall_row = waterfall_row,
+      waterfall_aggregate = isTRUE(waterfall_aggregate)
+    ))
   }
   .plot_shap_interaction_network(x, top_n)
 }
@@ -185,7 +245,9 @@ plot.cast_shap <- function(x,
   imp <- colMeans(abs(x$shap))
   inter <- x$shap_interaction
   if (is.null(inter) || !is.matrix(inter)) {
-    cli::cli_abort("Interaction matrix missing; check xgboost predinteraction.")
+    cli::cli_abort(
+      "Interaction matrix missing or invalid in {.cls cast_shap} object."
+    )
   }
 
   if (top_n < length(feats)) {
@@ -309,7 +371,12 @@ plot.cast_shap <- function(x,
       expand = FALSE
     ) +
     ggplot2::labs(
-      title = sprintf("Impact intensity (Top %d features)", n),
+      title = sprintf(
+        "Impact intensity (Top %d of %d features)",
+        n,
+        ncol(as.matrix(x$shap))
+      ),
+      subtitle = x$shap_plot_caption %||% NULL,
       x = NULL, y = NULL
     )
 
@@ -347,6 +414,9 @@ plot.cast_shap <- function(x,
       plot.title = ggplot2::element_text(
         face = "bold", hjust = 0, size = 12
       ),
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0, size = 7.5, color = "gray35", lineheight = 1.15
+      ),
       legend.position = "bottom",
       legend.box = "horizontal",
       legend.justification = "center",
@@ -359,14 +429,64 @@ plot.cast_shap <- function(x,
 
 #' @keywords internal
 #' @noRd
-.plot_shap_waterfall <- function(x, top_n, pos_color, neg_color) {
+.shap_waterfall_arrow_poly <- function(x_c, y0, y1, xhw = 0.18, tip_frac = 0.14) {
+  h <- y1 - y0
+  if (abs(h) < 1e-10) {
+    return(data.frame(
+      x = c(x_c - xhw, x_c + xhw, x_c + xhw, x_c - xhw),
+      y = rep(y0, 4)
+    ))
+  }
+  tip_len <- min(abs(h) * tip_frac, abs(h) * 0.42)
+  if (h > 0) {
+    yt <- y1 - tip_len
+    data.frame(
+      x = c(x_c - xhw, x_c + xhw, x_c + xhw, x_c, x_c - xhw),
+      y = c(y0, y0, yt, y1, yt)
+    )
+  } else {
+    yt <- y1 + tip_len
+    data.frame(
+      x = c(x_c - xhw, x_c + xhw, x_c + xhw, x_c, x_c - xhw),
+      y = c(y0, y0, yt, y1, yt)
+    )
+  }
+}
+
+
+#' @keywords internal
+#' @noRd
+.plot_shap_waterfall <- function(x, top_n, pos_color, neg_color,
+                                 waterfall_row = 1L,
+                                 waterfall_aggregate = FALSE) {
   sh <- x$shap
   feats <- colnames(sh)
-  ms <- colMeans(sh)
+  n_obs <- nrow(sh)
+
+  if (isTRUE(waterfall_aggregate)) {
+    ms <- colMeans(sh)
+    base <- as.numeric(x$base_score)[1]
+    row_lab <- "mean across hold-out rows"
+  } else {
+    wi <- as.integer(waterfall_row)[1L]
+    if (is.na(wi) || wi < 1L || wi > n_obs) {
+      cli::cli_abort(
+        "{.arg waterfall_row} must be an integer in 1..{n_obs} (hold-out SHAP rows)."
+      )
+    }
+    ms <- as.numeric(sh[wi, , drop = TRUE])
+    names(ms) <- colnames(sh)
+    bias <- x$bias_shap
+    if (is.null(bias) || length(bias) != n_obs) {
+      bias <- rep(as.numeric(x$base_score)[1], n_obs)
+    }
+    base <- as.numeric(bias[wi])
+    row_lab <- sprintf("hold-out row %d", wi)
+  }
+
   ord <- order(abs(ms), decreasing = TRUE)[seq_len(min(top_n, length(ms)))]
   ms <- ms[ord]
   feats <- feats[ord]
-  base <- as.numeric(x$base_score)[1]
 
   ends <- cumsum(ms) + base
   starts <- c(base, utils::head(ends, -1L))
@@ -381,17 +501,26 @@ plot.cast_shap <- function(x,
     direction = ifelse(ms >= 0, "Positive", "Negative"),
     stringsAsFactors = FALSE
   )
-  final_val <- utils::tail(ends, 1L)
+  final_margin <- utils::tail(ends, 1L)
   df$val_lab <- ifelse(
     df$val >= 0,
-    sprintf("+%.4g", df$val),
-    sprintf("%.4g", df$val)
+    sprintf("+%.4f", df$val),
+    sprintf("%.4f", df$val)
   )
 
-  y_rng <- range(c(df$ymin, df$ymax, base, final_val))
+  poly_parts <- vector("list", nrow(df))
+  for (k in seq_len(nrow(df))) {
+    pr <- .shap_waterfall_arrow_poly(df$x[k], df$start[k], df$end[k])
+    pr$piece <- k
+    pr$direction <- df$direction[k]
+    poly_parts[[k]] <- pr
+  }
+  poly_df <- do.call(rbind, poly_parts)
+
+  y_rng <- range(c(df$ymin, df$ymax, base, final_margin))
   y_pad <- max(diff(y_rng) * 0.06, 1e-6)
-  y_top <- max(df$ymax) + y_pad * 2.2
-  y_bot <- min(df$ymin) - y_pad * 0.5
+  y_top <- max(df$ymax) + y_pad * 2.6
+  y_bot <- min(df$ymin) - y_pad * 0.65
 
   bridge <- if (nrow(df) > 1L) {
     data.frame(
@@ -403,6 +532,32 @@ plot.cast_shap <- function(x,
     )
   } else {
     NULL
+  }
+
+  df$lab_y <- ifelse(
+    df$val >= 0,
+    df$ymax + y_pad * 0.55,
+    df$ymin - y_pad * 0.55
+  )
+
+  eng <- x$engine %||% "xgboost"
+  if (identical(eng, "xgboost")) {
+    sub_txt <- sprintf(
+      "XGBoost margin (log-odds); %s | P(presence): %.4f \u2192 %.4f",
+      row_lab,
+      stats::plogis(base),
+      stats::plogis(final_margin)
+    )
+    ylab_main <- "SHAP (margin)"
+  } else {
+    note <- x$shap_engine_note %||% ""
+    sub_txt <- sprintf(
+      "%s | %s | endpoint pred.: %.4f (baseline + sum SHAP).",
+      note,
+      row_lab,
+      final_margin
+    )
+    ylab_main <- "SHAP (level)"
   }
 
   p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$x)) +
@@ -434,20 +589,21 @@ plot.cast_shap <- function(x,
   }
 
   p <- p +
-    ggplot2::geom_rect(
+    ggplot2::geom_polygon(
+      data = poly_df,
       ggplot2::aes(
-        xmin = .data$x - 0.18,
-        xmax = .data$x + 0.18,
-        ymin = .data$ymin,
-        ymax = .data$ymax,
+        x = .data$x,
+        y = .data$y,
+        group = .data$piece,
         fill = .data$direction
       ),
-      color = "#2a2a2a",
+      inherit.aes = FALSE,
+      colour = "#2a2a2a",
       linewidth = 0.28
     ) +
     ggplot2::geom_text(
       ggplot2::aes(
-        y = ifelse(.data$val >= 0, .data$ymax + y_pad * 0.55, .data$ymin - y_pad * 0.55),
+        y = .data$lab_y,
         label = .data$val_lab
       ),
       size = 3.1,
@@ -483,7 +639,7 @@ plot.cast_shap <- function(x,
       "text",
       x = max(df$x) + 0.35,
       y = y_top,
-      label = sprintf("f(x) = %.4f", final_val),
+      label = sprintf("f(x) = %.4f", final_margin),
       hjust = 1,
       size = 3.4,
       color = "gray20",
@@ -491,12 +647,17 @@ plot.cast_shap <- function(x,
     ) +
     ggplot2::labs(
       title = "Impact direction",
+      subtitle = sub_txt,
+      caption = x$shap_plot_caption %||% NULL,
       x = NULL,
-      y = "SHAP value"
+      y = ylab_main
     ) +
     ggplot2::coord_cartesian(clip = "off") +
     ggplot2::theme_minimal(base_size = 11.5) +
     ggplot2::theme(
+      plot.caption = ggplot2::element_text(
+        size = 7, color = "gray40", hjust = 0, lineheight = 1.2
+      ),
       axis.text.x = ggplot2::element_text(
         angle = 90,
         vjust = 0.5,
@@ -510,6 +671,12 @@ plot.cast_shap <- function(x,
         face = "bold",
         hjust = 0,
         size = 13.5,
+        margin = ggplot2::margin(b = 2)
+      ),
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0,
+        size = 8,
+        color = "gray45",
         margin = ggplot2::margin(b = 4)
       ),
       plot.margin = ggplot2::margin(10, 14, 10, 10),
@@ -528,7 +695,7 @@ plot.cast_shap <- function(x,
 
 #' Write SHAP summary tables to CSV
 #'
-#' @param x Object returned by \code{\link{cast_shap_xgb}}.
+#' @param x Object from \code{\link{cast_shap_xgb}} or \code{\link{cast_shap_fit}}.
 #' @param dir Output directory (created if needed).
 #' @param prefix File name prefix. Default `"shap"`.
 #'

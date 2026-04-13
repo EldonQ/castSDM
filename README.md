@@ -93,7 +93,10 @@ standalone function:
 |   — | `cast_shap_xgb()` / `plot.cast_shap()` | XGBoost SHAP network & waterfall |
 
 All steps are also available through the unified `cast()` function.
-Multi-species batches: `cast_batch()`.
+Multi-species batches: `cast_batch()` runs the same pipeline per species into
+separate folders; use `fit_verbose` for `cast_fit()` logging (not `verbose` in
+`...`, which would clash with the batch driver’s `verbose`). See
+`inst/examples/run_multi_species.R`.
 
 ## Step-by-Step Usage
 

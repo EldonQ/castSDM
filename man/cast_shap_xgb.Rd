@@ -9,6 +9,7 @@ cast_shap_xgb(
   response = "presence",
   env_vars = NULL,
   screen = NULL,
+  dag = NULL,
   nrounds = 400L,
   max_depth = 6L,
   eta = 0.05,
@@ -24,10 +25,19 @@ cast_shap_xgb(
 
 \item{response}{Name of the binary response column. Default \code{"presence"}.}
 
-\item{env_vars}{Predictor column names; \code{NULL} uses \code{\link[=get_env_vars]{get_env_vars()}}.}
+\item{env_vars}{Predictor column names. If \code{NULL}, columns are chosen in
+order: (1) if \code{dag} is set, \strong{\code{intersect(dag$nodes, names(data))}} — the
+same convention as \code{\link[=cast_fit]{cast_fit()}} for traditional models; (2) else if
+\code{screen} is set, \code{intersect(get_env_vars(), screen$selected)}; (3) else
+\code{\link[=get_env_vars]{get_env_vars()}}.}
 
-\item{screen}{Optional \link{cast_screen}; when set, only \code{screen$selected}
-variables are used (aligned with CAST screening).}
+\item{screen}{Optional \link{cast_screen}; used only when \code{dag} is \code{NULL} and
+\code{env_vars} is \code{NULL} (legacy screening of numeric env names).}
+
+\item{dag}{Optional \link{cast_dag}; when supplied with \code{env_vars = NULL},
+fixes SHAP inputs to \strong{DAG nodes} so the XGBoost surrogate uses the \strong{same
+raw environmental columns} as \code{cast_fit(..., models = "rf", ...)} (not
+\code{cast_features()} interaction columns).}
 
 \item{nrounds}{Maximum boosting rounds. Default \code{400}.}
 
@@ -41,17 +51,23 @@ variables are used (aligned with CAST screening).}
 \item{verbose}{Passed to \code{\link[xgboost:xgb.train]{xgboost::xgb.train()}}.}
 }
 \value{
-A \code{cast_shap} object: \code{shap} (matrix, rows = test samples),
-\code{shap_interaction} (averaged absolute interaction matrix \verb{p x p}),
-\code{feature_names}, \code{base_score}, \code{xgb_model}, \code{expected_value} (mean
-prediction on probability scale for reference), \code{train_matrix}, \code{label}.
+A \code{cast_shap} object: \code{shap} (matrix, rows = test samples, columns =
+features only), \code{bias_shap} (numeric vector, length \code{nrow(shap)}: TreeSHAP
+bias / baseline margin contribution per row, sums with \code{shap} to the
+logit margin), \code{shap_interaction} (averaged absolute interaction matrix
+\verb{p x p}), \code{feature_names}, \code{base_score} (mean of \code{bias_shap}), \code{xgb_model},
+\code{expected_value} (mean predicted probability on test rows), \code{train_matrix},
+\code{label}, \code{engine} (\code{"xgboost"}), \code{method} (\code{"xgboost"}), \code{fitted_model}
+(\code{NULL}), \code{shap_engine_note} (\code{NULL}). Objects from \code{\link[=cast_shap_fit]{cast_shap_fit()}}
+reuse the same slots with \code{engine}/\code{method} describing the source model.
 }
 \description{
 Trains a gradient-boosted tree on \code{presence} ~ environmental variables (the
 same columns used elsewhere in castSDM). Computes SHAP contributions and
 SHAP interaction values on a held-out subset, then \code{\link[=plot.cast_shap]{plot.cast_shap()}} can
 reproduce the \strong{Impact intensity} network and \strong{Impact direction} waterfall
-layouts from the Python reference (see \code{inst/examples/../Ref/DAG图.md}).
+(single hold-out row by default: bias + feature SHAPs add to the logit margin;
+not the same as column means across rows).
 }
 \seealso{
 \code{\link[=plot.cast_shap]{plot.cast_shap()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_screen]{cast_screen()}}

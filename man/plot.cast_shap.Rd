@@ -10,19 +10,31 @@
   top_n = 20L,
   pos_color = "#f1696d",
   neg_color = "#44c3df",
+  waterfall_row = 1L,
+  waterfall_aggregate = FALSE,
   ...
 )
 }
 \arguments{
-\item{x}{Object returned by \code{\link{cast_shap_xgb}}.}
+\item{x}{Object from \code{\link{cast_shap_xgb}} or \code{\link{cast_shap_fit}}.}
 
 \item{type}{\code{"interaction_network"} (circular impact-intensity style) or
-\code{"waterfall"} (mean SHAP contributions, impact-direction style).}
+\code{"waterfall"} (additive SHAP decomposition, impact-direction style).}
 
 \item{top_n}{Number of features in the figure. Default \code{20}.}
 
 \item{pos_color, neg_color}{Waterfall bar colours. Defaults match the
 reference (\verb{#f1696d}, \verb{#44c3df}).}
+
+\item{waterfall_row}{Integer in \code{1:nrow(x$shap)} (a \strong{hold-out test row}
+used only for SHAP). Used when \code{type = "waterfall"} and
+\code{waterfall_aggregate} is \code{FALSE}. The waterfall then matches the usual
+\strong{single-observation} SHAP path (bias + feature SHAPs = logit margin for
+that row). Default \code{1}.}
+
+\item{waterfall_aggregate}{If \code{TRUE}, bars use \strong{column means} of \code{x$shap}
+and \code{base_score} as baseline (a summary across the hold-out set, \strong{not} a
+single prediction path). Default \code{FALSE}.}
 
 \item{...}{Reserved.}
 }

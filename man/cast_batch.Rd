@@ -14,6 +14,7 @@ cast_batch(
   parallel = TRUE,
   seed = NULL,
   verbose = TRUE,
+  fit_verbose = FALSE,
   dag_R = 100L,
   dag_structure_method = "bootstrap_hc",
   dag_pc_alpha = 0.05,
@@ -50,6 +51,39 @@ cast_batch(
   cate_n_trees = 1000L,
   cate_hss_model = "cast",
   cate_hss_threshold = 0.1,
+  response = "presence",
+  prepare_env_vars = NULL,
+  prepare_verbose = FALSE,
+  dag_env_vars = NULL,
+  dag_verbose = FALSE,
+  ate_variables = NULL,
+  ate_verbose = FALSE,
+  screen_verbose = FALSE,
+  cv_models = NULL,
+  cv_n_epochs = 200L,
+  cv_n_runs = 3L,
+  cv_rf_ntree = 300L,
+  cv_brt_n_trees = 500L,
+  cv_parallel = FALSE,
+  cv_verbose = FALSE,
+  predict_models = NULL,
+  plot_basemap = "world",
+  cate_variables = NULL,
+  cate_verbose = FALSE,
+  cate_point_size = 0.45,
+  eval_response = NULL,
+  var_labels = NULL,
+  do_shap = FALSE,
+  shap_nrounds = 200L,
+  shap_max_depth = 6L,
+  shap_eta = 0.05,
+  shap_subsample = 0.8,
+  shap_colsample_bytree = 0.8,
+  shap_test_fraction = 0.2,
+  shap_verbose = FALSE,
+  shap_plot_top_n = 15L,
+  shap_fastshap_nsim = 40L,
+  shap_max_explain_rows = 50L,
   ...
 )
 }
@@ -77,7 +111,12 @@ outputs. Default \code{"castSDM_batch_output"}.}
 \item{seed}{Integer or \code{NULL}. Base seed. Each species gets
 \code{seed + species_index} for reproducibility.}
 
-\item{verbose}{Logical. Default \code{TRUE}.}
+\item{verbose}{Logical. Progress messages for the batch driver itself.
+Default \code{TRUE}.}
+
+\item{fit_verbose}{Logical. Passed to \code{\link[=cast_fit]{cast_fit()}} as \code{verbose} for each
+species. Default \code{FALSE}. (Do not pass \code{verbose} in \code{...} to \code{cast_batch};
+it would clash with \code{verbose} here; use \code{fit_verbose} instead.)}
 
 \item{dag_R}{Integer. Number of DAG bootstrap replicates.
 Default \code{100}.}
@@ -166,6 +205,53 @@ Default \code{1000}.}
 \code{\link[=plot.cast_cate]{plot.cast_cate()}} to mask by \verb{HSS_<model> >= threshold}. Defaults
 \code{cast} and \code{0.1}. Set \code{cate_hss_model = NULL} to disable masking.}
 
+\item{response}{Character. Response column name in each species
+\code{data.frame}. Default \code{"presence"}.}
+
+\item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}} as
+\code{env_vars} and \code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+
+\item{dag_env_vars, dag_verbose}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{env_vars} and
+\code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+
+\item{ate_variables, ate_verbose}{Passed to \code{\link[=cast_ate]{cast_ate()}} as \code{variables} and
+\code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+
+\item{screen_verbose}{Passed to \code{\link[=cast_screen]{cast_screen()}} as \code{verbose}. Default \code{FALSE}.}
+
+\item{cv_models}{Character vector or \code{NULL}. Models for \code{\link[=cast_cv]{cast_cv()}}. If
+\code{NULL}, uses the same vector as \code{models}.}
+
+\item{cv_n_epochs, cv_n_runs, cv_rf_ntree, cv_brt_n_trees, cv_parallel, cv_verbose}{Passed to \code{\link[=cast_cv]{cast_cv()}}. Defaults match that function.}
+
+\item{predict_models}{Passed to \code{\link[=cast_predict]{cast_predict()}} as \code{models}. Default \code{NULL}
+(all fitted models).}
+
+\item{plot_basemap}{Character. \code{basemap} for spatial plots (CV, HSS, CATE).
+Default \code{"world"}.}
+
+\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}. Defaults \code{NULL}
+and \code{FALSE}.}
+
+\item{cate_point_size}{Numeric. Point size for saved \code{\link[=plot.cast_cate]{plot.cast_cate()}} maps.
+Default \code{0.45} (matches \code{run_ovis_ammon.R}).}
+
+\item{eval_response}{Character or \code{NULL}. Passed to \code{\link[=cast_evaluate]{cast_evaluate()}} as
+\code{response}. If \code{NULL}, uses \code{response}.}
+
+\item{var_labels}{Named character vector or \code{NULL}. Optional labels for
+\code{\link[=plot.cast_dag]{plot.cast_dag()}}, \code{\link[=plot.cast_ate]{plot.cast_ate()}}, \code{\link[=plot.cast_screen]{plot.cast_screen()}}, \code{\link[=plot.cast_cate]{plot.cast_cate()}}.}
+
+\item{do_shap}{Logical. If \code{TRUE}, saves SHAP figures (XGBoost surrogate,
+RF and CAST via \code{\link[=cast_shap_xgb]{cast_shap_xgb()}} / \code{\link[=cast_shap_fit]{cast_shap_fit()}}) when dependencies
+are available. Default \code{FALSE} (can be slow in parallel batches).}
+
+\item{shap_nrounds, shap_max_depth, shap_eta, shap_subsample, shap_colsample_bytree, shap_test_fraction, shap_verbose}{Passed to \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}.}
+
+\item{shap_plot_top_n}{Integer. Passed to SHAP plot methods.}
+
+\item{shap_fastshap_nsim, shap_max_explain_rows}{Passed to \code{\link[=cast_shap_fit]{cast_shap_fit()}}.}
+
 \item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}} for
 model hyper-parameter tuning (e.g., \code{n_epochs}, \code{n_runs},
 \code{rf_ntree}, \code{brt_n_trees}, \code{tune_grid}).}
@@ -210,11 +296,14 @@ causal forest trees.
 \code{n_epochs}, \code{n_runs}, \code{patience}, \code{rf_ntree}, \code{brt_n_trees},
 \code{brt_depth}, \code{hidden_size}, \code{dropout}, \code{lr}, \code{batch_size},
 \code{max_interactions}, \code{tune_grid} are forwarded to \code{\link[=cast_fit]{cast_fit()}}.
+Use \code{fit_verbose} for \code{\link[=cast_fit]{cast_fit()}} console output (not \code{verbose} in \code{...}).
+\item \strong{Spatial plots}: \code{plot_basemap} for CV / HSS / CATE maps.
+\item \strong{SHAP} (\code{do_shap}, \verb{shap_*}): optional XGBoost + fastshap figures.
 }
 }
 
 \seealso{
 \code{\link[=cast]{cast()}}, \code{\link[=plot.cast_batch]{plot.cast_batch()}}, \code{\link[=cast_consistency]{cast_consistency()}},
 \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}},
-\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}, \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, \code{\link[=cast_shap_fit]{cast_shap_fit()}}
 }

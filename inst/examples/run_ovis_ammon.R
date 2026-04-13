@@ -118,7 +118,8 @@ var_labels <- c(
 # ==============================================================================
 
 # ── 集中配置: 与 cast_prepare / cast_dag / cast_ate / cast_screen / cast_fit /
-#    cast_evaluate / cast_predict / cast_cv / cast_cate / cast_shap_xgb 等
+#    cast_evaluate / cast_predict / cast_cv / cast_cate / cast_shap_xgb /
+#    cast_shap_fit（需 fastshap）等
 #    的形参一一对应, 便于对照帮助文档调参 ───────────────────────────────────
 CONFIG <- list(
   response          = "presence",
@@ -130,14 +131,14 @@ CONFIG <- list(
   # cast_dag (注意: 选 PC/FCI/NOTEARS/BiDAG 时改 dag_structure_method;
   #   dag_algorithm / dag_score 仅当 structure_method = "bootstrap_hc" 时生效)
   dag_env_vars            = NULL,
-  dag_R                   = 50L,
+  dag_R                   = 100L,  #speed
   dag_algorithm           = "hc",
   dag_score               = "bic-g",
   dag_strength_threshold  = 0.7,
   dag_direction_threshold = 0.6,
   dag_max_rows            = 8000L,
   dag_verbose             = TRUE,
-  dag_structure_method    = "pc",
+  dag_structure_method    = "bootstrap_hc",
   dag_pc_alpha            = 0.05,
   dag_pc_test             = "zf",
   dag_fci_alpha           = 0.05,
@@ -155,7 +156,7 @@ CONFIG <- list(
   ate_K             = 5L,
   ate_num_trees     = 300L,
   ate_alpha         = 0.05,
-  ate_quantile_cuts = c(0.25, 0.5, 0.75),
+  ate_quantile_cuts = c(0.1, 0.25, 0.5, 0.75, 0.9),
   ate_bonferroni    = TRUE,
   ate_parallel      = TRUE,
   ate_verbose       = TRUE,
@@ -166,8 +167,8 @@ CONFIG <- list(
   screen_verbose      = TRUE,
   # cast_fit (快速演示: n_epochs / n_runs 较小; 正式分析请增大并打开 tune_grid)
   fit_models            = c("cast", "rf", "maxent", "brt"),
-  fit_n_epochs          = 50L,
-  fit_n_runs            = 1L,
+  fit_n_epochs          = 50L,  #speed
+  fit_n_runs            = 1L, #speed
   fit_patience          = 40L,
   fit_val_fraction      = 0.2,
   fit_focal_gamma       = 2.0,
@@ -181,7 +182,7 @@ CONFIG <- list(
   fit_lr                = 1e-3,
   fit_batch_size        = NULL,
   fit_max_interactions  = 15L,
-  fit_tune_grid         = FALSE,
+  fit_tune_grid         = FALSE,  #speed
   fit_verbose           = TRUE,
   # cast_evaluate
   eval_response = "presence",
@@ -211,7 +212,10 @@ CONFIG <- list(
   shap_colsample_bytree = 0.8,
   shap_test_fraction    = 0.2,
   shap_verbose          = FALSE,
-  shap_plot_top_n       = 15L
+  shap_plot_top_n       = 15L,
+  # cast_shap_fit（RF / CAST，依赖 fastshap；MC 次数越大越稳但更慢）
+  shap_fastshap_nsim      = 40L,
+  shap_max_explain_rows   = 50L
 )
 
 # 是否对五种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
@@ -559,9 +563,44 @@ print(pred)
 
 # ── Step 9: 绘图 ─────────────────────────────────────────────────────────────
 # 以下绘图需要 ggplot2, ggraph, igraph, sf 等
-# install.packages(c("ggplot2", "ggraph", "igraph", "sf", "patchwork"))
+# install.packages(c("ggplot2", "ggraph", "igraph", "sf", "patchwork", "fastshap"))
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
+  # SHAP：网络图 + 瀑布图各保存一张（stem 为文件名前缀）
+  ovis_shap_save_pair <- function(sh_obj, stem) {
+    p_net <- plot(
+      sh_obj,
+      type = "interaction_network",
+      top_n = CONFIG$shap_plot_top_n
+    )
+    print(p_net)
+    ovis_save_plot(
+      p_net,
+      paste0(stem, "_interaction_network.png"),
+      width = 9,
+      height = 9
+    )
+    bv <- sh_obj$bias_shap
+    if (is.null(bv) || length(bv) != nrow(sh_obj$shap)) {
+      bv <- rep(as.numeric(sh_obj$base_score)[1], nrow(sh_obj$shap))
+    }
+    marg <- bv + rowSums(as.matrix(sh_obj$shap))
+    wi <- which.min(abs(marg - stats::median(marg)))[1L]
+    p_wf <- plot(
+      sh_obj,
+      type = "waterfall",
+      top_n = CONFIG$shap_plot_top_n,
+      waterfall_row = wi
+    )
+    print(p_wf)
+    ovis_save_plot(
+      p_wf,
+      paste0(stem, "_waterfall.png"),
+      width = 10,
+      height = 6
+    )
+  }
+
   # DAG 网络图
   p_dag <- plot(
     dag,
@@ -588,11 +627,18 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   print(p_eval)
   ovis_save_plot(p_eval, "ovis_evaluate.png", width = 10, height = 7)
 
-  # 空间栖息地适宜性地图 (需要 sf)
+  # 空间栖息地适宜性地图 (需要 sf)：已训练模型各保存一张 HSS 图
   if (requireNamespace("sf", quietly = TRUE)) {
-    p_pred <- plot(pred, model = "rf", basemap = "china")
-    print(p_pred)
-    ovis_save_plot(p_pred, "ovis_predict_rf_china.png", width = 10, height = 7)
+    for (md in pred$models) {
+      p_pred <- plot(pred, model = md, basemap = "china")
+      print(p_pred)
+      ovis_save_plot(
+        p_pred,
+        sprintf("ovis_predict_%s_china.png", md),
+        width = 10,
+        height = 7
+      )
+    }
   }
 
   # 模型间空间一致性热力图 (需要 >= 2 个模型)
@@ -657,13 +703,20 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     }
   }
 
-  # XGBoost + SHAP 可解释性 (需 xgboost; 与 SDM 共用 presence + 环境变量)
+  # ── SHAP 三种路径（变量个数与含义不同，勿混读一张图）────────────────────────
+  # 1) XGBoost：单独训练的 surrogate，TreeSHAP；自 dag 传入后与 RF 共用 **dag$nodes**
+  #    原始环境列（非 cast_features 的 int_*）。瀑布图纵轴为 **logit**。
+  # 2) RF：cast_fit 里的 ranger，fastshap，**原始环境列**，概率尺度。
+  # 3) CAST：cast_fit 里的神经网络，fastshap，输入为 **cast_features()**（含 int_A_B
+  #    = DAG 边 A-B 上的标准化乘积×边强度）；与 XGB/RF 的列空间不同，属预期行为。
+  # XGBoost（TreeSHAP）
   if (requireNamespace("xgboost", quietly = TRUE)) {
-    sh <- cast_shap_xgb(
+    sh_xgb <- cast_shap_xgb(
       data               = split$train,
       response           = CONFIG$response,
       env_vars           = NULL,
       screen             = screen,
+      dag                = dag,
       nrounds            = CONFIG$shap_nrounds,
       max_depth          = CONFIG$shap_max_depth,
       eta                = CONFIG$shap_eta,
@@ -673,17 +726,63 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       seed               = CONFIG$seed,
       verbose            = CONFIG$shap_verbose
     )
-    p_sh_net <- plot(
-      sh,
-      type = "interaction_network",
-      top_n = CONFIG$shap_plot_top_n
+    ovis_shap_save_pair(sh_xgb, "ovis_shap_xgb")
+    # cast_shap_write_csv(sh_xgb, file.path(OVIS_FIG_DIR, "shap_export_xgb"))
+  }
+
+  # RF（fastshap + 已拟合 ranger，概率尺度）
+  if (requireNamespace("fastshap", quietly = TRUE) &&
+      requireNamespace("ranger", quietly = TRUE) &&
+      "rf" %in% names(fit_full$models) &&
+      !is.null(fit_full$models$rf$model)) {
+    sh_rf <- tryCatch(
+      cast_shap_fit(
+        fit                  = fit_full,
+        which                = "rf",
+        data                 = split$train,
+        response             = CONFIG$response,
+        test_fraction        = CONFIG$shap_test_fraction,
+        seed                 = CONFIG$seed,
+        fastshap_nsim        = CONFIG$shap_fastshap_nsim,
+        max_explain_rows     = CONFIG$shap_max_explain_rows,
+        verbose              = FALSE
+      ),
+      error = function(e) {
+        message("cast_shap_fit(rf) 跳过: ", conditionMessage(e))
+        NULL
+      }
     )
-    print(p_sh_net)
-    ovis_save_plot(p_sh_net, "ovis_shap_interaction_network.png", 9, 9)
-    p_sh_wf <- plot(sh, type = "waterfall", top_n = CONFIG$shap_plot_top_n)
-    print(p_sh_wf)
-    ovis_save_plot(p_sh_wf, "ovis_shap_waterfall.png", 10, 6)
-    # cast_shap_write_csv(sh, file.path(getwd(), "shap_export_ovis"))
+    if (!is.null(sh_rf)) {
+      ovis_shap_save_pair(sh_rf, "ovis_shap_rf")
+    }
+  }
+
+  # CAST 神经网络（fastshap + torch；列为 cast_features 工程特征）
+  torch_ok <- requireNamespace("torch", quietly = TRUE) &&
+    tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
+  if (requireNamespace("fastshap", quietly = TRUE) && isTRUE(torch_ok) &&
+      "cast" %in% names(fit_full$models) &&
+      !is.null(fit_full$models$cast$model)) {
+    sh_cast <- tryCatch(
+      cast_shap_fit(
+        fit                  = fit_full,
+        which                = "cast",
+        data                 = split$train,
+        response             = CONFIG$response,
+        test_fraction        = CONFIG$shap_test_fraction,
+        seed                 = CONFIG$seed,
+        fastshap_nsim        = CONFIG$shap_fastshap_nsim,
+        max_explain_rows     = CONFIG$shap_max_explain_rows,
+        verbose              = FALSE
+      ),
+      error = function(e) {
+        message("cast_shap_fit(cast) 跳过: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(sh_cast)) {
+      ovis_shap_save_pair(sh_cast, "ovis_shap_cast")
+    }
   }
 }
 

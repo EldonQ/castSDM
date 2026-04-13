@@ -27,6 +27,9 @@
 #'     `n_epochs`, `n_runs`, `patience`, `rf_ntree`, `brt_n_trees`,
 #'     `brt_depth`, `hidden_size`, `dropout`, `lr`, `batch_size`,
 #'     `max_interactions`, `tune_grid` are forwarded to [cast_fit()].
+#'     Use `fit_verbose` for [cast_fit()] console output (not `verbose` in `...`).
+#'   \item **Spatial plots**: `plot_basemap` for CV / HSS / CATE maps.
+#'   \item **SHAP** (`do_shap`, `shap_*`): optional XGBoost + fastshap figures.
 #' }
 #'
 #' @param species_list A named list of `data.frame`s. Each element is a
@@ -44,7 +47,43 @@
 #'   \pkg{future}. Set a [future::plan()] before calling. Default `TRUE`.
 #' @param seed Integer or `NULL`. Base seed. Each species gets
 #'   `seed + species_index` for reproducibility.
-#' @param verbose Logical. Default `TRUE`.
+#' @param verbose Logical. Progress messages for the batch driver itself.
+#'   Default `TRUE`.
+#' @param fit_verbose Logical. Passed to [cast_fit()] as `verbose` for each
+#'   species. Default `FALSE`. (Do not pass `verbose` in `...` to `cast_batch`;
+#'   it would clash with `verbose` here; use `fit_verbose` instead.)
+#' @param response Character. Response column name in each species
+#'   `data.frame`. Default `"presence"`.
+#' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()] as
+#'   `env_vars` and `verbose`. Defaults `NULL` and `FALSE`.
+#' @param dag_env_vars,dag_verbose Passed to [cast_dag()] as `env_vars` and
+#'   `verbose`. Defaults `NULL` and `FALSE`.
+#' @param ate_variables,ate_verbose Passed to [cast_ate()] as `variables` and
+#'   `verbose`. Defaults `NULL` and `FALSE`.
+#' @param screen_verbose Passed to [cast_screen()] as `verbose`. Default `FALSE`.
+#' @param cv_models Character vector or `NULL`. Models for [cast_cv()]. If
+#'   `NULL`, uses the same vector as `models`.
+#' @param cv_n_epochs,cv_n_runs,cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose
+#'   Passed to [cast_cv()]. Defaults match that function.
+#' @param predict_models Passed to [cast_predict()] as `models`. Default `NULL`
+#'   (all fitted models).
+#' @param plot_basemap Character. `basemap` for spatial plots (CV, HSS, CATE).
+#'   Default `"world"`.
+#' @param cate_variables,cate_verbose Passed to [cast_cate()]. Defaults `NULL`
+#'   and `FALSE`.
+#' @param cate_point_size Numeric. Point size for saved [plot.cast_cate()] maps.
+#'   Default `0.45` (matches `run_ovis_ammon.R`).
+#' @param eval_response Character or `NULL`. Passed to [cast_evaluate()] as
+#'   `response`. If `NULL`, uses `response`.
+#' @param var_labels Named character vector or `NULL`. Optional labels for
+#'   [plot.cast_dag()], [plot.cast_ate()], [plot.cast_screen()], [plot.cast_cate()].
+#' @param do_shap Logical. If `TRUE`, saves SHAP figures (XGBoost surrogate,
+#'   RF and CAST via [cast_shap_xgb()] / [cast_shap_fit()]) when dependencies
+#'   are available. Default `FALSE` (can be slow in parallel batches).
+#' @param shap_nrounds,shap_max_depth,shap_eta,shap_subsample,shap_colsample_bytree,shap_test_fraction,shap_verbose
+#'   Passed to [cast_shap_xgb()].
+#' @param shap_plot_top_n Integer. Passed to SHAP plot methods.
+#' @param shap_fastshap_nsim,shap_max_explain_rows Passed to [cast_shap_fit()].
 #'
 #' @param dag_R Integer. Number of DAG bootstrap replicates.
 #'   Default `100`.
@@ -122,7 +161,7 @@
 #'
 #' @seealso [cast()], [plot.cast_batch()], [cast_consistency()],
 #'   [cast_fit()], [cast_dag()], [cast_ate()], [cast_screen()],
-#'   [cast_cv()], [cast_cate()]
+#'   [cast_cv()], [cast_cate()], [cast_shap_xgb()], [cast_shap_fit()]
 #'
 #' @export
 cast_batch <- function(species_list,
@@ -134,6 +173,7 @@ cast_batch <- function(species_list,
                        parallel    = TRUE,
                        seed        = NULL,
                        verbose     = TRUE,
+                       fit_verbose = FALSE,
                        # ── DAG ──
                        dag_R                  = 100L,
                        dag_structure_method   = "bootstrap_hc",
@@ -175,6 +215,39 @@ cast_batch <- function(species_list,
                        cate_n_trees = 1000L,
                        cate_hss_model = "cast",
                        cate_hss_threshold = 0.1,
+                       response = "presence",
+                       prepare_env_vars = NULL,
+                       prepare_verbose = FALSE,
+                       dag_env_vars = NULL,
+                       dag_verbose = FALSE,
+                       ate_variables = NULL,
+                       ate_verbose = FALSE,
+                       screen_verbose = FALSE,
+                       cv_models = NULL,
+                       cv_n_epochs = 200L,
+                       cv_n_runs = 3L,
+                       cv_rf_ntree = 300L,
+                       cv_brt_n_trees = 500L,
+                       cv_parallel = FALSE,
+                       cv_verbose = FALSE,
+                       predict_models = NULL,
+                       plot_basemap = "world",
+                       cate_variables = NULL,
+                       cate_verbose = FALSE,
+                       cate_point_size = 0.45,
+                       eval_response = NULL,
+                       var_labels = NULL,
+                       do_shap = FALSE,
+                       shap_nrounds = 200L,
+                       shap_max_depth = 6L,
+                       shap_eta = 0.05,
+                       shap_subsample = 0.8,
+                       shap_colsample_bytree = 0.8,
+                       shap_test_fraction = 0.2,
+                       shap_verbose = FALSE,
+                       shap_plot_top_n = 15L,
+                       shap_fastshap_nsim = 40L,
+                       shap_max_explain_rows = 50L,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -192,10 +265,24 @@ cast_batch <- function(species_list,
   }
 
   fit_args <- list(...)
+  if ("verbose" %in% names(fit_args)) {
+    cli::cli_abort(
+      "{.arg verbose} in {.arg ...} is ambiguous: use {.arg fit_verbose} for {.fn cast_fit} logging."
+    )
+  }
+
+  eval_resp <- if (is.null(eval_response)) response else eval_response
+  cv_models_use <- if (is.null(cv_models)) models else cv_models
 
   # Pack all pipeline config so workers receive a single list
   cfg <- list(
+    response = response,
+    eval_response = eval_resp,
+    prepare_env_vars = prepare_env_vars,
+    prepare_verbose = prepare_verbose,
     train_fraction = train_fraction,
+    dag_env_vars = dag_env_vars,
+    dag_verbose = dag_verbose,
     dag_R = dag_R,
     dag_structure_method = dag_structure_method,
     dag_pc_alpha = dag_pc_alpha,
@@ -215,19 +302,47 @@ cast_batch <- function(species_list,
     dag_strength_threshold = dag_strength_threshold,
     dag_direction_threshold = dag_direction_threshold,
     dag_max_rows = dag_max_rows,
+    ate_variables = ate_variables,
+    ate_verbose = ate_verbose,
     ate_K = ate_K, ate_alpha = ate_alpha,
     ate_num_trees = ate_num_trees,
     ate_quantile_cuts = ate_quantile_cuts,
     ate_bonferroni = ate_bonferroni,
     ate_parallel = ate_parallel,
+    screen_verbose = screen_verbose,
     screen_min_vars = screen_min_vars,
     screen_min_fraction = screen_min_fraction,
     screen_num_trees = screen_num_trees,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
+    cv_models = cv_models_use,
+    cv_n_epochs = cv_n_epochs,
+    cv_n_runs = cv_n_runs,
+    cv_rf_ntree = cv_rf_ntree,
+    cv_brt_n_trees = cv_brt_n_trees,
+    cv_parallel = cv_parallel,
+    cv_verbose = cv_verbose,
+    predict_models = predict_models,
+    plot_basemap = plot_basemap,
     do_cate = do_cate, cate_top_n = cate_top_n,
     cate_n_trees = cate_n_trees,
+    cate_variables = cate_variables,
+    cate_verbose = cate_verbose,
+    cate_point_size = cate_point_size,
     cate_hss_model = cate_hss_model,
-    cate_hss_threshold = cate_hss_threshold
+    cate_hss_threshold = cate_hss_threshold,
+    var_labels = var_labels,
+    do_shap = do_shap,
+    shap_nrounds = shap_nrounds,
+    shap_max_depth = shap_max_depth,
+    shap_eta = shap_eta,
+    shap_subsample = shap_subsample,
+    shap_colsample_bytree = shap_colsample_bytree,
+    shap_test_fraction = shap_test_fraction,
+    shap_verbose = shap_verbose,
+    shap_plot_top_n = shap_plot_top_n,
+    shap_fastshap_nsim = shap_fastshap_nsim,
+    shap_max_explain_rows = shap_max_explain_rows,
+    fit_verbose = fit_verbose
   )
 
   run_one_species <- function(sp_name, sp_data, env_data, models,
@@ -240,18 +355,59 @@ cast_batch <- function(species_list,
     save_fig <- function(p, fname, w = 10, h = 7) {
       if (is.null(p)) return(invisible(NULL))
       tryCatch(
-        ggplot2::ggsave(file.path(fig_dir, fname), p,
-                        width = w, height = h, dpi = fig_dpi),
+        ggplot2::ggsave(
+          file.path(fig_dir, fname), p,
+          width = w, height = h, dpi = fig_dpi,
+          bg = "white", limitsize = FALSE
+        ),
         error = function(e) NULL
       )
     }
 
+    batch_shap_save_pair <- function(sh_obj, stem) {
+      if (is.null(sh_obj)) return(invisible(NULL))
+      topn <- cfg$shap_plot_top_n
+      p_net <- tryCatch(
+        plot(
+          sh_obj,
+          type = "interaction_network",
+          top_n = topn
+        ),
+        error = function(e) NULL
+      )
+      save_fig(p_net, paste0(stem, "_interaction_network.png"), w = 9, h = 9)
+      bv <- sh_obj$bias_shap
+      if (is.null(bv) || length(bv) != nrow(sh_obj$shap)) {
+        bv <- rep(as.numeric(sh_obj$base_score)[1], nrow(sh_obj$shap))
+      }
+      marg <- bv + rowSums(as.matrix(sh_obj$shap))
+      wi <- which.min(abs(marg - stats::median(marg)))[1L]
+      p_wf <- tryCatch(
+        plot(
+          sh_obj,
+          type = "waterfall",
+          top_n = topn,
+          waterfall_row = wi
+        ),
+        error = function(e) NULL
+      )
+      save_fig(p_wf, paste0(stem, "_waterfall.png"), w = 10, h = 6)
+      invisible(NULL)
+    }
+
     result <- tryCatch({
-      split <- cast_prepare(sp_data, train_fraction = cfg$train_fraction,
-                            seed = seed_i)
+      split <- cast_prepare(
+        sp_data,
+        train_fraction = cfg$train_fraction,
+        seed = seed_i,
+        env_vars = cfg$prepare_env_vars,
+        verbose = cfg$prepare_verbose
+      )
 
       dag <- cast_dag(
         split$train,
+        response = cfg$response,
+        env_vars = cfg$dag_env_vars,
         R = cfg$dag_R,
         algorithm = cfg$dag_algorithm,
         score = cfg$dag_score,
@@ -259,7 +415,7 @@ cast_batch <- function(species_list,
         direction_threshold = cfg$dag_direction_threshold,
         max_rows = cfg$dag_max_rows,
         seed = seed_i,
-        verbose = FALSE,
+        verbose = cfg$dag_verbose,
         structure_method = cfg$dag_structure_method,
         pc_alpha = cfg$dag_pc_alpha,
         pc_test = cfg$dag_pc_test,
@@ -275,38 +431,69 @@ cast_batch <- function(species_list,
         notears_alpha_mult = cfg$dag_notears_alpha_mult
       )
 
-      ate <- cast_ate(split$train, K = cfg$ate_K,
-                       alpha = cfg$ate_alpha,
-                       num_trees = cfg$ate_num_trees,
-                       quantile_cuts = cfg$ate_quantile_cuts,
-                       bonferroni = cfg$ate_bonferroni,
-                       parallel = cfg$ate_parallel,
-                       seed = seed_i, verbose = FALSE)
+      ate <- cast_ate(
+        split$train,
+        response = cfg$response,
+        variables = cfg$ate_variables,
+        K = cfg$ate_K,
+        alpha = cfg$ate_alpha,
+        num_trees = cfg$ate_num_trees,
+        quantile_cuts = cfg$ate_quantile_cuts,
+        bonferroni = cfg$ate_bonferroni,
+        parallel = cfg$ate_parallel,
+        seed = seed_i,
+        verbose = cfg$ate_verbose
+      )
 
-      screen <- cast_screen(dag, ate, split$train,
-                             min_vars = cfg$screen_min_vars,
-                             min_fraction = cfg$screen_min_fraction,
-                             num_trees = cfg$screen_num_trees,
-                             seed = seed_i, verbose = FALSE)
+      screen <- cast_screen(
+        dag, ate, split$train,
+        response = cfg$response,
+        min_vars = cfg$screen_min_vars,
+        min_fraction = cfg$screen_min_fraction,
+        num_trees = cfg$screen_num_trees,
+        seed = seed_i,
+        verbose = cfg$screen_verbose
+      )
 
       roles <- cast_roles(screen, dag)
 
-      fit_call_args <- c(
-        list(data = split$train, screen = screen, dag = dag, ate = ate,
-             models = models, seed = seed_i, verbose = FALSE),
+      fit_call_args <- utils::modifyList(
+        list(
+          data = split$train,
+          screen = screen,
+          dag = dag,
+          ate = ate,
+          models = models,
+          response = cfg$response,
+          seed = seed_i,
+          verbose = cfg$fit_verbose
+        ),
         fit_args
       )
       fit <- do.call(cast_fit, fit_call_args)
 
-      eval_result <- cast_evaluate(fit, split$test)
+      eval_result <- cast_evaluate(
+        fit, split$test,
+        response = cfg$eval_response
+      )
 
       cv_result <- NULL
       if (cfg$do_cv) {
         cv_result <- tryCatch(
-          cast_cv(sp_data, screen = screen, dag = dag, ate = ate,
-                  k = cfg$cv_k, models = models,
-                  block_method = cfg$cv_block_method,
-                  seed = seed_i, verbose = FALSE),
+          cast_cv(
+            sp_data,
+            screen = screen, dag = dag, ate = ate,
+            k = cfg$cv_k, models = cfg$cv_models,
+            block_method = cfg$cv_block_method,
+            response = cfg$response,
+            n_epochs = cfg$cv_n_epochs,
+            n_runs = cfg$cv_n_runs,
+            rf_ntree = cfg$cv_rf_ntree,
+            brt_n_trees = cfg$cv_brt_n_trees,
+            parallel = cfg$cv_parallel,
+            seed = seed_i,
+            verbose = cfg$cv_verbose
+          ),
           error = function(e) NULL
         )
       }
@@ -314,7 +501,7 @@ cast_batch <- function(species_list,
       pred_result <- NULL
       if (!is.null(env_data)) {
         pred_result <- tryCatch(
-          cast_predict(fit, env_data),
+          cast_predict(fit, env_data, models = cfg$predict_models),
           error = function(e) NULL
         )
       }
@@ -324,10 +511,17 @@ cast_batch <- function(species_list,
         cate_result <- tryCatch({
           check_suggested("grf", "for CATE")
           pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-          cast_cate(split$train, ate = ate, screen = screen,
-                    predict_data = pred_for_cate, top_n = cfg$cate_top_n,
-                    n_trees = cfg$cate_n_trees,
-                    seed = seed_i, verbose = FALSE)
+          cast_cate(
+            split$train,
+            variables = cfg$cate_variables,
+            ate = ate, screen = screen,
+            response = cfg$response,
+            predict_data = pred_for_cate,
+            top_n = cfg$cate_top_n,
+            n_trees = cfg$cate_n_trees,
+            seed = seed_i,
+            verbose = cfg$cate_verbose
+          )
         }, error = function(e) NULL)
       }
 
@@ -340,17 +534,25 @@ cast_batch <- function(species_list,
       # ── Save ALL plots ────────────────────────────────────────────────
       check_suggested("ggplot2", "for plotting")
 
+      vl <- cfg$var_labels
+      bm <- cfg$plot_basemap
+
       if (requireNamespace("ggraph", quietly = TRUE) &&
           requireNamespace("igraph", quietly = TRUE)) {
-        p <- tryCatch(plot(dag, roles = roles, screen = screen,
-                           species = sp_name), error = function(e) NULL)
+        p <- tryCatch(
+          plot(
+            dag, roles = roles, screen = screen,
+            species = sp_name, var_labels = vl
+          ),
+          error = function(e) NULL
+        )
         save_fig(p, "causal_dag.png", w = 14, h = 10)
       }
 
-      p <- tryCatch(plot(ate), error = function(e) NULL)
+      p <- tryCatch(plot(ate, var_labels = vl), error = function(e) NULL)
       save_fig(p, "ate_forest_plot.png", w = 10, h = 7)
 
-      p <- tryCatch(plot(screen), error = function(e) NULL)
+      p <- tryCatch(plot(screen, var_labels = vl), error = function(e) NULL)
       save_fig(p, "variable_screening.png", w = 10, h = 7)
 
       p <- tryCatch(plot(eval_result), error = function(e) NULL)
@@ -358,8 +560,10 @@ cast_batch <- function(species_list,
 
       if (!is.null(cv_result)) {
         p <- tryCatch(
-          plot(cv_result, lon = sp_data$lon, lat = sp_data$lat,
-               metric = "auc", basemap = "world"),
+          plot(
+            cv_result, lon = sp_data$lon, lat = sp_data$lat,
+            metric = "auc", basemap = bm
+          ),
           error = function(e) NULL
         )
         save_fig(p, "spatial_cv_map.png", w = 14, h = 8)
@@ -368,9 +572,11 @@ cast_batch <- function(species_list,
       if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
         for (mdl in pred_result$models) {
           p <- tryCatch(
-            plot(pred_result, model = mdl, basemap = "world",
-                 title = sprintf("%s HSS (%s)",
-                                 gsub("_", " ", sp_name), mdl)),
+            plot(
+              pred_result, model = mdl, basemap = bm,
+              title = sprintf("%s HSS (%s)",
+                              gsub("_", " ", sp_name), mdl)
+            ),
             error = function(e) NULL
           )
           save_fig(p, sprintf("HSS_%s.png", mdl), w = 14, h = 8)
@@ -387,7 +593,9 @@ cast_batch <- function(species_list,
                 cate_result,
                 variable = cv,
                 species = sp_name,
-                basemap = "world",
+                basemap = bm,
+                var_labels = vl,
+                point_size = cfg$cate_point_size,
                 legend_position = "bottom",
                 hss_predict = pred_result,
                 hss_model = pm,
@@ -398,7 +606,9 @@ cast_batch <- function(species_list,
                 cate_result,
                 variable = cv,
                 species = sp_name,
-                basemap = "world",
+                basemap = bm,
+                var_labels = vl,
+                point_size = cfg$cate_point_size,
                 legend_position = "bottom"
               )
             }
@@ -409,9 +619,89 @@ cast_batch <- function(species_list,
 
       if (!is.null(cons_result) &&
           requireNamespace("patchwork", quietly = TRUE)) {
-        p <- tryCatch(plot(cons_result, species = sp_name),
-                       error = function(e) NULL)
+        p <- tryCatch(
+          plot(
+            cons_result,
+            species = sp_name,
+            font_family = "sans",
+            use_bold = TRUE,
+            font_base = 11L,
+            font_main_title = 14L,
+            font_panel_title = 11L,
+            font_axis = 8L,
+            font_cell_value = 3.5,
+            value_decimals = 3L,
+            tile_linewidth = 0.5,
+            text_white_above = 0.7
+          ),
+          error = function(e) NULL
+        )
         save_fig(p, "model_consistency.png", w = 16, h = 5.5)
+      }
+
+      # ── SHAP (optional; mirrors run_ovis_ammon Step 9) ─────────────────
+      if (isTRUE(cfg$do_shap)) {
+        if (requireNamespace("xgboost", quietly = TRUE)) {
+          sh_xgb <- tryCatch(
+            cast_shap_xgb(
+              data = split$train,
+              response = cfg$response,
+              env_vars = NULL,
+              screen = screen,
+              dag = dag,
+              nrounds = cfg$shap_nrounds,
+              max_depth = cfg$shap_max_depth,
+              eta = cfg$shap_eta,
+              subsample = cfg$shap_subsample,
+              colsample_bytree = cfg$shap_colsample_bytree,
+              test_fraction = cfg$shap_test_fraction,
+              seed = seed_i,
+              verbose = cfg$shap_verbose
+            ),
+            error = function(e) NULL
+          )
+          batch_shap_save_pair(sh_xgb, "shap_xgb")
+        }
+        if (requireNamespace("fastshap", quietly = TRUE) &&
+            requireNamespace("ranger", quietly = TRUE) &&
+            "rf" %in% names(fit$models) && !is.null(fit$models$rf$model)) {
+          sh_rf <- tryCatch(
+            cast_shap_fit(
+              fit = fit,
+              which = "rf",
+              data = split$train,
+              response = cfg$response,
+              test_fraction = cfg$shap_test_fraction,
+              seed = seed_i,
+              fastshap_nsim = cfg$shap_fastshap_nsim,
+              max_explain_rows = cfg$shap_max_explain_rows,
+              verbose = FALSE
+            ),
+            error = function(e) NULL
+          )
+          batch_shap_save_pair(sh_rf, "shap_rf")
+        }
+        torch_ok <- requireNamespace("torch", quietly = TRUE) &&
+          tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
+        if (requireNamespace("fastshap", quietly = TRUE) && isTRUE(torch_ok) &&
+            "cast" %in% names(fit$models) &&
+            !is.null(fit$models$cast$model)) {
+          sh_cast <- tryCatch(
+            cast_shap_fit(
+              fit = fit,
+              which = "cast",
+              data = split$train,
+              response = cfg$response,
+              test_fraction = cfg$shap_test_fraction,
+              seed = seed_i,
+              fastshap_nsim = cfg$shap_fastshap_nsim,
+              max_explain_rows = cfg$shap_max_explain_rows,
+              verbose = FALSE
+            ),
+            error = function(e) NULL
+          )
+          batch_shap_save_pair(sh_cast, "shap_cast")
+        }
       }
 
       # ── Save RDS ──────────────────────────────────────────────────────

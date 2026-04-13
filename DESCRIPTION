@@ -39,6 +39,7 @@ Suggests:
     BiDAG,
     bnlearn,
     car,
+    fastshap,
     future,
     future.apply,
     gbm,

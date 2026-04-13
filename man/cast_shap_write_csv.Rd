@@ -7,7 +7,7 @@
 cast_shap_write_csv(x, dir, prefix = "shap")
 }
 \arguments{
-\item{x}{Object returned by \code{\link{cast_shap_xgb}}.}
+\item{x}{Object from \code{\link{cast_shap_xgb}} or \code{\link{cast_shap_fit}}.}
 
 \item{dir}{Output directory (created if needed).}
 

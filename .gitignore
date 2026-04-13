@@ -13,6 +13,7 @@ Meta/
 output/
 castSDM_batch_output/
 castSDM_multi_species/
+cast_ovis_ammon_figures/
 
 # Local copies of multi-species CAST grids (optional; keep repo lean — tracked
 # examples remain: CAST_Ovis_ammon*, CAST_Gazella*, CAST_Pseudois*, China_Env*)
