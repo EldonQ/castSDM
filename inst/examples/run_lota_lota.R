@@ -137,10 +137,9 @@ DAG_SCORE               <- "bic-g"
 DAG_STRENGTH_THRESHOLD  <- 0.7
 DAG_DIRECTION_THRESHOLD <- 0.6
 DAG_MAX_ROWS            <- 8000L
-# cast_dag() structure_method: "bootstrap_hc" | "pc" | "fci" | "bidag_bge" | "notears_linear"
+# cast_dag() structure_method: "bootstrap_hc" | "pc" | "bidag_bge" | "notears_linear"
 DAG_STRUCTURE_METHOD    <- "bootstrap_hc"
 DAG_PC_ALPHA            <- 0.05
-DAG_FCI_ALPHA           <- 0.05
 DAG_BIDAG_ALGORITHM     <- "order"
 DAG_BIDAG_ITERATIONS    <- NULL
 DAG_NOTEARS_LAMBDA      <- 0.03
@@ -524,7 +523,6 @@ dag_result <- checkpoint(file.path(MODEL_DIR, "dag_result.rds"), {
     verbose               = TRUE,
     structure_method      = DAG_STRUCTURE_METHOD,
     pc_alpha              = DAG_PC_ALPHA,
-    fci_alpha             = DAG_FCI_ALPHA,
     bidag_algorithm       = DAG_BIDAG_ALGORITHM,
     bidag_iterations      = DAG_BIDAG_ITERATIONS,
     notears_lambda        = DAG_NOTEARS_LAMBDA,

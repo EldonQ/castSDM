@@ -20,7 +20,7 @@ spurious correlations and poor transferability under novel conditions.
 **castSDM** addresses these limitations by:
 
 - Discovering causal structure among predictors via **Directed Acyclic
-  Graphs (DAGs)** (bootstrap Hill-Climbing, PC, FCI, BiDAG BGe MAP, or
+  Graphs (DAGs)** (bootstrap Hill-Climbing, PC, BiDAG BGe MAP, or
   linear NOTEARS with optional **torch**)
 - Quantifying causal effect sizes through **Double Machine Learning
   (DML)** based Average Treatment Effect (ATE) estimation
@@ -63,7 +63,7 @@ result <- cast(
   species_data = ovis_ammon,
   env_data     = china_env_grid,
   models       = c("cast", "rf", "maxent", "brt"),
-  dag_structure_method = "bootstrap_hc"  # or "pc", "fci", "bidag_bge", "notears_linear"
+  dag_structure_method = "bootstrap_hc"  # or "pc", "bidag_bge", "notears_linear"
 )
 
 summary(result)
@@ -156,7 +156,7 @@ if (requireNamespace("xgboost", quietly = TRUE)) {
   estimation provide an ecologically grounded variable selection and
   feature engineering framework.
 - **Several DAG learners**: `cast_dag(..., structure_method = )` supports
-  `"bootstrap_hc"`, `"pc"`, `"fci"` (**bnlearn**), `"bidag_bge"`
+  `"bootstrap_hc"`, `"pc"` (**bnlearn**), `"bidag_bge"`
   (**BiDAG**), and `"notears_linear"` (**torch**).
 - **Multi-model comparison**: Fit CI-MLP alongside Random Forest,
   MaxEnt, and BRT within the same pipeline for fair benchmarking.

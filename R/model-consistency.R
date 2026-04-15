@@ -136,16 +136,16 @@ pearson_r <- function(p1, p2) {
 #'
 #' @param x A `cast_consistency` object.
 #' @param species Optional character. Species name for the title.
-#' @param font_family Base font family (passed to ggplot2). Default `"sans"`.
+#' @param font_family Base font family (passed to ggplot2). Default `"Arial"`.
 #' @param use_bold Logical. Use bold face for titles, axes, legend, and cell
 #'   values. Default `TRUE`.
-#' @param font_base Base theme size. Default `11`.
-#' @param font_main_title Outer patchwork title size. Default `14`.
-#' @param font_panel_title Panel title size. Default `11`.
-#' @param font_axis Axis label size (model names). Default `8`.
-#' @param font_cell_value Text size inside tiles. Default `3.5`.
-#' @param value_decimals Decimals printed in each cell. Default `3L`.
-#' @param tile_linewidth Grid line width between tiles. Default `0.5`.
+#' @param font_base Base theme size. Default `14`.
+#' @param font_main_title Outer patchwork title size. Default `20`.
+#' @param font_panel_title Panel title size. Default `28`.
+#' @param font_axis Axis label size (model names). Default `25`.
+#' @param font_cell_value Text size inside tiles. Default `7`.
+#' @param value_decimals Decimals printed in each cell. Default `4L`.
+#' @param tile_linewidth Grid line width between tiles. Default `0.8`.
 #' @param text_white_above Values above this threshold use white cell text.
 #'   Default `0.7`.
 #' @param consistency_colors Colours for the shared gradient (low to high).
@@ -158,15 +158,15 @@ pearson_r <- function(p1, p2) {
 #' @export
 plot.cast_consistency <- function(x,
                                   species = NULL,
-                                  font_family = "sans",
+                                  font_family = "Arial",
                                   use_bold = TRUE,
-                                  font_base = 11L,
-                                  font_main_title = 14L,
-                                  font_panel_title = 11L,
-                                  font_axis = 8L,
-                                  font_cell_value = 3.5,
-                                  value_decimals = 3L,
-                                  tile_linewidth = 0.5,
+                                  font_base = 14L,
+                                  font_main_title = 20L,
+                                  font_panel_title = 28L,
+                                  font_axis = 25L,
+                                  font_cell_value = 7,
+                                  value_decimals = 4L,
+                                  tile_linewidth = 0.8,
                                   text_white_above = 0.7,
                                   consistency_colors = c(
                                     "#F7FBFF", "#DEEBF7", "#C6DBEF",

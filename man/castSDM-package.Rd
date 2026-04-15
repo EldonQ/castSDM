@@ -17,7 +17,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Liqiang \email{2759831686@qq.com} (\href{https://orcid.org/0009-0002-6966-4633}{ORCID}) [copyright holder]
+\strong{Maintainer}: Liqiang Q \email{2759831686@qq.com} (\href{https://orcid.org/0009-0002-6966-4633}{ORCID}) [copyright holder]
 
 }
 \keyword{internal}

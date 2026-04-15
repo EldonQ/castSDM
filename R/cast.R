@@ -18,10 +18,10 @@
 #'   `dag_structure_method = "bootstrap_hc"`. Default `100`.
 #' @param dag_structure_method Character passed to [cast_dag()] as
 #'   `structure_method`. Default `"bootstrap_hc"`. Alternatives: `"pc"`,
-#'   `"fci"`, `"bidag_bge"`, `"notears_linear"`.
-#' @param dag_pc_alpha,dag_fci_alpha Significance levels for PC / FCI.
-#' @param dag_pc_test,dag_fci_test Conditional-independence tests passed to
-#'   [cast_dag()] as `pc_test` / `fci_test` (default `"zf"`).
+#'   `"bidag_bge"`, `"notears_linear"`.
+#' @param dag_pc_alpha Significance level for PC.
+#' @param dag_pc_test Conditional-independence test passed to
+#'   [cast_dag()] as `pc_test` (default `"zf"`).
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG options.
 #' @param dag_notears_lambda NOTEARS L1 penalty; passed to \code{cast_dag()}.
 #' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
@@ -65,8 +65,6 @@ cast <- function(species_data,
                  dag_structure_method = "bootstrap_hc",
                  dag_pc_alpha = 0.05,
                  dag_pc_test = "zf",
-                 dag_fci_alpha = 0.05,
-                 dag_fci_test = "zf",
                  dag_bidag_algorithm = "order",
                  dag_bidag_iterations = NULL,
                  dag_notears_lambda = 0.03,
@@ -117,8 +115,6 @@ cast <- function(species_data,
     structure_method = dag_structure_method,
     pc_alpha = dag_pc_alpha,
     pc_test = dag_pc_test,
-    fci_alpha = dag_fci_alpha,
-    fci_test = dag_fci_test,
     bidag_algorithm = dag_bidag_algorithm,
     bidag_iterations = dag_bidag_iterations,
     notears_lambda = dag_notears_lambda,

@@ -7,15 +7,15 @@
 \method{plot}{cast_consistency}(
   x,
   species = NULL,
-  font_family = "sans",
+  font_family = "Arial",
   use_bold = TRUE,
-  font_base = 11L,
-  font_main_title = 14L,
-  font_panel_title = 11L,
-  font_axis = 8L,
-  font_cell_value = 3.5,
-  value_decimals = 3L,
-  tile_linewidth = 0.5,
+  font_base = 14L,
+  font_main_title = 20L,
+  font_panel_title = 28L,
+  font_axis = 25L,
+  font_cell_value = 7,
+  value_decimals = 4L,
+  tile_linewidth = 0.8,
   text_white_above = 0.7,
   consistency_colors = c("#F7FBFF", "#DEEBF7", "#C6DBEF", "#9ECAE1", "#6BAED6",
     "#4292C6", "#2171B5", "#084594"),
@@ -29,24 +29,24 @@
 
 \item{species}{Optional character. Species name for the title.}
 
-\item{font_family}{Base font family (passed to ggplot2). Default \code{"sans"}.}
+\item{font_family}{Base font family (passed to ggplot2). Default \code{"Arial"}.}
 
 \item{use_bold}{Logical. Use bold face for titles, axes, legend, and cell
 values. Default \code{TRUE}.}
 
-\item{font_base}{Base theme size. Default \code{11}.}
+\item{font_base}{Base theme size. Default \code{14}.}
 
-\item{font_main_title}{Outer patchwork title size. Default \code{14}.}
+\item{font_main_title}{Outer patchwork title size. Default \code{20}.}
 
-\item{font_panel_title}{Panel title size. Default \code{11}.}
+\item{font_panel_title}{Panel title size. Default \code{28}.}
 
-\item{font_axis}{Axis label size (model names). Default \code{8}.}
+\item{font_axis}{Axis label size (model names). Default \code{25}.}
 
-\item{font_cell_value}{Text size inside tiles. Default \code{3.5}.}
+\item{font_cell_value}{Text size inside tiles. Default \code{7}.}
 
-\item{value_decimals}{Decimals printed in each cell. Default \code{3L}.}
+\item{value_decimals}{Decimals printed in each cell. Default \code{4L}.}
 
-\item{tile_linewidth}{Grid line width between tiles. Default \code{0.5}.}
+\item{tile_linewidth}{Grid line width between tiles. Default \code{0.8}.}
 
 \item{text_white_above}{Values above this threshold use white cell text.
 Default \code{0.7}.}

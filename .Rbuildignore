@@ -12,3 +12,9 @@
 ^castSDM_batch_output$
 ^castSDM_multi_species$
 ^cast_ovis_ammon_figures$
+^castSDM\.Rcheck$
+^\.\.Rcheck$
+^\.git$
+^\.gitignore$
+^\.Rhistory$
+^\.RData$

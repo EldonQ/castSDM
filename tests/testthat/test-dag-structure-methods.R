@@ -65,21 +65,6 @@ test_that("cast_dag runs PC (structure_method pc)", {
   expect_s3_class(dag$edges, "data.frame")
 })
 
-test_that("cast_dag runs FCI", {
-  skip_if_not_installed("bnlearn")
-  d <- make_toy_species_df(200L)
-  dag <- cast_dag(
-    d,
-    structure_method = "fci",
-    fci_alpha = 0.05,
-    fci_test = "zf",
-    seed = 3L,
-    verbose = FALSE
-  )
-  expect_s3_class(dag, "cast_dag")
-  expect_equal(dag$structure_method, "fci")
-})
-
 test_that("cast_dag runs bootstrap_hc with small R", {
   skip_if_not_installed("bnlearn")
   d <- make_toy_species_df(150L)

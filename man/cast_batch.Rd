@@ -19,8 +19,6 @@ cast_batch(
   dag_structure_method = "bootstrap_hc",
   dag_pc_alpha = 0.05,
   dag_pc_test = "zf",
-  dag_fci_alpha = 0.05,
-  dag_fci_test = "zf",
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
   dag_notears_lambda = 0.03,
@@ -84,6 +82,7 @@ cast_batch(
   shap_plot_top_n = 15L,
   shap_fastshap_nsim = 40L,
   shap_max_explain_rows = 50L,
+  dev_package_root = NULL,
   ...
 )
 }
@@ -124,10 +123,9 @@ Default \code{100}.}
 \item{dag_structure_method}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as
 \code{structure_method}. Default \code{"bootstrap_hc"}.}
 
-\item{dag_pc_alpha, dag_fci_alpha}{PC/FCI alpha levels. Defaults \code{0.05}.}
+\item{dag_pc_alpha}{PC alpha level. Default \code{0.05}.}
 
-\item{dag_pc_test, dag_fci_test}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{pc_test} /
-\code{fci_test}. Defaults \code{"zf"}.}
+\item{dag_pc_test}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{pc_test}. Default \code{"zf"}.}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
 
@@ -252,6 +250,13 @@ are available. Default \code{FALSE} (can be slow in parallel batches).}
 
 \item{shap_fastshap_nsim, shap_max_explain_rows}{Passed to \code{\link[=cast_shap_fit]{cast_shap_fit()}}.}
 
+\item{dev_package_root}{Character or \code{NULL}. Absolute path to the package
+source root (folder containing \code{DESCRIPTION}). When \code{parallel = TRUE},
+each PSOCK worker runs \code{\link[pkgload:load_all]{pkgload::load_all()}} on this path before fitting
+(so code matches \code{\link[devtools:load_all]{devtools::load_all()}} on the host). Example: pass the
+same path as in \code{inst/examples/run_multi_species.R} after locating the
+project root.}
+
 \item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}} for
 model hyper-parameter tuning (e.g., \code{n_epochs}, \code{n_runs},
 \code{rf_ntree}, \code{brt_n_trees}, \code{tune_grid}).}
@@ -282,6 +287,11 @@ explicit arguments. Parameters are grouped by prefix:
 \itemize{
 \item \strong{General}: \code{models}, \code{train_fraction}, \code{output_dir},
 \code{fig_dpi}, \code{parallel}, \code{seed}, \code{verbose}.
+When \code{dev_package_root} is set and \code{parallel = TRUE}, species run on a
+\code{\link[parallel:makeCluster]{parallel::makeCluster()}} backend: each worker calls \code{\link[pkgload:load_all]{pkgload::load_all()}}
+first (see \code{inst/examples/run_multi_species.R}). Without it, \code{parallel}
+uses \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}} and the installed package must match
+your DAG API.
 \item \strong{DAG} (\verb{dag_*}): Bootstrap replicates, edge thresholds,
 structure learning algorithm and scoring criterion.
 \item \strong{ATE} (\verb{ate_*}): Cross-fitting folds, significance level,

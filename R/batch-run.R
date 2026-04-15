@@ -13,6 +13,11 @@
 #' \itemize{
 #'   \item **General**: `models`, `train_fraction`, `output_dir`,
 #'     `fig_dpi`, `parallel`, `seed`, `verbose`.
+#'     When `dev_package_root` is set and `parallel = TRUE`, species run on a
+#'     [parallel::makeCluster()] backend: each worker calls [pkgload::load_all()]
+#'     first (see `inst/examples/run_multi_species.R`). Without it, `parallel`
+#'     uses [future.apply::future_lapply()] and the installed package must match
+#'     your DAG API.
 #'   \item **DAG** (`dag_*`): Bootstrap replicates, edge thresholds,
 #'     structure learning algorithm and scoring criterion.
 #'   \item **ATE** (`ate_*`): Cross-fitting folds, significance level,
@@ -49,6 +54,12 @@
 #'   `seed + species_index` for reproducibility.
 #' @param verbose Logical. Progress messages for the batch driver itself.
 #'   Default `TRUE`.
+#' @param dev_package_root Character or `NULL`. Absolute path to the package
+#'   source root (folder containing `DESCRIPTION`). When `parallel = TRUE`,
+#'   each PSOCK worker runs [pkgload::load_all()] on this path before fitting
+#'   (so code matches [devtools::load_all()] on the host). Example: pass the
+#'   same path as in `inst/examples/run_multi_species.R` after locating the
+#'   project root.
 #' @param fit_verbose Logical. Passed to [cast_fit()] as `verbose` for each
 #'   species. Default `FALSE`. (Do not pass `verbose` in `...` to `cast_batch`;
 #'   it would clash with `verbose` here; use `fit_verbose` instead.)
@@ -89,9 +100,8 @@
 #'   Default `100`.
 #' @param dag_structure_method Character. Passed to [cast_dag()] as
 #'   `structure_method`. Default `"bootstrap_hc"`.
-#' @param dag_pc_alpha,dag_fci_alpha PC/FCI alpha levels. Defaults `0.05`.
-#' @param dag_pc_test,dag_fci_test Passed to [cast_dag()] as `pc_test` /
-#'   `fci_test`. Defaults `"zf"`.
+#' @param dag_pc_alpha PC alpha level. Default `0.05`.
+#' @param dag_pc_test Passed to [cast_dag()] as `pc_test`. Default `"zf"`.
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
 #' @param dag_notears_lambda NOTEARS L1 penalty (see \code{cast_dag()}).
 #' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
@@ -179,8 +189,6 @@ cast_batch <- function(species_list,
                        dag_structure_method   = "bootstrap_hc",
                        dag_pc_alpha           = 0.05,
                        dag_pc_test            = "zf",
-                       dag_fci_alpha          = 0.05,
-                       dag_fci_test           = "zf",
                        dag_bidag_algorithm    = "order",
                        dag_bidag_iterations   = NULL,
                        dag_notears_lambda     = 0.03,
@@ -248,6 +256,7 @@ cast_batch <- function(species_list,
                        shap_plot_top_n = 15L,
                        shap_fastshap_nsim = 40L,
                        shap_max_explain_rows = 50L,
+                       dev_package_root = NULL,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -264,11 +273,66 @@ cast_batch <- function(species_list,
     cli::cli_inform("Output: {output_dir}")
   }
 
+  dev_root_workers <- NULL
+  if (!is.null(dev_package_root) && nzchar(as.character(dev_package_root)[1])) {
+    dev_root_workers <- tryCatch(
+      normalizePath(
+        as.character(dev_package_root)[1],
+        winslash = "/", mustWork = FALSE
+      ),
+      error = function(e) NA_character_
+    )
+    if (!is.na(dev_root_workers) && nzchar(dev_root_workers) &&
+        file.exists(file.path(dev_root_workers, "DESCRIPTION"))) {
+      Sys.setenv(CASTSDM_ROOT = dev_root_workers)
+    } else {
+      dev_root_workers <- NULL
+    }
+  }
+
+  if (isTRUE(parallel) && requireNamespace("future.apply", quietly = TRUE) &&
+      is.null(dev_root_workers) && !nzchar(Sys.getenv("CASTSDM_ROOT", ""))) {
+    root <- tryCatch(
+      normalizePath(
+        as.character(getNamespaceInfo(asNamespace("castSDM"), "path")),
+        winslash = "/", mustWork = FALSE
+      ),
+      error = function(e) NA_character_
+    )
+    if (!is.na(root) && nzchar(root) &&
+        file.exists(file.path(root, "DESCRIPTION"))) {
+      np <- root
+      in_lib <- any(vapply(.libPaths(), function(lib) {
+        nl <- tryCatch(
+          normalizePath(lib, winslash = "/", mustWork = FALSE),
+          error = function(e) ""
+        )
+        nzchar(nl) && (identical(np, nl) || startsWith(np, paste0(nl, "/")))
+      }, logical(1L)))
+      if (!isTRUE(in_lib)) Sys.setenv(CASTSDM_ROOT = root)
+    }
+  }
+  if (verbose && isTRUE(parallel) && nzchar(Sys.getenv("CASTSDM_ROOT", ""))) {
+    cli::cli_inform(
+      "Parallel: {.envvar CASTSDM_ROOT} = {.path {Sys.getenv('CASTSDM_ROOT')}}"
+    )
+  }
+
   fit_args <- list(...)
   if ("verbose" %in% names(fit_args)) {
     cli::cli_abort(
       "{.arg verbose} in {.arg ...} is ambiguous: use {.arg fit_verbose} for {.fn cast_fit} logging."
     )
+  }
+  cast_fit_names <- names(formals(cast_fit))
+  if (length(fit_args)) {
+    bad <- !names(fit_args) %in% cast_fit_names
+    if (any(bad)) {
+      cli::cli_warn(
+        "Dropping {.arg ...} names not in {.fn cast_fit}: {.val {names(fit_args)[bad]}} (use {.code devtools::load_all()} on current source if you meant batch options)."
+      )
+      fit_args <- fit_args[!bad]
+    }
   }
 
   eval_resp <- if (is.null(eval_response)) response else eval_response
@@ -287,8 +351,6 @@ cast_batch <- function(species_list,
     dag_structure_method = dag_structure_method,
     dag_pc_alpha = dag_pc_alpha,
     dag_pc_test = dag_pc_test,
-    dag_fci_alpha = dag_fci_alpha,
-    dag_fci_test = dag_fci_test,
     dag_bidag_algorithm = dag_bidag_algorithm,
     dag_bidag_iterations = dag_bidag_iterations,
     dag_notears_lambda = dag_notears_lambda,
@@ -345,400 +407,82 @@ cast_batch <- function(species_list,
     fit_verbose = fit_verbose
   )
 
-  run_one_species <- function(sp_name, sp_data, env_data, models,
-                              output_dir, fig_dpi, seed_i,
-                              cfg, fit_args) {
-    sp_dir  <- file.path(output_dir, sp_name)
-    fig_dir <- file.path(sp_dir, "figures")
-    dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
-
-    save_fig <- function(p, fname, w = 10, h = 7) {
-      if (is.null(p)) return(invisible(NULL))
-      tryCatch(
-        ggplot2::ggsave(
-          file.path(fig_dir, fname), p,
-          width = w, height = h, dpi = fig_dpi,
-          bg = "white", limitsize = FALSE
-        ),
-        error = function(e) NULL
+  if (parallel && !is.null(dev_root_workers)) {
+    nwrk <- tryCatch(
+      if (requireNamespace("future", quietly = TRUE)) {
+        future::nbrOfWorkers()
+      } else {
+        NA_integer_
+      },
+      error = function(e) NA_integer_
+    )
+    if (is.na(nwrk) || nwrk < 1L) {
+      nwrk <- max(1L, parallel::detectCores() - 1L)
+    }
+    nwrk <- min(as.integer(nwrk), n_sp)
+    if (verbose) {
+      cli::cli_inform(
+        "Parallel (dev): PSOCK with {nwrk} workers; pkgload::load_all() on each."
       )
     }
-
-    batch_shap_save_pair <- function(sh_obj, stem) {
-      if (is.null(sh_obj)) return(invisible(NULL))
-      topn <- cfg$shap_plot_top_n
-      p_net <- tryCatch(
-        plot(
-          sh_obj,
-          type = "interaction_network",
-          top_n = topn
-        ),
-        error = function(e) NULL
-      )
-      save_fig(p_net, paste0(stem, "_interaction_network.png"), w = 9, h = 9)
-      bv <- sh_obj$bias_shap
-      if (is.null(bv) || length(bv) != nrow(sh_obj$shap)) {
-        bv <- rep(as.numeric(sh_obj$base_score)[1], nrow(sh_obj$shap))
-      }
-      marg <- bv + rowSums(as.matrix(sh_obj$shap))
-      wi <- which.min(abs(marg - stats::median(marg)))[1L]
-      p_wf <- tryCatch(
-        plot(
-          sh_obj,
-          type = "waterfall",
-          top_n = topn,
-          waterfall_row = wi
-        ),
-        error = function(e) NULL
-      )
-      save_fig(p_wf, paste0(stem, "_waterfall.png"), w = 10, h = 6)
-      invisible(NULL)
-    }
-
-    result <- tryCatch({
-      split <- cast_prepare(
-        sp_data,
-        train_fraction = cfg$train_fraction,
-        seed = seed_i,
-        env_vars = cfg$prepare_env_vars,
-        verbose = cfg$prepare_verbose
-      )
-
-      dag <- cast_dag(
-        split$train,
-        response = cfg$response,
-        env_vars = cfg$dag_env_vars,
-        R = cfg$dag_R,
-        algorithm = cfg$dag_algorithm,
-        score = cfg$dag_score,
-        strength_threshold = cfg$dag_strength_threshold,
-        direction_threshold = cfg$dag_direction_threshold,
-        max_rows = cfg$dag_max_rows,
-        seed = seed_i,
-        verbose = cfg$dag_verbose,
-        structure_method = cfg$dag_structure_method,
-        pc_alpha = cfg$dag_pc_alpha,
-        pc_test = cfg$dag_pc_test,
-        fci_alpha = cfg$dag_fci_alpha,
-        fci_test = cfg$dag_fci_test,
-        bidag_algorithm = cfg$dag_bidag_algorithm,
-        bidag_iterations = cfg$dag_bidag_iterations,
-        notears_lambda = cfg$dag_notears_lambda,
-        notears_max_iter = cfg$dag_notears_max_iter,
-        notears_lr = cfg$dag_notears_lr,
-        notears_tol = cfg$dag_notears_tol,
-        notears_rho_init = cfg$dag_notears_rho_init,
-        notears_alpha_mult = cfg$dag_notears_alpha_mult
-      )
-
-      ate <- cast_ate(
-        split$train,
-        response = cfg$response,
-        variables = cfg$ate_variables,
-        K = cfg$ate_K,
-        alpha = cfg$ate_alpha,
-        num_trees = cfg$ate_num_trees,
-        quantile_cuts = cfg$ate_quantile_cuts,
-        bonferroni = cfg$ate_bonferroni,
-        parallel = cfg$ate_parallel,
-        seed = seed_i,
-        verbose = cfg$ate_verbose
-      )
-
-      screen <- cast_screen(
-        dag, ate, split$train,
-        response = cfg$response,
-        min_vars = cfg$screen_min_vars,
-        min_fraction = cfg$screen_min_fraction,
-        num_trees = cfg$screen_num_trees,
-        seed = seed_i,
-        verbose = cfg$screen_verbose
-      )
-
-      roles <- cast_roles(screen, dag)
-
-      fit_call_args <- utils::modifyList(
-        list(
-          data = split$train,
-          screen = screen,
-          dag = dag,
-          ate = ate,
-          models = models,
-          response = cfg$response,
-          seed = seed_i,
-          verbose = cfg$fit_verbose
-        ),
-        fit_args
-      )
-      fit <- do.call(cast_fit, fit_call_args)
-
-      eval_result <- cast_evaluate(
-        fit, split$test,
-        response = cfg$eval_response
-      )
-
-      cv_result <- NULL
-      if (cfg$do_cv) {
-        cv_result <- tryCatch(
-          cast_cv(
-            sp_data,
-            screen = screen, dag = dag, ate = ate,
-            k = cfg$cv_k, models = cfg$cv_models,
-            block_method = cfg$cv_block_method,
-            response = cfg$response,
-            n_epochs = cfg$cv_n_epochs,
-            n_runs = cfg$cv_n_runs,
-            rf_ntree = cfg$cv_rf_ntree,
-            brt_n_trees = cfg$cv_brt_n_trees,
-            parallel = cfg$cv_parallel,
-            seed = seed_i,
-            verbose = cfg$cv_verbose
+    root_value <- as.character(dev_root_workers)[1L]
+    cl <- NULL
+    cl <- parallel::makeCluster(nwrk)
+    results <- tryCatch(
+      {
+        parallel::clusterExport(cl, "root_value", envir = environment())
+        ok <- parallel::clusterEvalQ(cl, {
+          if (!requireNamespace("pkgload", quietly = TRUE)) {
+            FALSE
+          } else {
+            suppressPackageStartupMessages(pkgload::load_all(root_value, quiet = TRUE))
+            TRUE
+          }
+        })
+        if (!all(vapply(ok, isTRUE, logical(1L)))) {
+          cli::cli_abort(
+            "Parallel with {.arg dev_package_root} requires {.pkg pkgload} on workers."
+          )
+        }
+        eb <- environment()
+        parallel::clusterExport(
+          cl,
+          c(
+            "species_list", "sp_names", "env_data", "models", "output_dir",
+            "fig_dpi", "seed", "cfg", "fit_args"
           ),
-          error = function(e) NULL
+          envir = eb
         )
-      }
-
-      pred_result <- NULL
-      if (!is.null(env_data)) {
-        pred_result <- tryCatch(
-          cast_predict(fit, env_data, models = cfg$predict_models),
-          error = function(e) NULL
+        parallel::parLapply(cl, seq_along(sp_names), function(ii) {
+          sp <- sp_names[[ii]]
+          sd <- species_list[[sp]]
+          seed_i <- if (!is.null(seed)) seed + ii else NULL
+          worker_run <- utils::getFromNamespace(
+            ".cast_batch_run_one_species", "castSDM"
+          )
+          worker_run(
+            sp, sd, env_data, models,
+            output_dir, fig_dpi, seed_i,
+            cfg, fit_args, FALSE, NULL
+          )
+        })
+      },
+      finally = if (!is.null(cl)) parallel::stopCluster(cl)
+    )
+  } else if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
+    if (verbose) cli::cli_inform("Running in parallel (future)...")
+    results <- future.apply::future_lapply(
+      seq_along(sp_names),
+      function(ii) {
+        sp <- sp_names[[ii]]
+        sd <- species_list[[sp]]
+        seed_i <- if (!is.null(seed)) seed + ii else NULL
+        .cast_batch_run_one_species(
+          sp, sd, env_data, models,
+          output_dir, fig_dpi, seed_i,
+          cfg, fit_args, TRUE, dev_root_workers
         )
-      }
-
-      cate_result <- NULL
-      if (cfg$do_cate) {
-        cate_result <- tryCatch({
-          check_suggested("grf", "for CATE")
-          pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-          cast_cate(
-            split$train,
-            variables = cfg$cate_variables,
-            ate = ate, screen = screen,
-            response = cfg$response,
-            predict_data = pred_for_cate,
-            top_n = cfg$cate_top_n,
-            n_trees = cfg$cate_n_trees,
-            seed = seed_i,
-            verbose = cfg$cate_verbose
-          )
-        }, error = function(e) NULL)
-      }
-
-      cons_result <- NULL
-      if (!is.null(pred_result) && length(pred_result$models) >= 2) {
-        cons_result <- tryCatch(cast_consistency(pred_result),
-                                error = function(e) NULL)
-      }
-
-      # ── Save ALL plots ────────────────────────────────────────────────
-      check_suggested("ggplot2", "for plotting")
-
-      vl <- cfg$var_labels
-      bm <- cfg$plot_basemap
-
-      if (requireNamespace("ggraph", quietly = TRUE) &&
-          requireNamespace("igraph", quietly = TRUE)) {
-        p <- tryCatch(
-          plot(
-            dag, roles = roles, screen = screen,
-            species = sp_name, var_labels = vl
-          ),
-          error = function(e) NULL
-        )
-        save_fig(p, "causal_dag.png", w = 14, h = 10)
-      }
-
-      p <- tryCatch(plot(ate, var_labels = vl), error = function(e) NULL)
-      save_fig(p, "ate_forest_plot.png", w = 10, h = 7)
-
-      p <- tryCatch(plot(screen, var_labels = vl), error = function(e) NULL)
-      save_fig(p, "variable_screening.png", w = 10, h = 7)
-
-      p <- tryCatch(plot(eval_result), error = function(e) NULL)
-      save_fig(p, "model_evaluation.png", w = 10, h = 6)
-
-      if (!is.null(cv_result)) {
-        p <- tryCatch(
-          plot(
-            cv_result, lon = sp_data$lon, lat = sp_data$lat,
-            metric = "auc", basemap = bm
-          ),
-          error = function(e) NULL
-        )
-        save_fig(p, "spatial_cv_map.png", w = 14, h = 8)
-      }
-
-      if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
-        for (mdl in pred_result$models) {
-          p <- tryCatch(
-            plot(
-              pred_result, model = mdl, basemap = bm,
-              title = sprintf("%s HSS (%s)",
-                              gsub("_", " ", sp_name), mdl)
-            ),
-            error = function(e) NULL
-          )
-          save_fig(p, sprintf("HSS_%s.png", mdl), w = 14, h = 8)
-        }
-      }
-
-      if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
-        for (cv in cate_result$variables) {
-          p <- tryCatch({
-            pm <- cfg$cate_hss_model
-            if (!is.null(pm) && !is.null(pred_result) &&
-                pm %in% pred_result$models) {
-              plot(
-                cate_result,
-                variable = cv,
-                species = sp_name,
-                basemap = bm,
-                var_labels = vl,
-                point_size = cfg$cate_point_size,
-                legend_position = "bottom",
-                hss_predict = pred_result,
-                hss_model = pm,
-                hss_threshold = cfg$cate_hss_threshold
-              )
-            } else {
-              plot(
-                cate_result,
-                variable = cv,
-                species = sp_name,
-                basemap = bm,
-                var_labels = vl,
-                point_size = cfg$cate_point_size,
-                legend_position = "bottom"
-              )
-            }
-          }, error = function(e) NULL)
-          save_fig(p, sprintf("CATE_%s.png", cv), w = 14, h = 8)
-        }
-      }
-
-      if (!is.null(cons_result) &&
-          requireNamespace("patchwork", quietly = TRUE)) {
-        p <- tryCatch(
-          plot(
-            cons_result,
-            species = sp_name,
-            font_family = "sans",
-            use_bold = TRUE,
-            font_base = 11L,
-            font_main_title = 14L,
-            font_panel_title = 11L,
-            font_axis = 8L,
-            font_cell_value = 3.5,
-            value_decimals = 3L,
-            tile_linewidth = 0.5,
-            text_white_above = 0.7
-          ),
-          error = function(e) NULL
-        )
-        save_fig(p, "model_consistency.png", w = 16, h = 5.5)
-      }
-
-      # ── SHAP (optional; mirrors run_ovis_ammon Step 9) ─────────────────
-      if (isTRUE(cfg$do_shap)) {
-        if (requireNamespace("xgboost", quietly = TRUE)) {
-          sh_xgb <- tryCatch(
-            cast_shap_xgb(
-              data = split$train,
-              response = cfg$response,
-              env_vars = NULL,
-              screen = screen,
-              dag = dag,
-              nrounds = cfg$shap_nrounds,
-              max_depth = cfg$shap_max_depth,
-              eta = cfg$shap_eta,
-              subsample = cfg$shap_subsample,
-              colsample_bytree = cfg$shap_colsample_bytree,
-              test_fraction = cfg$shap_test_fraction,
-              seed = seed_i,
-              verbose = cfg$shap_verbose
-            ),
-            error = function(e) NULL
-          )
-          batch_shap_save_pair(sh_xgb, "shap_xgb")
-        }
-        if (requireNamespace("fastshap", quietly = TRUE) &&
-            requireNamespace("ranger", quietly = TRUE) &&
-            "rf" %in% names(fit$models) && !is.null(fit$models$rf$model)) {
-          sh_rf <- tryCatch(
-            cast_shap_fit(
-              fit = fit,
-              which = "rf",
-              data = split$train,
-              response = cfg$response,
-              test_fraction = cfg$shap_test_fraction,
-              seed = seed_i,
-              fastshap_nsim = cfg$shap_fastshap_nsim,
-              max_explain_rows = cfg$shap_max_explain_rows,
-              verbose = FALSE
-            ),
-            error = function(e) NULL
-          )
-          batch_shap_save_pair(sh_rf, "shap_rf")
-        }
-        torch_ok <- requireNamespace("torch", quietly = TRUE) &&
-          tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
-        if (requireNamespace("fastshap", quietly = TRUE) && isTRUE(torch_ok) &&
-            "cast" %in% names(fit$models) &&
-            !is.null(fit$models$cast$model)) {
-          sh_cast <- tryCatch(
-            cast_shap_fit(
-              fit = fit,
-              which = "cast",
-              data = split$train,
-              response = cfg$response,
-              test_fraction = cfg$shap_test_fraction,
-              seed = seed_i,
-              fastshap_nsim = cfg$shap_fastshap_nsim,
-              max_explain_rows = cfg$shap_max_explain_rows,
-              verbose = FALSE
-            ),
-            error = function(e) NULL
-          )
-          batch_shap_save_pair(sh_cast, "shap_cast")
-        }
-      }
-
-      # ── Save RDS ──────────────────────────────────────────────────────
-      sp_result <- list(
-        dag = dag, ate = ate, screen = screen, roles = roles,
-        fit = fit, eval = eval_result, cv = cv_result,
-        predict = pred_result, cate = cate_result,
-        consistency = cons_result
-      )
-      saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
-
-      sp_result
-    }, error = function(e) {
-      warning(sprintf("Species '%s' failed: %s", sp_name, e$message))
-      NULL
-    })
-
-    result
-  }
-
-  if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
-    if (verbose) cli::cli_inform("Running in parallel...")
-    results <- future.apply::future_mapply(
-      run_one_species,
-      sp_name  = sp_names,
-      sp_data  = species_list,
-      seed_i   = if (!is.null(seed)) seed + seq_along(sp_names) else
-                   rep(list(NULL), n_sp),
-      MoreArgs = list(
-        env_data   = env_data,
-        models     = models,
-        output_dir = output_dir,
-        fig_dpi    = fig_dpi,
-        cfg        = cfg,
-        fit_args   = fit_args
-      ),
-      SIMPLIFY = FALSE,
+      },
       future.seed = TRUE
     )
   } else {
@@ -748,9 +492,9 @@ cast_batch <- function(species_list,
       sp <- sp_names[i]
       if (verbose) cli::cli_inform("[{i}/{n_sp}] Processing {.val {sp}}...")
       seed_i <- if (!is.null(seed)) seed + i else NULL
-      results[[i]] <- run_one_species(
+      results[[i]] <- .cast_batch_run_one_species(
         sp, species_list[[sp]], env_data, models, output_dir,
-        fig_dpi, seed_i, cfg, fit_args
+        fig_dpi, seed_i, cfg, fit_args, FALSE, dev_root_workers
       )
     }
   }

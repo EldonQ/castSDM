@@ -9,14 +9,34 @@
 #     cast_batch() 升级版一致
 #
 # 多物种增量：
-#   - future 按物种并行；每个物种独立子目录
+#   - 物种并行（有 dev_package_root 时为 PSOCK）；每个物种
 #     <output_dir>/<Species>/figures/ 与 cast_result.rds
+#   - SHAP：do_shap=TRUE 时写 shap_xgb/rf/cast 各两张图 + shap_panel_2x3.png（2 行 3 列）
+#   - 已跑完 batch 仅补 SHAP：CONFIG$only_shap_posthoc <- TRUE 后 source（不重训）
+#   - 空间 HSS/CATE：包原生为 geom_point 格点图；CONFIG$only_replot_spatial_heatmap
+#     TRUE 时用 terra 热图覆盖各物种 figures/HSS_*.png、CATE_*.png（需 cast_result.rds）
 #   - 顶层 <output_dir>/figures/multi_species_comparison.png
 #
-# 运行：在 castSDM 项目下 load_all() 后 source 本文件；或安装包后
+# 在 RStudio 中运行方式（与 run_ovis_ammon.R 一致）：
+#   1. 用 RStudio 打开 castSDM.Rproj（工作目录在包根目录）
+#   2. Ctrl+Shift+L (devtools::load_all()) 或运行下面「包加载」代码块
+#   3. source() 本脚本；若从子目录 source，代码会从当前目录向上查找
+#      含 castSDM 的 DESCRIPTION 的包根并 load_all(路径)，避免用到旧版
+#      已安装包里的 cast_dag（否则会出现 structure_method 等 unused arguments）。
+#
+# 或已安装**当前源码对应版本**的包后：
+#   library(castSDM)
 #   source(system.file("examples/run_multi_species.R", package = "castSDM"))
 #
-# 依赖建议：future / future.apply / ggplot2 / patchwork；与 ovis 相同
+# # 方式一：开发模式 (推荐) — 若 getwd() 不在包根，可显式指定：
+# # devtools::load_all("E:/Package/cast")
+#
+# # 方式二：安装后再加载
+# # devtools::install("E:/Package/cast")
+# # library(castSDM)
+#
+# 并行开发模式：cast_batch(dev_package_root=...) 用 PSOCK，各 worker 先 pkgload::load_all。
+# 依赖建议：future / future.apply / ggplot2 / patchwork / pkgload；与 ovis 相同
 #   的 DAG / SHAP 可选包见 run_ovis_ammon.R 文首说明。
 #
 # 说明：本脚本不包含「五种 DAG structure_method」自检；自检仅在
@@ -25,14 +45,98 @@
 #   → CATE → 一致性图 →（可选）SHAP，结果写入各自子目录。
 # ==============================================================================
 
-if (file.exists("DESCRIPTION") &&
-    grepl("castSDM", readLines("DESCRIPTION", 1))) {
-  devtools::load_all()
+.cast_find_package_root <- function(max_up = 8L) {
+  d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  for (.i in seq_len(max_up)) {
+    desc <- file.path(d, "DESCRIPTION")
+    if (file.exists(desc)) {
+      l1 <- tryCatch(readLines(desc, 1L, warn = FALSE), error = function(e) "")
+      if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+        return(d)
+      }
+    }
+    desc_cast <- file.path(d, "cast", "DESCRIPTION")
+    if (file.exists(desc_cast)) {
+      l1 <- tryCatch(readLines(desc_cast, 1L, warn = FALSE), error = function(e) "")
+      if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+        return(normalizePath(file.path(d, "cast"), winslash = "/", mustWork = FALSE))
+      }
+    }
+    parent <- dirname(d)
+    if (identical(parent, d)) break
+    d <- parent
+  }
+  env <- Sys.getenv("CASTSDM_ROOT", "")
+  if (nzchar(env)) {
+    for (env_try in c(env, file.path(env, "cast"))) {
+      desc <- file.path(env_try, "DESCRIPTION")
+      if (file.exists(desc)) {
+        l1 <- tryCatch(readLines(desc, 1L, warn = FALSE), error = function(e) "")
+        if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+          return(normalizePath(env_try, winslash = "/", mustWork = FALSE))
+        }
+      }
+    }
+  }
+  NA_character_
+}
+
+# 热图 helper：工作区在 e:/Package、脚本在 cast/inst/examples 时 pkg_root 可能为 NA，
+# 故多路径查找（含 getwd()/cast/inst/examples、向上爬目录）。
+.cast_find_spatial_heatmap_helpers <- function(pkg_root) {
+  bn <- "cast_spatial_heatmap_helpers.R"
+  cand <- character(0)
+  if (!is.na(pkg_root) && nzchar(pkg_root)) {
+    cand <- c(cand, file.path(pkg_root, "inst", "examples", bn))
+  }
+  cr <- Sys.getenv("CASTSDM_ROOT", "")
+  if (nzchar(cr)) {
+    cand <- c(
+      cand,
+      file.path(cr, "inst", "examples", bn),
+      file.path(cr, "cast", "inst", "examples", bn)
+    )
+  }
+  cand <- c(cand, system.file(file.path("examples", bn), package = "castSDM"))
+  d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  for (.i in seq_len(12L)) {
+    cand <- c(
+      cand,
+      file.path(d, "inst", "examples", bn),
+      file.path(d, "cast", "inst", "examples", bn)
+    )
+    parent <- dirname(d)
+    if (identical(parent, d)) break
+    d <- parent
+  }
+  cand <- unique(cand[nzchar(cand)])
+  for (p in cand) {
+    pp <- tryCatch(
+      normalizePath(p, winslash = "/", mustWork = FALSE),
+      error = function(e) ""
+    )
+    if (nzchar(pp) && file.exists(pp)) {
+      return(pp)
+    }
+  }
+  NA_character_
+}
+
+# 开发模式：与 run_ovis_ammon.R 相同逻辑，并支持从 inst/examples 等子目录 source
+pkg_root <- .cast_find_package_root()
+if (!is.na(pkg_root)) {
+  if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools", repos = "https://cloud.r-project.org")
+  }
+  devtools::load_all(pkg_root)
+  # future::multisession 子进程只认 library() 里的包；cast_batch 会读此变量并在各 worker 内 pkgload::load_all
+  Sys.setenv(CASTSDM_ROOT = normalizePath(pkg_root, winslash = "/", mustWork = FALSE))
 } else {
+  Sys.unsetenv("CASTSDM_ROOT")
   library(castSDM)
 }
 
-for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table")) {
+for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table", "pkgload")) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     install.packages(pkg, repos = "https://cloud.r-project.org")
   }
@@ -40,11 +144,16 @@ for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table")) {
 
 # ==============================================================================
 # 集中配置（字段命名与 inst/examples/run_ovis_ammon.R 的 CONFIG 对齐）
-# 多物种专用项：data_dir, species_files, env_grid_path, output_dir,
-#   n_workers, parallel_species, do_shap（批量默认 FALSE 以免极慢）
+# 多物种专用项：data_dir, species_files, output_dir, n_workers,
+#   only_shap_posthoc, only_replot_spatial_heatmap, spatial_heatmap_res_deg, …
 # ==============================================================================
 CONFIG <- list(
   # --- multi-species only ---
+  only_shap_posthoc  = FALSE, # TRUE：跳过 cast_batch，只读各物种 cast_result.rds 补 SHAP（不重训）
+  only_replot_spatial_heatmap = TRUE, # TRUE：仅热图重绘；需 terra 与同仓库 cast_spatial_heatmap_helpers.R
+  spatial_heatmap_res_deg      = 0.06,
+  spatial_heatmap_interp_method = "nearest",
+  spatial_heatmap_display_res   = 0.02,
   data_dir          = NULL, # 非 NULL 时扫描目录内 *.csv，忽略 species_files
   species_files     = list(
     Ovis_ammon           = "CAST_Ovis_ammon_Res9_screened.csv",
@@ -74,8 +183,6 @@ CONFIG <- list(
   dag_structure_method    = "bootstrap_hc",
   dag_pc_alpha            = 0.05,
   dag_pc_test             = "zf",
-  dag_fci_alpha           = 0.05,
-  dag_fci_test            = "zf",
   dag_bidag_algorithm     = "order",
   dag_bidag_iterations    = NULL,
   dag_notears_lambda      = 0.03,
@@ -136,7 +243,7 @@ CONFIG <- list(
   cate_hss_model      = "cast",
   cate_hss_threshold  = 0.1,
   var_labels          = NULL,
-  do_shap             = FALSE,
+  do_shap             = TRUE,
   shap_nrounds          = 200L,
   shap_max_depth        = 6L,
   shap_eta              = 0.05,
@@ -214,6 +321,102 @@ if (!is.null(CONFIG$env_grid_path) && file.exists(CONFIG$env_grid_path)) {
 dir.create(CONFIG$output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 仅重绘空间 HSS / CATE 热图（nearest 插值栅格 + 中国边界 shap 遮罩；覆盖各物种 figures/HSS_*.png、CATE_*.png）
+# ══════════════════════════════════════════════════════════════════════════════
+
+if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
+  future::plan(future::sequential)
+  hlp <- .cast_find_spatial_heatmap_helpers(pkg_root)
+  if (is.na(hlp) || !nzchar(hlp)) {
+    stop(
+      "Could not find cast_spatial_heatmap_helpers.R.\n",
+      "  pkg_root = ", deparse(pkg_root), "\n",
+      "  getwd()  = ", getwd(), "\n",
+      "Set CASTSDM_ROOT to the castSDM source root, or run from e:/Package/cast (or parent with cast/ subfolder).",
+      call. = FALSE
+    )
+  }
+  sys.source(hlp, envir = .GlobalEnv)
+  spn <- names(species_list)
+  cat("\n[only_replot_spatial_heatmap] Re-saving HSS/CATE heatmaps...\n")
+  for (sp in spn) {
+    rds <- file.path(CONFIG$output_dir, sp, "cast_result.rds")
+    if (!file.exists(rds)) {
+      warning("Skip ", sp, ": missing ", rds)
+      next
+    }
+    res <- readRDS(rds)
+    fig_dir <- file.path(CONFIG$output_dir, sp, "figures")
+    cast_spatial_replot_hss_cate_heatmaps(
+      pred            = res$predict,
+      cate            = res$cate,
+      fig_dir         = fig_dir,
+      fig_dpi         = CONFIG$fig_dpi,
+      var_labels      = CONFIG$var_labels,
+      basemap         = CONFIG$plot_basemap,
+      res_deg         = CONFIG$spatial_heatmap_res_deg,
+      interp_method   = CONFIG$spatial_heatmap_interp_method,
+      display_res_deg = CONFIG$spatial_heatmap_display_res,
+      hss_model       = CONFIG$cate_hss_model,
+      hss_threshold   = CONFIG$cate_hss_threshold,
+      species_label   = sp,
+      ovis_style      = FALSE
+    )
+    cat("  ", sp, "\n", sep = "")
+  }
+  cat("\nSpatial heatmap replot complete.\n\n")
+} else if (isTRUE(CONFIG$only_shap_posthoc)) {
+  future::plan(future::sequential)
+  cfg_shap <- list(
+    do_shap               = TRUE,
+    response              = CONFIG$response,
+    shap_nrounds          = CONFIG$shap_nrounds,
+    shap_max_depth        = CONFIG$shap_max_depth,
+    shap_eta              = CONFIG$shap_eta,
+    shap_subsample        = CONFIG$shap_subsample,
+    shap_colsample_bytree = CONFIG$shap_colsample_bytree,
+    shap_test_fraction    = CONFIG$shap_test_fraction,
+    shap_verbose          = CONFIG$shap_verbose,
+    shap_plot_top_n       = CONFIG$shap_plot_top_n,
+    shap_fastshap_nsim    = CONFIG$shap_fastshap_nsim,
+    shap_max_explain_rows = CONFIG$shap_max_explain_rows
+  )
+  spn <- names(species_list)
+  cat("\n[only_shap_posthoc] Writing SHAP figures (splits replayed via cast_prepare)...\n")
+  for (i in seq_along(spn)) {
+    sp <- spn[i]
+    rds <- file.path(CONFIG$output_dir, sp, "cast_result.rds")
+    if (!file.exists(rds)) {
+      warning("Skip ", sp, ": missing ", rds)
+      next
+    }
+    res <- readRDS(rds)
+    sp_data <- species_list[[sp]]
+    seed_i <- if (!is.null(CONFIG$seed)) CONFIG$seed + i else NULL
+    split <- cast_prepare(
+      sp_data,
+      train_fraction = CONFIG$prepare_train_fraction,
+      seed = seed_i,
+      env_vars = CONFIG$prepare_env_vars,
+      verbose = FALSE
+    )
+    fig_dir <- file.path(CONFIG$output_dir, sp, "figures")
+    castSDM::save_cast_batch_shap_outputs(
+      train_df = split$train,
+      fit = res$fit,
+      dag = res$dag,
+      screen = res$screen,
+      cfg = cfg_shap,
+      fig_dir = fig_dir,
+      fig_dpi = CONFIG$fig_dpi,
+      seed_i = seed_i
+    )
+    cat("  ", sp, ": SHAP written -> ", fig_dir, "\n", sep = "")
+  }
+  cat("\nPost-hoc SHAP complete (also see shap_panel_2x3.png per species).\n\n")
+} else {
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Parallel backend
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -246,6 +449,7 @@ batch_result <- cast_batch(
   output_dir     = CONFIG$output_dir,
   fig_dpi        = CONFIG$fig_dpi,
   parallel       = use_par,
+  dev_package_root = if (!is.na(pkg_root)) pkg_root else NULL,
   seed           = CONFIG$seed,
   verbose        = CONFIG$batch_verbose,
   fit_verbose    = CONFIG$fit_verbose,
@@ -259,8 +463,6 @@ batch_result <- cast_batch(
   dag_structure_method    = CONFIG$dag_structure_method,
   dag_pc_alpha            = CONFIG$dag_pc_alpha,
   dag_pc_test             = CONFIG$dag_pc_test,
-  dag_fci_alpha           = CONFIG$dag_fci_alpha,
-  dag_fci_test            = CONFIG$dag_fci_test,
   dag_bidag_algorithm     = CONFIG$dag_bidag_algorithm,
   dag_bidag_iterations    = CONFIG$dag_bidag_iterations,
   dag_notears_lambda      = CONFIG$dag_notears_lambda,
@@ -372,3 +574,5 @@ for (sp in names(batch_result$results)) {
     cat(sprintf("  %s: %d PNG(s)\n", sp, length(figs)))
   }
 }
+
+} # end else (full cast_batch path; skipped when shap-only or heatmap-only)

@@ -13,8 +13,6 @@ cast(
   dag_structure_method = "bootstrap_hc",
   dag_pc_alpha = 0.05,
   dag_pc_test = "zf",
-  dag_fci_alpha = 0.05,
-  dag_fci_test = "zf",
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
   dag_notears_lambda = 0.03,
@@ -57,12 +55,12 @@ the same environmental columns as \code{species_data}.}
 
 \item{dag_structure_method}{Character passed to \code{\link[=cast_dag]{cast_dag()}} as
 \code{structure_method}. Default \code{"bootstrap_hc"}. Alternatives: \code{"pc"},
-\code{"fci"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
+\code{"bidag_bge"}, \code{"notears_linear"}.}
 
-\item{dag_pc_alpha, dag_fci_alpha}{Significance levels for PC / FCI.}
+\item{dag_pc_alpha}{Significance level for PC.}
 
-\item{dag_pc_test, dag_fci_test}{Conditional-independence tests passed to
-\code{\link[=cast_dag]{cast_dag()}} as \code{pc_test} / \code{fci_test} (default \code{"zf"}).}
+\item{dag_pc_test}{Conditional-independence test passed to
+\code{\link[=cast_dag]{cast_dag()}} as \code{pc_test} (default \code{"zf"}).}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG options.}
 

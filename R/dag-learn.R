@@ -3,7 +3,7 @@
 #' Discovers the causal structure among environmental variables. The default
 #' (`structure_method = "bootstrap_hc"`) uses bootstrap-aggregated
 #' Hill-Climbing as in the original CAST workflow. Alternative **constraint-based**
-#' (`"pc"`, `"fci"`), **Bayesian MAP search** via \pkg{BiDAG} (`"bidag_bge"`,
+#' (`"pc"`), **Bayesian MAP search** via \pkg{BiDAG} (`"bidag_bge"`,
 #' recommended for many variables), and **continuous optimization** linear NOTEARS
 #' (`"notears_linear"`, requires \pkg{torch}) are also available.
 #'
@@ -22,10 +22,10 @@
 #' @param algorithm Character. **Only used** when `structure_method =
 #'   "bootstrap_hc"`: score-based learner passed to
 #'   \code{bnlearn::boot.strength()} (e.g. `"hc"`, `"tabu"`, `"mmhc"`,
-#'   `"pc.stable"`). Ignored for `"pc"`, `"fci"`, `"bidag_bge"`, and
-#'   `"notears_linear"`. Do not set this to `"pc"` or `"fci"` here; those
-#'   names refer to constraint-based algorithms and require
-#'   `structure_method = "pc"` or `"fci"` instead.
+#'   `"pc.stable"`). Ignored for `"pc"`, `"bidag_bge"`, and
+#'   `"notears_linear"`. Do not set this to `"pc"` here; that name refers to
+#'   a constraint-based algorithm and requires
+#'   `structure_method = "pc"` instead.
 #' @param score Character. **Only used** when `structure_method =
 #'   "bootstrap_hc"`: scoring criterion in `algorithm.args` for
 #'   \code{bnlearn::boot.strength()}. Default `"bic-g"`. Ignored otherwise.
@@ -37,18 +37,12 @@
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #' @param structure_method Character. One of `"bootstrap_hc"` (default),
-#'   `"pc"`, `"fci"`, `"bidag_bge"`, `"notears_linear"`.
+#'   `"pc"`, `"bidag_bge"`, `"notears_linear"`.
 #' @param pc_alpha Significance level for constraint-based PC. Default `0.05`.
 #'   Used only when `structure_method = "pc"`.
 #' @param pc_test Conditional-independence test passed as `test` to
 #'   \code{bnlearn::pc.stable()} (e.g. `"zf"` for Gaussian data). Default
 #'   `"zf"`. Used only when `structure_method = "pc"`.
-#' @param fci_alpha Significance level for FCI. Default `0.05`. Used only when
-#'   `structure_method = "fci"`.
-#' @param fci_test Passed as `test` to \code{bnlearn::fci()} when that function
-#'   exists (older **bnlearn**). With **bnlearn** >= 5.0, FCI is run via
-#'   \pkg{pcalg}::\code{fci()} with \code{gaussCItest} and this argument is
-#'   currently ignored (Gaussian CI tests are fixed by pcalg).
 #' @param bidag_algorithm Passed to \code{BiDAG::learnBN()}: `"order"` or
 #'   `"orderIter"`. Default `"order"`.
 #' @param bidag_iterations Optional integer MCMC iterations for BiDAG.
@@ -76,7 +70,7 @@
 #' structure learning and sampling of Bayesian networks with the R package
 #' BiDAG. *Journal of Statistical Software*, 105(9), 1-32.
 #'
-#' @seealso \pkg{bnlearn} (\code{boot.strength}, \code{pc}, \code{fci}),
+#' @seealso \pkg{bnlearn} (\code{boot.strength}, \code{pc.stable}),
 #'   \pkg{BiDAG} (\code{learnBN}).
 #'
 #' @export
@@ -92,13 +86,11 @@ cast_dag <- function(data,
                      seed = NULL,
                      verbose = TRUE,
                      structure_method = c(
-                       "bootstrap_hc", "pc", "fci",
+                       "bootstrap_hc", "pc",
                        "bidag_bge", "notears_linear"
                      ),
                      pc_alpha = 0.05,
                      pc_test = "zf",
-                     fci_alpha = 0.05,
-                     fci_test = "zf",
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
                      notears_lambda = 0.03,
@@ -118,11 +110,17 @@ cast_dag <- function(data,
   )
   if (structure_method == "bootstrap_hc") {
     algo_lc <- tolower(trimws(as.character(algorithm)))
-    if (algo_lc %in% c("pc", "fci")) {
+    if (algo_lc == "pc") {
       cli::cli_abort(c(
         "{.arg algorithm} = {.val {algorithm}} is not valid for {.code structure_method = \"bootstrap_hc\"}.",
-        "i" = "Use {.code structure_method = \"{algorithm}\"} for the constraint-based {.val {algorithm}} algorithm (and keep {.arg algorithm} at a bootstrap learner like {.val hc}, or omit it).",
+        "i" = "Use {.code structure_method = \"pc\"} for the constraint-based PC algorithm (and keep {.arg algorithm} at a bootstrap learner like {.val hc}, or omit it).",
         "i" = "For PC *inside* each bootstrap replicate, use {.code algorithm = \"pc.stable\"} instead."
+      ))
+    }
+    if (algo_lc == "fci") {
+      cli::cli_abort(c(
+        "{.arg algorithm} = {.val {algorithm}} is not supported.",
+        "i" = "FCI has been removed from castSDM DAG discovery. Use {.code structure_method = \"pc\"}, {.code \"bidag_bge\"}, or {.code \"notears_linear\"}."
       ))
     }
     if (!algorithm %in% boot_learners) {
@@ -175,10 +173,6 @@ cast_dag <- function(data,
     ),
     pc = .dag_pc_edges(
       dag_df, alpha = pc_alpha, test = pc_test,
-      seed = seed, verbose = verbose
-    ),
-    fci = .dag_fci_edges(
-      dag_df, alpha = fci_alpha, test = fci_test,
       seed = seed, verbose = verbose
     ),
     bidag_bge = .dag_bidag_edges(
@@ -266,101 +260,6 @@ cast_dag <- function(data,
   )
   learned <- pc_fun(dag_df, test = test, alpha = alpha, debug = FALSE)
   .bn_arcs_to_cast_edges(learned)
-}
-
-
-#' @keywords internal
-#' @noRd
-.pag_amat_to_directed_edges <- function(amat_int, labels) {
-  labels <- as.character(labels)
-  p <- nrow(amat_int)
-  rows <- list()
-  k <- 0L
-  for (i in seq_len(p)) {
-    for (j in seq_len(p)) {
-      if (i == j) next
-      # amat.pag (pcalg): amat[i,j]=2, amat[j,i]=3 => i --> j
-      if (amat_int[i, j] == 2L && amat_int[j, i] == 3L) {
-        k <- k + 1L
-        rows[[k]] <- data.frame(
-          from = labels[i],
-          to = labels[j],
-          strength = 1,
-          direction = 1,
-          stringsAsFactors = FALSE
-        )
-      }
-    }
-  }
-  if (k == 0L) {
-    return(data.frame(
-      from = character(), to = character(),
-      strength = numeric(), direction = numeric(),
-      stringsAsFactors = FALSE
-    ))
-  }
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
-  out
-}
-
-
-#' @keywords internal
-#' @noRd
-.dag_fci_edges <- function(dag_df, alpha, test, seed, verbose) {
-  if (!is.null(seed)) set.seed(seed)
-
-  ns_bn <- asNamespace("bnlearn")
-  if (exists("fci", envir = ns_bn, inherits = FALSE)) {
-    check_suggested("bnlearn", "for FCI algorithm")
-    fci_fun <- get("fci", envir = ns_bn)
-    learned <- fci_fun(dag_df, test = test, alpha = alpha, debug = FALSE)
-    return(.bn_arcs_to_cast_edges(learned))
-  }
-
-  check_suggested(
-    "pcalg",
-    paste0(
-      "for FCI: {.pkg bnlearn} (>= 5.0) no longer provides {.code bnlearn::fci()}; ",
-      "castSDM uses {.pkg pcalg}::{.fn fci} with Gaussian CI tests instead"
-    )
-  )
-
-  if (isTRUE(verbose) && !identical(test, "zf")) {
-    cli::cli_inform(c(
-      "i" = "Note: {.arg fci_test} = {.val {test}} applies only to legacy {.code bnlearn::fci()}; the {.pkg pcalg} path uses {.fn pcalg::gaussCItest}."
-    ))
-  }
-
-  p <- ncol(dag_df)
-  labels <- names(dag_df)
-  Cmat <- stats::cor(dag_df, use = "pairwise.complete.obs")
-  Cmat[!is.finite(Cmat)] <- 0
-  diag(Cmat) <- 1
-  suffStat <- list(C = Cmat, n = as.integer(nrow(dag_df)))
-
-  res <- tryCatch(
-    pcalg::fci(
-      suffStat,
-      indepTest = pcalg::gaussCItest,
-      alpha = alpha,
-      labels = labels,
-      p = as.integer(p),
-      verbose = FALSE
-    ),
-    error = function(e) {
-      cli::cli_abort(c(
-        "{.pkg pcalg}::{.fn fci} failed: {e$message}",
-        "i" = "Try {.code structure_method = \"pc\"} or {.code \"bootstrap_hc\"}, or check data (finite numeric columns, enough rows)."
-      ))
-    }
-  )
-
-  Araw <- methods::as(res, "amat")
-  u <- unclass(Araw)
-  Amat <- matrix(as.integer(round(u)), nrow = nrow(u), ncol = ncol(u))
-  dimnames(Amat) <- dimnames(u)
-  .pag_amat_to_directed_edges(Amat, labels)
 }
 
 

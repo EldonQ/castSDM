@@ -16,11 +16,9 @@ cast_dag(
   max_rows = 8000L,
   seed = NULL,
   verbose = TRUE,
-  structure_method = c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear"),
+  structure_method = c("bootstrap_hc", "pc", "bidag_bge", "notears_linear"),
   pc_alpha = 0.05,
   pc_test = "zf",
-  fci_alpha = 0.05,
-  fci_test = "zf",
   bidag_algorithm = c("order", "orderIter"),
   bidag_iterations = NULL,
   notears_lambda = 0.03,
@@ -46,10 +44,10 @@ in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
 
 \item{algorithm}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: score-based learner passed to
 \code{bnlearn::boot.strength()} (e.g. \code{"hc"}, \code{"tabu"}, \code{"mmhc"},
-\code{"pc.stable"}). Ignored for \code{"pc"}, \code{"fci"}, \code{"bidag_bge"}, and
-\code{"notears_linear"}. Do not set this to \code{"pc"} or \code{"fci"} here; those
-names refer to constraint-based algorithms and require
-\code{structure_method = "pc"} or \code{"fci"} instead.}
+\code{"pc.stable"}). Ignored for \code{"pc"}, \code{"bidag_bge"}, and
+\code{"notears_linear"}. Do not set this to \code{"pc"} here; that name refers to
+a constraint-based algorithm and requires
+\code{structure_method = "pc"} instead.}
 
 \item{score}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: scoring criterion in \code{algorithm.args} for
 \code{bnlearn::boot.strength()}. Default \code{"bic-g"}. Ignored otherwise.}
@@ -67,7 +65,7 @@ HC only). Default \code{0.6}.}
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 
 \item{structure_method}{Character. One of \code{"bootstrap_hc"} (default),
-\code{"pc"}, \code{"fci"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
+\code{"pc"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
 
 \item{pc_alpha}{Significance level for constraint-based PC. Default \code{0.05}.
 Used only when \code{structure_method = "pc"}.}
@@ -75,14 +73,6 @@ Used only when \code{structure_method = "pc"}.}
 \item{pc_test}{Conditional-independence test passed as \code{test} to
 \code{bnlearn::pc.stable()} (e.g. \code{"zf"} for Gaussian data). Default
 \code{"zf"}. Used only when \code{structure_method = "pc"}.}
-
-\item{fci_alpha}{Significance level for FCI. Default \code{0.05}. Used only when
-\code{structure_method = "fci"}.}
-
-\item{fci_test}{Passed as \code{test} to \code{bnlearn::fci()} when that function
-exists (older \strong{bnlearn}). With \strong{bnlearn} >= 5.0, FCI is run via
-\pkg{pcalg}::\code{fci()} with \code{gaussCItest} and this argument is
-currently ignored (Gaussian CI tests are fixed by pcalg).}
 
 \item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
 \code{"orderIter"}. Default \code{"order"}.}
@@ -112,7 +102,7 @@ A \code{cast_dag} object (\code{structure_method} is stored on the object).
 Discovers the causal structure among environmental variables. The default
 (\code{structure_method = "bootstrap_hc"}) uses bootstrap-aggregated
 Hill-Climbing as in the original CAST workflow. Alternative \strong{constraint-based}
-(\code{"pc"}, \code{"fci"}), \strong{Bayesian MAP search} via \pkg{BiDAG} (\code{"bidag_bge"},
+(\code{"pc"}), \strong{Bayesian MAP search} via \pkg{BiDAG} (\code{"bidag_bge"},
 recommended for many variables), and \strong{continuous optimization} linear NOTEARS
 (\code{"notears_linear"}, requires \pkg{torch}) are also available.
 }
@@ -132,6 +122,6 @@ structure learning and sampling of Bayesian networks with the R package
 BiDAG. \emph{Journal of Statistical Software}, 105(9), 1-32.
 }
 \seealso{
-\pkg{bnlearn} (\code{boot.strength}, \code{pc}, \code{fci}),
+\pkg{bnlearn} (\code{boot.strength}, \code{pc.stable}),
 \pkg{BiDAG} (\code{learnBN}).
 }

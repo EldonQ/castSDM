@@ -1,6 +1,10 @@
 # ==============================================================================
 # castSDM 端到端测试：盘羊 (Ovis ammon)
 #
+# 空间 HSS / CATE：包内 plot.cast_predict / plot.cast_cate 对任意 lon/lat 格点
+# 均用 geom_point 绘制（Eco-ISEA3H 只是你的数据形态，非特例）。文末「空间热图
+# 重绘」用 terra 栅格化 + focal 得到类 fig7_spatial_prediction_maps.py 的连续热图。
+#
 # 在 RStudio 中运行方式：
 #   1. 用 RStudio 打开 castSDM.Rproj
 #   2. Ctrl+Shift+L (devtools::load_all()) 加载包
@@ -10,10 +14,10 @@
 #   library(castSDM)
 #   source(system.file("examples/run_ovis_ammon.R", package = "castSDM"))
 #
-# DAG 五种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
+# DAG 四种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
 # 依赖 (自检 + 后续 ATE 必用 ranger): 建议一次安装
-#   install.packages(c("bnlearn", "pcalg", "BiDAG", "torch", "ranger"))
-# 说明: fci 在 bnlearn>=5 且无 bnlearn::fci 时需 pcalg; bidag_bge 需 BiDAG;
+#   install.packages(c("bnlearn", "BiDAG", "torch", "ranger"))
+# 说明: bidag_bge 需 BiDAG;
 # notears_linear 需 torch。仅想跑主流程、不做 DAG 五法自检可设
 #   RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 # ==============================================================================
@@ -25,11 +29,91 @@
 # devtools::install("E:/Package/cast")
 # library(castSDM)
 
-# 开发模式 (在 castSDM 项目目录下) 用 load_all(), 否则用 library()
-if (file.exists("DESCRIPTION") &&
-    grepl("castSDM", readLines("DESCRIPTION", 1))) {
-  devtools::load_all()
+.cast_find_package_root <- function(max_up = 8L) {
+  d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  for (.i in seq_len(max_up)) {
+    desc <- file.path(d, "DESCRIPTION")
+    if (file.exists(desc)) {
+      l1 <- tryCatch(readLines(desc, 1L, warn = FALSE), error = function(e) "")
+      if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+        return(d)
+      }
+    }
+    desc_cast <- file.path(d, "cast", "DESCRIPTION")
+    if (file.exists(desc_cast)) {
+      l1 <- tryCatch(readLines(desc_cast, 1L, warn = FALSE), error = function(e) "")
+      if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+        return(normalizePath(file.path(d, "cast"), winslash = "/", mustWork = FALSE))
+      }
+    }
+    parent <- dirname(d)
+    if (identical(parent, d)) break
+    d <- parent
+  }
+  env <- Sys.getenv("CASTSDM_ROOT", "")
+  if (nzchar(env)) {
+    for (env_try in c(env, file.path(env, "cast"))) {
+      desc <- file.path(env_try, "DESCRIPTION")
+      if (file.exists(desc)) {
+        l1 <- tryCatch(readLines(desc, 1L, warn = FALSE), error = function(e) "")
+        if (length(l1) && nzchar(l1[1L]) && grepl("castSDM", l1[1L], fixed = TRUE)) {
+          return(normalizePath(env_try, winslash = "/", mustWork = FALSE))
+        }
+      }
+    }
+  }
+  NA_character_
+}
+
+.cast_find_spatial_heatmap_helpers <- function(pkg_root) {
+  bn <- "cast_spatial_heatmap_helpers.R"
+  cand <- character(0)
+  if (!is.na(pkg_root) && nzchar(pkg_root)) {
+    cand <- c(cand, file.path(pkg_root, "inst", "examples", bn))
+  }
+  cr <- Sys.getenv("CASTSDM_ROOT", "")
+  if (nzchar(cr)) {
+    cand <- c(
+      cand,
+      file.path(cr, "inst", "examples", bn),
+      file.path(cr, "cast", "inst", "examples", bn)
+    )
+  }
+  cand <- c(cand, system.file(file.path("examples", bn), package = "castSDM"))
+  d <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  for (.i in seq_len(12L)) {
+    cand <- c(
+      cand,
+      file.path(d, "inst", "examples", bn),
+      file.path(d, "cast", "inst", "examples", bn)
+    )
+    parent <- dirname(d)
+    if (identical(parent, d)) break
+    d <- parent
+  }
+  cand <- unique(cand[nzchar(cand)])
+  for (p in cand) {
+    pp <- tryCatch(
+      normalizePath(p, winslash = "/", mustWork = FALSE),
+      error = function(e) ""
+    )
+    if (nzchar(pp) && file.exists(pp)) {
+      return(pp)
+    }
+  }
+  NA_character_
+}
+
+# 开发模式：包根 load_all；与 run_multi_species.R 一致。并行 future 子进程需 CASTSDM_ROOT（见该脚本说明）。
+pkg_root <- .cast_find_package_root()
+if (!is.na(pkg_root)) {
+  if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools", repos = "https://cloud.r-project.org")
+  }
+  devtools::load_all(pkg_root)
+  Sys.setenv(CASTSDM_ROOT = normalizePath(pkg_root, winslash = "/", mustWork = FALSE))
 } else {
+  Sys.unsetenv("CASTSDM_ROOT")
   library(castSDM)
 }
 
@@ -74,7 +158,7 @@ var_labels <- c(
 )
 
 # ==============================================================================
-# cast_dag()：五种 structure_method 的参数与依赖（正式跑前必读）
+# cast_dag()：四种 structure_method 的参数与依赖（正式跑前必读）
 # ==============================================================================
 # 入口：cast_dag(data, response = "presence", env_vars = NULL, ...,
 #               structure_method = "<下列之一>", ...)
@@ -86,35 +170,29 @@ var_labels <- c(
 #     algorithm：传给 bnlearn::boot.strength() 的学习器，如 "hc","tabu",
 #                 "mmhc","pc.stable"（注意：选约束型 PC 本体应设
 #                 structure_method="pc"，不要把 algorithm 写成 "pc"）
-#     忽略：pc_alpha/pc_test、fci_*、bidag_*、notears_*（仍会传入，包内忽略）
+#     忽略：pc_alpha/pc_test、bidag_*、notears_*（仍会传入，包内忽略）
 #
 # (2) pc — 约束型 PC（bnlearn::pc.stable）
 #     依赖：bnlearn
 #     生效参数：pc_alpha, pc_test（如连续高斯常用 "zf"）, max_rows, seed,
 #               verbose, env_vars, response
 #     忽略：R, algorithm, score, strength_threshold, direction_threshold,
-#           fci_*, bidag_*, notears_*
-#
-# (3) fci — FCI（bnlearn 旧版有 bnlearn::fci；bnlearn >= 5 走 pcalg::fci）
-#     依赖：bnlearn；若 bnlearn 无 fci() 则需再装 pcalg
-#     生效参数：fci_alpha, max_rows, seed, verbose, env_vars, response
-#     fci_test：仅旧版 bnlearn::fci 使用；pcalg 路径下当前固定 gaussCItest
-#     忽略：R, algorithm, score, pc_*, bidag_*, notears_*
-#
-# (4) bidag_bge — BiDAG + BGe 分数
+#           bidag_*, notears_*
+
+# (3) bidag_bge — BiDAG + BGe 分数
 #     依赖：BiDAG（及数据矩阵）
 #     生效参数：bidag_algorithm ("order"|"orderIter"), bidag_iterations,
 #               max_rows, seed, verbose, env_vars, response
-#     忽略：R, algorithm, score, pc_*, fci_*, notears_*
+#     忽略：R, algorithm, score, pc_*, notears_*
 #
-# (5) notears_linear — 线性 NOTEARS（torch 实现）
+# (4) notears_linear — 线性 NOTEARS（torch 实现）
 #     依赖：torch；变量数 p 不宜过大（包内约 p<=60）
 #     生效参数：notears_lambda, notears_max_iter, notears_lr, notears_tol,
 #               notears_rho_init, notears_alpha_mult, max_rows, seed, verbose
-#     忽略：R, algorithm, score, pc_*, fci_*, bidag_*
+#     忽略：R, algorithm, score, pc_*, bidag_*
 #
 # 一键安装常用建议包（按需删减后运行）：
-#   install.packages(c("bnlearn", "pcalg", "BiDAG", "torch"))
+#   install.packages(c("bnlearn", "BiDAG", "torch"))
 # ==============================================================================
 
 # ── 集中配置: 与 cast_prepare / cast_dag / cast_ate / cast_screen / cast_fit /
@@ -128,7 +206,7 @@ CONFIG <- list(
   prepare_train_fraction = 0.7,
   prepare_env_vars       = NULL,
   prepare_verbose        = TRUE,
-  # cast_dag (注意: 选 PC/FCI/NOTEARS/BiDAG 时改 dag_structure_method;
+  # cast_dag (注意: 选 PC/NOTEARS/BiDAG 时改 dag_structure_method;
   #   dag_algorithm / dag_score 仅当 structure_method = "bootstrap_hc" 时生效)
   dag_env_vars            = NULL,
   dag_R                   = 100L,  #speed
@@ -141,8 +219,6 @@ CONFIG <- list(
   dag_structure_method    = "bootstrap_hc",
   dag_pc_alpha            = 0.05,
   dag_pc_test             = "zf",
-  dag_fci_alpha           = 0.05,
-  dag_fci_test            = "zf",
   dag_bidag_algorithm     = "order",
   dag_bidag_iterations    = NULL,
   dag_notears_lambda      = 0.03,
@@ -215,13 +291,18 @@ CONFIG <- list(
   shap_plot_top_n       = 15L,
   # cast_shap_fit（RF / CAST，依赖 fastshap；MC 次数越大越稳但更慢）
   shap_fastshap_nsim      = 40L,
-  shap_max_explain_rows   = 50L
+  shap_max_explain_rows   = 50L,
+  # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
+  only_replot_spatial_heatmap = FALSE,
+  spatial_heatmap_res_deg      = 0.06,
+  spatial_heatmap_interp_method = "nearest",
+  spatial_heatmap_display_res   = 0.02
 )
 
-# 是否对五种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
+# 是否对四种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
 RUN_DAG_SELFTEST_ALL_METHODS <- TRUE
 
-#' 盘羊示例：五种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
+#' 盘羊示例：四种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
 #' @noRd
 ovis_dag_selftest_all <- function(train_df, cfg) {
   if (!requireNamespace("ranger", quietly = TRUE)) {
@@ -233,21 +314,12 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
 
   ncap <- min(1600L, nrow(train_df))
   d <- train_df[seq_len(ncap), , drop = FALSE]
-  methods <- c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge", "notears_linear")
 
   for (sm in methods) {
     miss <- character(0)
     if (!requireNamespace("bnlearn", quietly = TRUE)) {
       miss <- c(miss, "bnlearn")
-    }
-    if (identical(sm, "fci")) {
-      has_bn_fci <- FALSE
-      if (requireNamespace("bnlearn", quietly = TRUE)) {
-        has_bn_fci <- exists("fci", envir = asNamespace("bnlearn"), inherits = FALSE)
-      }
-      if (!has_bn_fci && !requireNamespace("pcalg", quietly = TRUE)) {
-        miss <- c(miss, "pcalg")
-      }
     }
     if (identical(sm, "bidag_bge") && !requireNamespace("BiDAG", quietly = TRUE)) {
       miss <- c(miss, "BiDAG")
@@ -289,8 +361,6 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
         structure_method = sm,
         pc_alpha = cfg$dag_pc_alpha,
         pc_test = cfg$dag_pc_test,
-        fci_alpha = cfg$dag_fci_alpha,
-        fci_test = cfg$dag_fci_test,
         bidag_algorithm = cfg$dag_bidag_algorithm,
         bidag_iterations = if (identical(sm, "bidag_bge")) {
           if (!is.null(cfg$dag_bidag_iterations)) {
@@ -380,7 +450,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
     )
   }
 
-  message("cast_dag 五种 structure_method 自检均通过 (bootstrap_hc, pc, fci, bidag_bge, notears_linear)。")
+  message("cast_dag 四种 structure_method 自检均通过 (bootstrap_hc, pc, bidag_bge, notears_linear)。")
   invisible(TRUE)
 }
 
@@ -400,7 +470,7 @@ split <- cast_prepare(
 cat("训练集:", nrow(split$train), "| 测试集:", nrow(split$test), "\n")
 cat("环境变量:", paste(split$env_vars, collapse = ", "), "\n")
 
-# ── DAG 五种算法 + ATE/screen/roles 最小闭环自检 (默认必须全部通过) ─────────
+# ── DAG 四种算法 + ATE/screen/roles 最小闭环自检 (默认必须全部通过) ─────────
 if (isTRUE(RUN_DAG_SELFTEST_ALL_METHODS)) {
   ovis_dag_selftest_all(split$train, CONFIG)
 }
@@ -419,7 +489,7 @@ if (requireNamespace("car", quietly = TRUE)) {
 
 # ── Step 2: DAG 因果结构学习 ─────────────────────────────────────────────────
 # structure_method 可选:
-#   "bootstrap_hc"(默认), "pc", "fci", "bidag_bge"(需 BiDAG), "notears_linear"(需 torch)
+#   "bootstrap_hc"(默认), "pc", "bidag_bge"(需 BiDAG), "notears_linear"(需 torch)
 # 下面列出 cast_dag() 全部形参; R / algorithm / score 仅用于 bootstrap_hc。
 dag <- cast_dag(
   data                 = split$train,
@@ -436,8 +506,6 @@ dag <- cast_dag(
   structure_method     = CONFIG$dag_structure_method,
   pc_alpha             = CONFIG$dag_pc_alpha,
   pc_test              = CONFIG$dag_pc_test,
-  fci_alpha            = CONFIG$dag_fci_alpha,
-  fci_test             = CONFIG$dag_fci_test,
   bidag_algorithm      = CONFIG$dag_bidag_algorithm,
   bidag_iterations     = CONFIG$dag_bidag_iterations,
   notears_lambda       = CONFIG$dag_notears_lambda,
@@ -784,6 +852,27 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       ovis_shap_save_pair(sh_cast, "ovis_shap_cast")
     }
   }
+
+  # 供「仅重绘空间热图」：castSDM 原生 plot.cast_predict / plot.cast_cate 用 geom_point
+  # 画 Eco-ISEA3H 格点；此处缓存 pred/cate 供 terra 栅格热图后处理（见文末）。
+  tryCatch(
+    saveRDS(
+      list(
+        pred         = pred,
+        cate         = if (exists("cate")) cate else NULL,
+        var_labels   = var_labels,
+        config_flags = list(
+          cate_hss_model     = "cast",
+          cate_hss_threshold = 0.1,
+          species            = "Ovis_ammon"
+        )
+      ),
+      file.path(OVIS_FIG_DIR, "ovis_spatial_replot_cache.rds")
+    ),
+    error = function(e) {
+      warning("ovis_spatial_replot_cache.rds: ", conditionMessage(e))
+    }
+  )
 }
 
 
@@ -805,8 +894,6 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     dag_structure_method   = CONFIG$dag_structure_method,
     dag_pc_alpha           = CONFIG$dag_pc_alpha,
     dag_pc_test            = CONFIG$dag_pc_test,
-    dag_fci_alpha          = CONFIG$dag_fci_alpha,
-    dag_fci_test           = CONFIG$dag_fci_test,
     dag_bidag_algorithm    = CONFIG$dag_bidag_algorithm,
     dag_bidag_iterations   = CONFIG$dag_bidag_iterations,
     dag_notears_lambda     = CONFIG$dag_notears_lambda,
@@ -845,7 +932,7 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
 RUN_DAG_METHOD_SHOWCASE <- TRUE
 
 if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
-  methods <- c("bootstrap_hc", "pc", "fci", "bidag_bge", "notears_linear")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge", "notears_linear")
   for (sm in methods) {
     dm <- tryCatch(
       cast_dag(
@@ -863,8 +950,6 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
         structure_method = sm,
         pc_alpha = CONFIG$dag_pc_alpha,
         pc_test = CONFIG$dag_pc_test,
-        fci_alpha = CONFIG$dag_fci_alpha,
-        fci_test = CONFIG$dag_fci_test,
         bidag_algorithm = CONFIG$dag_bidag_algorithm,
         bidag_iterations = CONFIG$dag_bidag_iterations,
         notears_lambda = CONFIG$dag_notears_lambda,
@@ -913,4 +998,53 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
     "DAG showcase figures saved under: ",
     normalizePath(OVIS_FIG_DIR, winslash = "/", mustWork = FALSE)
   )
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 空间 HSS / CATE 仅热图重绘（lon/lat 规则网格 + nearest 插值，对齐 fig7 Python 的
+# griddata + pcolormesh 思路；并按中国边界 shap 做遮罩）
+# ══════════════════════════════════════════════════════════════════════════════
+# 将 CONFIG$only_replot_spatial_heatmap 设为 TRUE 后，选中本段到结尾运行（或 source
+# 全脚本）。需要 ovis_spatial_replot_cache.rds（全量跑 Step 9 后自动写入 OVIS_FIG_DIR）。
+# 会覆盖 ovis_predict_*_china.png、ovis_cate_*.png。
+
+if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
+  hlp <- .cast_find_spatial_heatmap_helpers(pkg_root)
+  if (is.na(hlp) || !nzchar(hlp)) {
+    stop(
+      "Could not find cast_spatial_heatmap_helpers.R.\n",
+      "  pkg_root = ", deparse(pkg_root), "\n",
+      "  getwd()  = ", getwd(), "\n",
+      "Set CASTSDM_ROOT to the castSDM source root, or use getwd() under e:/Package/cast.",
+      call. = FALSE
+    )
+  }
+  sys.source(hlp, envir = .GlobalEnv)
+  cache <- file.path(OVIS_FIG_DIR, "ovis_spatial_replot_cache.rds")
+  if (!file.exists(cache)) {
+    stop(
+      "Missing cache file:\n  ", cache,
+      "\nRun the full script once (Step 9 writes this file), then set ",
+      "CONFIG$only_replot_spatial_heatmap <- TRUE and re-run this block.",
+      call. = FALSE
+    )
+  }
+  z <- readRDS(cache)
+  cf <- z$config_flags
+  cast_spatial_replot_hss_cate_heatmaps(
+    pred            = z$pred,
+    cate            = z$cate,
+    fig_dir         = OVIS_FIG_DIR,
+    fig_dpi         = OVIS_FIG_DPI,
+    var_labels      = z$var_labels,
+    basemap         = "china",
+    res_deg         = CONFIG$spatial_heatmap_res_deg,
+    interp_method   = CONFIG$spatial_heatmap_interp_method,
+    display_res_deg = CONFIG$spatial_heatmap_display_res,
+    hss_model       = if (!is.null(cf) && !is.null(cf$cate_hss_model)) cf$cate_hss_model else "cast",
+    hss_threshold   = if (!is.null(cf) && !is.null(cf$cate_hss_threshold)) cf$cate_hss_threshold else 0.1,
+    species_label   = if (!is.null(cf) && !is.null(cf$species)) cf$species else "Ovis_ammon",
+    ovis_style      = TRUE
+  )
+  message("Spatial heatmap replot finished (ovis_predict_* / ovis_cate_*).")
 }
