@@ -266,14 +266,47 @@ plot.cast_shap <- function(x,
     importance = imp,
     stringsAsFactors = FALSE
   )
-  pos$label_x <- pos$x * 1.22
-  pos$label_y <- pos$y * 1.22
-  pos$label_hjust <- ifelse(pos$x > 0.05, 0, ifelse(pos$x < -0.05, 1, 0.5))
-  pos$label_vjust <- ifelse(
-    abs(pos$x) <= 0.05,
-    ifelse(pos$y > 0, -0.3, 1.3),
-    0.5
-  )
+  pos$side <- ifelse(pos$x >= 0, "right", "left")
+  pos$label_x <- ifelse(pos$side == "right", 1.46, -1.46)
+  pos$label_y <- pos$y * 1.30
+
+  .spread_label_y <- function(y_vals, min_gap = 0.11, low = -1.32, high = 1.32) {
+    if (length(y_vals) <= 1L) {
+      return(y_vals)
+    }
+    ord <- order(y_vals, decreasing = TRUE)
+    yy <- y_vals[ord]
+    for (k in 2:length(yy)) {
+      if ((yy[k - 1L] - yy[k]) < min_gap) {
+        yy[k] <- yy[k - 1L] - min_gap
+      }
+    }
+    span <- max(yy) - min(yy)
+    if (is.finite(span) && span > (high - low)) {
+      yy <- seq(high, low, length.out = length(yy))
+    } else {
+      if (max(yy) > high) {
+        yy <- yy - (max(yy) - high)
+      }
+      if (min(yy) < low) {
+        yy <- yy + (low - min(yy))
+      }
+    }
+    out <- y_vals
+    out[ord] <- yy
+    out
+  }
+
+  ridx <- which(pos$side == "right")
+  lidx <- which(pos$side == "left")
+  if (length(ridx) > 0L) {
+    pos$label_y[ridx] <- .spread_label_y(pos$label_y[ridx])
+  }
+  if (length(lidx) > 0L) {
+    pos$label_y[lidx] <- .spread_label_y(pos$label_y[lidx])
+  }
+  pos$label_hjust <- ifelse(pos$side == "right", 0, 1)
+  pos$label_vjust <- 0.5
 
   max_imp <- max(imp, 1e-8)
   pair <- list()
@@ -344,6 +377,18 @@ plot.cast_shap <- function(x,
   }
 
   p <- p +
+    ggplot2::geom_segment(
+      ggplot2::aes(
+        x = .data$x * 1.03,
+        y = .data$y * 1.03,
+        xend = .data$label_x + ifelse(.data$side == "right", -0.03, 0.03),
+        yend = .data$label_y
+      ),
+      inherit.aes = TRUE,
+      color = "#c4c4c4",
+      linewidth = 0.32,
+      alpha = 0.95
+    ) +
     ggplot2::geom_point(
       ggplot2::aes(
         size = .data$importance,
@@ -362,7 +407,7 @@ plot.cast_shap <- function(x,
         vjust = .data$label_vjust
       ),
       inherit.aes = TRUE,
-      size = 3.2,
+      size = 4.05,
       fontface = "bold"
     ) +
     ggplot2::scale_fill_gradientn(
@@ -373,8 +418,8 @@ plot.cast_shap <- function(x,
     ) +
     ggplot2::scale_size(range = c(2, 10), guide = "none") +
     ggplot2::coord_fixed(
-      xlim = c(-1.55, 1.55),
-      ylim = c(-1.55, 1.55),
+      xlim = c(-1.75, 1.75),
+      ylim = c(-1.62, 1.62),
       expand = FALSE
     ) +
     ggplot2::labs(
@@ -390,30 +435,33 @@ plot.cast_shap <- function(x,
   if (!is.null(seg) && nrow(seg) > 0) {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Vimp",
-        barwidth = ggplot2::unit(4.5, "cm"),
+        title = "Importance\nLow -> High\nVimp",
+        barwidth = ggplot2::unit(4.9, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
         title.hjust = 0.5,
+        label.position = "bottom",
         order = 1L
       ),
       colour = ggplot2::guide_colorbar(
-        title = "Vint",
-        barwidth = ggplot2::unit(4.5, "cm"),
+        title = "Interaction Intensity\nWeak -> Strong\nVint",
+        barwidth = ggplot2::unit(4.9, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
         title.hjust = 0.5,
+        label.position = "bottom",
         order = 2L
       )
     )
   } else {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Vimp",
-        barwidth = ggplot2::unit(4.5, "cm"),
+        title = "Importance\nLow -> High\nVimp",
+        barwidth = ggplot2::unit(4.9, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
-        title.hjust = 0.5
+        title.hjust = 0.5,
+        label.position = "bottom"
       )
     )
   }
@@ -432,8 +480,8 @@ plot.cast_shap <- function(x,
       legend.box.spacing = ggplot2::unit(0.15, "cm"),
       legend.spacing.x = ggplot2::unit(1.2, "cm"),
       legend.justification = "center",
-      legend.title = ggplot2::element_text(size = 10, face = "bold"),
-      legend.text = ggplot2::element_text(size = 8),
+      legend.title = ggplot2::element_text(size = 10.2, face = "bold", lineheight = 1.05),
+      legend.text = ggplot2::element_text(size = 9),
       plot.margin = ggplot2::margin(8, 12, 8, 12)
     )
 

@@ -989,86 +989,232 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
         cat(sprintf("  Median(PI width): %.4f\n", stats::median(unc$pi_width)))
         cat("───────────────────────────────────────────────────────\n\n")
 
-        # ── 共用绘图主题（与 HSI 地图保持一致：theme_void, 无网格线）────────
+        # ── 不确定性地图：优先使用与 HSS 相同的空间热图渲染管线 ──────────────
+        unc_heatmap_ready <- FALSE
+        unc_hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
+        if (!is.na(unc_hlp_path) && nzchar(unc_hlp_path) &&
+            requireNamespace("terra", quietly = TRUE)) {
+          tryCatch(
+            {
+              sys.source(unc_hlp_path, envir = environment())
+              unc_heatmap_ready <-
+                exists(".cast_spatial_interpolate_grid", mode = "function") &&
+                exists(".cast_spatial_load_basemap", mode = "function")
+            },
+            error = function(e) {
+              message("uncertainty heatmap helper load failed: ", conditionMessage(e))
+              unc_heatmap_ready <<- FALSE
+            }
+          )
+        }
+
         unc_theme <- ggplot2::theme_void(base_size = 10) +
           ggplot2::theme(
-            plot.title    = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+            plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
             plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 8, color = "grey50"),
-            legend.position   = "right",
-            legend.key.width  = ggplot2::unit(0.5, "cm"),
+            legend.position = "right",
+            legend.key.width = ggplot2::unit(0.5, "cm"),
             legend.key.height = ggplot2::unit(1.5, "cm")
           )
 
-        # ── 1) SD 不确定性地图 ──────────────────────────────────────────────
-        p_unc_sd <- ggplot2::ggplot(
-          unc, ggplot2::aes(x = lon, y = lat, colour = sd)
-        ) +
-          ggplot2::geom_point(size = 0.3) +
-          ggplot2::scale_colour_viridis_c(
-            name = "SD", option = "magma", direction = -1
-          ) +
-          ggplot2::coord_sf(expand = FALSE) +
-          ggplot2::labs(
-            title    = "Ovis ammon \u2014 MC Dropout Uncertainty (SD)",
-            subtitle = sprintf(
-              "Mean SD = %.4f | Max SD = %.4f | %d forward passes",
-              mean(unc$sd), max(unc$sd), CONFIG$uncertainty_n_forward
+        ovis_uncertainty_heatmap <- function(df,
+                                             value_col,
+                                             title,
+                                             subtitle = NULL,
+                                             legend_name = value_col,
+                                             palette,
+                                             limits = NULL) {
+          if (!isTRUE(unc_heatmap_ready) || !all(c("lon", "lat", value_col) %in% names(df))) {
+            return(NULL)
+          }
+
+          ext <- if (exists(".cast_spatial_extent_default", mode = "function")) {
+            .cast_spatial_extent_default()
+          } else {
+            c(lon_min = 73.5, lon_max = 135, lat_min = 18, lat_max = 53.5)
+          }
+
+          df_r <- .cast_spatial_interpolate_grid(
+            lon = df$lon,
+            lat = df$lat,
+            z = as.numeric(df[[value_col]]),
+            extent = ext,
+            res_deg = CONFIG$spatial_heatmap_res_deg,
+            interp_method = CONFIG$spatial_heatmap_interp_method,
+            display_res_deg = CONFIG$spatial_heatmap_display_res,
+            nmax_idw = 24L,
+            basemap = "china"
+          )
+          if (is.null(df_r) || nrow(df_r) < 2L) {
+            return(NULL)
+          }
+
+          bm <- .cast_spatial_load_basemap("china")
+          dash <- .cast_spatial_load_basemap("dashline")
+
+          p <- ggplot2::ggplot()
+          if (!is.null(bm)) {
+            p <- p + ggplot2::geom_sf(data = bm, fill = "white", color = "black", linewidth = 0.25)
+          }
+
+          p <- p +
+            ggplot2::geom_raster(
+              ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$z),
+              data = df_r,
+              interpolate = FALSE
+            ) +
+            ggplot2::scale_fill_gradientn(
+              colours = palette,
+              limits = limits,
+              oob = scales::squish,
+              na.value = "transparent",
+              name = legend_name
+            ) +
+            ggplot2::coord_sf(
+              crs = sf::st_crs(4326),
+              expand = FALSE,
+              xlim = c(ext[["lon_min"]], ext[["lon_max"]]),
+              ylim = c(ext[["lat_min"]], ext[["lat_max"]])
+            ) +
+            ggplot2::labs(title = title, subtitle = subtitle) +
+            ggplot2::theme_void(base_size = 10) +
+            ggplot2::theme(
+              plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12, color = "black"),
+              plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey35", size = 8),
+              legend.position = "bottom",
+              legend.key.width = ggplot2::unit(2.5, "cm"),
+              legend.key.height = ggplot2::unit(0.35, "cm"),
+              panel.border = ggplot2::element_rect(fill = NA, color = "black", linewidth = 0.8)
             )
+
+          if (!is.null(dash)) {
+            p <- p + ggplot2::geom_sf(data = dash, fill = NA, color = "black", linewidth = 0.5)
+          }
+
+          p
+        }
+
+        # ── 1) SD 不确定性地图 ──────────────────────────────────────────────
+        p_unc_sd <- ovis_uncertainty_heatmap(
+          unc,
+          value_col = "sd",
+          title = "Ovis ammon \u2014 MC Dropout Uncertainty (SD)",
+          subtitle = sprintf(
+            "Mean SD = %.4f | Max SD = %.4f | %d forward passes",
+            mean(unc$sd), max(unc$sd), CONFIG$uncertainty_n_forward
+          ),
+          legend_name = "SD",
+          palette = rev(grDevices::hcl.colors(11L, "Inferno"))
+        )
+        if (is.null(p_unc_sd)) {
+          p_unc_sd <- ggplot2::ggplot(
+            unc, ggplot2::aes(x = lon, y = lat, colour = sd)
           ) +
-          unc_theme
+            ggplot2::geom_point(size = 0.3) +
+            ggplot2::scale_colour_viridis_c(
+              name = "SD", option = "magma", direction = -1
+            ) +
+            ggplot2::coord_sf(expand = FALSE) +
+            ggplot2::labs(
+              title = "Ovis ammon \u2014 MC Dropout Uncertainty (SD)",
+              subtitle = sprintf(
+                "Mean SD = %.4f | Max SD = %.4f | %d forward passes",
+                mean(unc$sd), max(unc$sd), CONFIG$uncertainty_n_forward
+              )
+            ) +
+            unc_theme
+        }
         print(p_unc_sd)
         ovis_save_plot(p_unc_sd, "ovis_uncertainty_sd.png", width = 10, height = 7)
 
         # ── 2) CV 不确定性地图 ──────────────────────────────────────────────
-        p_unc_cv <- ggplot2::ggplot(
-          unc, ggplot2::aes(x = lon, y = lat, colour = cv)
-        ) +
-          ggplot2::geom_point(size = 0.3) +
-          ggplot2::scale_colour_viridis_c(
-            name = "CV", option = "inferno", direction = -1
+        p_unc_cv <- ovis_uncertainty_heatmap(
+          unc,
+          value_col = "cv",
+          title = "Ovis ammon \u2014 MC Dropout Uncertainty (CV)",
+          legend_name = "CV",
+          palette = rev(grDevices::hcl.colors(11L, "Plasma"))
+        )
+        if (is.null(p_unc_cv)) {
+          p_unc_cv <- ggplot2::ggplot(
+            unc, ggplot2::aes(x = lon, y = lat, colour = cv)
           ) +
-          ggplot2::coord_sf(expand = FALSE) +
-          ggplot2::labs(
-            title = "Ovis ammon \u2014 MC Dropout Uncertainty (CV)"
-          ) +
-          unc_theme
+            ggplot2::geom_point(size = 0.3) +
+            ggplot2::scale_colour_viridis_c(
+              name = "CV", option = "inferno", direction = -1
+            ) +
+            ggplot2::coord_sf(expand = FALSE) +
+            ggplot2::labs(
+              title = "Ovis ammon \u2014 MC Dropout Uncertainty (CV)"
+            ) +
+            unc_theme
+        }
         print(p_unc_cv)
         ovis_save_plot(p_unc_cv, "ovis_uncertainty_cv.png", width = 10, height = 7)
 
         # ── 3) 90% 预测区间宽度地图 ────────────────────────────────────────
-        p_unc_pi <- ggplot2::ggplot(
-          unc, ggplot2::aes(x = lon, y = lat, colour = pi_width)
-        ) +
-          ggplot2::geom_point(size = 0.3) +
-          ggplot2::scale_colour_viridis_c(
-            name = "Q95\u2013Q05", option = "plasma", direction = -1
+        p_unc_pi <- ovis_uncertainty_heatmap(
+          unc,
+          value_col = "pi_width",
+          title = "Ovis ammon \u2014 90% Prediction Interval Width",
+          subtitle = sprintf(
+            "Mean width = %.4f | Median = %.4f",
+            mean(unc$pi_width), stats::median(unc$pi_width)
+          ),
+          legend_name = "Q95\u2013Q05",
+          palette = rev(grDevices::hcl.colors(11L, "Cividis"))
+        )
+        if (is.null(p_unc_pi)) {
+          p_unc_pi <- ggplot2::ggplot(
+            unc, ggplot2::aes(x = lon, y = lat, colour = pi_width)
           ) +
-          ggplot2::coord_sf(expand = FALSE) +
-          ggplot2::labs(
-            title    = "Ovis ammon \u2014 90% Prediction Interval Width",
-            subtitle = sprintf(
-              "Mean width = %.4f | Median = %.4f",
-              mean(unc$pi_width), stats::median(unc$pi_width)
-            )
-          ) +
-          unc_theme
+            ggplot2::geom_point(size = 0.3) +
+            ggplot2::scale_colour_viridis_c(
+              name = "Q95\u2013Q05", option = "plasma", direction = -1
+            ) +
+            ggplot2::coord_sf(expand = FALSE) +
+            ggplot2::labs(
+              title = "Ovis ammon \u2014 90% Prediction Interval Width",
+              subtitle = sprintf(
+                "Mean width = %.4f | Median = %.4f",
+                mean(unc$pi_width), stats::median(unc$pi_width)
+              )
+            ) +
+            unc_theme
+        }
         print(p_unc_pi)
         ovis_save_plot(p_unc_pi, "ovis_uncertainty_pi_width.png", width = 10, height = 7)
 
         # ── 4) MC 均值预测地图 (贝叶斯近似后验均值) ────────────────────────
-        p_unc_mean <- ggplot2::ggplot(
-          unc, ggplot2::aes(x = lon, y = lat, colour = mean)
-        ) +
-          ggplot2::geom_point(size = 0.3) +
-          ggplot2::scale_colour_viridis_c(
-            name = "MC Mean HSS", option = "viridis"
+        hss_pal <- if (exists(".cast_spatial_hss_palette", mode = "function")) {
+          .cast_spatial_hss_palette()
+        } else {
+          rev(grDevices::hcl.colors(11L, "Plasma"))
+        }
+        p_unc_mean <- ovis_uncertainty_heatmap(
+          unc,
+          value_col = "mean",
+          title = "Ovis ammon \u2014 MC Dropout Mean Prediction",
+          subtitle = "Bayesian-approximate posterior mean (more robust than single eval pass)",
+          legend_name = "MC Mean HSS",
+          palette = hss_pal,
+          limits = c(0, 1)
+        )
+        if (is.null(p_unc_mean)) {
+          p_unc_mean <- ggplot2::ggplot(
+            unc, ggplot2::aes(x = lon, y = lat, colour = mean)
           ) +
-          ggplot2::coord_sf(expand = FALSE) +
-          ggplot2::labs(
-            title    = "Ovis ammon \u2014 MC Dropout Mean Prediction",
-            subtitle = "Bayesian-approximate posterior mean (more robust than single eval pass)"
-          ) +
-          unc_theme
+            ggplot2::geom_point(size = 0.3) +
+            ggplot2::scale_colour_viridis_c(
+              name = "MC Mean HSS", option = "viridis"
+            ) +
+            ggplot2::coord_sf(expand = FALSE) +
+            ggplot2::labs(
+              title = "Ovis ammon \u2014 MC Dropout Mean Prediction",
+              subtitle = "Bayesian-approximate posterior mean (more robust than single eval pass)"
+            ) +
+            unc_theme
+        }
         print(p_unc_mean)
         ovis_save_plot(p_unc_mean, "ovis_uncertainty_mean.png", width = 10, height = 7)
 
