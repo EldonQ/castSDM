@@ -10,7 +10,7 @@
 #' @param data A `data.frame` with `presence` (0/1) and numeric predictors.
 #' @param response Name of the binary response column. Default `"presence"`.
 #' @param env_vars Predictor column names. If `NULL`, columns are chosen in
-#'   order: (1) if `dag` is set, **`intersect(dag$nodes, names(data))`** — the
+#'   order: (1) if `dag` is set, **`intersect(dag$nodes, names(data))`** -- the
 #'   same convention as [cast_fit()] for traditional models; (2) else if
 #'   `screen` is set, `intersect(get_env_vars(), screen$selected)`; (3) else
 #'   [get_env_vars()].
@@ -266,47 +266,24 @@ plot.cast_shap <- function(x,
     importance = imp,
     stringsAsFactors = FALSE
   )
-  pos$side <- ifelse(pos$x >= 0, "right", "left")
-  pos$label_x <- ifelse(pos$side == "right", 1.46, -1.46)
-  pos$label_y <- pos$y * 1.30
 
-  .spread_label_y <- function(y_vals, min_gap = 0.11, low = -1.32, high = 1.32) {
-    if (length(y_vals) <= 1L) {
-      return(y_vals)
-    }
-    ord <- order(y_vals, decreasing = TRUE)
-    yy <- y_vals[ord]
-    for (k in 2:length(yy)) {
-      if ((yy[k - 1L] - yy[k]) < min_gap) {
-        yy[k] <- yy[k - 1L] - min_gap
-      }
-    }
-    span <- max(yy) - min(yy)
-    if (is.finite(span) && span > (high - low)) {
-      yy <- seq(high, low, length.out = length(yy))
-    } else {
-      if (max(yy) > high) {
-        yy <- yy - (max(yy) - high)
-      }
-      if (min(yy) < low) {
-        yy <- yy + (low - min(yy))
-      }
-    }
-    out <- y_vals
-    out[ord] <- yy
-    out
-  }
+  # Labels placed radially outward, close to their node (reference style)
+  label_r <- 1.28
+  pos$label_x <- label_r * cos(ang - pi / 2)
+  pos$label_y <- label_r * sin(ang - pi / 2)
 
-  ridx <- which(pos$side == "right")
-  lidx <- which(pos$side == "left")
-  if (length(ridx) > 0L) {
-    pos$label_y[ridx] <- .spread_label_y(pos$label_y[ridx])
-  }
-  if (length(lidx) > 0L) {
-    pos$label_y[lidx] <- .spread_label_y(pos$label_y[lidx])
-  }
-  pos$label_hjust <- ifelse(pos$side == "right", 0, 1)
-  pos$label_vjust <- 0.5
+  # hjust/vjust depend on angular position for neat radial placement
+  cos_v <- cos(ang - pi / 2)
+  sin_v <- sin(ang - pi / 2)
+  pos$label_hjust <- ifelse(
+    cos_v > 0.15, 0,
+    ifelse(cos_v < -0.15, 1, 0.5)
+  )
+  pos$label_vjust <- ifelse(
+    abs(cos_v) <= 0.15,
+    ifelse(sin_v > 0, -0.2, 1.2),
+    0.5
+  )
 
   max_imp <- max(imp, 1e-8)
   pair <- list()
@@ -335,8 +312,6 @@ plot.cast_shap <- function(x,
     c("#edf8e9", "#31a354")
   )(64)
 
-  # Single ggplot + one coord_fixed (avoids "coordinate system already present"
-  # noise). scale_linewidth() does not support `oob` on all ggplot2 versions.
   p <- ggplot2::ggplot(
     pos,
     ggplot2::aes(x = .data$x, y = .data$y)
@@ -370,25 +345,11 @@ plot.cast_shap <- function(x,
         colours = purples,
         limits = c(0, 1),
         name = "Vint",
-        breaks = c(0, 0.25, 0.5, 0.75, 1),
-        labels = c("0", "0.25", "0.5", "0.75", "1"),
         oob = scales::squish
       )
   }
 
   p <- p +
-    ggplot2::geom_segment(
-      ggplot2::aes(
-        x = .data$x * 1.03,
-        y = .data$y * 1.03,
-        xend = .data$label_x + ifelse(.data$side == "right", -0.03, 0.03),
-        yend = .data$label_y
-      ),
-      inherit.aes = TRUE,
-      color = "#c4c4c4",
-      linewidth = 0.32,
-      alpha = 0.95
-    ) +
     ggplot2::geom_point(
       ggplot2::aes(
         size = .data$importance,
@@ -407,7 +368,7 @@ plot.cast_shap <- function(x,
         vjust = .data$label_vjust
       ),
       inherit.aes = TRUE,
-      size = 4.05,
+      size = 4.2,
       fontface = "bold"
     ) +
     ggplot2::scale_fill_gradientn(
@@ -416,10 +377,10 @@ plot.cast_shap <- function(x,
       name = "Vimp",
       oob = scales::squish
     ) +
-    ggplot2::scale_size(range = c(2, 10), guide = "none") +
+    ggplot2::scale_size(range = c(2, 12), guide = "none") +
     ggplot2::coord_fixed(
-      xlim = c(-1.75, 1.75),
-      ylim = c(-1.62, 1.62),
+      xlim = c(-1.7, 1.7),
+      ylim = c(-1.7, 1.7),
       expand = FALSE
     ) +
     ggplot2::labs(
@@ -435,8 +396,8 @@ plot.cast_shap <- function(x,
   if (!is.null(seg) && nrow(seg) > 0) {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Importance\nLow -> High\nVimp",
-        barwidth = ggplot2::unit(4.9, "cm"),
+        title = "Importance\nLow \u2500\u2500\u25b6 High\nVimp",
+        barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
         title.hjust = 0.5,
@@ -444,8 +405,8 @@ plot.cast_shap <- function(x,
         order = 1L
       ),
       colour = ggplot2::guide_colorbar(
-        title = "Interaction Intensity\nWeak -> Strong\nVint",
-        barwidth = ggplot2::unit(4.9, "cm"),
+        title = "Interaction Intensity\nWeak \u2500\u2500\u25b6 Strong\nVint",
+        barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
         title.hjust = 0.5,
@@ -456,8 +417,8 @@ plot.cast_shap <- function(x,
   } else {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Importance\nLow -> High\nVimp",
-        barwidth = ggplot2::unit(4.9, "cm"),
+        title = "Importance\nLow \u2500\u2500\u25b6 High\nVimp",
+        barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
         title.hjust = 0.5,
@@ -477,11 +438,11 @@ plot.cast_shap <- function(x,
       ),
       legend.position = "bottom",
       legend.box = "horizontal",
-      legend.box.spacing = ggplot2::unit(0.15, "cm"),
-      legend.spacing.x = ggplot2::unit(1.2, "cm"),
+      legend.box.spacing = ggplot2::unit(0.3, "cm"),
+      legend.spacing.x = ggplot2::unit(1.8, "cm"),
       legend.justification = "center",
-      legend.title = ggplot2::element_text(size = 10.2, face = "bold", lineheight = 1.05),
-      legend.text = ggplot2::element_text(size = 9),
+      legend.title = ggplot2::element_text(size = 10, face = "bold", lineheight = 1.1),
+      legend.text = ggplot2::element_text(size = 8.5),
       plot.margin = ggplot2::margin(8, 12, 8, 12)
     )
 
@@ -666,8 +627,8 @@ plot.cast_shap <- function(x,
       values = c("Positive" = pos_color, "Negative" = neg_color),
       breaks = c("Positive", "Negative"),
       labels = c(
-        "Positive" = paste0("Positive ", "\u25B6"),
-        "Negative" = paste0("\u25C0", " Negative")
+        "Positive" = "Positive",
+        "Negative" = "Negative"
       ),
       drop = FALSE
     ) +
@@ -685,32 +646,34 @@ plot.cast_shap <- function(x,
       x = c(0.2, max(df$x) + 0.5)
     )
 
-  # f(x) label on LEFT side (vertical, rotated 90)
+  # f(x) label on LEFT side, vertical (rotated 90)
   p <- p +
     ggplot2::annotate(
       "text",
-      x = 0.25,
+      x = 0.15,
       y = final_margin,
-      label = sprintf("italic(f(x))==%.5f", final_margin),
+      label = sprintf("italic(f(x))==%.4f", final_margin),
       parse = TRUE,
       hjust = 0.5,
-      vjust = -0.5,
+      vjust = 1.3,
       size = 3.3,
-      color = "gray20"
+      color = "gray20",
+      angle = 90
     )
 
-  # E[f(x)] label on RIGHT side (vertical, rotated)
+  # E[f(x)] label on RIGHT side, vertical (rotated 90)
   p <- p +
     ggplot2::annotate(
       "text",
-      x = max(df$x) + 0.45,
+      x = max(df$x) + 0.55,
       y = base,
-      label = sprintf("italic(E)*'['*italic(f(x))*']'==%.5f", base),
+      label = sprintf("italic(E)*'['*italic(f(x))*']'==%.4f", base),
       parse = TRUE,
       hjust = 0.5,
-      vjust = -0.5,
+      vjust = -0.3,
       size = 3.3,
-      color = "gray20"
+      color = "gray20",
+      angle = 90
     )
 
   p <- p +
