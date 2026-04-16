@@ -5,7 +5,9 @@
 #' with dropout active, producing a distribution of predictions from which
 #' mean, standard deviation, and coefficient of variation are computed per site.
 #'
-#' @param fit A [cast_fit] object that contains a `"ci_mlp"` model.
+#' @param fit A [cast_fit] object that contains at least one fitted neural
+#'   network model (`"cast"`, `"mlp_ate"`, or `"mlp"`). If multiple
+#'   neural models are present, `"cast"` is used preferentially.
 #' @param new_data A `data.frame` with `lon`, `lat`, and environmental
 #'   variables matching those in `fit`.
 #' @param n_forward Integer. Number of stochastic forward passes.
@@ -45,8 +47,12 @@ cast_uncertainty <- function(fit, new_data, n_forward = 50L,
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
-  if (!"ci_mlp" %in% names(fit$models)) {
-    cli::cli_abort("MC Dropout requires a {.val ci_mlp} model in {.arg fit}.")
+  nn_priority <- c("cast", "mlp_ate", "mlp", "ci_mlp")
+  nn_available <- nn_priority[nn_priority %in% names(fit$models)]
+  if (length(nn_available) == 0L) {
+    cli::cli_abort(
+      "MC Dropout requires a fitted neural model ({.val cast}, {.val mlp_ate}, or {.val mlp}) in {.arg fit}."
+    )
   }
   check_suggested("torch", "for MC Dropout uncertainty estimation")
 
@@ -60,17 +66,42 @@ cast_uncertainty <- function(fit, new_data, n_forward = 50L,
   )
   X_sc[is.na(X_sc)] <- 0
 
-  mdl_info <- fit$models[["ci_mlp"]]
+  model_name <- nn_available[1L]
+  mdl_info <- fit$models[[model_name]]
+  if (!identical(mdl_info$type, "nn") || is.null(mdl_info$model)) {
+    cli::cli_abort(
+      "Selected model {.val {model_name}} is not a fitted neural-network model."
+    )
+  }
   model <- mdl_info$model
 
+  feature_type <- mdl_info$feature_type %||% "mlp"
+  if (feature_type != "mlp") {
+    if (is.null(fit$screen) || is.null(fit$dag) || is.null(fit$ate)) {
+      cli::cli_abort(
+        "Neural models with causal features require {.arg fit} to carry {.val screen}, {.val dag}, and {.val ate}."
+      )
+    }
+    feat <- cast_features(
+      X_sc,
+      screen = fit$screen,
+      dag = fit$dag,
+      ate = fit$ate,
+      model_type = feature_type
+    )
+    X_pred <- feat$features
+  } else {
+    X_pred <- X_sc
+  }
+
   Xt <- torch::torch_tensor(
-    as.matrix(X_sc[, mdl_info$features, drop = FALSE]),
+    as.matrix(X_pred),
     dtype = torch::torch_float32()
   )
 
   if (verbose) {
     cli::cli_inform(
-      "MC Dropout: {n_forward} forward passes on {nrow(new_data)} sites..."
+      "MC Dropout ({model_name}): {n_forward} forward passes on {nrow(new_data)} sites..."
     )
   }
 

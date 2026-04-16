@@ -7,7 +7,9 @@
 cast_uncertainty(fit, new_data, n_forward = 50L, verbose = TRUE)
 }
 \arguments{
-\item{fit}{A \link{cast_fit} object that contains a \code{"ci_mlp"} model.}
+\item{fit}{A \link{cast_fit} object that contains at least one fitted neural
+network model (\code{"cast"}, \code{"mlp_ate"}, or \code{"mlp"}). If multiple
+neural models are present, \code{"cast"} is used preferentially.}
 
 \item{new_data}{A \code{data.frame} with \code{lon}, \code{lat}, and environmental
 variables matching those in \code{fit}.}
