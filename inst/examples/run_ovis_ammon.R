@@ -971,23 +971,120 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
         }
       )
       if (!is.null(unc) && requireNamespace("sf", quietly = TRUE)) {
-        # 绘制 CV (变异系数) 不确定性地图
-        p_unc <- ggplot2::ggplot(
-          unc,
-          ggplot2::aes(x = lon, y = lat, colour = cv)
+
+        # ── 不确定性汇总表 (CSV) ────────────────────────────────────────────
+        unc$pi_width <- unc$q95 - unc$q05
+        unc_csv <- file.path(OVIS_FIG_DIR, "ovis_uncertainty_table.csv")
+        utils::write.csv(unc, unc_csv, row.names = FALSE)
+        message("Saved uncertainty table: ", normalizePath(unc_csv, winslash = "/", mustWork = FALSE))
+
+        # 控制台打印汇总统计
+        cat("\n── MC Dropout Uncertainty Summary ──────────────────────\n")
+        cat(sprintf("  Sites           : %d\n", nrow(unc)))
+        cat(sprintf("  Mean(sd)        : %.4f\n", mean(unc$sd)))
+        cat(sprintf("  Median(sd)      : %.4f\n", stats::median(unc$sd)))
+        cat(sprintf("  Max(sd)         : %.4f\n", max(unc$sd)))
+        cat(sprintf("  Mean(CV)        : %.4f\n", mean(unc$cv)))
+        cat(sprintf("  Mean(PI width)  : %.4f\n", mean(unc$pi_width)))
+        cat(sprintf("  Median(PI width): %.4f\n", stats::median(unc$pi_width)))
+        cat("───────────────────────────────────────────────────────\n\n")
+
+        # ── 共用绘图主题（与 HSI 地图保持一致：theme_void, 无网格线）────────
+        unc_theme <- ggplot2::theme_void(base_size = 10) +
+          ggplot2::theme(
+            plot.title    = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+            plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 8, color = "grey50"),
+            legend.position   = "right",
+            legend.key.width  = ggplot2::unit(0.5, "cm"),
+            legend.key.height = ggplot2::unit(1.5, "cm")
+          )
+
+        # ── 1) SD 不确定性地图 ──────────────────────────────────────────────
+        p_unc_sd <- ggplot2::ggplot(
+          unc, ggplot2::aes(x = lon, y = lat, colour = sd)
+        ) +
+          ggplot2::geom_point(size = 0.3) +
+          ggplot2::scale_colour_viridis_c(
+            name = "SD", option = "magma", direction = -1
+          ) +
+          ggplot2::coord_sf(expand = FALSE) +
+          ggplot2::labs(
+            title    = "Ovis ammon \u2014 MC Dropout Uncertainty (SD)",
+            subtitle = sprintf(
+              "Mean SD = %.4f | Max SD = %.4f | %d forward passes",
+              mean(unc$sd), max(unc$sd), CONFIG$uncertainty_n_forward
+            )
+          ) +
+          unc_theme
+        print(p_unc_sd)
+        ovis_save_plot(p_unc_sd, "ovis_uncertainty_sd.png", width = 10, height = 7)
+
+        # ── 2) CV 不确定性地图 ──────────────────────────────────────────────
+        p_unc_cv <- ggplot2::ggplot(
+          unc, ggplot2::aes(x = lon, y = lat, colour = cv)
         ) +
           ggplot2::geom_point(size = 0.3) +
           ggplot2::scale_colour_viridis_c(
             name = "CV", option = "inferno", direction = -1
           ) +
-          ggplot2::coord_sf() +
+          ggplot2::coord_sf(expand = FALSE) +
           ggplot2::labs(
-            title = "Ovis ammon — MC Dropout Uncertainty (CV)",
-            x = "Longitude", y = "Latitude"
+            title = "Ovis ammon \u2014 MC Dropout Uncertainty (CV)"
           ) +
-          ggplot2::theme_minimal(base_size = 11)
-        print(p_unc)
-        ovis_save_plot(p_unc, "ovis_uncertainty_cv.png", width = 10, height = 7)
+          unc_theme
+        print(p_unc_cv)
+        ovis_save_plot(p_unc_cv, "ovis_uncertainty_cv.png", width = 10, height = 7)
+
+        # ── 3) 90% 预测区间宽度地图 ────────────────────────────────────────
+        p_unc_pi <- ggplot2::ggplot(
+          unc, ggplot2::aes(x = lon, y = lat, colour = pi_width)
+        ) +
+          ggplot2::geom_point(size = 0.3) +
+          ggplot2::scale_colour_viridis_c(
+            name = "Q95\u2013Q05", option = "plasma", direction = -1
+          ) +
+          ggplot2::coord_sf(expand = FALSE) +
+          ggplot2::labs(
+            title    = "Ovis ammon \u2014 90% Prediction Interval Width",
+            subtitle = sprintf(
+              "Mean width = %.4f | Median = %.4f",
+              mean(unc$pi_width), stats::median(unc$pi_width)
+            )
+          ) +
+          unc_theme
+        print(p_unc_pi)
+        ovis_save_plot(p_unc_pi, "ovis_uncertainty_pi_width.png", width = 10, height = 7)
+
+        # ── 4) MC 均值预测地图 (贝叶斯近似后验均值) ────────────────────────
+        p_unc_mean <- ggplot2::ggplot(
+          unc, ggplot2::aes(x = lon, y = lat, colour = mean)
+        ) +
+          ggplot2::geom_point(size = 0.3) +
+          ggplot2::scale_colour_viridis_c(
+            name = "MC Mean HSS", option = "viridis"
+          ) +
+          ggplot2::coord_sf(expand = FALSE) +
+          ggplot2::labs(
+            title    = "Ovis ammon \u2014 MC Dropout Mean Prediction",
+            subtitle = "Bayesian-approximate posterior mean (more robust than single eval pass)"
+          ) +
+          unc_theme
+        print(p_unc_mean)
+        ovis_save_plot(p_unc_mean, "ovis_uncertainty_mean.png", width = 10, height = 7)
+
+        # ── 5) 四面板合板图 (需 patchwork) ─────────────────────────────────
+        if (requireNamespace("patchwork", quietly = TRUE)) {
+          p_unc_combo <- (p_unc_mean + p_unc_sd) / (p_unc_cv + p_unc_pi) +
+            patchwork::plot_annotation(
+              title   = "Ovis ammon \u2014 MC Dropout Uncertainty Suite",
+              caption = sprintf("%d stochastic forward passes", CONFIG$uncertainty_n_forward),
+              theme   = ggplot2::theme(
+                plot.title = ggplot2::element_text(face = "bold", size = 14)
+              )
+            )
+          print(p_unc_combo)
+          ovis_save_plot(p_unc_combo, "ovis_uncertainty_panel.png", width = 18, height = 14)
+        }
       }
     } else {
       message("cast_uncertainty: 无可用 cast/ci_mlp 模型，跳过 MC Dropout。")

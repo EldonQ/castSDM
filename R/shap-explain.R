@@ -266,8 +266,14 @@ plot.cast_shap <- function(x,
     importance = imp,
     stringsAsFactors = FALSE
   )
-  pos$label_x <- pos$x * 1.18
-  pos$label_y <- pos$y * 1.18
+  pos$label_x <- pos$x * 1.22
+  pos$label_y <- pos$y * 1.22
+  pos$label_hjust <- ifelse(pos$x > 0.05, 0, ifelse(pos$x < -0.05, 1, 0.5))
+  pos$label_vjust <- ifelse(
+    abs(pos$x) <= 0.05,
+    ifelse(pos$y > 0, -0.3, 1.3),
+    0.5
+  )
 
   max_imp <- max(imp, 1e-8)
   pair <- list()
@@ -351,12 +357,13 @@ plot.cast_shap <- function(x,
       ggplot2::aes(
         x = .data$label_x,
         y = .data$label_y,
-        label = .data$feature
+        label = .data$feature,
+        hjust = .data$label_hjust,
+        vjust = .data$label_vjust
       ),
       inherit.aes = TRUE,
       size = 3.2,
-      fontface = "bold",
-      hjust = 0.5
+      fontface = "bold"
     ) +
     ggplot2::scale_fill_gradientn(
       colours = greens,
@@ -384,16 +391,18 @@ plot.cast_shap <- function(x,
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
         title = "Vimp",
-        barwidth = ggplot2::unit(3.2, "cm"),
-        barheight = ggplot2::unit(0.35, "cm"),
+        barwidth = ggplot2::unit(4.5, "cm"),
+        barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
+        title.hjust = 0.5,
         order = 1L
       ),
       colour = ggplot2::guide_colorbar(
         title = "Vint",
-        barwidth = ggplot2::unit(3.2, "cm"),
-        barheight = ggplot2::unit(0.35, "cm"),
+        barwidth = ggplot2::unit(4.5, "cm"),
+        barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
+        title.hjust = 0.5,
         order = 2L
       )
     )
@@ -401,9 +410,10 @@ plot.cast_shap <- function(x,
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
         title = "Vimp",
-        barwidth = ggplot2::unit(3.2, "cm"),
-        barheight = ggplot2::unit(0.35, "cm"),
-        title.position = "top"
+        barwidth = ggplot2::unit(4.5, "cm"),
+        barheight = ggplot2::unit(0.4, "cm"),
+        title.position = "top",
+        title.hjust = 0.5
       )
     )
   }
@@ -419,8 +429,12 @@ plot.cast_shap <- function(x,
       ),
       legend.position = "bottom",
       legend.box = "horizontal",
+      legend.box.spacing = ggplot2::unit(0.15, "cm"),
+      legend.spacing.x = ggplot2::unit(1.2, "cm"),
       legend.justification = "center",
-      plot.margin = ggplot2::margin(8, 8, 8, 8)
+      legend.title = ggplot2::element_text(size = 10, face = "bold"),
+      legend.text = ggplot2::element_text(size = 8),
+      plot.margin = ggplot2::margin(8, 12, 8, 12)
     )
 
   p
@@ -522,18 +536,6 @@ plot.cast_shap <- function(x,
   y_top <- max(df$ymax) + y_pad * 2.6
   y_bot <- min(df$ymin) - y_pad * 0.65
 
-  bridge <- if (nrow(df) > 1L) {
-    data.frame(
-      x = utils::head(df$x, -1L) + 0.22,
-      xend = utils::tail(df$x, -1L) - 0.22,
-      y = utils::head(df$end, -1L),
-      yend = utils::head(df$end, -1L),
-      stringsAsFactors = FALSE
-    )
-  } else {
-    NULL
-  }
-
   df$lab_y <- ifelse(
     df$val >= 0,
     df$ymax + y_pad * 0.55,
@@ -548,7 +550,7 @@ plot.cast_shap <- function(x,
       stats::plogis(base),
       stats::plogis(final_margin)
     )
-    ylab_main <- "SHAP (margin)"
+    ylab_main <- "SHAP value"
   } else {
     note <- x$shap_engine_note %||% ""
     sub_txt <- sprintf(
@@ -557,37 +559,38 @@ plot.cast_shap <- function(x,
       row_lab,
       final_margin
     )
-    ylab_main <- "SHAP (level)"
+    ylab_main <- "SHAP value"
   }
 
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$x)) +
-    ggplot2::geom_vline(
-      xintercept = df$x,
-      color = "#e0e0e0",
-      linewidth = 0.28
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$x))
+
+  # Baseline dashed horizontal
+  p <- p +
+    ggplot2::geom_hline(
+      yintercept = base,
+      linetype = "dotted",
+      color = "gray40",
+      linewidth = 0.35
     ) +
     ggplot2::geom_hline(
-      ggplot2::aes(yintercept = base),
+      yintercept = final_margin,
       linetype = "dotted",
       color = "gray40",
       linewidth = 0.35
     )
 
-  if (!is.null(bridge)) {
-    p <- p + ggplot2::geom_segment(
-      data = bridge,
-      ggplot2::aes(
-        x = .data$x, xend = .data$xend,
-        y = .data$y, yend = .data$yend
-      ),
-      inherit.aes = FALSE,
-      linetype = "dashed",
-      color = "grey50",
-      linewidth = 0.35,
-      lineend = "round"
+  # Vertical dotted connectors from bar tips
+  for (k in seq_len(nrow(df))) {
+    conn_y <- df$end[k]
+    p <- p + ggplot2::annotate(
+      "segment",
+      x = df$x[k] + 0.22, xend = min(df$x[k] + 1, max(df$x) + 0.45),
+      y = conn_y, yend = conn_y,
+      linetype = "dotted", color = "grey60", linewidth = 0.3
     )
   }
 
+  # Arrow-shaped bar polygons
   p <- p +
     ggplot2::geom_polygon(
       data = poly_df,
@@ -606,14 +609,18 @@ plot.cast_shap <- function(x,
         y = .data$lab_y,
         label = .data$val_lab
       ),
-      size = 3.1,
+      size = 2.8,
       color = "#1a1a1a",
       inherit.aes = TRUE
     ) +
     ggplot2::scale_fill_manual(
-      name = NULL,
+      name = "Impact direction",
       values = c("Positive" = pos_color, "Negative" = neg_color),
       breaks = c("Positive", "Negative"),
+      labels = c(
+        "Positive" = paste0("Positive ", "\u25B6"),
+        "Negative" = paste0("\u25C0", " Negative")
+      ),
       drop = FALSE
     ) +
     ggplot2::scale_x_continuous(
@@ -621,72 +628,91 @@ plot.cast_shap <- function(x,
       labels = df$feature,
       expand = ggplot2::expansion(mult = 0.05)
     ) +
+    ggplot2::scale_y_continuous(
+      name = NULL,
+      sec.axis = ggplot2::sec_axis(~ ., name = ylab_main)
+    ) +
     ggplot2::expand_limits(
       y = c(y_bot, y_top),
-      x = c(0.55, max(df$x) + 0.45)
-    ) +
+      x = c(0.2, max(df$x) + 0.5)
+    )
+
+  # f(x) label on LEFT side (vertical, rotated 90)
+  p <- p +
     ggplot2::annotate(
       "text",
-      x = 0.65,
-      y = y_top,
-      label = sprintf("E[f(x)] = %.4f", base),
-      hjust = 0,
-      size = 3.4,
-      color = "gray20",
-      fontface = "plain"
-    ) +
+      x = 0.25,
+      y = final_margin,
+      label = sprintf("italic(f(x))==%.5f", final_margin),
+      parse = TRUE,
+      hjust = 0.5,
+      vjust = -0.5,
+      size = 3.3,
+      color = "gray20"
+    )
+
+  # E[f(x)] label on RIGHT side (vertical, rotated)
+  p <- p +
     ggplot2::annotate(
       "text",
-      x = max(df$x) + 0.35,
-      y = y_top,
-      label = sprintf("f(x) = %.4f", final_margin),
-      hjust = 1,
-      size = 3.4,
-      color = "gray20",
-      fontface = "plain"
-    ) +
+      x = max(df$x) + 0.45,
+      y = base,
+      label = sprintf("italic(E)*'['*italic(f(x))*']'==%.5f", base),
+      parse = TRUE,
+      hjust = 0.5,
+      vjust = -0.5,
+      size = 3.3,
+      color = "gray20"
+    )
+
+  p <- p +
     ggplot2::labs(
-      title = "Impact direction",
+      title = NULL,
       subtitle = sub_txt,
       caption = x$shap_plot_caption %||% NULL,
-      x = NULL,
-      y = ylab_main
+      x = NULL
     ) +
     ggplot2::coord_cartesian(clip = "off") +
-    ggplot2::theme_minimal(base_size = 11.5) +
+    ggplot2::theme_classic(base_size = 11) +
     ggplot2::theme(
+      # Outer box frame
+      panel.border = ggplot2::element_rect(
+        colour = "black", fill = NA, linewidth = 0.6
+      ),
+      # Remove all grid lines
+      panel.grid = ggplot2::element_blank(),
+      # Subtitle (small, informational)
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0, size = 7.5, color = "gray45",
+        margin = ggplot2::margin(b = 4)
+      ),
       plot.caption = ggplot2::element_text(
         size = 7, color = "gray40", hjust = 0, lineheight = 1.2
       ),
+      # X-axis labels rotated
       axis.text.x = ggplot2::element_text(
-        angle = 90,
-        vjust = 0.5,
-        hjust = 1,
-        size = 8.5,
-        color = "gray15"
+        angle = 45, vjust = 1, hjust = 1,
+        size = 8.5, color = "gray15"
       ),
-      panel.grid.major.x = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank(),
-      plot.title = ggplot2::element_text(
-        face = "bold",
-        hjust = 0,
-        size = 13.5,
-        margin = ggplot2::margin(b = 2)
+      axis.ticks.x = ggplot2::element_line(
+        color = "grey50", linewidth = 0.3
       ),
-      plot.subtitle = ggplot2::element_text(
-        hjust = 0,
-        size = 8,
-        color = "gray45",
-        margin = ggplot2::margin(b = 4)
+      axis.ticks.y = ggplot2::element_line(
+        color = "grey50", linewidth = 0.3
       ),
+      # Right-side Y axis title
+      axis.title.y.right = ggplot2::element_text(
+        color = "gray25", size = 10, face = "bold",
+        angle = 270, vjust = 1.5
+      ),
+      axis.title.y.left = ggplot2::element_blank(),
       plot.margin = ggplot2::margin(10, 14, 10, 10),
+      # Legend at bottom with arrow labels
       legend.position = "bottom",
-      legend.title = ggplot2::element_blank(),
-      axis.title.y = ggplot2::element_text(
-        color = "gray35",
-        size = 9.5,
-        angle = 90
-      )
+      legend.title = ggplot2::element_text(
+        face = "bold", size = 9.5
+      ),
+      legend.text = ggplot2::element_text(size = 9)
     )
 
   p
