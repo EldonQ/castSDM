@@ -18,3 +18,5 @@
 ^\.gitignore$
 ^\.Rhistory$
 ^\.RData$
+^inst/extdata$
+^tools$

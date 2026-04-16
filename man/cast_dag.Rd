@@ -26,7 +26,9 @@ cast_dag(
   notears_lr = 0.02,
   notears_tol = 0.001,
   notears_rho_init = 0.1,
-  notears_alpha_mult = 1.01
+  notears_alpha_mult = 1.01,
+  blacklist = NULL,
+  whitelist = NULL
 )
 }
 \arguments{
@@ -94,6 +96,17 @@ Default \code{1e-3}.}
 \item{notears_rho_init}{Initial augmented-Lagrangian rho. Default \code{0.1}.}
 
 \item{notears_alpha_mult}{Multiplier on rho each 100 steps. Default \code{1.01}.}
+
+\item{blacklist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
+\strong{forbidden} directed edges. These edges will never appear in the learned
+DAG. Use this to encode expert knowledge (e.g., "temperature cannot cause
+elevation"). Default \code{NULL} (no forbidden edges).}
+
+\item{whitelist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
+\strong{required} directed edges. These edges are guaranteed to appear in the
+learned DAG. Use this when domain knowledge dictates certain causal
+relationships (e.g., "elevation causes temperature"). Default \code{NULL}
+(no required edges).}
 }
 \value{
 A \code{cast_dag} object (\code{structure_method} is stored on the object).

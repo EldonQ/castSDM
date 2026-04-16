@@ -56,6 +56,15 @@
 #'   Default `1e-3`.
 #' @param notears_rho_init Initial augmented-Lagrangian rho. Default `0.1`.
 #' @param notears_alpha_mult Multiplier on rho each 100 steps. Default `1.01`.
+#' @param blacklist A `data.frame` with columns `from` and `to` specifying
+#'   **forbidden** directed edges. These edges will never appear in the learned
+#'   DAG. Use this to encode expert knowledge (e.g., "temperature cannot cause
+#'   elevation"). Default `NULL` (no forbidden edges).
+#' @param whitelist A `data.frame` with columns `from` and `to` specifying
+#'   **required** directed edges. These edges are guaranteed to appear in the
+#'   learned DAG. Use this when domain knowledge dictates certain causal
+#'   relationships (e.g., "elevation causes temperature"). Default `NULL`
+#'   (no required edges).
 #'
 #' @return A `cast_dag` object (`structure_method` is stored on the object).
 #'
@@ -98,7 +107,9 @@ cast_dag <- function(data,
                      notears_lr = 0.02,
                      notears_tol = 1e-3,
                      notears_rho_init = 0.1,
-                     notears_alpha_mult = 1.01) {
+                     notears_alpha_mult = 1.01,
+                     blacklist = NULL,
+                     whitelist = NULL) {
   structure_method <- match.arg(structure_method)
   bidag_algorithm <- match.arg(bidag_algorithm)
 
@@ -164,22 +175,39 @@ cast_dag <- function(data,
     )
   }
 
+  # Validate blacklist / whitelist
+  if (!is.null(blacklist)) {
+    if (!is.data.frame(blacklist) || !all(c("from", "to") %in% names(blacklist))) {
+      cli::cli_abort("{.arg blacklist} must be a data.frame with columns {.val from} and {.val to}.")
+    }
+    blacklist <- blacklist[, c("from", "to"), drop = FALSE]
+  }
+  if (!is.null(whitelist)) {
+    if (!is.data.frame(whitelist) || !all(c("from", "to") %in% names(whitelist))) {
+      cli::cli_abort("{.arg whitelist} must be a data.frame with columns {.val from} and {.val to}.")
+    }
+    whitelist <- whitelist[, c("from", "to"), drop = FALSE]
+  }
+
   env_edges <- switch(structure_method,
     bootstrap_hc = .dag_bootstrap_hc(
       dag_df, R = R, algorithm = algorithm, score = score,
       strength_threshold = strength_threshold,
       direction_threshold = direction_threshold,
-      seed = seed, verbose = verbose
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
     ),
     pc = .dag_pc_edges(
       dag_df, alpha = pc_alpha, test = pc_test,
-      seed = seed, verbose = verbose
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
     ),
     bidag_bge = .dag_bidag_edges(
       dag_df,
       algorithm = bidag_algorithm,
       iterations = bidag_iterations,
-      seed = seed, verbose = verbose
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
     ),
     notears_linear = notears_learn_edges(
       dag_df,
@@ -190,7 +218,8 @@ cast_dag <- function(data,
       rho = notears_rho_init,
       alpha_mult = notears_alpha_mult,
       seed = seed,
-      verbose = verbose
+      verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
     ),
     cli::cli_abort("Unknown {.arg structure_method}.")
   )
@@ -226,29 +255,48 @@ cast_dag <- function(data,
 #' @noRd
 .dag_bootstrap_hc <- function(dag_df, R, algorithm, score,
                               strength_threshold, direction_threshold,
-                              seed, verbose) {
+                              seed, verbose,
+                              blacklist = NULL, whitelist = NULL) {
   check_suggested("bnlearn", "for DAG structure learning")
   if (!is.null(seed)) set.seed(seed)
   boot_strength <- utils::getFromNamespace("boot.strength", "bnlearn")
-  boot_str <- boot_strength(
-    dag_df, R = R, algorithm = algorithm,
+  boot_args <- list(
+    data = dag_df, R = R, algorithm = algorithm,
     algorithm.args = list(score = score)
   )
+  if (!is.null(blacklist)) boot_args$algorithm.args$blacklist <- blacklist
+  if (!is.null(whitelist)) boot_args$algorithm.args$whitelist <- whitelist
+  boot_str <- suppressWarnings(do.call(boot_strength, boot_args))
   strong <- boot_str[
     boot_str$strength >= strength_threshold &
       boot_str$direction >= direction_threshold, ,
     drop = FALSE
   ]
+  # Re-inject whitelisted edges that may not pass threshold
+  if (!is.null(whitelist)) {
+    for (r in seq_len(nrow(whitelist))) {
+      wl_from <- whitelist$from[r]
+      wl_to   <- whitelist$to[r]
+      found <- any(strong$from == wl_from & strong$to == wl_to)
+      if (!found) {
+        strong <- rbind(strong, data.frame(
+          from = wl_from, to = wl_to,
+          strength = 1.0, direction = 1.0,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
   as.data.frame(strong)
 }
 
 
 #' @keywords internal
 #' @noRd
-.dag_pc_edges <- function(dag_df, alpha, test, seed, verbose) {
+.dag_pc_edges <- function(dag_df, alpha, test, seed, verbose,
+                          blacklist = NULL, whitelist = NULL) {
   check_suggested("bnlearn", "for PC algorithm")
   if (!is.null(seed)) set.seed(seed)
-  # bnlearn >= 5.0: constraint-based PC is pc.stable(); bnlearn::pc() was removed.
   pc_fun <- tryCatch(
     utils::getFromNamespace("pc.stable", "bnlearn"),
     error = function(e) {
@@ -258,7 +306,10 @@ cast_dag <- function(data,
       ))
     }
   )
-  learned <- pc_fun(dag_df, test = test, alpha = alpha, debug = FALSE)
+  pc_args <- list(x = dag_df, test = test, alpha = alpha, debug = FALSE)
+  if (!is.null(blacklist)) pc_args$blacklist <- blacklist
+  if (!is.null(whitelist)) pc_args$whitelist <- whitelist
+  learned <- suppressWarnings(do.call(pc_fun, pc_args))
   .bn_arcs_to_cast_edges(learned)
 }
 
@@ -357,7 +408,8 @@ cast_dag <- function(data,
 
 #' @keywords internal
 #' @noRd
-.dag_bidag_edges <- function(dag_df, algorithm, iterations, seed, verbose) {
+.dag_bidag_edges <- function(dag_df, algorithm, iterations, seed, verbose,
+                             blacklist = NULL, whitelist = NULL) {
   check_suggested("BiDAG", "for BiDAG / high-dimensional Bayesian DAG search")
   if (!is.null(seed)) set.seed(seed)
 
@@ -379,6 +431,22 @@ cast_dag <- function(data,
     iterations = it_ctl$iterations,
     stepsave = it_ctl$stepsave
   )
+
+  # BiDAG uses a binary adjacency matrix as startspace for constraints
+  if (!is.null(blacklist) || !is.null(whitelist)) {
+    vnames <- names(dag_df)
+    ss <- matrix(1L, nrow = p, ncol = p,
+                 dimnames = list(vnames, vnames))
+    diag(ss) <- 0L
+    if (!is.null(blacklist)) {
+      for (r in seq_len(nrow(blacklist))) {
+        fi <- match(blacklist$from[r], vnames)
+        ti <- match(blacklist$to[r], vnames)
+        if (!is.na(fi) && !is.na(ti)) ss[fi, ti] <- 0L
+      }
+    }
+    learn_args$startspace <- ss
+  }
 
   fit <- tryCatch(
     do.call(learn_bn, learn_args),
@@ -460,7 +528,9 @@ notears_learn_edges <- function(dag_df,
                                   rho = 0.1,
                                   alpha_mult = 1.01,
                                   seed = NULL,
-                                  verbose = FALSE) {
+                                  verbose = FALSE,
+                                  blacklist = NULL,
+                                  whitelist = NULL) {
   check_suggested("torch", "for NOTEARS linear structure learning")
 
   X <- as.matrix(dag_df)
@@ -530,6 +600,16 @@ notears_learn_edges <- function(dag_df,
   Wm <- torch::as_array(W$detach())
   if (!is.matrix(Wm)) Wm <- matrix(Wm, nrow = p, ncol = p)
   diag(Wm) <- 0
+
+  # Apply blacklist: zero out forbidden edges
+  if (!is.null(blacklist)) {
+    for (r in seq_len(nrow(blacklist))) {
+      fi <- match(blacklist$from[r], colnames(X))
+      ti <- match(blacklist$to[r], colnames(X))
+      if (!is.na(fi) && !is.na(ti)) Wm[ti, fi] <- 0
+    }
+  }
+
   thr <- stats::quantile(abs(Wm), probs = 0.85, na.rm = TRUE)
   thr <- max(thr, 1e-3)
 
@@ -561,5 +641,22 @@ notears_learn_edges <- function(dag_df,
 
   out <- do.call(rbind, edges)
   rownames(out) <- NULL
+
+  # Inject whitelisted edges not already present
+  if (!is.null(whitelist)) {
+    for (r in seq_len(nrow(whitelist))) {
+      wl_from <- whitelist$from[r]
+      wl_to   <- whitelist$to[r]
+      found <- nrow(out) > 0 && any(out$from == wl_from & out$to == wl_to)
+      if (!found) {
+        out <- rbind(out, data.frame(
+          from = wl_from, to = wl_to,
+          strength = 1.0, direction = 1.0,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+
   out
 }

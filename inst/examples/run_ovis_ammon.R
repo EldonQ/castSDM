@@ -119,7 +119,7 @@ if (!is.na(pkg_root)) {
 
 # 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
 OVIS_FIG_DIR <- file.path(getwd(), "cast_ovis_ammon_figures")
-OVIS_FIG_DPI <- 600L
+OVIS_FIG_DPI <- 1200L
 dir.create(OVIS_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
 
 ovis_save_plot <- function(plot_obj, filename, width, height) {
@@ -227,13 +227,15 @@ CONFIG <- list(
   dag_notears_tol         = 1e-3,
   dag_notears_rho_init    = 0.1,
   dag_notears_alpha_mult  = 1.01,
+  dag_blacklist           = NULL,   # data.frame(from, to) 禁止边
+  dag_whitelist           = NULL,   # data.frame(from, to) 强制边
   # cast_ate
   ate_variables     = NULL,
   ate_K             = 5L,
   ate_num_trees     = 300L,
   ate_alpha         = 0.05,
-  ate_quantile_cuts = c(0.1, 0.25, 0.5, 0.75, 0.9),
-  ate_bonferroni    = TRUE,
+  ate_quantile_cuts = c(0.25, 0.5, 0.75),
+  ate_p_adjust     = "fdr",
   ate_parallel      = TRUE,
   ate_verbose       = TRUE,
   # cast_screen
@@ -274,7 +276,7 @@ CONFIG <- list(
   cv_brt_n_trees   = 500L,
   cv_parallel      = TRUE,
   cv_verbose       = TRUE,
-  run_spatial_cv   = FALSE,
+  run_spatial_cv   = TRUE,
   # cast_cate
   cate_variables   = NULL,
   cate_top_n       = 2L,
@@ -292,6 +294,17 @@ CONFIG <- list(
   # cast_shap_fit（RF / CAST，依赖 fastshap；MC 次数越大越稳但更慢）
   shap_fastshap_nsim      = 40L,
   shap_max_explain_rows   = 50L,
+  # cast_evalue
+  do_evalue               = TRUE,
+  evalue_transform        = "RR",
+  evalue_p0               = 0.5,
+  # cast_backdoor
+  do_backdoor             = TRUE,
+  # cast_uncertainty (MC Dropout; 仅 ci_mlp / cast 模型可用)
+  do_uncertainty          = TRUE,
+  uncertainty_n_forward   = 50L,
+  # cast_report (需 rmarkdown)
+  do_report               = FALSE,
   # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
@@ -384,7 +397,9 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
           cfg$dag_notears_tol
         },
         notears_rho_init = cfg$dag_notears_rho_init,
-        notears_alpha_mult = cfg$dag_notears_alpha_mult
+        notears_alpha_mult = cfg$dag_notears_alpha_mult,
+        blacklist = cfg$dag_blacklist,
+        whitelist = cfg$dag_whitelist
       ),
       error = function(e) {
         stop(
@@ -410,7 +425,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
         num_trees = 120L,
         alpha = cfg$ate_alpha,
         quantile_cuts = cfg$ate_quantile_cuts,
-        bonferroni = cfg$ate_bonferroni,
+        p_adjust = cfg$ate_p_adjust,
         parallel = FALSE,
         seed = cfg$seed,
         verbose = FALSE
@@ -513,7 +528,9 @@ dag <- cast_dag(
   notears_lr           = CONFIG$dag_notears_lr,
   notears_tol          = CONFIG$dag_notears_tol,
   notears_rho_init     = CONFIG$dag_notears_rho_init,
-  notears_alpha_mult   = CONFIG$dag_notears_alpha_mult
+  notears_alpha_mult   = CONFIG$dag_notears_alpha_mult,
+  blacklist            = CONFIG$dag_blacklist,
+  whitelist            = CONFIG$dag_whitelist
 )
 print(dag)
 
@@ -526,12 +543,34 @@ ate <- cast_ate(
   num_trees     = CONFIG$ate_num_trees,
   alpha         = CONFIG$ate_alpha,
   quantile_cuts = CONFIG$ate_quantile_cuts,
-  bonferroni    = CONFIG$ate_bonferroni,
+  p_adjust        = CONFIG$ate_p_adjust,
   parallel      = CONFIG$ate_parallel,
   seed          = CONFIG$seed,
   verbose       = CONFIG$ate_verbose
 )
 print(ate)
+
+# ── Step 3b: E-value 敏感性分析 ──────────────────────────────────────────────
+if (isTRUE(CONFIG$do_evalue)) {
+  evalue <- cast_evalue(
+    ate       = ate,
+    transform = CONFIG$evalue_transform,
+    p0        = CONFIG$evalue_p0,
+    verbose   = TRUE
+  )
+  print(evalue)
+}
+
+# ── Step 3c: 后门准则检查 ────────────────────────────────────────────────────
+if (isTRUE(CONFIG$do_backdoor) &&
+    requireNamespace("dagitty", quietly = TRUE)) {
+  backdoor <- cast_backdoor(
+    dag     = dag,
+    outcome = CONFIG$response,
+    verbose = TRUE
+  )
+  print(backdoor)
+}
 
 # ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
 screen <- cast_screen(
@@ -685,6 +724,52 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   print(p_ate)
   ovis_save_plot(p_ate, "ovis_ate.png", width = 8, height = 10)
 
+  # E-value 敏感性分析图
+  if (isTRUE(CONFIG$do_evalue) && exists("evalue")) {
+    p_evalue <- plot(evalue, var_labels = var_labels, type = "evalue")
+    print(p_evalue)
+    ovis_save_plot(p_evalue, "ovis_evalue.png", width = 9, height = 8)
+  }
+
+  # Backdoor 识别性检验表格图
+  if (isTRUE(CONFIG$do_backdoor) && exists("backdoor") &&
+      is.data.frame(backdoor) && nrow(backdoor) > 0) {
+    bd <- backdoor
+    bd$variable <- if (!is.null(var_labels)) {
+      ifelse(bd$variable %in% names(var_labels), var_labels[bd$variable], bd$variable)
+    } else {
+      bd$variable
+    }
+    bd$status <- ifelse(bd$identifiable, "\u2713 Identifiable", "\u2717 Not identifiable")
+    p_bd <- ggplot2::ggplot(bd, ggplot2::aes(
+      x = stats::reorder(.data$variable, .data$n_paths),
+      y = .data$n_paths,
+      fill = .data$identifiable
+    )) +
+      ggplot2::geom_col(width = 0.6) +
+      ggplot2::geom_text(
+        ggplot2::aes(label = .data$status),
+        hjust = -0.1, size = 3
+      ) +
+      ggplot2::scale_fill_manual(
+        values = c("TRUE" = "#4DBBD5", "FALSE" = "#E64B35"),
+        guide = "none"
+      ) +
+      ggplot2::coord_flip(clip = "off") +
+      ggplot2::labs(
+        title = "Backdoor Criterion Check",
+        subtitle = sprintf(
+          "%d/%d variables identifiable (DAG-implied)",
+          sum(bd$identifiable), nrow(bd)
+        ),
+        x = NULL, y = "Number of backdoor paths"
+      ) +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(plot.margin = ggplot2::margin(5, 40, 5, 5))
+    print(p_bd)
+    ovis_save_plot(p_bd, "ovis_backdoor.png", width = 9, height = 7)
+  }
+
   # 筛选分数分解图
   p_screen <- plot(screen, var_labels = var_labels)
   print(p_screen)
@@ -732,8 +817,20 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     ovis_save_plot(p_cons, "ovis_consistency.png", width = 16, height = 5.5)
   }
 
-  # 空间 CATE + 按 HSS 截断出图 (需 grf; HSS 模型默认 cast, 阈值 0.1)
+  # 空间 CATE + 按 HSS 截断出图 (需 grf; HSS 模型 fallback: cast → rf → 第一个可用)
   if (requireNamespace("grf", quietly = TRUE)) {
+    # 选择 HSS 掩膜模型：优先 cast，若 cast 预测全 NA 则回退到 rf
+    cate_hss_model <- "cast"
+    if ("cast" %in% pred$models) {
+      hss_vals <- pred$predictions[["HSS_cast"]]
+      if (all(is.na(hss_vals))) {
+        cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+        message("CATE HSS mask: cast 预测全 NA，回退到 ", cate_hss_model)
+      }
+    } else {
+      cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+    }
+
     cate <- cast_cate(
       data           = split$train,
       variables      = CONFIG$cate_variables,
@@ -757,7 +854,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
           point_size       = 0.45,
           legend_position  = "bottom",
           hss_predict      = pred,
-          hss_model        = "cast",
+          hss_model        = cate_hss_model,
           hss_threshold    = 0.1
         )
         print(pc)
@@ -853,8 +950,53 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     }
   }
 
+  # ── MC Dropout 不确定性地图 (仅 cast / ci_mlp 模型) ─────────────────────────
+  if (isTRUE(CONFIG$do_uncertainty)) {
+    torch_ok2 <- requireNamespace("torch", quietly = TRUE) &&
+      tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
+    has_ci_mlp <- isTRUE(torch_ok2) &&
+      ("cast" %in% names(fit_full$models) &&
+       !is.null(fit_full$models$cast$model))
+    if (has_ci_mlp) {
+      unc <- tryCatch(
+        cast_uncertainty(
+          fit       = fit_full,
+          new_data  = china_env_grid,
+          n_forward = CONFIG$uncertainty_n_forward,
+          verbose   = TRUE
+        ),
+        error = function(e) {
+          message("cast_uncertainty 跳过: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (!is.null(unc) && requireNamespace("sf", quietly = TRUE)) {
+        # 绘制 CV (变异系数) 不确定性地图
+        p_unc <- ggplot2::ggplot(
+          unc,
+          ggplot2::aes(x = lon, y = lat, colour = cv)
+        ) +
+          ggplot2::geom_point(size = 0.3) +
+          ggplot2::scale_colour_viridis_c(
+            name = "CV", option = "inferno", direction = -1
+          ) +
+          ggplot2::coord_sf() +
+          ggplot2::labs(
+            title = "Ovis ammon — MC Dropout Uncertainty (CV)",
+            x = "Longitude", y = "Latitude"
+          ) +
+          ggplot2::theme_minimal(base_size = 11)
+        print(p_unc)
+        ovis_save_plot(p_unc, "ovis_uncertainty_cv.png", width = 10, height = 7)
+      }
+    } else {
+      message("cast_uncertainty: 无可用 cast/ci_mlp 模型，跳过 MC Dropout。")
+    }
+  }
+
   # 供「仅重绘空间热图」：castSDM 原生 plot.cast_predict / plot.cast_cate 用 geom_point
   # 画 Eco-ISEA3H 格点；此处缓存 pred/cate 供 terra 栅格热图后处理（见文末）。
+  cate_hss_model_final <- if (exists("cate_hss_model")) cate_hss_model else "rf"
   tryCatch(
     saveRDS(
       list(
@@ -862,7 +1004,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
         cate         = if (exists("cate")) cate else NULL,
         var_labels   = var_labels,
         config_flags = list(
-          cate_hss_model     = "cast",
+          cate_hss_model     = cate_hss_model_final,
           cate_hss_threshold = 0.1,
           species            = "Ovis_ammon"
         )
@@ -873,6 +1015,37 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       warning("ovis_spatial_replot_cache.rds: ", conditionMessage(e))
     }
   )
+
+  # ── 插值渲染：用 terra 栅格热图覆盖 geom_point 的 HSS / CATE 图 ──────────
+  hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
+  if (!is.na(hlp_path) && nzchar(hlp_path) &&
+      requireNamespace("terra", quietly = TRUE) &&
+      requireNamespace("sf", quietly = TRUE)) {
+    message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
+    sys.source(hlp_path, envir = environment())
+    tryCatch(
+      cast_spatial_replot_hss_cate_heatmaps(
+        pred            = pred,
+        cate            = if (exists("cate")) cate else NULL,
+        fig_dir         = OVIS_FIG_DIR,
+        fig_dpi         = OVIS_FIG_DPI,
+        var_labels      = var_labels,
+        basemap         = "china",
+        res_deg         = CONFIG$spatial_heatmap_res_deg,
+        interp_method   = CONFIG$spatial_heatmap_interp_method,
+        display_res_deg = CONFIG$spatial_heatmap_display_res,
+        hss_model       = cate_hss_model_final,
+        hss_threshold   = 0.1,
+        species_label   = "Ovis_ammon",
+        ovis_style      = TRUE
+      ),
+      error = function(e) {
+        warning("Spatial heatmap replot failed: ", conditionMessage(e))
+      }
+    )
+  } else {
+    message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
+  }
 }
 
 
@@ -913,6 +1086,10 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     do_predict               = NULL,
     do_cate                  = TRUE,
     cate_top_n               = 3L,
+    blacklist                = CONFIG$dag_blacklist,
+    whitelist                = CONFIG$dag_whitelist,
+    do_evalue                = CONFIG$do_evalue,
+    do_backdoor              = CONFIG$do_backdoor,
     seed                     = CONFIG$seed,
     verbose                  = TRUE
   )
@@ -921,6 +1098,18 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     p_cast <- plot(result, var_labels = var_labels)
     print(p_cast)
     ovis_save_plot(p_cast, "ovis_cast_pipeline.png", 12, 10)
+  }
+  # Pipeline 模式下生成 HTML 报告
+  if (isTRUE(CONFIG$do_report) &&
+      requireNamespace("rmarkdown", quietly = TRUE)) {
+    cast_report(
+      result      = result,
+      output_file = file.path(OVIS_FIG_DIR, "ovis_ammon_report.html"),
+      species     = "Ovis ammon",
+      var_labels  = var_labels,
+      open        = FALSE,
+      verbose     = TRUE
+    )
   }
 }
 
@@ -957,7 +1146,9 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
         notears_lr = CONFIG$dag_notears_lr,
         notears_tol = CONFIG$dag_notears_tol,
         notears_rho_init = CONFIG$dag_notears_rho_init,
-        notears_alpha_mult = CONFIG$dag_notears_alpha_mult
+        notears_alpha_mult = CONFIG$dag_notears_alpha_mult,
+        blacklist = CONFIG$dag_blacklist,
+        whitelist = CONFIG$dag_whitelist
       ),
       error = function(e) {
         message("cast_dag (", sm, ") 出图跳过: ", conditionMessage(e))

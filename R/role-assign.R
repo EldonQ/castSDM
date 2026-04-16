@@ -26,31 +26,7 @@ cast_roles <- function(screen, dag) {
   edges <- dag$edges
 
   # Compute out-degree and in-degree for selected vars
-  if (nrow(edges) > 0) {
-    out_agg <- stats::aggregate(
-      to ~ from, data = edges, FUN = length
-    )
-    names(out_agg) <- c("variable", "out_degree")
-    in_agg <- stats::aggregate(
-      from ~ to, data = edges, FUN = length
-    )
-    names(in_agg) <- c("variable", "in_degree")
-  } else {
-    out_agg <- data.frame(
-      variable = character(0), out_degree = integer(0)
-    )
-    in_agg <- data.frame(
-      variable = character(0), in_degree = integer(0)
-    )
-  }
-
-  role_df <- data.frame(
-    variable = selected_vars, stringsAsFactors = FALSE
-  )
-  role_df <- merge(role_df, out_agg, by = "variable", all.x = TRUE)
-  role_df <- merge(role_df, in_agg, by = "variable", all.x = TRUE)
-  role_df$out_degree[is.na(role_df$out_degree)] <- 0
-  role_df$in_degree[is.na(role_df$in_degree)] <- 0
+  role_df <- compute_edge_degrees(edges, selected_vars)
 
   role_df$role_score <- ifelse(
     role_df$in_degree == 0,

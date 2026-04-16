@@ -12,7 +12,7 @@ cast_ate(
   num_trees = 300L,
   alpha = 0.05,
   quantile_cuts = c(0.25, 0.5, 0.75),
-  bonferroni = TRUE,
+  p_adjust = "fdr",
   parallel = FALSE,
   seed = NULL,
   verbose = TRUE
@@ -34,16 +34,17 @@ recommendation from the DML literature.}
 \item{num_trees}{Integer. Number of trees for nuisance Random Forests.
 Default \code{300}.}
 
-\item{alpha}{Numeric. Significance level \strong{after Bonferroni correction}.
-Default \code{0.05}.}
+\item{alpha}{Numeric. Nominal significance level. Default \code{0.05}.}
 
 \item{quantile_cuts}{Numeric vector. Quantile thresholds used to binarize
 each treatment variable. ATEs from all cuts are averaged before
 significance testing. Default \code{c(0.25, 0.50, 0.75)}. Set to \code{0.5} to
 recover the original single-median behaviour.}
 
-\item{bonferroni}{Logical. Apply Bonferroni correction for the number of
-variables tested. Default \code{TRUE}.}
+\item{p_adjust}{Character. Multiple-testing correction method passed to
+\code{\link[stats:p.adjust]{stats::p.adjust()}}. Default \code{"fdr"} (Benjamini-Hochberg), which
+controls the false discovery rate and is standard in ecology. Other
+common choices: \code{"bonferroni"}, \code{"holm"}, \code{"none"}.}
 
 \item{parallel}{Logical. If \code{TRUE}, estimate ATEs for each variable in
 parallel using \pkg{future.apply}. The user must set up a
@@ -82,10 +83,13 @@ This captures both lower-tail and upper-tail effects, substantially
 improving detection of non-linear (e.g. Gaussian, threshold) responses.
 }
 
-\subsection{Bonferroni correction}{
+\subsection{Multiple-testing correction}{
 
-When \code{bonferroni = TRUE} the significance threshold is divided by the
-number of variables tested, controlling the family-wise error rate.
+p-values are adjusted using \code{\link[stats:p.adjust]{stats::p.adjust()}} with the method specified
+by \code{p_adjust}. The default \code{"fdr"} (Benjamini-Hochberg) controls the
+expected proportion of false discoveries, which is more appropriate than
+Bonferroni for exploratory ecological analyses where retaining marginally
+significant variables is preferable to missing real effects.
 }
 }
 \references{

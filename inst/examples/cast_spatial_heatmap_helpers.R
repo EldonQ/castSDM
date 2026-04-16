@@ -470,6 +470,21 @@ cast_spatial_replot_hss_cate_heatmaps <- function(pred,
         basemap = basemap
       )
 
+      # Re-apply HSS mask on the interpolated raster grid so that
+      # nearest-neighbor infill does not spread CATE into non-habitat areas
+      if (!is.null(df_r) && !is.null(pred) && inherits(pred, "cast_predict")) {
+        hss_col <- paste0("HSS_", hss_model)
+        pr <- pred$predictions
+        if (hss_col %in% names(pr)) {
+          pr_sf <- sf::st_as_sf(pr, coords = c("lon", "lat"), crs = 4326)
+          grid_sf <- sf::st_as_sf(df_r, coords = c("lon", "lat"), crs = 4326)
+          nn_idx <- sf::st_nearest_feature(grid_sf, pr_sf)
+          hss_at_grid <- as.numeric(pr[[hss_col]][nn_idx])
+          df_r$z[is.na(hss_at_grid) | hss_at_grid < hss_threshold] <- NA_real_
+          df_r <- df_r[!is.na(df_r$z), , drop = FALSE]
+        }
+      }
+
       vlab <- if (!is.null(var_labels) && v %in% names(var_labels)) var_labels[[v]] else v
       ttl <- sprintf("Spatial CATE: %s", vlab)
       nvis <- sum(!is.na(df1$cate))

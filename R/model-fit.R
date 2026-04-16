@@ -464,17 +464,27 @@ train_ci_mlp <- function(model, train_dl, val_tensor, y_val_vec,
 
     # Training
     model$train()
-    coro::loop(for (batch in train_dl) {
-      optimizer$zero_grad()
-      logits <- model(batch$x)
-      loss <- focal_loss(
-        logits, batch$y,
-        alpha = focal_alpha, gamma = focal_gamma
-      )
-      if (is.nan(loss$item())) next
-      loss$backward()
-      torch::nn_utils_clip_grad_norm_(model$parameters, max_norm = 1.0)
-      optimizer$step()
+    coro_loop <- train_dl$.iter()
+    tryCatch({
+      while (TRUE) {
+        batch <- coro_loop$.next()
+        if (!is.list(batch)) break
+        bx <- batch[["x"]]
+        by <- batch[["y"]]
+        optimizer$zero_grad()
+        logits <- model(bx)
+        loss <- focal_loss(
+          logits, by,
+          alpha = focal_alpha, gamma = focal_gamma
+        )
+        if (is.nan(loss$item())) next
+        loss$backward()
+        torch::nn_utils_clip_grad_norm_(model$parameters, max_norm = 1.0)
+        optimizer$step()
+      }
+    }, error = function(e) {
+      if (!grepl("StopIteration|exhausted", e$message, ignore.case = TRUE))
+        stop(e)
     })
 
     # Validation

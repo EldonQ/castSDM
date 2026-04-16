@@ -60,18 +60,7 @@ cast_screen <- function(dag,
   )$variable.importance
 
   # -- DAG out-degree per variable --
-  if (nrow(edges) > 0) {
-    out_deg <- stats::aggregate(
-      to ~ from, data = edges, FUN = length
-    )
-    names(out_deg) <- c("variable", "out_degree")
-  } else {
-    out_deg <- data.frame(
-      variable = character(0),
-      out_degree = integer(0),
-      stringsAsFactors = FALSE
-    )
-  }
+  deg_df <- compute_edge_degrees(edges, env_vars)
 
   # -- DAG quality & ATE signal ratio --
   n_possible <- length(env_vars) * (length(env_vars) - 1) / 2
@@ -92,9 +81,7 @@ cast_screen <- function(dag,
   w_imp <- 1 - w_dag - w_ate
 
   # -- Build scoring data.frame --
-  scr <- data.frame(variable = env_vars, stringsAsFactors = FALSE)
-  scr <- merge(scr, out_deg, by = "variable", all.x = TRUE)
-  scr$out_degree[is.na(scr$out_degree)] <- 0
+  scr <- deg_df
 
   # Merge ATE estimates
   if (n_tested > 0) {

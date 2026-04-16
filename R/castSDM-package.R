@@ -27,12 +27,12 @@
 #' plot(result)
 #' ```
 #'
-#' @importFrom rlang abort warn inform
 #' @importFrom cli cli_abort cli_warn cli_inform
-#' @importFrom data.table data.table setDT as.data.table
 #' @importFrom stats predict cor sd median var na.omit lm residuals
 #' @importFrom utils head tail
 NULL
 
 # Suppress R CMD check NOTEs for non-standard evaluation variables
-utils::globalVariables(c("self", ".data", "index", "edge_strength"))
+utils::globalVariables(c("self", ".data", "index", "edge_strength",
+                         "from", "to", "evalue_point", "evalue_ci",
+                         "significant"))

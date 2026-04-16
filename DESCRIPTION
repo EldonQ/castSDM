@@ -31,15 +31,13 @@ Depends:
     R (>= 4.1.0)
 Imports:
     cli,
-    coro,
-    data.table,
     grid,
-    rlang,
     scales
 Suggests:
     BiDAG,
     bnlearn,
     car,
+    dagitty,
     fastshap,
     future,
     future.apply,

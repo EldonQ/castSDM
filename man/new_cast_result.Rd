@@ -14,6 +14,8 @@ new_cast_result(
   cv = NULL,
   predict = NULL,
   cate = NULL,
+  shap = NULL,
+  backdoor = NULL,
   call = NULL
 )
 }
@@ -35,6 +37,11 @@ new_cast_result(
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
 \item{cate}{A \code{cast_cate} object (or \code{NULL}).}
+
+\item{shap}{A named list of \code{cast_shap} objects (or \code{NULL}). Keys are
+model names such as \code{"xgb"}, \code{"rf"}, \code{"cast"}.}
+
+\item{backdoor}{A \code{data.frame} from \code{\link[=cast_backdoor]{cast_backdoor()}} (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

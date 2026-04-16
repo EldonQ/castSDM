@@ -47,6 +47,25 @@
 #'   `env_data`. Default `TRUE` if `env_data` is provided.
 #' @param do_cate Logical. Whether to estimate spatial CATE. Default `FALSE`.
 #' @param cate_top_n Integer. Top variables for CATE. Default `3`.
+#' @param do_shap Logical. Whether to compute SHAP explanations after model
+#'   fitting. Produces up to three `cast_shap` objects (XGBoost surrogate, RF,
+#'   and CAST) stored in the returned result. Default `FALSE`.
+#' @param shap_nrounds Integer. XGBoost boosting rounds for
+#'   [cast_shap_xgb()]. Default `400`.
+#' @param shap_test_fraction Numeric. Fraction held out for SHAP
+#'   visualisation. Default `0.2`.
+#' @param shap_fastshap_nsim Integer. Monte Carlo reps per feature in
+#'   [cast_shap_fit()]. Default `60`.
+#' @param shap_max_explain_rows Integer. Cap on explained rows in
+#'   [cast_shap_fit()]. Default `80`.
+#' @param blacklist A `data.frame` with columns `from` and `to` specifying
+#'   forbidden directed edges in DAG learning. Default `NULL`.
+#' @param whitelist A `data.frame` with columns `from` and `to` specifying
+#'   required directed edges in DAG learning. Default `NULL`.
+#' @param do_evalue Logical. Compute E-value sensitivity analysis on ATE
+#'   estimates. Default `FALSE`.
+#' @param do_backdoor Logical. Run backdoor criterion check via dagitty.
+#'   Default `FALSE`.
 #' @param seed Integer or `NULL`. Random seed.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #'
@@ -54,7 +73,7 @@
 #'   Use [print()], [summary()], and [plot()] for inspection.
 #'
 #' @seealso [cast_dag()], [cast_ate()], [cast_screen()], [cast_fit()],
-#'   [cast_predict()], [cast_cate()]
+#'   [cast_predict()], [cast_cate()], [cast_shap_xgb()], [cast_shap_fit()]
 #'
 #' @export
 cast <- function(species_data,
@@ -84,6 +103,15 @@ cast <- function(species_data,
                  do_predict = NULL,
                  do_cate = FALSE,
                  cate_top_n = 3L,
+                 do_shap = FALSE,
+                 shap_nrounds = 400L,
+                 shap_test_fraction = 0.2,
+                 shap_fastshap_nsim = 60L,
+                 shap_max_explain_rows = 80L,
+                 blacklist = NULL,
+                 whitelist = NULL,
+                 do_evalue = FALSE,
+                 do_backdoor = FALSE,
                  seed = NULL,
                  verbose = TRUE) {
   do_predict <- do_predict %||% !is.null(env_data)
@@ -122,7 +150,9 @@ cast <- function(species_data,
     notears_lr = dag_notears_lr,
     notears_tol = dag_notears_tol,
     notears_rho_init = dag_notears_rho_init,
-    notears_alpha_mult = dag_notears_alpha_mult
+    notears_alpha_mult = dag_notears_alpha_mult,
+    blacklist = blacklist,
+    whitelist = whitelist
   )
 
   # === Step 3: ATE Estimation ===
@@ -132,6 +162,19 @@ cast <- function(species_data,
     K = ate_folds, alpha = ate_alpha,
     seed = seed, verbose = verbose
   )
+
+  # === Step 3b: E-value Sensitivity (optional) ===
+  if (do_evalue) {
+    if (verbose) cli::cli_h2("Step 3b: E-value Sensitivity Analysis")
+    ate <- cast_evalue(ate, verbose = verbose)
+  }
+
+  # === Step 3c: Backdoor Criterion (optional) ===
+  backdoor <- NULL
+  if (do_backdoor) {
+    if (verbose) cli::cli_h2("Step 3c: Backdoor Criterion Check")
+    backdoor <- cast_backdoor(dag, verbose = verbose)
+  }
 
   # === Step 4: Variable Screening ===
   if (verbose) cli::cli_h2("Step 4: Variable Screening")
@@ -224,12 +267,98 @@ cast <- function(species_data,
     )
   }
 
+  # === Step 10: SHAP Explanations (optional) ===
+  shap_result <- NULL
+  if (do_shap) {
+    if (verbose) cli::cli_h2("Step 10: SHAP Explanations")
+    shap_result <- list()
+
+    # XGBoost surrogate SHAP
+    if (requireNamespace("xgboost", quietly = TRUE)) {
+      if (verbose) cli::cli_inform("  Computing XGBoost TreeSHAP...")
+      shap_result$xgb <- tryCatch(
+        cast_shap_xgb(
+          train_data,
+          response = "presence",
+          dag = dag,
+          nrounds = shap_nrounds,
+          test_fraction = shap_test_fraction,
+          seed = seed,
+          verbose = FALSE
+        ),
+        error = function(e) {
+          if (verbose) cli::cli_warn("XGBoost SHAP failed: {e$message}")
+          NULL
+        }
+      )
+    }
+
+    # RF SHAP (fastshap)
+    if (requireNamespace("fastshap", quietly = TRUE) &&
+        "rf" %in% names(fit$models) &&
+        !is.null(fit$models$rf$model)) {
+      if (verbose) cli::cli_inform("  Computing RF SHAP (fastshap)...")
+      shap_result$rf <- tryCatch(
+        cast_shap_fit(
+          fit = fit,
+          which = "rf",
+          data = train_data,
+          test_fraction = shap_test_fraction,
+          seed = seed,
+          fastshap_nsim = shap_fastshap_nsim,
+          max_explain_rows = shap_max_explain_rows,
+          verbose = FALSE
+        ),
+        error = function(e) {
+          if (verbose) cli::cli_warn("RF SHAP failed: {e$message}")
+          NULL
+        }
+      )
+    }
+
+    # CAST SHAP (fastshap on CI-MLP)
+    torch_ok <- requireNamespace("torch", quietly = TRUE) &&
+      tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
+    if (requireNamespace("fastshap", quietly = TRUE) &&
+        isTRUE(torch_ok) &&
+        "cast" %in% names(fit$models) &&
+        !is.null(fit$models$cast$model)) {
+      if (verbose) cli::cli_inform("  Computing CAST SHAP (fastshap)...")
+      shap_result$cast <- tryCatch(
+        cast_shap_fit(
+          fit = fit,
+          which = "cast",
+          data = train_data,
+          test_fraction = shap_test_fraction,
+          seed = seed,
+          fastshap_nsim = shap_fastshap_nsim,
+          max_explain_rows = shap_max_explain_rows,
+          verbose = FALSE
+        ),
+        error = function(e) {
+          if (verbose) cli::cli_warn("CAST SHAP failed: {e$message}")
+          NULL
+        }
+      )
+    }
+
+    n_ok <- sum(!vapply(shap_result, is.null, logical(1)))
+    if (n_ok == 0L) shap_result <- NULL
+    if (verbose && !is.null(shap_result)) {
+      cli::cli_inform(
+        "SHAP: {n_ok} model(s) explained ({.val {names(Filter(Negate(is.null), shap_result))}})"
+      )
+    }
+  }
+
   if (verbose) cli::cli_h1("Pipeline Complete")
 
   new_cast_result(
     dag = dag, ate = ate, screen = screen, roles = roles,
     fit = fit, eval = eval_result,
     cv = cv_result,
-    predict = pred_result, cate = cate_result
+    predict = pred_result, cate = cate_result,
+    shap = shap_result,
+    backdoor = backdoor
   )
 }

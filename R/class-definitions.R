@@ -40,12 +40,13 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
 #' @return A `cast_ate` object.
 #' @keywords internal
 #' @export
-new_cast_ate <- function(estimates, K, alpha = 0.05) {
+new_cast_ate <- function(estimates, K, alpha = 0.05, p_adjust = "fdr") {
   structure(
     list(
       estimates = estimates,
       K = K,
-      alpha = alpha
+      alpha = alpha,
+      p_adjust = p_adjust
     ),
     class = "cast_ate"
   )
@@ -215,6 +216,9 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param cate A `cast_cate` object (or `NULL`).
+#' @param shap A named list of `cast_shap` objects (or `NULL`). Keys are
+#'   model names such as `"xgb"`, `"rf"`, `"cast"`.
+#' @param backdoor A `data.frame` from [cast_backdoor()] (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
@@ -222,7 +226,9 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' @export
 new_cast_result <- function(dag, ate, screen, roles, fit, eval,
                             cv = NULL, predict = NULL,
-                            cate = NULL, call = NULL) {
+                            cate = NULL, shap = NULL,
+                            backdoor = NULL,
+                            call = NULL) {
   structure(
     list(
       dag = dag,
@@ -234,6 +240,8 @@ new_cast_result <- function(dag, ate, screen, roles, fit, eval,
       cv = cv,
       predict = predict,
       cate = cate,
+      shap = shap,
+      backdoor = backdoor,
       call = call
     ),
     class = "cast_result"

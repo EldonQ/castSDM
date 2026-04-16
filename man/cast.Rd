@@ -32,6 +32,15 @@ cast(
   do_predict = NULL,
   do_cate = FALSE,
   cate_top_n = 3L,
+  do_shap = FALSE,
+  shap_nrounds = 400L,
+  shap_test_fraction = 0.2,
+  shap_fastshap_nsim = 60L,
+  shap_max_explain_rows = 80L,
+  blacklist = NULL,
+  whitelist = NULL,
+  do_evalue = FALSE,
+  do_backdoor = FALSE,
   seed = NULL,
   verbose = TRUE
 )
@@ -105,6 +114,34 @@ small datasets (< 100 presences) or \code{10} for large ones.}
 
 \item{cate_top_n}{Integer. Top variables for CATE. Default \code{3}.}
 
+\item{do_shap}{Logical. Whether to compute SHAP explanations after model
+fitting. Produces up to three \code{cast_shap} objects (XGBoost surrogate, RF,
+and CAST) stored in the returned result. Default \code{FALSE}.}
+
+\item{shap_nrounds}{Integer. XGBoost boosting rounds for
+\code{\link[=cast_shap_xgb]{cast_shap_xgb()}}. Default \code{400}.}
+
+\item{shap_test_fraction}{Numeric. Fraction held out for SHAP
+visualisation. Default \code{0.2}.}
+
+\item{shap_fastshap_nsim}{Integer. Monte Carlo reps per feature in
+\code{\link[=cast_shap_fit]{cast_shap_fit()}}. Default \code{60}.}
+
+\item{shap_max_explain_rows}{Integer. Cap on explained rows in
+\code{\link[=cast_shap_fit]{cast_shap_fit()}}. Default \code{80}.}
+
+\item{blacklist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
+forbidden directed edges in DAG learning. Default \code{NULL}.}
+
+\item{whitelist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
+required directed edges in DAG learning. Default \code{NULL}.}
+
+\item{do_evalue}{Logical. Compute E-value sensitivity analysis on ATE
+estimates. Default \code{FALSE}.}
+
+\item{do_backdoor}{Logical. Run backdoor criterion check via dagitty.
+Default \code{FALSE}.}
+
 \item{seed}{Integer or \code{NULL}. Random seed.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
@@ -121,5 +158,5 @@ prediction and CATE estimation.
 }
 \seealso{
 \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}}, \code{\link[=cast_fit]{cast_fit()}},
-\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}, \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, \code{\link[=cast_shap_fit]{cast_shap_fit()}}
 }

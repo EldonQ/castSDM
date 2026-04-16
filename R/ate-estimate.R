@@ -17,14 +17,15 @@
 #'   recommendation from the DML literature.
 #' @param num_trees Integer. Number of trees for nuisance Random Forests.
 #'   Default `300`.
-#' @param alpha Numeric. Significance level **after Bonferroni correction**.
-#'   Default `0.05`.
+#' @param alpha Numeric. Nominal significance level. Default `0.05`.
 #' @param quantile_cuts Numeric vector. Quantile thresholds used to binarize
 #'   each treatment variable. ATEs from all cuts are averaged before
 #'   significance testing. Default `c(0.25, 0.50, 0.75)`. Set to `0.5` to
 #'   recover the original single-median behaviour.
-#' @param bonferroni Logical. Apply Bonferroni correction for the number of
-#'   variables tested. Default `TRUE`.
+#' @param p_adjust Character. Multiple-testing correction method passed to
+#'   [stats::p.adjust()]. Default `"fdr"` (Benjamini-Hochberg), which
+#'   controls the false discovery rate and is standard in ecology. Other
+#'   common choices: `"bonferroni"`, `"holm"`, `"none"`.
 #' @param parallel Logical. If `TRUE`, estimate ATEs for each variable in
 #'   parallel using \pkg{future.apply}. The user must set up a
 #'   [future::plan()] beforehand (e.g.,
@@ -47,9 +48,12 @@
 #' This captures both lower-tail and upper-tail effects, substantially
 #' improving detection of non-linear (e.g. Gaussian, threshold) responses.
 #'
-#' ## Bonferroni correction
-#' When `bonferroni = TRUE` the significance threshold is divided by the
-#' number of variables tested, controlling the family-wise error rate.
+#' ## Multiple-testing correction
+#' p-values are adjusted using [stats::p.adjust()] with the method specified
+#' by `p_adjust`. The default `"fdr"` (Benjamini-Hochberg) controls the
+#' expected proportion of false discoveries, which is more appropriate than
+#' Bonferroni for exploratory ecological analyses where retaining marginally
+#' significant variables is preferable to missing real effects.
 #'
 #' @references
 #' Chernozhukov, V., Chetverikov, D., Demirer, M., et al. (2018).
@@ -66,7 +70,7 @@ cast_ate <- function(data,
                      num_trees     = 300L,
                      alpha         = 0.05,
                      quantile_cuts = c(0.25, 0.50, 0.75),
-                     bonferroni    = TRUE,
+                     p_adjust      = "fdr",
                      parallel      = FALSE,
                      seed          = NULL,
                      verbose       = TRUE) {
@@ -78,23 +82,16 @@ cast_ate <- function(data,
   X_full <- as.data.frame(data[, env_vars, drop = FALSE])
   X_full[is.na(X_full)] <- 0
 
-  # Bonferroni-corrected significance threshold
-  alpha_adj <- if (bonferroni && length(env_vars) > 1) {
-    alpha / length(env_vars)
-  } else {
-    alpha
-  }
-
   if (verbose) {
     cli::cli_inform(c(
       "Estimating ATE for {length(env_vars)} variables",
-      "i" = "K={K} folds, {length(quantile_cuts)} quantile cut(s), alpha_adj={round(alpha_adj,4)}"
+      "i" = "K={K} folds, {length(quantile_cuts)} quantile cut(s), p_adjust={.val {p_adjust}}, alpha={alpha}"
     ))
   }
 
   # Worker function for a single variable
   ate_one_var <- function(v, Y, X_full, env_vars, quantile_cuts, K,
-                          num_trees, alpha_adj, seed) {
+                          num_trees, seed) {
     tryCatch({
       W <- X_full[, setdiff(env_vars, v), drop = FALSE]
 
@@ -136,13 +133,12 @@ cast_ate <- function(data,
         coef        = coef_avg,
         se          = se_avg,
         p_value     = p_val,
-        significant = !is.na(p_val) && p_val < alpha_adj,
         stringsAsFactors = FALSE
       )
     }, error = function(e) {
       data.frame(
         variable = v, coef = NA_real_, se = NA_real_,
-        p_value  = NA_real_, significant = FALSE,
+        p_value  = NA_real_,
         stringsAsFactors = FALSE
       )
     })
@@ -155,7 +151,7 @@ cast_ate <- function(data,
       ate_one_var,
       Y = Y, X_full = X_full, env_vars = env_vars,
       quantile_cuts = quantile_cuts, K = K,
-      num_trees = num_trees, alpha_adj = alpha_adj, seed = seed,
+      num_trees = num_trees, seed = seed,
       future.seed = TRUE
     )
   } else {
@@ -164,20 +160,27 @@ cast_ate <- function(data,
       results[[i]] <- ate_one_var(
         env_vars[i], Y = Y, X_full = X_full, env_vars = env_vars,
         quantile_cuts = quantile_cuts, K = K,
-        num_trees = num_trees, alpha_adj = alpha_adj, seed = seed
+        num_trees = num_trees, seed = seed
       )
     }
   }
 
   estimates <- do.call(rbind, results)
+
+  # Multiple-testing correction (post-hoc on raw p-values)
+  estimates$p_adjusted <- stats::p.adjust(estimates$p_value, method = p_adjust)
+  estimates$significant <- !is.na(estimates$p_adjusted) &
+    estimates$p_adjusted < alpha
+
   n_sig <- sum(estimates$significant, na.rm = TRUE)
   if (verbose) {
     cli::cli_inform(
-      "ATE: {n_sig}/{length(env_vars)} significant (Bonferroni p < {round(alpha_adj,4)})."
+      "ATE: {n_sig}/{length(env_vars)} significant ({p_adjust}-adjusted p < {alpha})."
     )
   }
 
-  new_cast_ate(estimates = estimates, K = K, alpha = alpha_adj)
+  new_cast_ate(estimates = estimates, K = K, alpha = alpha,
+               p_adjust = p_adjust)
 }
 
 

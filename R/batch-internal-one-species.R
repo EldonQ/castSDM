@@ -76,7 +76,7 @@
       alpha = cfg$ate_alpha,
       num_trees = cfg$ate_num_trees,
       quantile_cuts = cfg$ate_quantile_cuts,
-      bonferroni = cfg$ate_bonferroni,
+      p_adjust = cfg$ate_p_adjust,
       parallel = cfg$ate_parallel,
       seed = seed_i,
       verbose = cfg$ate_verbose

@@ -4,7 +4,7 @@
 \alias{new_cast_ate}
 \title{Create a cast_ate Object}
 \usage{
-new_cast_ate(estimates, K, alpha = 0.05)
+new_cast_ate(estimates, K, alpha = 0.05, p_adjust = "fdr")
 }
 \arguments{
 \item{estimates}{A \code{data.frame} with columns: \code{variable}, \code{coef}, \code{se},

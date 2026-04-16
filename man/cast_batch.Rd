@@ -36,7 +36,7 @@ cast_batch(
   ate_alpha = 0.05,
   ate_num_trees = 300L,
   ate_quantile_cuts = c(0.25, 0.5, 0.75),
-  ate_bonferroni = TRUE,
+  ate_p_adjust = "fdr",
   ate_parallel = FALSE,
   screen_min_vars = 5L,
   screen_min_fraction = 0.5,
@@ -168,8 +168,8 @@ Default \code{300}.}
 \item{ate_quantile_cuts}{Numeric vector. Quantile thresholds for
 binarization. Default \code{c(0.25, 0.50, 0.75)}.}
 
-\item{ate_bonferroni}{Logical. Apply Bonferroni correction.
-Default \code{TRUE}.}
+\item{ate_p_adjust}{Character. Multiple-testing correction method
+(passed to \code{\link[stats:p.adjust]{stats::p.adjust()}}). Default \code{"fdr"}.}
 
 \item{ate_parallel}{Logical. Parallel ATE estimation within each
 species (via \pkg{future}). Default \code{FALSE}.}

@@ -195,7 +195,7 @@ plot.cast_consistency <- function(x,
 
   fmt_val <- function(v) {
     ifelse(
-      is.na(v), "",
+      is.na(v), "NA",
       format(round(v, value_decimals), nsmall = value_decimals)
     )
   }
@@ -227,7 +227,7 @@ plot.cast_consistency <- function(x,
         ]
         if (nrow(row) > 0) {
           val <- row[[mkey]][1]
-          mat_df$value[ri] <- if (is.na(val)) 0 else val
+          mat_df$value[ri] <- val
         }
       }
     }

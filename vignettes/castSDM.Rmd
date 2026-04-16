@@ -64,18 +64,16 @@ vars <- cast_screen(dag, ate, train_data)
 # 5. Causal role assignment
 roles <- cast_roles(vars, dag)
 
-# 6. Feature engineering
-features <- cast_features(train_data, vars, dag, ate)
+# 6. Model fitting (feature engineering is handled internally)
+fit <- cast_fit(train_data, screen = vars, dag = dag, ate = ate,
+                models = c("cast", "rf"))
 
-# 7. Model fitting
-fit <- cast_fit(train_data, features, models = c("cast", "rf"))
-
-# 8. Evaluation
+# 7. Evaluation
 eval <- cast_evaluate(fit, test_data)
 
-# 9. Prediction
+# 8. Prediction
 pred <- cast_predict(fit, env_grid)
 
-# 10. CATE estimation
+# 9. CATE estimation
 cate <- cast_cate(train_data, ate = ate, top_n = 3)
 ```

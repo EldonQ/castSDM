@@ -46,5 +46,15 @@ summary.cast_result <- function(object, ...) {
   if (!is.null(object$eval)) {
     print(object$eval$metrics)
   }
+  if (!is.null(object$shap)) {
+    cat("\n-- SHAP --\n")
+    shap_names <- names(Filter(Negate(is.null), object$shap))
+    cat("  Explained models:", paste(shap_names, collapse = ", "), "\n")
+    for (nm in shap_names) {
+      sh <- object$shap[[nm]]
+      cat(sprintf("  %s: %d features, %d rows, engine=%s\n",
+                  nm, sh$n_features, nrow(sh$shap), sh$engine))
+    }
+  }
   invisible(object)
 }

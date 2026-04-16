@@ -157,17 +157,26 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
 #' @param x A `cast_ate` object.
 #' @param var_labels Optional named character vector for display labels.
 #' @param ... Ignored.
-#'
+#' @param type Character. `"ate"` (default) for coefficient forest plot,
+#'   `"evalue"` for E-value sensitivity plot (requires [cast_evalue()] to
+#'   have been called first).
 #' @return A `ggplot` object.
 #' @export
-plot.cast_ate <- function(x, var_labels = NULL, ...) {
+plot.cast_ate <- function(x, var_labels = NULL, type = c("ate", "evalue"),
+                          ...) {
   check_suggested("ggplot2", "for plotting")
+  type <- match.arg(type)
+
+  if (type == "evalue") return(plot_ate_evalue(x, var_labels))
 
   est <- x$estimates
   est$ci_lower <- est$coef - 1.96 * est$se
   est$ci_upper <- est$coef + 1.96 * est$se
+  p_method <- x$p_adjust %||% "bonferroni"
+  sig_label_text <- paste0("Significant (", p_method, " p < ", x$alpha, ")")
+  nonsig_label_text <- "Not significant"
   est$sig_label <- ifelse(
-    est$significant, "Significant (p < 0.05)", "Not significant"
+    est$significant, sig_label_text, nonsig_label_text
   )
 
   # Labels
@@ -200,9 +209,9 @@ plot.cast_ate <- function(x, var_labels = NULL, ...) {
     ) +
     ggplot2::geom_point(size = 3, alpha = 0.9) +
     ggplot2::scale_color_manual(
-      values = c(
-        "Significant (p < 0.05)" = "#C0392B",
-        "Not significant" = "grey60"
+      values = stats::setNames(
+        c("#C0392B", "grey60"),
+        c(sig_label_text, nonsig_label_text)
       ),
       name = ""
     ) +
@@ -455,8 +464,17 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
   }
 
   # Symmetric limits at 98th percentile (like fig6 reference)
-  cate_lim <- stats::quantile(abs(df$cate), 0.98, na.rm = TRUE)
-  if (cate_lim < 1e-10) cate_lim <- max(abs(df$cate), na.rm = TRUE)
+  finite_cate <- df$cate[is.finite(df$cate)]
+  if (length(finite_cate) == 0) {
+    cli::cli_warn("No finite CATE values after masking for {.val {variable}}. Returning empty plot.")
+    return(ggplot2::ggplot() + ggplot2::theme_void() +
+             ggplot2::labs(title = paste("CATE:", variable, "(no data after HSS mask)")))
+  }
+  cate_lim <- as.numeric(stats::quantile(abs(finite_cate), 0.98, na.rm = TRUE))
+  if (!is.finite(cate_lim) || cate_lim < 1e-10) {
+    cate_lim <- max(abs(finite_cate), na.rm = TRUE)
+  }
+  if (!is.finite(cate_lim) || cate_lim < 1e-10) cate_lim <- 0.05
 
   # Title
   sp_display <- if (!is.null(species)) {
@@ -842,4 +860,65 @@ load_basemap <- function(type = "world") {
     basemap <- sf::st_make_valid(basemap)
   }
   basemap
+}
+
+
+# -- E-value sensitivity plot (internal) --------------------------------------
+#' @noRd
+plot_ate_evalue <- function(x, var_labels = NULL) {
+  est <- x$estimates
+  if (!"evalue_point" %in% names(est)) {
+    cli::cli_abort("No E-value columns found. Run {.fn cast_evalue} first.")
+  }
+
+  if (!is.null(var_labels)) {
+    est$display <- ifelse(
+      est$variable %in% names(var_labels),
+      var_labels[est$variable], est$variable
+    )
+  } else {
+    est$display <- est$variable
+  }
+  est$display <- factor(
+    est$display,
+    levels = rev(est$display[order(est$evalue_point)])
+  )
+
+  ggplot2::ggplot(est, ggplot2::aes(
+    x = .data$evalue_point, y = .data$display
+  )) +
+    ggplot2::geom_vline(
+      xintercept = 1, linetype = "dashed", color = "grey60", linewidth = 0.6
+    ) +
+    ggplot2::geom_segment(
+      ggplot2::aes(
+        x = .data$evalue_ci, xend = .data$evalue_point,
+        y = .data$display, yend = .data$display
+      ),
+      linewidth = 0.8, color = "grey50"
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(color = .data$significant), size = 3
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(x = .data$evalue_ci), shape = 1, size = 2.5,
+      color = "grey40"
+    ) +
+    ggplot2::scale_color_manual(
+      values = c("TRUE" = "#C0392B", "FALSE" = "grey60"),
+      labels = c("TRUE" = "Significant", "FALSE" = "Not significant"),
+      name = ""
+    ) +
+    ggplot2::labs(
+      title = "E-value Sensitivity Analysis",
+      subtitle = "Filled = point estimate; Open = CI bound",
+      x = "E-value (minimum confounding strength)", y = ""
+    ) +
+    theme_cast() +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_line(
+        color = "grey93", linewidth = 0.3
+      )
+    )
 }

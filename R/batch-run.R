@@ -131,8 +131,8 @@
 #'   Default `300`.
 #' @param ate_quantile_cuts Numeric vector. Quantile thresholds for
 #'   binarization. Default `c(0.25, 0.50, 0.75)`.
-#' @param ate_bonferroni Logical. Apply Bonferroni correction.
-#'   Default `TRUE`.
+#' @param ate_p_adjust Character. Multiple-testing correction method
+#'   (passed to [stats::p.adjust()]). Default `"fdr"`.
 #' @param ate_parallel Logical. Parallel ATE estimation within each
 #'   species (via \pkg{future}). Default `FALSE`.
 #'
@@ -207,7 +207,7 @@ cast_batch <- function(species_list,
                        ate_alpha          = 0.05,
                        ate_num_trees      = 300L,
                        ate_quantile_cuts  = c(0.25, 0.50, 0.75),
-                       ate_bonferroni     = TRUE,
+                       ate_p_adjust       = "fdr",
                        ate_parallel       = FALSE,
                        # ── Screen ──
                        screen_min_vars     = 5L,
@@ -369,7 +369,7 @@ cast_batch <- function(species_list,
     ate_K = ate_K, ate_alpha = ate_alpha,
     ate_num_trees = ate_num_trees,
     ate_quantile_cuts = ate_quantile_cuts,
-    ate_bonferroni = ate_bonferroni,
+    ate_p_adjust = ate_p_adjust,
     ate_parallel = ate_parallel,
     screen_verbose = screen_verbose,
     screen_min_vars = screen_min_vars,

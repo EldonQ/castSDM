@@ -4,12 +4,16 @@
 \alias{plot.cast_ate}
 \title{Plot ATE Forest Plot}
 \usage{
-\method{plot}{cast_ate}(x, var_labels = NULL, ...)
+\method{plot}{cast_ate}(x, var_labels = NULL, type = c("ate", "evalue"), ...)
 }
 \arguments{
 \item{x}{A \code{cast_ate} object.}
 
 \item{var_labels}{Optional named character vector for display labels.}
+
+\item{type}{Character. \code{"ate"} (default) for coefficient forest plot,
+\code{"evalue"} for E-value sensitivity plot (requires \code{\link[=cast_evalue]{cast_evalue()}} to
+have been called first).}
 
 \item{...}{Ignored.}
 }

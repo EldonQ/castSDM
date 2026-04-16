@@ -21,10 +21,11 @@ print.cast_dag <- function(x, ...) {
 print.cast_ate <- function(x, ...) {
   n_total <- nrow(x$estimates)
   n_sig <- sum(x$estimates$significant, na.rm = TRUE)
+  p_method <- x$p_adjust %||% "bonferroni"
   cli::cli_h1("CAST ATE (Double Machine Learning)")
   cli::cli_ul(c(
     "Variables tested: {n_total}",
-    "Significant (p < {x$alpha}): {n_sig}",
+    "Significant ({p_method}-adjusted p < {x$alpha}): {n_sig}",
     "Cross-fitting folds: {x$K}"
   ))
   invisible(x)
@@ -124,15 +125,37 @@ print.cast_cate <- function(x, ...) {
 }
 
 #' @export
+print.cast_shap <- function(x, ...) {
+  cli::cli_h1("CAST SHAP Explanation")
+  cli::cli_ul(c(
+    "Engine: {.val {x$engine}}",
+    "Method: {.val {x$method}}",
+    "Features: {x$n_features}",
+    "Feature space: {.val {x$feature_space}}",
+    "SHAP scale: {.val {x$shap_scale}}",
+    "Hold-out rows: {nrow(x$shap)}",
+    "Base score: {round(x$base_score, 4)}",
+    "Expected value: {round(x$expected_value, 4)}"
+  ))
+  invisible(x)
+}
+
+#' @export
 print.cast_result <- function(x, ...) {
   cli::cli_h1("CAST Pipeline Result")
+  shap_txt <- if (!is.null(x$shap)) {
+    paste(names(Filter(Negate(is.null), x$shap)), collapse = ", ")
+  } else {
+    "No"
+  }
   cli::cli_ul(c(
     "DAG: {nrow(x$dag$edges)} edges",
     "ATE: {sum(x$ate$estimates$significant)} significant variables",
     "Screened: {length(x$screen$selected)} variables",
     "Models: {.val {names(x$fit$models)}}",
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",
-    "CATE: {if (!is.null(x$cate)) 'Yes' else 'No'}"
+    "CATE: {if (!is.null(x$cate)) 'Yes' else 'No'}",
+    "SHAP: {shap_txt}"
   ))
   invisible(x)
 }
