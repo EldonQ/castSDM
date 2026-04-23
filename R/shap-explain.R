@@ -267,8 +267,10 @@ plot.cast_shap <- function(x,
     stringsAsFactors = FALSE
   )
 
-  # Labels placed radially outward, close to their node (reference style)
-  label_r <- 1.28
+  # Keep labels close to nodes while giving larger nodes a bit more clearance.
+  # This reduces node-label gap but avoids overlap on dominant nodes.
+  max_imp <- max(imp, 1e-8)
+  label_r <- 1.18 + 0.08 * (imp / max_imp)
   pos$label_x <- label_r * cos(ang - pi / 2)
   pos$label_y <- label_r * sin(ang - pi / 2)
 
@@ -285,7 +287,6 @@ plot.cast_shap <- function(x,
     0.5
   )
 
-  max_imp <- max(imp, 1e-8)
   pair <- list()
   pk <- 0L
   for (i in seq_len(n)) {
@@ -379,9 +380,10 @@ plot.cast_shap <- function(x,
     ) +
     ggplot2::scale_size(range = c(2, 12), guide = "none") +
     ggplot2::coord_fixed(
-      xlim = c(-1.7, 1.7),
-      ylim = c(-1.7, 1.7),
-      expand = FALSE
+      xlim = c(-2.55, 2.55),
+      ylim = c(-2.05, 2.05),
+      expand = FALSE,
+      clip = "off"
     ) +
     ggplot2::labs(
       title = sprintf(
@@ -443,7 +445,7 @@ plot.cast_shap <- function(x,
       legend.justification = "center",
       legend.title = ggplot2::element_text(size = 10, face = "bold", lineheight = 1.1),
       legend.text = ggplot2::element_text(size = 8.5),
-      plot.margin = ggplot2::margin(8, 12, 8, 12)
+      plot.margin = ggplot2::margin(10, 26, 10, 26)
     )
 
   p
