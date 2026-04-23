@@ -277,10 +277,13 @@
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12, color = "black"),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.position = "bottom",
       legend.key.width = ggplot2::unit(2.5, "cm"),
       legend.key.height = ggplot2::unit(0.35, "cm"),
-      panel.border = ggplot2::element_rect(fill = NA, color = "black", linewidth = 0.8)
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA)
     )
 
   if (!is.null(dash)) {
@@ -353,10 +356,13 @@
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12, color = "black"),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey30", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.position = "bottom",
       legend.key.width = ggplot2::unit(2.5, "cm"),
       legend.key.height = ggplot2::unit(0.35, "cm"),
-      panel.border = ggplot2::element_rect(fill = NA, color = "black", linewidth = 0.8)
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA)
     )
 
   if (!is.null(dash)) {
@@ -436,7 +442,7 @@ cast_spatial_replot_hss_cate_heatmaps <- function(pred,
           width = 10,
           height = 7,
           dpi = fig_dpi,
-          bg = "white",
+          bg = "transparent",
           limitsize = FALSE
         )
         message("Heatmap saved: ", fn)
@@ -516,7 +522,7 @@ cast_spatial_replot_hss_cate_heatmaps <- function(pred,
           width = 10,
           height = 7,
           dpi = fig_dpi,
-          bg = "white",
+          bg = "transparent",
           limitsize = FALSE
         )
         message("Heatmap saved: ", fn)

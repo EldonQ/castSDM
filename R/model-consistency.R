@@ -267,6 +267,8 @@ plot.cast_consistency <- function(x,
           hjust = 0.5,
           size = font_panel_title
         ),
+        plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
         axis.text.x = ggplot2::element_text(
           family = font_family,
           face = face_plain_or_bold,
@@ -287,6 +289,8 @@ plot.cast_consistency <- function(x,
           family = font_family,
           face = face_plain_or_bold
         ),
+        legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
         panel.grid = ggplot2::element_blank(),
         legend.position = "right",
         plot.margin = ggplot2::margin(8, 8, 8, 8)
@@ -307,6 +311,7 @@ plot.cast_consistency <- function(x,
       title = sp_title,
       theme = ggplot2::theme(
         text = ggplot2::element_text(family = font_family),
+        plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
         plot.title = ggplot2::element_text(
           family = font_family,
           face = face_plain_or_bold,

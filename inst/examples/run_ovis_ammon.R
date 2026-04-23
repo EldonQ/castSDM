@@ -120,11 +120,24 @@ if (!is.na(pkg_root)) {
 # 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
 OVIS_FIG_DIR <- file.path(getwd(), "cast_ovis_ammon_figures")
 OVIS_FIG_DPI <- 1200L
+OVIS_SHAP_CACHE <- file.path(OVIS_FIG_DIR, "ovis_shap_cache.rds")
 dir.create(OVIS_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
 
 ovis_save_plot <- function(plot_obj, filename, width, height) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     return(invisible(NULL))
+  }
+  .transparent_theme <- ggplot2::theme(
+    plot.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+    panel.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+    legend.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+    legend.box.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+    strip.background = ggplot2::element_rect(fill = "transparent", colour = NA)
+  )
+  if (inherits(plot_obj, c("gg", "ggplot"))) {
+    plot_obj <- plot_obj + .transparent_theme
+  } else if (inherits(plot_obj, "patchwork")) {
+    plot_obj <- plot_obj & .transparent_theme
   }
   fp <- file.path(OVIS_FIG_DIR, filename)
   ggplot2::ggsave(
@@ -133,11 +146,79 @@ ovis_save_plot <- function(plot_obj, filename, width, height) {
     width = width,
     height = height,
     dpi = OVIS_FIG_DPI,
-    bg = "white",
+    bg = "transparent",
     limitsize = FALSE
   )
   message("Saved figure: ", normalizePath(fp, winslash = "/", mustWork = FALSE))
   invisible(fp)
+}
+
+.parse_edge_rules <- function(rules, what = "rules") {
+  if (is.null(rules)) return(NULL)
+  x <- trimws(as.character(rules))
+  x <- x[nzchar(x)]
+  if (!length(x)) return(NULL)
+
+  parse_one <- function(s) {
+    if (grepl("->", s, fixed = TRUE)) {
+      p <- strsplit(s, "->", fixed = TRUE)[[1]]
+    } else if (grepl(",", s, fixed = TRUE)) {
+      p <- strsplit(s, ",", fixed = TRUE)[[1]]
+    } else {
+      return(c(NA_character_, NA_character_))
+    }
+    if (length(p) < 2) return(c(NA_character_, NA_character_))
+    c(trimws(p[1]), trimws(p[2]))
+  }
+
+  mat <- do.call(rbind, lapply(x, parse_one))
+  bad <- is.na(mat[, 1]) | is.na(mat[, 2]) |
+    !nzchar(mat[, 1]) | !nzchar(mat[, 2])
+  if (any(bad)) {
+    stop(
+      sprintf(
+        "%s format error: use 'from->to' (or 'from,to'). Bad entries: %s",
+        what,
+        paste(x[bad], collapse = "; ")
+      )
+    )
+  }
+
+  unique(data.frame(
+    from = mat[, 1],
+    to = mat[, 2],
+    stringsAsFactors = FALSE
+  ))
+}
+
+.filter_edge_rules_by_vars <- function(rules_df, vars, what = "rules") {
+  if (is.null(rules_df) || !nrow(rules_df)) return(NULL)
+  vars <- unique(as.character(vars))
+  keep <- rules_df$from %in% vars & rules_df$to %in% vars & rules_df$from != rules_df$to
+  if (any(!keep)) {
+    dropped <- unique(sprintf("%s->%s", rules_df$from[!keep], rules_df$to[!keep]))
+    message(sprintf("%s: dropped %d rules not in active env vars (or self-loop)",
+                    what, length(dropped)))
+    message(sprintf("  dropped: %s", paste(dropped, collapse = "; ")))
+  }
+  out <- unique(rules_df[keep, c("from", "to"), drop = FALSE])
+  if (!nrow(out)) return(NULL)
+  out
+}
+
+.resolve_edge_rule_conflicts <- function(blacklist_df, whitelist_df) {
+  if (is.null(blacklist_df) || is.null(whitelist_df)) {
+    return(list(blacklist = blacklist_df, whitelist = whitelist_df))
+  }
+  b_key <- paste(blacklist_df$from, blacklist_df$to, sep = "->")
+  w_key <- paste(whitelist_df$from, whitelist_df$to, sep = "->")
+  overlap <- intersect(b_key, w_key)
+  if (length(overlap)) {
+    message(sprintf("DAG rules conflict: %d edge(s) in both blacklist and whitelist; whitelist wins", length(overlap)))
+    blacklist_df <- blacklist_df[!b_key %in% overlap, c("from", "to"), drop = FALSE]
+    if (!nrow(blacklist_df)) blacklist_df <- NULL
+  }
+  list(blacklist = blacklist_df, whitelist = whitelist_df)
 }
 
 # ── Step 0: 加载示例数据 ─────────────────────────────────────────────────────
@@ -148,14 +229,8 @@ cat("盘羊数据:", nrow(ovis_ammon), "行,", ncol(ovis_ammon), "列\n")
 cat("存在点:", sum(ovis_ammon$presence == 1),
     "| 缺失点:", sum(ovis_ammon$presence == 0), "\n")
 
-# 变量中文名映射 (可选, 用于美化绘图标签)
-var_labels <- c(
-  bio02 = "昼夜温差", bio15 = "降水季节性", bio19 = "最冷季降水",
-  elevation = "海拔", aridityindexthornthwaite = "干旱指数",
-  maxtempcoldest = "最冷月最高温", tri = "地形崎岖度",
-  topowet = "地形湿度指数", nontree = "非乔木植被",
-  etccdi_cwd = "连续湿日", landcover_igbp = "土地覆盖"
-)
+# Keep native environmental variable names (English) in all plots.
+var_labels <- NULL
 
 # ==============================================================================
 # cast_dag()：四种 structure_method 的参数与依赖（正式跑前必读）
@@ -229,6 +304,33 @@ CONFIG <- list(
   dag_notears_alpha_mult  = 1.01,
   dag_blacklist           = NULL,   # data.frame(from, to) 禁止边
   dag_whitelist           = NULL,   # data.frame(from, to) 强制边
+  # 可选简便写法：每条规则可写为 "from->to" 或 "from,to"
+  # 若 dag_blacklist / dag_whitelist 非 NULL，则优先使用 data.frame 版本。
+  dag_blacklist_rules     = NULL,
+  dag_whitelist_rules     = NULL,
+  # DAG 先验知识（盘羊示例）：约束明显不合理方向，强化高可信方向。
+  dag_prior_blacklist_rules = c(
+    # 地形变量不应被气候/地表覆盖变量反向“决定”
+    "bio02->elevation", "bio15->elevation", "bio19->elevation",
+    "maxtempcoldest->elevation", "aridityindexthornthwaite->elevation",
+    "etccdi_cwd->elevation", "landcover_igbp->elevation", "nontree->elevation",
+    "bio02->tri", "bio15->tri", "bio19->tri",
+    "landcover_igbp->tri", "nontree->tri",
+    "bio02->topowet", "bio15->topowet", "bio19->topowet",
+    "landcover_igbp->topowet", "nontree->topowet"
+  ),
+  dag_prior_whitelist_rules = c(
+    # 地形衍生关系
+    "elevation->tri", "elevation->topowet",
+    # 高程对低温与干湿相关指标的区域控制
+    "elevation->maxtempcoldest", "elevation->aridityindexthornthwaite",
+    # 干湿度对地表覆盖格局
+    "aridityindexthornthwaite->nontree"
+  ),
+  # DAG 后验知识（默认关闭；先跑一轮再按结果启用）
+  dag_use_posterior_rules   = FALSE,
+  dag_posterior_blacklist_rules = NULL,
+  dag_posterior_whitelist_rules = NULL,
   # cast_ate
   ate_variables     = NULL,
   ate_K             = 5L,
@@ -309,11 +411,18 @@ CONFIG <- list(
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
   spatial_heatmap_interp_method = "nearest",
-  spatial_heatmap_display_res   = 0.02
+  spatial_heatmap_display_res   = 0.02,
+  # 若为 TRUE：跳过全流程，仅基于 ovis_shap_cache.rds 重新输出 SHAP 图。
+  only_run_shap_plots           = FALSE
 )
 
 # 是否对四种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
 RUN_DAG_SELFTEST_ALL_METHODS <- TRUE
+
+# DAG 实际生效参数（运行后会按 active env vars 过滤更新）
+dag_env_vars_use <- CONFIG$dag_env_vars
+dag_blacklist_use <- CONFIG$dag_blacklist
+dag_whitelist_use <- CONFIG$dag_whitelist
 
 #' 盘羊示例：四种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
 #' @noRd
@@ -474,6 +583,70 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
 # 方式 A: 模块化逐步运行 (推荐初次使用, 便于理解每一步)
 # ══════════════════════════════════════════════════════════════════════════════
 
+if (isTRUE(CONFIG$only_run_shap_plots)) {
+  if (!file.exists(OVIS_SHAP_CACHE)) {
+    stop(
+      "Missing SHAP cache file:\n  ", OVIS_SHAP_CACHE,
+      "\nRun this script once with CONFIG$only_run_shap_plots <- FALSE ",
+      "to generate the cache, then re-run with TRUE.",
+      call. = FALSE
+    )
+  }
+
+  shap_cache <- readRDS(OVIS_SHAP_CACHE)
+  required_fields <- c("train_df", "fit", "dag", "screen")
+  missing_fields <- required_fields[!vapply(
+    required_fields,
+    function(nm) !is.null(shap_cache[[nm]]),
+    logical(1)
+  )]
+  if (length(missing_fields) > 0L) {
+    stop(
+      "Invalid SHAP cache (missing fields): ",
+      paste(missing_fields, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  shap_response <- if (!is.null(shap_cache$response) &&
+                       nzchar(as.character(shap_cache$response))) {
+    as.character(shap_cache$response)
+  } else {
+    CONFIG$response
+  }
+
+  shap_cfg <- list(
+    do_shap = TRUE,
+    response = shap_response,
+    shap_nrounds = CONFIG$shap_nrounds,
+    shap_max_depth = CONFIG$shap_max_depth,
+    shap_eta = CONFIG$shap_eta,
+    shap_subsample = CONFIG$shap_subsample,
+    shap_colsample_bytree = CONFIG$shap_colsample_bytree,
+    shap_test_fraction = CONFIG$shap_test_fraction,
+    shap_verbose = CONFIG$shap_verbose,
+    shap_plot_top_n = CONFIG$shap_plot_top_n,
+    shap_fastshap_nsim = CONFIG$shap_fastshap_nsim,
+    shap_max_explain_rows = CONFIG$shap_max_explain_rows
+  )
+
+  save_cast_batch_shap_outputs(
+    train_df = shap_cache$train_df,
+    fit = shap_cache$fit,
+    dag = shap_cache$dag,
+    screen = shap_cache$screen,
+    cfg = shap_cfg,
+    fig_dir = OVIS_FIG_DIR,
+    fig_dpi = OVIS_FIG_DPI,
+    seed_i = CONFIG$seed
+  )
+
+  message(
+    "SHAP-only mode finished. Figures saved under: ",
+    normalizePath(OVIS_FIG_DIR, winslash = "/", mustWork = FALSE)
+  )
+} else {
+
 # ── Step 1: 数据准备 ─────────────────────────────────────────────────────────
 split <- cast_prepare(
   data           = ovis_ammon,
@@ -485,9 +658,52 @@ split <- cast_prepare(
 cat("训练集:", nrow(split$train), "| 测试集:", nrow(split$test), "\n")
 cat("环境变量:", paste(split$env_vars, collapse = ", "), "\n")
 
+# DAG 输入变量与先验约束：后续所有 DAG 调用统一复用
+dag_env_vars_use <- CONFIG$dag_env_vars
+if (is.null(dag_env_vars_use)) {
+  dag_env_vars_use <- split$env_vars
+}
+
+dag_blacklist_use <- CONFIG$dag_blacklist
+if (is.null(dag_blacklist_use)) {
+  dag_blacklist_rules_all <- c(
+    CONFIG$dag_blacklist_rules,
+    CONFIG$dag_prior_blacklist_rules,
+    if (isTRUE(CONFIG$dag_use_posterior_rules)) CONFIG$dag_posterior_blacklist_rules
+  )
+  dag_blacklist_use <- .parse_edge_rules(dag_blacklist_rules_all, "dag_blacklist_rules")
+}
+dag_whitelist_use <- CONFIG$dag_whitelist
+if (is.null(dag_whitelist_use)) {
+  dag_whitelist_rules_all <- c(
+    CONFIG$dag_whitelist_rules,
+    CONFIG$dag_prior_whitelist_rules,
+    if (isTRUE(CONFIG$dag_use_posterior_rules)) CONFIG$dag_posterior_whitelist_rules
+  )
+  dag_whitelist_use <- .parse_edge_rules(dag_whitelist_rules_all, "dag_whitelist_rules")
+}
+
+dag_blacklist_use <- .filter_edge_rules_by_vars(dag_blacklist_use, dag_env_vars_use, "dag_blacklist")
+dag_whitelist_use <- .filter_edge_rules_by_vars(dag_whitelist_use, dag_env_vars_use, "dag_whitelist")
+
+.rule_fix <- .resolve_edge_rule_conflicts(dag_blacklist_use, dag_whitelist_use)
+dag_blacklist_use <- .rule_fix$blacklist
+dag_whitelist_use <- .rule_fix$whitelist
+rm(.rule_fix)
+
+message(sprintf(
+  "DAG 先验约束: blacklist=%d, whitelist=%d",
+  if (is.null(dag_blacklist_use)) 0L else nrow(dag_blacklist_use),
+  if (is.null(dag_whitelist_use)) 0L else nrow(dag_whitelist_use)
+))
+
 # ── DAG 四种算法 + ATE/screen/roles 最小闭环自检 (默认必须全部通过) ─────────
 if (isTRUE(RUN_DAG_SELFTEST_ALL_METHODS)) {
-  ovis_dag_selftest_all(split$train, CONFIG)
+  cfg_for_selftest <- CONFIG
+  cfg_for_selftest$dag_env_vars <- dag_env_vars_use
+  cfg_for_selftest$dag_blacklist <- dag_blacklist_use
+  cfg_for_selftest$dag_whitelist <- dag_whitelist_use
+  ovis_dag_selftest_all(split$train, cfg_for_selftest)
 }
 
 # 可选: 多重共线性筛查 (需建议包 car)
@@ -509,7 +725,7 @@ if (requireNamespace("car", quietly = TRUE)) {
 dag <- cast_dag(
   data                 = split$train,
   response             = CONFIG$response,
-  env_vars             = CONFIG$dag_env_vars,
+  env_vars             = dag_env_vars_use,
   R                    = CONFIG$dag_R,
   algorithm            = CONFIG$dag_algorithm,
   score                = CONFIG$dag_score,
@@ -529,8 +745,8 @@ dag <- cast_dag(
   notears_tol          = CONFIG$dag_notears_tol,
   notears_rho_init     = CONFIG$dag_notears_rho_init,
   notears_alpha_mult   = CONFIG$dag_notears_alpha_mult,
-  blacklist            = CONFIG$dag_blacklist,
-  whitelist            = CONFIG$dag_whitelist
+  blacklist            = dag_blacklist_use,
+  whitelist            = dag_whitelist_use
 )
 print(dag)
 
@@ -619,6 +835,23 @@ fit_full <- cast_fit(
   verbose            = CONFIG$fit_verbose
 )
 
+tryCatch(
+  saveRDS(
+    list(
+      train_df = split$train,
+      fit = fit_full,
+      dag = dag,
+      screen = screen,
+      response = CONFIG$response,
+      seed = CONFIG$seed
+    ),
+    OVIS_SHAP_CACHE
+  ),
+  error = function(e) {
+    warning("SHAP cache save failed: ", conditionMessage(e))
+  }
+)
+
 # ── Step 6b (可选): 空间交叉验证 ────────────────────────────────────────────
 if (isTRUE(CONFIG$run_spatial_cv)) {
   cv_ovis <- cast_cv(
@@ -684,8 +917,8 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     ovis_save_plot(
       p_net,
       paste0(stem, "_interaction_network.png"),
-      width = 9,
-      height = 9
+      width = 13,
+      height = 10
     )
     bv <- sh_obj$bias_shap
     if (is.null(bv) || length(bv) != nrow(sh_obj$shap)) {
@@ -801,17 +1034,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     print(consistency)
     p_cons <- plot(
       consistency,
-      species = "Ovis_ammon",
-      font_family = "sans",
-      use_bold = TRUE,
-      font_base = 11L,
-      font_main_title = 14L,
-      font_panel_title = 11L,
-      font_axis = 8L,
-      font_cell_value = 3.5,
-      value_decimals = 3L,
-      tile_linewidth = 0.5,
-      text_white_above = 0.7
+      species = "Ovis_ammon"
     )
     print(p_cons)
     ovis_save_plot(p_cons, "ovis_consistency.png", width = 16, height = 5.5)
@@ -1329,8 +1552,8 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     do_predict               = NULL,
     do_cate                  = TRUE,
     cate_top_n               = 3L,
-    blacklist                = CONFIG$dag_blacklist,
-    whitelist                = CONFIG$dag_whitelist,
+    blacklist                = dag_blacklist_use,
+    whitelist                = dag_whitelist_use,
     do_evalue                = CONFIG$do_evalue,
     do_backdoor              = CONFIG$do_backdoor,
     seed                     = CONFIG$seed,
@@ -1370,7 +1593,7 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
       cast_dag(
         data = split$train,
         response = CONFIG$response,
-        env_vars = CONFIG$dag_env_vars,
+        env_vars = dag_env_vars_use,
         R = CONFIG$dag_R,
         algorithm = CONFIG$dag_algorithm,
         score = CONFIG$dag_score,
@@ -1390,8 +1613,8 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
         notears_tol = CONFIG$dag_notears_tol,
         notears_rho_init = CONFIG$dag_notears_rho_init,
         notears_alpha_mult = CONFIG$dag_notears_alpha_mult,
-        blacklist = CONFIG$dag_blacklist,
-        whitelist = CONFIG$dag_whitelist
+        blacklist = dag_blacklist_use,
+        whitelist = dag_whitelist_use
       ),
       error = function(e) {
         message("cast_dag (", sm, ") 出图跳过: ", conditionMessage(e))
@@ -1481,4 +1704,6 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
     ovis_style      = TRUE
   )
   message("Spatial heatmap replot finished (ovis_predict_* / ovis_cate_*).")
+}
+
 }

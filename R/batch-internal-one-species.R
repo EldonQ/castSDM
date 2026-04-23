@@ -28,7 +28,7 @@
       ggplot2::ggsave(
         file.path(fig_dir, fname), p,
         width = w, height = h, dpi = fig_dpi,
-        bg = "white", limitsize = FALSE
+        bg = "transparent", limitsize = FALSE
       ),
       error = function(e) NULL
     )

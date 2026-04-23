@@ -141,6 +141,10 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
       plot.subtitle = ggplot2::element_text(
         hjust = 0, color = "grey40", size = 8.5
       ),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.text = ggplot2::element_text(size = 7),
       legend.title = ggplot2::element_text(size = 8, face = "bold"),
       legend.position = "right"
@@ -380,6 +384,10 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.position = "right",
       legend.key.width = ggplot2::unit(0.5, "cm"),
       legend.key.height = ggplot2::unit(1.5, "cm")
@@ -536,6 +544,10 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
       plot.subtitle = ggplot2::element_text(
         hjust = 0.5, color = "grey40", size = 9, face = "italic"
       ),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.position = legend_position
     )
 
@@ -742,7 +754,11 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     ggplot2::theme(
       plot.title = ggplot2::element_text(
         face = "bold", hjust = 0.5
-      )
+      ),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA)
     )
 
   if (requireNamespace("patchwork", quietly = TRUE)) {
@@ -821,7 +837,11 @@ theme_cast <- function(base_size = 11) {
       plot.subtitle = ggplot2::element_text(
         hjust = 0, color = "grey40", size = base_size - 2
       ),
-      legend.background = ggplot2::element_rect(fill = "white", color = NA)
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      strip.background = ggplot2::element_rect(fill = "transparent", color = NA)
     )
 }
 

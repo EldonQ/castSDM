@@ -13,8 +13,8 @@
     tryCatch(
       ggplot2::ggsave(
         file.path(fig_dir, paste0(stem, "_interaction_network.png")),
-        p_net, width = 9, height = 9, dpi = fig_dpi,
-        bg = "white", limitsize = FALSE
+        p_net, width = 13, height = 10, dpi = fig_dpi,
+        bg = "transparent", limitsize = FALSE
       ),
       error = function(e) NULL
     )
@@ -39,7 +39,7 @@
       ggplot2::ggsave(
         file.path(fig_dir, paste0(stem, "_waterfall.png")),
         p_wf, width = 10, height = 6, dpi = fig_dpi,
-        bg = "white", limitsize = FALSE
+        bg = "transparent", limitsize = FALSE
       ),
       error = function(e) NULL
     )
@@ -104,8 +104,8 @@
   tryCatch(
     ggplot2::ggsave(
       file.path(fig_dir, "shap_panel_2x3.png"),
-      comb, width = 16, height = 11, dpi = fig_dpi,
-      bg = "white", limitsize = FALSE
+      comb, width = 21, height = 12, dpi = fig_dpi,
+      bg = "transparent", limitsize = FALSE
     ),
     error = function(e) NULL
   )
