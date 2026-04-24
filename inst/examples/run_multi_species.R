@@ -555,7 +555,7 @@ ggplot2::ggsave(
   file.path(fig_dir, "multi_species_comparison.png"),
   p_compare,
   width = 14, height = 6, dpi = CONFIG$fig_dpi,
-  bg = "white", limitsize = FALSE
+  bg = "transparent", limitsize = FALSE
 )
 cat("  Saved: multi_species_comparison.png\n")
 

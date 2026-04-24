@@ -333,7 +333,7 @@ CONFIG <- list(
   dag_posterior_whitelist_rules = NULL,
   # cast_ate
   ate_variables     = NULL,
-  ate_K             = 5L,
+  ate_K             = 10L,
   ate_num_trees     = 300L,
   ate_alpha         = 0.05,
   ate_quantile_cuts = c(0.25, 0.5, 0.75),
@@ -347,8 +347,8 @@ CONFIG <- list(
   screen_verbose      = TRUE,
   # cast_fit (快速演示: n_epochs / n_runs 较小; 正式分析请增大并打开 tune_grid)
   fit_models            = c("cast", "rf", "maxent", "brt"),
-  fit_n_epochs          = 50L,  #speed
-  fit_n_runs            = 1L, #speed
+  fit_n_epochs          = 100L,  #speed
+  fit_n_runs            = 10L, #speed
   fit_patience          = 40L,
   fit_val_fraction      = 0.2,
   fit_focal_gamma       = 2.0,
@@ -378,7 +378,7 @@ CONFIG <- list(
   cv_brt_n_trees   = 500L,
   cv_parallel      = TRUE,
   cv_verbose       = TRUE,
-  run_spatial_cv   = TRUE,
+  run_spatial_cv   = FALSE,
   # cast_cate
   cate_variables   = NULL,
   cate_top_n       = 2L,
@@ -407,6 +407,8 @@ CONFIG <- list(
   uncertainty_n_forward   = 50L,
   # cast_report (需 rmarkdown)
   do_report               = FALSE,
+  # 是否自动执行 terra 空间热图重绘（默认关闭，保持源码原生 HSS/CATE 出图）
+  do_spatial_heatmap      = FALSE,
   # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
@@ -1483,34 +1485,38 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   )
 
   # ── 插值渲染：用 terra 栅格热图覆盖 geom_point 的 HSS / CATE 图 ──────────
-  hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
-  if (!is.na(hlp_path) && nzchar(hlp_path) &&
-      requireNamespace("terra", quietly = TRUE) &&
-      requireNamespace("sf", quietly = TRUE)) {
-    message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
-    sys.source(hlp_path, envir = environment())
-    tryCatch(
-      cast_spatial_replot_hss_cate_heatmaps(
-        pred            = pred,
-        cate            = if (exists("cate")) cate else NULL,
-        fig_dir         = OVIS_FIG_DIR,
-        fig_dpi         = OVIS_FIG_DPI,
-        var_labels      = var_labels,
-        basemap         = "china",
-        res_deg         = CONFIG$spatial_heatmap_res_deg,
-        interp_method   = CONFIG$spatial_heatmap_interp_method,
-        display_res_deg = CONFIG$spatial_heatmap_display_res,
-        hss_model       = cate_hss_model_final,
-        hss_threshold   = 0.1,
-        species_label   = "Ovis_ammon",
-        ovis_style      = TRUE
-      ),
-      error = function(e) {
-        warning("Spatial heatmap replot failed: ", conditionMessage(e))
-      }
-    )
+  if (isTRUE(CONFIG$do_spatial_heatmap)) {
+    hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
+    if (!is.na(hlp_path) && nzchar(hlp_path) &&
+        requireNamespace("terra", quietly = TRUE) &&
+        requireNamespace("sf", quietly = TRUE)) {
+      message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
+      sys.source(hlp_path, envir = environment())
+      tryCatch(
+        cast_spatial_replot_hss_cate_heatmaps(
+          pred            = pred,
+          cate            = if (exists("cate")) cate else NULL,
+          fig_dir         = OVIS_FIG_DIR,
+          fig_dpi         = OVIS_FIG_DPI,
+          var_labels      = var_labels,
+          basemap         = "china",
+          res_deg         = CONFIG$spatial_heatmap_res_deg,
+          interp_method   = CONFIG$spatial_heatmap_interp_method,
+          display_res_deg = CONFIG$spatial_heatmap_display_res,
+          hss_model       = cate_hss_model_final,
+          hss_threshold   = 0.1,
+          species_label   = "Ovis_ammon",
+          ovis_style      = TRUE
+        ),
+        error = function(e) {
+          warning("Spatial heatmap replot failed: ", conditionMessage(e))
+        }
+      )
+    } else {
+      message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
+    }
   } else {
-    message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
+    message("Skip terra heatmap replot: CONFIG$do_spatial_heatmap = FALSE")
   }
 }
 

@@ -10,10 +10,10 @@
   font_family = "Arial",
   use_bold = TRUE,
   font_base = 14L,
-  font_main_title = 20L,
-  font_panel_title = 28L,
-  font_axis = 25L,
-  font_cell_value = 7,
+  font_main_title = 24L,
+  font_panel_title = 24L,
+  font_axis = 20L,
+  font_cell_value = 5,
   value_decimals = 4L,
   tile_linewidth = 0.8,
   text_white_above = 0.7,
@@ -36,13 +36,13 @@ values. Default \code{TRUE}.}
 
 \item{font_base}{Base theme size. Default \code{14}.}
 
-\item{font_main_title}{Outer patchwork title size. Default \code{20}.}
+\item{font_main_title}{Outer patchwork title size. Default \code{24}.}
 
-\item{font_panel_title}{Panel title size. Default \code{28}.}
+\item{font_panel_title}{Panel title size. Default \code{24}.}
 
-\item{font_axis}{Axis label size (model names). Default \code{25}.}
+\item{font_axis}{Axis label size (model names). Default \code{20}.}
 
-\item{font_cell_value}{Text size inside tiles. Default \code{7}.}
+\item{font_cell_value}{Text size inside tiles. Default \code{5}.}
 
 \item{value_decimals}{Decimals printed in each cell. Default \code{4L}.}
 
