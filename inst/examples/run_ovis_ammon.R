@@ -347,8 +347,8 @@ CONFIG <- list(
   screen_verbose      = TRUE,
   # cast_fit (快速演示: n_epochs / n_runs 较小; 正式分析请增大并打开 tune_grid)
   fit_models            = c("cast", "rf", "maxent", "brt"),
-  fit_n_epochs          = 100L,  #speed
-  fit_n_runs            = 10L, #speed
+  fit_n_epochs          = 50L,  #speed
+  fit_n_runs            = 1L, #speed
   fit_patience          = 40L,
   fit_val_fraction      = 0.2,
   fit_focal_gamma       = 2.0,
@@ -380,10 +380,19 @@ CONFIG <- list(
   cv_verbose       = TRUE,
   run_spatial_cv   = FALSE,
   # cast_cate
-  cate_variables   = NULL,
-  cate_top_n       = 2L,
-  cate_n_trees     = 300L,
-  cate_verbose     = FALSE,
+  # CATE 变量可选策略：
+  #   "auto"        = 原默认逻辑（显著 ATE 与 screen 交集，再受 cate_top_n 限制）
+  #   "screen_top_n"= 固定画 screen$selected 前 cate_top_n 个（按筛选顺序）
+  #   "screen_all"  = 画全部 screen$selected
+  #   "env_all"     = 画全部 split$env_vars
+  #   "manual"      = 使用 cate_variables 显式给定变量向量
+  cate_variable_mode = "screen_all",
+  cate_variables     = NULL,
+  cate_top_n         = 8L,
+  cate_n_trees       = 300L,
+  cate_verbose       = FALSE,
+  cate_hss_model     = "cast",  # HSS 遮罩模型 (cast/rf/maxent/brt)
+  cate_hss_threshold = 0.1,   # HSS < 阈值的网格 CATE 设为 NA（不显示）
   # cast_shap_xgb
   shap_nrounds          = 200L,
   shap_max_depth        = 6L,
@@ -407,8 +416,6 @@ CONFIG <- list(
   uncertainty_n_forward   = 50L,
   # cast_report (需 rmarkdown)
   do_report               = FALSE,
-  # 是否自动执行 terra 空间热图重绘（默认关闭，保持源码原生 HSS/CATE 出图）
-  do_spatial_heatmap      = FALSE,
   # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
@@ -1042,23 +1049,39 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     ovis_save_plot(p_cons, "ovis_consistency.png", width = 16, height = 5.5)
   }
 
-  # 空间 CATE + 按 HSS 截断出图 (需 grf; HSS 模型 fallback: cast → rf → 第一个可用)
+  # 空间 CATE + 按 HSS 截断出图 (需 grf)
   if (requireNamespace("grf", quietly = TRUE)) {
-    # 选择 HSS 掩膜模型：优先 cast，若 cast 预测全 NA 则回退到 rf
-    cate_hss_model <- "cast"
-    if ("cast" %in% pred$models) {
-      hss_vals <- pred$predictions[["HSS_cast"]]
+    cate_hss_model <- CONFIG$cate_hss_model
+    if (!cate_hss_model %in% pred$models) {
+      cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+    } else {
+      hss_vals <- pred$predictions[[paste0("HSS_", cate_hss_model)]]
       if (all(is.na(hss_vals))) {
         cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
-        message("CATE HSS mask: cast 预测全 NA，回退到 ", cate_hss_model)
       }
+    }
+
+    cate_mode <- as.character(CONFIG$cate_variable_mode)
+    cate_variables_use <- NULL
+    if (identical(cate_mode, "screen_top_n")) {
+      cate_variables_use <- screen$selected[seq_len(min(CONFIG$cate_top_n, length(screen$selected)))]
+    } else if (identical(cate_mode, "screen_all")) {
+      cate_variables_use <- screen$selected
+    } else if (identical(cate_mode, "env_all")) {
+      cate_variables_use <- split$env_vars
+    } else if (identical(cate_mode, "manual")) {
+      cate_variables_use <- CONFIG$cate_variables
     } else {
-      cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+      # auto: 保持原默认行为（允许 cate_variables 手动覆盖）
+      cate_variables_use <- CONFIG$cate_variables
+      if (is.null(cate_variables_use) && exists("ate_variables_use")) {
+        cate_variables_use <- ate_variables_use
+      }
     }
 
     cate <- cast_cate(
       data           = split$train,
-      variables      = CONFIG$cate_variables,
+      variables      = cate_variables_use,
       ate            = ate,
       screen         = screen,
       response       = CONFIG$response,
@@ -1080,7 +1103,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
           legend_position  = "bottom",
           hss_predict      = pred,
           hss_model        = cate_hss_model,
-          hss_threshold    = 0.1
+          hss_threshold    = CONFIG$cate_hss_threshold
         )
         print(pc)
         ovis_save_plot(
@@ -1473,7 +1496,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
         var_labels   = var_labels,
         config_flags = list(
           cate_hss_model     = cate_hss_model_final,
-          cate_hss_threshold = 0.1,
+          cate_hss_threshold = CONFIG$cate_hss_threshold,
           species            = "Ovis_ammon"
         )
       ),
@@ -1485,38 +1508,34 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   )
 
   # ── 插值渲染：用 terra 栅格热图覆盖 geom_point 的 HSS / CATE 图 ──────────
-  if (isTRUE(CONFIG$do_spatial_heatmap)) {
-    hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
-    if (!is.na(hlp_path) && nzchar(hlp_path) &&
-        requireNamespace("terra", quietly = TRUE) &&
-        requireNamespace("sf", quietly = TRUE)) {
-      message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
-      sys.source(hlp_path, envir = environment())
-      tryCatch(
-        cast_spatial_replot_hss_cate_heatmaps(
-          pred            = pred,
-          cate            = if (exists("cate")) cate else NULL,
-          fig_dir         = OVIS_FIG_DIR,
-          fig_dpi         = OVIS_FIG_DPI,
-          var_labels      = var_labels,
-          basemap         = "china",
-          res_deg         = CONFIG$spatial_heatmap_res_deg,
-          interp_method   = CONFIG$spatial_heatmap_interp_method,
-          display_res_deg = CONFIG$spatial_heatmap_display_res,
-          hss_model       = cate_hss_model_final,
-          hss_threshold   = 0.1,
-          species_label   = "Ovis_ammon",
-          ovis_style      = TRUE
-        ),
-        error = function(e) {
-          warning("Spatial heatmap replot failed: ", conditionMessage(e))
-        }
-      )
-    } else {
-      message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
-    }
+  hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
+  if (!is.na(hlp_path) && nzchar(hlp_path) &&
+      requireNamespace("terra", quietly = TRUE) &&
+      requireNamespace("sf", quietly = TRUE)) {
+    message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
+    sys.source(hlp_path, envir = environment())
+    tryCatch(
+      cast_spatial_replot_hss_cate_heatmaps(
+        pred            = pred,
+        cate            = if (exists("cate")) cate else NULL,
+        fig_dir         = OVIS_FIG_DIR,
+        fig_dpi         = OVIS_FIG_DPI,
+        var_labels      = var_labels,
+        basemap         = "china",
+        res_deg         = CONFIG$spatial_heatmap_res_deg,
+        interp_method   = CONFIG$spatial_heatmap_interp_method,
+        display_res_deg = CONFIG$spatial_heatmap_display_res,
+        hss_model       = cate_hss_model_final,
+        hss_threshold   = CONFIG$cate_hss_threshold,
+        species_label   = "Ovis_ammon",
+        ovis_style      = TRUE
+      ),
+      error = function(e) {
+        warning("Spatial heatmap replot failed: ", conditionMessage(e))
+      }
+    )
   } else {
-    message("Skip terra heatmap replot: CONFIG$do_spatial_heatmap = FALSE")
+    message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
   }
 }
 
@@ -1704,8 +1723,8 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
     res_deg         = CONFIG$spatial_heatmap_res_deg,
     interp_method   = CONFIG$spatial_heatmap_interp_method,
     display_res_deg = CONFIG$spatial_heatmap_display_res,
-    hss_model       = if (!is.null(cf) && !is.null(cf$cate_hss_model)) cf$cate_hss_model else "cast",
-    hss_threshold   = if (!is.null(cf) && !is.null(cf$cate_hss_threshold)) cf$cate_hss_threshold else 0.1,
+    hss_model       = if (!is.null(cf) && !is.null(cf$cate_hss_model)) cf$cate_hss_model else CONFIG$cate_hss_model,
+    hss_threshold   = if (!is.null(cf) && !is.null(cf$cate_hss_threshold)) cf$cate_hss_threshold else CONFIG$cate_hss_threshold,
     species_label   = if (!is.null(cf) && !is.null(cf$species)) cf$species else "Ovis_ammon",
     ovis_style      = TRUE
   )
