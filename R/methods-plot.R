@@ -312,10 +312,32 @@ plot.cast_screen <- function(x, var_labels = NULL, ...) {
       ),
       x = "", y = "Composite score"
     ) +
-    theme_cast() +
+    theme_cast(base_size = 12) +
     ggplot2::theme(
+      text = ggplot2::element_text(family = "Arial"),
+      plot.title = ggplot2::element_text(
+        face = "bold", hjust = 0, size = 10
+      ),
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0, size = 22, face = "plain"
+      ),
+      axis.title.x = ggplot2::element_text(
+        face = "bold", size = 22
+      ),
+      axis.title.y = ggplot2::element_text(
+        face = "bold", size = 22
+      ),
       axis.text.x = ggplot2::element_text(
-        angle = 45, hjust = 1, vjust = 1, size = 8
+        angle = 45, hjust = 1, vjust = 1, size = 22, face = "plain"
+      ),
+      axis.text.y = ggplot2::element_text(
+        size = 22, face = "plain"
+      ),
+      legend.title = ggplot2::element_text(
+        face = "bold", size = 22
+      ),
+      legend.text = ggplot2::element_text(
+        face = "plain", size = 22
       ),
       legend.position = "bottom"
     )

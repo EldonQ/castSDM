@@ -430,8 +430,9 @@ plot.cast_shap <- function(x,
   }
 
   p <- p +
-    ggplot2::theme_void(base_size = 11) +
+    ggplot2::theme_void(base_size = 11, base_family = "Arial") +
     ggplot2::theme(
+      text = ggplot2::element_text(family = "Arial"),
       plot.title = ggplot2::element_text(
         face = "bold", hjust = 0, size = 12
       ),
@@ -444,7 +445,7 @@ plot.cast_shap <- function(x,
       legend.spacing.x = ggplot2::unit(1.8, "cm"),
       legend.justification = "center",
       legend.title = ggplot2::element_text(size = 10, face = "bold", lineheight = 1.1),
-      legend.text = ggplot2::element_text(size = 8.5),
+      legend.text = ggplot2::element_text(size = 8.5, face = "plain"),
       plot.margin = ggplot2::margin(10, 26, 10, 26)
     )
 
@@ -686,8 +687,9 @@ plot.cast_shap <- function(x,
       x = NULL
     ) +
     ggplot2::coord_cartesian(clip = "off") +
-    ggplot2::theme_classic(base_size = 11) +
+    ggplot2::theme_classic(base_size = 11, base_family = "Arial") +
     ggplot2::theme(
+      text = ggplot2::element_text(family = "Arial"),
       # Outer box frame
       panel.border = ggplot2::element_rect(
         colour = "black", fill = NA, linewidth = 0.6
@@ -707,6 +709,12 @@ plot.cast_shap <- function(x,
         angle = 45, vjust = 1, hjust = 1,
         size = 8.5, color = "gray15"
       ),
+      axis.text.y = ggplot2::element_text(
+        size = 8.5, face = "plain"
+      ),
+      axis.text.y.right = ggplot2::element_text(
+        size = 8.5, face = "plain"
+      ),
       axis.ticks.x = ggplot2::element_line(
         color = "grey50", linewidth = 0.3
       ),
@@ -723,9 +731,9 @@ plot.cast_shap <- function(x,
       # Legend at bottom with arrow labels
       legend.position = "bottom",
       legend.title = ggplot2::element_text(
-        face = "bold", size = 9.5
+        face = "bold", size = 10
       ),
-      legend.text = ggplot2::element_text(size = 9)
+      legend.text = ggplot2::element_text(size = 8.5, face = "plain")
     )
 
   p
