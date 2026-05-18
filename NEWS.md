@@ -15,7 +15,6 @@
 * E-value sensitivity analysis via `cast_ate()` (`compute_evalue = TRUE`).
 * Backdoor criterion check via `cast_roles()`.
 * SHAP value computation for XGBoost models via `cast_shap_xgb()`.
-* MC Dropout uncertainty estimation for CI-MLP models.
 * Spatial CV support in `cast_cv()`.
 * Batch multi-species workflow via `cast_batch()`.
 * Publication-quality spatial heatmaps (HSS & CATE) via helper functions

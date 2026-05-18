@@ -15,7 +15,7 @@ The package supports both end-to-end and modular use. You can run a full one-spe
 - Estimates average treatment-effect summaries with double machine learning and optional sensitivity / identifiability checks.
 - Uses DAG and ATE outputs to guide variable screening, structural role assignment, and causal feature engineering.
 - Fits a causally informed neural model alongside standard SDM baselines including RF, MaxEnt, and BRT.
-- Produces habitat suitability maps, spatial cross-validation summaries, inter-model consistency diagnostics, SHAP explanations, MC Dropout uncertainty, and optional CATE surfaces.
+- Produces habitat suitability maps, spatial cross-validation summaries, inter-model consistency diagnostics, SHAP explanations, and optional CATE surfaces.
 - Scales from focal species analysis to multi-species batch workflows.
 
 ## Installation
@@ -54,7 +54,7 @@ install.packages(c(
 | Causal structure and effects | `cast_dag()`, `cast_ate()`, `cast_evalue()`, `cast_backdoor()` | Learn putative predictor structure, estimate effect summaries, and add sensitivity / identifiability checks |
 | Screening and representation | `cast_screen()`, `cast_roles()`, `cast_features()` | Select variables and construct feature spaces informed by DAG + ATE outputs |
 | Fitting and evaluation | `cast_fit()`, `cast_evaluate()`, `cast_cv()` | Fit models and evaluate them under hold-out or spatial blocking |
-| Spatial outputs | `cast_predict()`, `cast_consistency()`, `cast_uncertainty()`, `cast_cate()` | Map habitat suitability, compare models, quantify neural uncertainty, and estimate heterogeneous effects |
+| Spatial outputs | `cast_predict()`, `cast_consistency()`, `cast_cate()` | Map habitat suitability, compare models, and estimate heterogeneous effects |
 | Interpretation and reporting | `cast_shap_xgb()`, `cast_shap_fit()`, `cast_shap_write_csv()`, `cast_report()` | Explain fitted models and export a reproducible HTML summary |
 | Wrappers | `cast()`, `cast_batch()` | Run one-species or multi-species end-to-end workflows |
 
