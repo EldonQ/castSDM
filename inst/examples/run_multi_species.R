@@ -1,12 +1,24 @@
 # ==============================================================================
 # castSDM 多物种并行示例（与 run_ovis_ammon.R 同一套 CONFIG 形参风格）
 #
+# 本脚本自动加载包内 data/ 下全部 32 个物种的 .rda 数据集以及
+# china_env_grid 环境栅格，对每个物种独立运行完整 castSDM 流水线，结果
+# 保存至 <output_dir>/<Species>/ 各自子目录。
+#
 # 与单物种 ovis 脚本对齐之处：
 #   - 单一 CONFIG 列表集中配置（cast_prepare / cast_dag / cast_ate /
 #     cast_screen / cast_fit / cast_evaluate / cast_predict / cast_cv /
 #     cast_cate / SHAP 等与 ovis 字段对应）
 #   - 出图 DPI、ggsave(bg=white)、空间图 basemap、一致性图字体等与包内
 #     cast_batch() 升级版一致
+#
+# v0.2.0 新增功能集成：
+#   - cast_worker_budget()：自动分配 species × intra 两层并行
+#   - cast_batch_resume()：断点续跑，跳过已完成的物种
+#   - GAM 算法（fit_models 新增 "gam"）
+#   - cast_tune()：统一超参网格搜索（可选）
+#   - 纯 R CI-MLP 后端（默认，无需 torch）
+#   - 每步检查点 + resource_log.csv 自动写盘
 #
 # 多物种增量：
 #   - 物种并行（有 dev_package_root 时为 PSOCK）；每个物种
@@ -150,21 +162,22 @@ for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table", "p
 CONFIG <- list(
   # --- multi-species only ---
   only_shap_posthoc  = FALSE, # TRUE：跳过 cast_batch，只读各物种 cast_result.rds 补 SHAP（不重训）
-  only_replot_spatial_heatmap = TRUE, # TRUE：仅热图重绘；需 terra 与同仓库 cast_spatial_heatmap_helpers.R
+  only_replot_spatial_heatmap = FALSE, # TRUE：仅热图重绘；需 terra 与同仓库 cast_spatial_heatmap_helpers.R
   spatial_heatmap_res_deg      = 0.06,
   spatial_heatmap_interp_method = "nearest",
   spatial_heatmap_display_res   = 0.02,
-  data_dir          = NULL, # 非 NULL 时扫描目录内 *.csv，忽略 species_files
-  species_files     = list(
-    Ovis_ammon           = "CAST_Ovis_ammon_Res9_screened.csv",
-    Gazella_subgutturosa = "CAST_Gazella_subgutturosa_Res9_screened.csv",
-    Pseudois_nayaur      = "CAST_Pseudois_nayaur_Res9_screened.csv"
-  ),
-  env_grid_path     = NULL, # 非 NULL 时用该路径；否则尝试包内中国环境栅格
+
+  # --- 物种来源 ---
+  # 默认从包内 data/*.rda 自动加载全部 32 个物种；
+  # 也可设置 data_dir 指向外部 CSV 目录
+  data_dir          = NULL, # 非 NULL 时扫描目录内 *.csv，忽略包内 .rda
+  env_grid_path     = NULL, # 非 NULL 时用该路径；否则用包内 china_env_grid
+
   output_dir        = "castSDM_multi_species",
   fig_dpi           = 600L,
-  n_workers         = min(3L, max(1L, parallel::detectCores() - 1L)),
+  n_workers         = min(6L, max(1L, parallel::detectCores() - 1L)),
   parallel_species  = TRUE,
+  resume            = TRUE, # 断点续跑：跳过已有 cast_result.rds 的物种
   batch_verbose     = TRUE,
 
   response          = "presence",
@@ -203,7 +216,7 @@ CONFIG <- list(
   screen_min_fraction = 0.5,
   screen_num_trees    = 500L,
   screen_verbose      = FALSE,
-  fit_models            = c("cast", "rf", "maxent", "brt"),
+  fit_models            = c("cast", "rf", "gam", "maxent", "brt"),
   fit_n_epochs          = 50L,
   fit_n_runs            = 1L,
   fit_patience          = 40L,
@@ -283,11 +296,29 @@ if (!is.null(CONFIG$data_dir) && dir.exists(CONFIG$data_dir)) {
   cat(sprintf("[Auto-scan] %d species in %s\n",
               length(sp_names), CONFIG$data_dir))
 } else {
-  species_list <- lapply(CONFIG$species_files, function(f) {
-    path <- system.file("extdata", f, package = "castSDM")
-    if (path == "") stop("File not found in package extdata: ", f)
-    data.table::fread(path, data.table = FALSE)
-  })
+  # 从包内 data/ 目录自动加载全部物种 .rda（排除 china_env_grid）
+  data_dir <- if (!is.na(pkg_root)) {
+    file.path(pkg_root, "data")
+  } else {
+    system.file("data", package = "castSDM")
+  }
+  rda_files <- list.files(data_dir, pattern = "\\.rda$", full.names = TRUE)
+  rda_names <- tools::file_path_sans_ext(basename(rda_files))
+  # 排除非物种数据
+  exclude <- c("china_env_grid")
+  keep <- !rda_names %in% exclude
+  rda_files <- rda_files[keep]
+  rda_names <- rda_names[keep]
+
+  species_list <- list()
+  for (i in seq_along(rda_files)) {
+    e <- new.env(parent = emptyenv())
+    load(rda_files[i], envir = e)
+    obj_name <- ls(e)[1]
+    species_list[[rda_names[i]]] <- get(obj_name, envir = e)
+  }
+  cat(sprintf("[Package data] %d species loaded from %s\n",
+              length(species_list), data_dir))
 }
 
 for (sp in names(species_list)) {
@@ -305,16 +336,38 @@ if (!is.null(CONFIG$env_grid_path) && file.exists(CONFIG$env_grid_path)) {
   cat(sprintf("\nPrediction grid (user file): %d x %d\n",
               nrow(env_grid), ncol(env_grid)))
 } else {
-  pkg_grid <- system.file(
-    "extdata", "China_EnvData_Res9_Screened.csv",
-    package = "castSDM"
-  )
-  if (pkg_grid != "") {
-    env_grid <- data.table::fread(pkg_grid, data.table = FALSE)
-    cat(sprintf("\nPrediction grid (bundled): %d x %d\n",
+  # 从包内 data/china_env_grid.rda 加载
+  grid_rda <- if (!is.na(pkg_root)) {
+    file.path(pkg_root, "data", "china_env_grid.rda")
+  } else {
+    ""
+  }
+  if (nzchar(grid_rda) && file.exists(grid_rda)) {
+    e <- new.env(parent = emptyenv())
+    load(grid_rda, envir = e)
+    env_grid <- get(ls(e)[1], envir = e)
+  } else {
+    # 已安装包模式：LazyData 直接可用
+    tryCatch({
+      env_grid <- get("china_env_grid", envir = asNamespace("castSDM"))
+    }, error = function(err) NULL)
+  }
+  if (!is.null(env_grid)) {
+    cat(sprintf("\nPrediction grid (china_env_grid): %d x %d\n",
                 nrow(env_grid), ncol(env_grid)))
   } else {
-    cat("\nNo prediction grid; spatial prediction skipped.\n")
+    # 兼容旧版 extdata CSV
+    pkg_grid <- system.file(
+      "extdata", "China_EnvData_Res9_Screened.csv",
+      package = "castSDM"
+    )
+    if (pkg_grid != "") {
+      env_grid <- data.table::fread(pkg_grid, data.table = FALSE)
+      cat(sprintf("\nPrediction grid (extdata CSV): %d x %d\n",
+                  nrow(env_grid), ncol(env_grid)))
+    } else {
+      cat("\nNo prediction grid; spatial prediction skipped.\n")
+    }
   }
 }
 
@@ -417,18 +470,24 @@ if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
 } else {
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Parallel backend
+# Parallel backend + worker budget
 # ══════════════════════════════════════════════════════════════════════════════
 
 use_par <- isTRUE(CONFIG$parallel_species) && CONFIG$n_workers > 1L
+
+# 使用 cast_worker_budget 分配 species × intra 两层并行
+worker_budget <- cast_worker_budget(
+  total_workers = CONFIG$n_workers,
+  n_species     = length(species_list)
+)
 cat(sprintf(
-  "\nParallel: %s | workers: %d (cores: %d)\n",
+  "\nParallel: %s | budget: total=%d species=%d intra=%d (cores: %d)\n",
   if (use_par) "ON" else "OFF",
-  if (use_par) CONFIG$n_workers else 1L,
+  worker_budget$total, worker_budget$species, worker_budget$intra,
   parallel::detectCores()
 ))
 if (use_par) {
-  future::plan(future::multisession, workers = CONFIG$n_workers)
+  future::plan(future::multisession, workers = worker_budget$species)
 } else {
   future::plan(future::sequential)
 }
@@ -442,7 +501,13 @@ cat("\nRunning cast_batch()...\n\n")
 eval_resp <- CONFIG$eval_response
 if (is.null(eval_resp)) eval_resp <- CONFIG$response
 
-batch_result <- cast_batch(
+# 断点续跑：如果 CONFIG$resume=TRUE 且 output_dir 已有部分结果
+do_resume <- isTRUE(CONFIG$resume) && dir.exists(CONFIG$output_dir) &&
+  any(vapply(names(species_list), function(sp)
+    file.exists(file.path(CONFIG$output_dir, sp, "cast_result.rds")),
+    logical(1)))
+
+batch_args <- list(
   species_list   = species_list,
   env_data       = env_grid,
   models         = CONFIG$fit_models,
@@ -539,7 +604,21 @@ batch_result <- cast_batch(
   tune_grid        = CONFIG$fit_tune_grid
 )
 
-print(batch_result)
+if (do_resume) {
+  cat("[Resume mode] Skipping species with existing cast_result.rds...\n")
+  batch_result <- do.call(cast_batch_resume, c(
+    list(output_dir = CONFIG$output_dir),
+    batch_args
+  ))
+} else {
+  batch_result <- do.call(cast_batch, batch_args)
+}
+
+if (!is.null(batch_result)) {
+  print(batch_result)
+} else {
+  cat("\nAll species already complete (resume mode, nothing to re-run).\n")
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Cross-species comparison
@@ -548,16 +627,28 @@ print(batch_result)
 fig_dir <- file.path(CONFIG$output_dir, "figures")
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 
-cat("\n[Plot] Multi-species model performance comparison...\n")
+if (!is.null(batch_result) && !is.null(batch_result$species_metrics) &&
+    nrow(batch_result$species_metrics) > 0) {
+  cat("\n[Plot] Multi-species model performance comparison...\n")
+  p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi"))
+  ggplot2::ggsave(
+    file.path(fig_dir, "multi_species_comparison.png"),
+    p_compare,
+    width = 14, height = 6, dpi = CONFIG$fig_dpi,
+    bg = "white", limitsize = FALSE
+  )
+  cat("  Saved: multi_species_comparison.png\n")
+}
 
-p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi"))
-ggplot2::ggsave(
-  file.path(fig_dir, "multi_species_comparison.png"),
-  p_compare,
-  width = 14, height = 6, dpi = CONFIG$fig_dpi,
-  bg = "white", limitsize = FALSE
-)
-cat("  Saved: multi_species_comparison.png\n")
+# 打印 resource_log 摘要
+res_log <- file.path(CONFIG$output_dir, "resource_log.csv")
+if (file.exists(res_log)) {
+  rl <- utils::read.csv(res_log, stringsAsFactors = FALSE)
+  cat(sprintf("\n[Resource log] %d entries across %d species\n",
+              nrow(rl), length(unique(rl$species))))
+  cat(sprintf("  Total wall time: %.1f min\n",
+              sum(rl$elapsed_sec, na.rm = TRUE) / 60))
+}
 
 future::plan(future::sequential)
 
@@ -567,11 +658,16 @@ cat("Output: ", normalizePath(CONFIG$output_dir, winslash = "/",
                               mustWork = FALSE), "\n", sep = "")
 cat("============================================================\n\n")
 
-for (sp in names(batch_result$results)) {
+# 列出各物种输出文件数
+for (sp in names(species_list)) {
   sp_figs <- file.path(CONFIG$output_dir, sp, "figures")
+  sp_rds  <- file.path(CONFIG$output_dir, sp, "cast_result.rds")
   if (dir.exists(sp_figs)) {
     figs <- list.files(sp_figs, pattern = "\\.png$")
-    cat(sprintf("  %s: %d PNG(s)\n", sp, length(figs)))
+    cat(sprintf("  %s: %d PNG(s) %s\n", sp, length(figs),
+                if (file.exists(sp_rds)) "[done]" else "[partial]"))
+  } else if (file.exists(sp_rds)) {
+    cat(sprintf("  %s: [done]\n", sp))
   }
 }
 

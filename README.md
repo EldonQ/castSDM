@@ -7,16 +7,18 @@
 
 castSDM (Causal Structure-Informed Species Distribution Modeling) is an R package for causal-aware species distribution modeling. It does not claim to turn observational SDMs into definitive causal identification. Instead, it brings causal structure learning, treatment-effect estimation, screening, feature construction, model fitting, spatial prediction, and interpretation into one workflow so that causal evidence can be used explicitly upstream rather than only discussed after the fact.
 
-The package supports both end-to-end and modular use. You can run a full one-species workflow with `cast()`, process many species with `cast_batch()`, or call each stage separately depending on how much control you need.
+The package supports both end-to-end and modular use. You can run a full one-species workflow with `cast()`, process many species with `cast_batch()`, drive reproducible runs from a YAML config via `cast_run_from_config()`, or call each stage separately depending on how much control you need.
+
+castSDM is optimised for Windows workstations: all parallel paths use `future::multisession` (PSOCK), tile-based prediction keeps RAM bounded on large rasters, and per-species checkpoints enable crash-safe batch runs without HPC infrastructure.
 
 ## What castSDM does
 
 - Learns putative dependency structure among environmental predictors with bootstrapped DAG learning or alternative structure learners.
 - Estimates average treatment-effect summaries with double machine learning and optional sensitivity / identifiability checks.
 - Uses DAG and ATE outputs to guide variable screening, structural role assignment, and causal feature engineering.
-- Fits a causally informed neural model alongside standard SDM baselines including RF, MaxEnt, and BRT.
+- Fits a causally informed neural model (CPU-native, no torch dependency by default) alongside standard SDM baselines including RF, GAM, MaxEnt, and BRT; provides an Ensemble of Small Models (ESM) fallback for rare species.
 - Produces habitat suitability maps, spatial cross-validation summaries, inter-model consistency diagnostics, SHAP explanations, and optional CATE surfaces.
-- Scales from focal species analysis to multi-species batch workflows.
+- Scales from focal species analysis to multi-species batch workflows with per-species checkpoints, crash-safe resume, tile-based prediction, and unified hyperparameter tuning.
 
 ## Installation
 
@@ -36,11 +38,12 @@ castSDM keeps hard imports lightweight and installs many advanced capabilities o
 ```r
 install.packages(c(
   "car", "bnlearn", "BiDAG", "dagitty", "ranger", "gbm", "maxnet",
-  "pROC", "ggplot2", "patchwork", "sf", "terra", "future",
-  "future.apply", "fastshap", "xgboost", "grf", "viridisLite"
+  "mgcv", "pROC", "ggplot2", "patchwork", "sf", "terra", "future",
+  "future.apply", "fastshap", "xgboost", "grf", "viridisLite",
+  "yaml", "peakRAM"
 ))
 
-# torch is installed separately if you want neural models / NOTEARS
+# torch is optional — the default CI-MLP backend is pure R (BLAS-accelerated)
 # install.packages("torch")
 # torch::install_torch()
 ```
@@ -53,19 +56,23 @@ install.packages(c(
 | Preparation | `cast_prepare()` | Validate data and create train/test splits |
 | Causal structure and effects | `cast_dag()`, `cast_ate()`, `cast_evalue()`, `cast_backdoor()` | Learn putative predictor structure, estimate effect summaries, and add sensitivity / identifiability checks |
 | Screening and representation | `cast_screen()`, `cast_roles()`, `cast_features()` | Select variables and construct feature spaces informed by DAG + ATE outputs |
-| Fitting and evaluation | `cast_fit()`, `cast_evaluate()`, `cast_cv()` | Fit models and evaluate them under hold-out or spatial blocking |
-| Spatial outputs | `cast_predict()`, `cast_consistency()`, `cast_cate()` | Map habitat suitability, compare models, and estimate heterogeneous effects |
+| Fitting and evaluation | `cast_fit()`, `cast_evaluate()`, `cast_cv()`, `cast_tune()` | Fit models, evaluate under hold-out or spatial blocking, and tune hyperparameters via split-sample grid search |
+| Rare species | `cast_esm()` | Ensemble of Small Models (bivariate GLM/GAM) fallback for low-presence species |
+| Spatial outputs | `cast_predict()`, `cast_predict_tiled()`, `cast_consistency()`, `cast_cate()` | Map habitat suitability (in-memory or tile-based for large rasters), compare models, and estimate heterogeneous effects |
 | Interpretation and reporting | `cast_shap_xgb()`, `cast_shap_fit()`, `cast_shap_write_csv()`, `cast_report()` | Explain fitted models and export a reproducible HTML summary |
-| Wrappers | `cast()`, `cast_batch()` | Run one-species or multi-species end-to-end workflows |
+| Wrappers | `cast()`, `cast_batch()`, `cast_batch_resume()` | Run one-species or multi-species end-to-end workflows, with crash-safe resume |
+| Config-driven | `cast_run_from_config()`, `cast_config_template()` | Drive a full batch from a single YAML file for reproducible, version-controlled runs |
+| Parallelism | `cast_worker_budget()` | Allocate workers across species and intra-species stages on Windows workstations |
 
 ## Model and interpretation options
 
 ### Fitted models
 
-- `cast`: causally informed neural network using ATE-weighted inputs and DAG-guided interactions.
+- `cast`: causally informed neural network (CPU-native pure R backend by default; optional `torch` backend) using ATE-weighted inputs and DAG-guided interactions.
 - `mlp_ate`: neural network using ATE-weighted predictors without DAG interaction features.
 - `mlp`: neural baseline on standardized raw predictors.
 - `rf`: random forest baseline.
+- `gam`: generalized additive model baseline (via `mgcv`).
 - `maxent`: MaxEnt baseline.
 - `brt`: boosted regression tree baseline.
 
@@ -91,12 +98,14 @@ Extended functionality is activated through suggested packages:
 |---------|----------|
 | Collinearity | `car` |
 | DAG / graph tools | `bnlearn`, `BiDAG`, `dagitty`, `igraph`, `ggraph`, `torch` |
-| Model fitting | `ranger`, `gbm`, `maxnet`, `torch` |
+| Model fitting | `ranger`, `gbm`, `mgcv`, `maxnet`, `torch` |
 | Evaluation | `pROC` |
 | CATE | `grf` |
 | SHAP | `xgboost`, `fastshap` |
 | Spatial / plotting | `ggplot2`, `patchwork`, `sf`, `terra`, `viridisLite` |
 | Parallel execution | `future`, `future.apply`, `pkgload` |
+| Config / tuning | `yaml` |
+| Resource monitoring | `peakRAM` |
 | Reporting / vignettes | `rmarkdown`, `knitr` |
 
 Functions that rely on optional packages will emit informative errors if the required backend is not installed.

@@ -5,14 +5,14 @@
 \alias{china_env_grid}
 \title{China Environmental Grid (ISEA3H Res9)}
 \format{
-A data frame with 3648 rows and 14 columns:
-\describe{
-\item{HID}{Hexagon grid cell ID.}
-\item{lon, lat}{Geographic coordinates (WGS84).}
-\item{bio02, bio15, bio19, elevation, aridityindexthornthwaite,
-maxtempcoldest, tri, topowet, nontree, etccdi_cwd,
-landcover_igbp}{Environmental variables (see \link{ovis_ammon}).}
-}
+A data frame with 3648 rows and 53 columns. Columns are: HID,
+lon, lat, bio01, bio02, bio03, bio04, bio05, bio06, bio07, bio12,
+bio13, bio14, bio15, bio16, bio17, bio18, bio19, elevation,
+annualpet, aridityindexthornthwaite, climaticmoistureindex,
+embergerq, maxtempcoldest, petseasonality, tri, topowet, nontree,
+bare, tree, etccdi_cdd, etccdi_cwd, etccdi_fd, etccdi_gsl,
+etccdi_rx1day, etccdi_rx5day, etccdi_sdii, igbp_01 through
+igbp_16. See \link{Ovis_ammon} for column descriptions.
 }
 \source{
 EcoISEA3H project.
@@ -22,8 +22,8 @@ china_env_grid
 }
 \description{
 Full environmental data grid for spatial prediction across China on the
-ISEA3H Resolution 9 hexagonal grid. Contains the same VIF-screened
-environmental variables as \link{ovis_ammon}.
+ISEA3H Resolution 9 hexagonal grid. Contains the same 50 environmental
+variables as the species datasets (see \link{Ovis_ammon}).
 }
 \examples{
 data(china_env_grid)

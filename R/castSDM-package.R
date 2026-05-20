@@ -14,11 +14,20 @@
 #'    ([cast_roles()])
 #' 6. **Feature Engineering**: ATE-weighting + DAG interactions
 #'    ([cast_features()])
-#' 7. **Model Fitting**: CI-MLP and traditional SDMs ([cast_fit()])
-#' 8. **Evaluation**: AUC, TSS metrics ([cast_evaluate()])
-#' 9. **Prediction**: Spatial habitat suitability scores ([cast_predict()])
-#' 10. **CATE Estimation**: Spatially heterogeneous treatment effects
+#' 7. **Model Fitting**: CI-MLP (CPU-native pure R or torch) and traditional
+#'    SDMs including RF, GAM, MaxEnt, BRT ([cast_fit()]), plus ESM for rare
+#'    species ([cast_esm()])
+#' 8. **Hyperparameter Tuning**: Per-algorithm grid search via split-sample
+#'    scoring ([cast_tune()])
+#' 9. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()])
+#' 10. **Prediction**: In-memory ([cast_predict()]) or tile-based
+#'     ([cast_predict_tiled()]) spatial habitat suitability mapping
+#' 11. **CATE Estimation**: Spatially heterogeneous treatment effects
 #'     ([cast_cate()])
+#' 12. **Batch Workflows**: Multi-species runs with checkpoint/resume
+#'     ([cast_batch()], [cast_batch_resume()]), YAML-driven config
+#'     ([cast_run_from_config()]), and worker budget allocation
+#'     ([cast_worker_budget()])
 #'
 #' @section Quick Start:
 #' ```
