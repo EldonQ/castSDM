@@ -25,3 +25,5 @@ inst/extdata/CAST_*_Res9_screened.csv
 !inst/extdata/CAST_Ovis_ammon_Res9_screened.csv
 !inst/extdata/CAST_Gazella_subgutturosa_Res9_screened.csv
 !inst/extdata/CAST_Pseudois_nayaur_Res9_screened.csv
+
+tools/

@@ -1008,9 +1008,8 @@ if (DO_SPATIAL_CV && exists("cv_result") && !is.null(cv_result) &&
               cv_result$k, cv_result$block_method))
   for (i in seq_len(nrow(cv_result$metrics))) {
     r <- cv_result$metrics[i, ]
-    cat(sprintf("  %s: AUC=%.3f  TSS=%.3f  CBI=%.3f  SEDI=%.3f\n",
-                r$model, r$auc_mean, r$tss_mean,
-                r$cbi_mean, r$sedi_mean))
+    cat(sprintf("  %s: AUC=%.3f  TSS=%.3f  CBI=%.3f\n",
+                r$model, r$auc_mean, r$tss_mean, r$cbi_mean))
   }
 }
 

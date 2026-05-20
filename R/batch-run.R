@@ -515,14 +515,13 @@ cast_batch <- function(species_list,
     } else if (!is.null(r$eval) && !is.null(r$eval$metrics)) {
       em <- r$eval$metrics
       em$species <- sp
-      for (mcol in c("auc", "tss", "cbi", "sedi", "kappa", "prauc")) {
+      for (mcol in c("auc", "tss", "cbi")) {
         mean_col <- paste0(mcol, "_mean")
         if (mean_col %in% names(em)) em[[mcol]] <- em[[mean_col]]
       }
       em$fold <- 0L
       metrics_rows[[sp]] <- em[, intersect(
-        c("fold", "model", "auc", "tss", "cbi", "sedi", "kappa",
-          "prauc", "species"),
+        c("fold", "model", "auc", "tss", "cbi", "species"),
         names(em)
       ), drop = FALSE]
     }

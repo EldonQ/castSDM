@@ -53,9 +53,6 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
       auc_mean    = ev["auc"],
       tss_mean    = ev["tss"],
       cbi_mean    = ev["cbi"],
-      sedi_mean   = ev["sedi"],
-      kappa_mean  = ev["kappa"],
-      prauc_mean  = ev["prauc"],
       stringsAsFactors = FALSE,
       row.names = NULL
     )
@@ -83,16 +80,20 @@ predict_single_model <- function(mdl_info, X_raw, X_sc,
                                  screen, dag, ate) {
   if (is.null(mdl_info$model)) return(rep(NA_real_, nrow(X_raw)))
 
-  if (mdl_info$type == "nn") {
-    # Build features for NN
+  type <- mdl_info$type %||% "traditional"
+
+  if (type == "nn" || type == "nn_r") {
     feat_type <- mdl_info$feature_type
-    if (feat_type != "mlp") {
+    if (!is.null(feat_type) && feat_type != "mlp") {
       feat <- cast_features(X_sc, screen, dag, ate, model_type = feat_type)
       X_pred <- feat$features
     } else {
       X_pred <- X_sc
     }
-
+    if (type == "nn_r") {
+      return(cast_mlp_predict(mdl_info$model, X_pred))
+    }
+    # Legacy torch backend
     model <- mdl_info$model
     model$eval()
     torch::with_no_grad({
@@ -104,24 +105,22 @@ predict_single_model <- function(mdl_info, X_raw, X_sc,
       )
     })
     return(pred)
+  }
 
-  } else {
-    # Traditional models
-    nm <- mdl_info$name
-    if (nm == "rf") {
-      return(
-        stats::predict(mdl_info$model, data = X_raw)$predictions[, "1"]
-      )
-    } else if (nm == "maxent") {
-      return(
-        as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic"))
-      )
-    } else if (nm == "brt") {
-      bt <- mdl_info$best_trees %||% 500L
-      return(
-        stats::predict(mdl_info$model, X_raw, n.trees = bt, type = "response")
-      )
-    }
+  # Traditional models
+  nm <- mdl_info$name
+  if (nm == "rf") {
+    return(stats::predict(mdl_info$model, data = X_raw)$predictions[, "1"])
+  } else if (nm == "maxent") {
+    return(as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic")))
+  } else if (nm == "brt") {
+    bt <- mdl_info$best_trees %||% 500L
+    return(stats::predict(mdl_info$model, X_raw, n.trees = bt, type = "response"))
+  } else if (nm == "gam") {
+    return(as.numeric(stats::predict(mdl_info$model, newdata = X_raw,
+                                     type = "response")))
+  } else if (nm == "esm") {
+    return(predict_cast_esm(mdl_info$model, X_raw))
   }
   rep(NA_real_, nrow(X_raw))
 }

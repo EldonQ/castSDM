@@ -3,8 +3,8 @@
 #' Evaluates fitted models using spatially blocked k-fold cross-validation.
 #' Unlike random splitting, spatial blocks ensure test folds are geographically
 #' separated from training folds, providing honest estimates of model
-#' transferability. The resulting metrics (AUC, TSS, CBI, SEDI, Kappa, PRAUC)
-#' feed directly into [cast_predict()] for threshold-calibrated HSS maps.
+#' transferability. The resulting metrics (AUC, TSS, CBI) feed directly into
+#' [cast_predict()] for threshold-calibrated HSS maps.
 #'
 #' @param data A `data.frame` with `lon`, `lat`, `presence` columns and
 #'   environmental variables. Typically the full dataset before any split,
@@ -177,9 +177,6 @@ cast_cv <- function(data,
         auc   = m["auc"],
         tss   = m["tss"],
         cbi   = m["cbi"],
-        sedi  = m["sedi"],
-        kappa = m["kappa"],
-        prauc = m["prauc"],
         row.names = NULL
       )
     }
@@ -233,11 +230,10 @@ cast_cv <- function(data,
     do.call(rbind, all_fold_rows)
   } else {
     data.frame(fold=integer(), model=character(),
-               auc=numeric(), tss=numeric(), cbi=numeric(),
-               sedi=numeric(), kappa=numeric(), prauc=numeric())
+               auc=numeric(), tss=numeric(), cbi=numeric())
   }
 
-  metric_cols <- c("auc", "tss", "cbi", "sedi", "kappa", "prauc")
+  metric_cols <- c("auc", "tss", "cbi")
   agg_rows <- list()
   for (mdl in models) {
     sub <- fold_df[fold_df$model == mdl, metric_cols, drop = FALSE]
@@ -249,9 +245,6 @@ cast_cv <- function(data,
       auc_mean    = means["auc"],   auc_sd    = sds["auc"],
       tss_mean    = means["tss"],   tss_sd    = sds["tss"],
       cbi_mean    = means["cbi"],   cbi_sd    = sds["cbi"],
-      sedi_mean   = means["sedi"],  sedi_sd   = sds["sedi"],
-      kappa_mean  = means["kappa"], kappa_sd  = sds["kappa"],
-      prauc_mean  = means["prauc"], prauc_sd  = sds["prauc"],
       n_folds     = nrow(sub),
       row.names   = NULL
     )

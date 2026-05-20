@@ -35,61 +35,69 @@
   }
 
   result <- tryCatch({
-    split <- cast_prepare(
-      sp_data,
-      train_fraction = cfg$train_fraction,
-      seed = seed_i,
-      env_vars = cfg$prepare_env_vars,
-      verbose = cfg$prepare_verbose
+    split <- cast_run_step("prepare", output_dir, sp_name,
+      cast_prepare(
+        sp_data,
+        train_fraction = cfg$train_fraction,
+        seed = seed_i,
+        env_vars = cfg$prepare_env_vars,
+        verbose = cfg$prepare_verbose
+      )
     )
 
-    dag <- cast_dag(
-      split$train,
-      response = cfg$response,
-      env_vars = cfg$dag_env_vars,
-      R = cfg$dag_R,
-      algorithm = cfg$dag_algorithm,
-      score = cfg$dag_score,
-      strength_threshold = cfg$dag_strength_threshold,
-      direction_threshold = cfg$dag_direction_threshold,
-      max_rows = cfg$dag_max_rows,
-      seed = seed_i,
-      verbose = cfg$dag_verbose,
-      structure_method = cfg$dag_structure_method,
-      pc_alpha = cfg$dag_pc_alpha,
-      pc_test = cfg$dag_pc_test,
-      bidag_algorithm = cfg$dag_bidag_algorithm,
-      bidag_iterations = cfg$dag_bidag_iterations,
-      notears_lambda = cfg$dag_notears_lambda,
-      notears_max_iter = cfg$dag_notears_max_iter,
-      notears_lr = cfg$dag_notears_lr,
-      notears_tol = cfg$dag_notears_tol,
-      notears_rho_init = cfg$dag_notears_rho_init,
-      notears_alpha_mult = cfg$dag_notears_alpha_mult
+    dag <- cast_run_step("dag", output_dir, sp_name,
+      cast_dag(
+        split$train,
+        response = cfg$response,
+        env_vars = cfg$dag_env_vars,
+        R = cfg$dag_R,
+        algorithm = cfg$dag_algorithm,
+        score = cfg$dag_score,
+        strength_threshold = cfg$dag_strength_threshold,
+        direction_threshold = cfg$dag_direction_threshold,
+        max_rows = cfg$dag_max_rows,
+        seed = seed_i,
+        verbose = cfg$dag_verbose,
+        structure_method = cfg$dag_structure_method,
+        pc_alpha = cfg$dag_pc_alpha,
+        pc_test = cfg$dag_pc_test,
+        bidag_algorithm = cfg$dag_bidag_algorithm,
+        bidag_iterations = cfg$dag_bidag_iterations,
+        notears_lambda = cfg$dag_notears_lambda,
+        notears_max_iter = cfg$dag_notears_max_iter,
+        notears_lr = cfg$dag_notears_lr,
+        notears_tol = cfg$dag_notears_tol,
+        notears_rho_init = cfg$dag_notears_rho_init,
+        notears_alpha_mult = cfg$dag_notears_alpha_mult
+      )
     )
 
-    ate <- cast_ate(
-      split$train,
-      response = cfg$response,
-      variables = cfg$ate_variables,
-      K = cfg$ate_K,
-      alpha = cfg$ate_alpha,
-      num_trees = cfg$ate_num_trees,
-      quantile_cuts = cfg$ate_quantile_cuts,
-      p_adjust = cfg$ate_p_adjust,
-      parallel = cfg$ate_parallel,
-      seed = seed_i,
-      verbose = cfg$ate_verbose
+    ate <- cast_run_step("ate", output_dir, sp_name,
+      cast_ate(
+        split$train,
+        response = cfg$response,
+        variables = cfg$ate_variables,
+        K = cfg$ate_K,
+        alpha = cfg$ate_alpha,
+        num_trees = cfg$ate_num_trees,
+        quantile_cuts = cfg$ate_quantile_cuts,
+        p_adjust = cfg$ate_p_adjust,
+        parallel = cfg$ate_parallel,
+        seed = seed_i,
+        verbose = cfg$ate_verbose
+      )
     )
 
-    screen <- cast_screen(
-      dag, ate, split$train,
-      response = cfg$response,
-      min_vars = cfg$screen_min_vars,
-      min_fraction = cfg$screen_min_fraction,
-      num_trees = cfg$screen_num_trees,
-      seed = seed_i,
-      verbose = cfg$screen_verbose
+    screen <- cast_run_step("screen", output_dir, sp_name,
+      cast_screen(
+        dag, ate, split$train,
+        response = cfg$response,
+        min_vars = cfg$screen_min_vars,
+        min_fraction = cfg$screen_min_fraction,
+        num_trees = cfg$screen_num_trees,
+        seed = seed_i,
+        verbose = cfg$screen_verbose
+      )
     )
 
     roles <- cast_roles(screen, dag)
@@ -107,65 +115,73 @@
       ),
       fit_args
     )
-    fit <- do.call(cast_fit, fit_call_args)
+    fit <- cast_run_step("fit", output_dir, sp_name,
+      do.call(cast_fit, fit_call_args)
+    )
 
-    eval_result <- cast_evaluate(
-      fit, split$test,
-      response = cfg$eval_response
+    eval_result <- cast_run_step("eval", output_dir, sp_name,
+      cast_evaluate(fit, split$test, response = cfg$eval_response)
     )
 
     cv_result <- NULL
     if (cfg$do_cv) {
-      cv_result <- tryCatch(
-        cast_cv(
-          sp_data,
-          screen = screen, dag = dag, ate = ate,
-          k = cfg$cv_k, models = cfg$cv_models,
-          block_method = cfg$cv_block_method,
-          response = cfg$response,
-          n_epochs = cfg$cv_n_epochs,
-          n_runs = cfg$cv_n_runs,
-          rf_ntree = cfg$cv_rf_ntree,
-          brt_n_trees = cfg$cv_brt_n_trees,
-          parallel = cfg$cv_parallel,
-          seed = seed_i,
-          verbose = cfg$cv_verbose
-        ),
-        error = function(e) NULL
+      cv_result <- cast_run_step("cv", output_dir, sp_name,
+        tryCatch(
+          cast_cv(
+            sp_data,
+            screen = screen, dag = dag, ate = ate,
+            k = cfg$cv_k, models = cfg$cv_models,
+            block_method = cfg$cv_block_method,
+            response = cfg$response,
+            n_epochs = cfg$cv_n_epochs,
+            n_runs = cfg$cv_n_runs,
+            rf_ntree = cfg$cv_rf_ntree,
+            brt_n_trees = cfg$cv_brt_n_trees,
+            parallel = cfg$cv_parallel,
+            seed = seed_i,
+            verbose = cfg$cv_verbose
+          ),
+          error = function(e) NULL
+        )
       )
     }
 
     pred_result <- NULL
     if (!is.null(env_data)) {
-      pred_result <- tryCatch(
-        cast_predict(fit, env_data, models = cfg$predict_models),
-        error = function(e) NULL
+      pred_result <- cast_run_step("predict", output_dir, sp_name,
+        tryCatch(
+          cast_predict(fit, env_data, models = cfg$predict_models),
+          error = function(e) NULL
+        )
       )
     }
 
     cate_result <- NULL
     if (cfg$do_cate) {
-      cate_result <- tryCatch({
-        check_suggested("grf", "for CATE")
-        pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-        cast_cate(
-          split$train,
-          variables = cfg$cate_variables,
-          ate = ate, screen = screen,
-          response = cfg$response,
-          predict_data = pred_for_cate,
-          top_n = cfg$cate_top_n,
-          n_trees = cfg$cate_n_trees,
-          seed = seed_i,
-          verbose = cfg$cate_verbose
-        )
-      }, error = function(e) NULL)
+      cate_result <- cast_run_step("cate", output_dir, sp_name,
+        tryCatch({
+          check_suggested("grf", "for CATE")
+          pred_for_cate <- if (!is.null(env_data)) env_data else NULL
+          cast_cate(
+            split$train,
+            variables = cfg$cate_variables,
+            ate = ate, screen = screen,
+            response = cfg$response,
+            predict_data = pred_for_cate,
+            top_n = cfg$cate_top_n,
+            n_trees = cfg$cate_n_trees,
+            seed = seed_i,
+            verbose = cfg$cate_verbose
+          )
+        }, error = function(e) NULL)
+      )
     }
 
     cons_result <- NULL
     if (!is.null(pred_result) && length(pred_result$models) >= 2) {
-      cons_result <- tryCatch(cast_consistency(pred_result),
-                              error = function(e) NULL)
+      cons_result <- cast_run_step("consistency", output_dir, sp_name,
+        tryCatch(cast_consistency(pred_result), error = function(e) NULL)
+      )
     }
 
     # ── Save ALL plots ────────────────────────────────────────────────

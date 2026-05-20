@@ -343,7 +343,7 @@ print(fit)
 #
 # cast_cv() 将数据按空间格网分成 k 个地理块，每次用 k-1 个块训练、
 # 第 k 块测试，输出：
-#   - 空间独立的 AUC / TSS / CBI / SEDI / Kappa / PRAUC
+#   - 空间独立的 AUC / TSS / CBI
 #   - 每折最优阈值 → 用于后续 HSS 地图二值化
 #
 # k 建议值：
@@ -408,9 +408,9 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 13 步: 保留集评估 (Hold-out AUC/TSS/CBI/SEDI/Kappa/PRAUC)
+# 第 13 步: 保留集评估 (Hold-out AUC/TSS/CBI)
 #
-# cast_evaluate() 在随机保留测试集上计算全套指标。
+# cast_evaluate() 在随机保留测试集上计算 3 个判别/校准指标。
 # 配合 cast_cv() 使用：
 #   - cast_cv()        → 空间泛化能力 (更可靠, 用于论文主指标)
 #   - cast_evaluate()  → 快速参考指标 (补充对比)
@@ -419,7 +419,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 cat("=== Step 13: 保留集评估 ===\n")
 eval_result <- cast_evaluate(fit, split$test)
 print(eval_result)
-# 输出: AUC, TSS, CBI, SEDI, Kappa, PRAUC (6 个指标)
+# 输出: AUC, TSS, CBI (3 个指标)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -488,8 +488,8 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
   print(p_screen)
 
 
-  ## ── 16.4 模型性能对比图 (6 指标 facet) ────────────────────────────────────
-  # 展示 AUC / TSS / CBI / SEDI / Kappa / PRAUC
+  ## ── 16.4 模型性能对比图 (3 指标 facet) ────────────────────────────────────
+  # 展示 AUC / TSS / CBI
   p_eval <- plot(eval_result)
   print(p_eval)
 
@@ -594,9 +594,8 @@ if (exists("cv_result") && nrow(cv_result$metrics) > 0) {
   for (i in seq_len(nrow(cv_result$metrics))) {
     r <- cv_result$metrics[i, ]
     cat(sprintf(
-      "  %s: AUC=%.3f TSS=%.3f CBI=%.3f SEDI=%.3f Kappa=%.3f PRAUC=%.3f\n",
-      r$model, r$auc_mean, r$tss_mean,
-      r$cbi_mean, r$sedi_mean, r$kappa_mean, r$prauc_mean
+      "  %s: AUC=%.3f TSS=%.3f CBI=%.3f\n",
+      r$model, r$auc_mean, r$tss_mean, r$cbi_mean
     ))
   }
   cat("  最优阈值:", paste(

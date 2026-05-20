@@ -36,13 +36,13 @@ values. Default \code{TRUE}.}
 
 \item{font_base}{Base theme size. Default \code{14}.}
 
-\item{font_main_title}{Outer patchwork title size. Default \code{24}.}
+\item{font_main_title}{Outer patchwork title size. Default \code{20}.}
 
-\item{font_panel_title}{Panel title size. Default \code{24}.}
+\item{font_panel_title}{Panel title size. Default \code{28}.}
 
-\item{font_axis}{Axis label size (model names). Default \code{20}.}
+\item{font_axis}{Axis label size (model names). Default \code{25}.}
 
-\item{font_cell_value}{Text size inside tiles. Default \code{5}.}
+\item{font_cell_value}{Text size inside tiles. Default \code{7}.}
 
 \item{value_decimals}{Decimals printed in each cell. Default \code{4L}.}
 

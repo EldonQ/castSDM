@@ -1,0 +1,106 @@
+---
+title: "Profiling Multi-species Runs with `resource_log.csv`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Profiling Multi-species Runs with resource_log.csv}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE,
+                      fig.width = 9, fig.height = 5)
+```
+
+## Where the time goes
+
+Every `cast_batch()` (or `cast_run_from_config()`) run appends one row
+per species × pipeline-step to `<output_dir>/resource_log.csv`. Steps
+are: `prepare`, `dag`, `ate`, `screen`, `fit`, `eval`, `cv`, `predict`,
+`cate`, `consistency`. Columns:
+
+```
+timestamp, species, step, elapsed_sec, peak_mb
+```
+
+The vignette below uses base R + ggplot2 to show the two views I find
+most useful: a **stacked bar** of cumulative wall time per species, and
+a **dot plot** of peak RAM per step. No hidden helper — copy and adapt.
+
+## Read & tidy
+
+```{r}
+log_path <- file.path("castSDM_output", "resource_log.csv")
+log <- read.csv(log_path, stringsAsFactors = FALSE)
+log$step <- factor(
+  log$step,
+  levels = c("prepare", "dag", "ate", "screen", "fit",
+             "eval", "cv", "predict", "cate", "consistency")
+)
+head(log)
+```
+
+If a step ran multiple times (e.g. you re-ran with `resume = TRUE`),
+keep only the latest row per (species, step):
+
+```{r}
+log <- log[order(log$timestamp), ]
+log <- log[!duplicated(log[, c("species", "step")], fromLast = TRUE), ]
+```
+
+## Per-species elapsed time
+
+```{r}
+library(ggplot2)
+ggplot(log, aes(x = species, y = elapsed_sec, fill = step)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = NULL, y = "Wall-clock seconds",
+       title = "castSDM pipeline cost by species and step") +
+  coord_flip() +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "right")
+```
+
+The stacked bars make it obvious which species dominate the budget and
+which steps inside each species do most of the work — usually `dag`
+(bootstrap structure learning) or `cv` (k-fold refits).
+
+## Peak RAM per step
+
+```{r}
+ggplot(log, aes(x = step, y = peak_mb, color = species)) +
+  geom_jitter(width = 0.18, size = 2.5, alpha = 0.85) +
+  labs(x = NULL, y = "Peak RAM (MiB)",
+       title = "Memory headroom by pipeline step") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+If `peakRAM` was not installed when the run executed, `peak_mb` is the
+total `gc()`-reported maximum since each step's reset — an upper bound
+that includes prior allocations. Install `peakRAM` for tighter numbers:
+
+```{r}
+install.packages("peakRAM")
+```
+
+## Quick targets for tuning
+
+* `dag` taking >> the rest — lower `dag_R` (bootstrap replicates) or
+  `dag_max_rows` (subsample cap).
+* `cv` taking >> the rest — drop `cv_n_runs` to 1 for tuning, restore
+  for final runs; or run with `cv_parallel = TRUE` once a worker
+  budget is set.
+* High `peak_mb` on `predict` — switch to `cast_predict_tiled()` with a
+  modest `tile_size`.
+* Highly variable `cv` cost across species — usually a presence-count
+  effect; the rare ones are picking up `esm` paths or hitting RF
+  internal parallelism limits.
+
+## Drop-in helper
+
+If you call this often, wrap the read/normalise/plot into a script
+local to your project. Keep it short — the columns are stable, and a
+20-line script you understand is more useful than a packaged plot you
+have to look up.

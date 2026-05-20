@@ -87,8 +87,8 @@ pooled OOF predictions, used by \code{\link[=cast_predict]{cast_predict()}} for 
 Evaluates fitted models using spatially blocked k-fold cross-validation.
 Unlike random splitting, spatial blocks ensure test folds are geographically
 separated from training folds, providing honest estimates of model
-transferability. The resulting metrics (AUC, TSS, CBI, SEDI, Kappa, PRAUC)
-feed directly into \code{\link[=cast_predict]{cast_predict()}} for threshold-calibrated HSS maps.
+transferability. The resulting metrics (AUC, TSS, CBI) feed directly into
+\code{\link[=cast_predict]{cast_predict()}} for threshold-calibrated HSS maps.
 }
 \details{
 \subsection{Why spatial CV matters for HSS maps}{

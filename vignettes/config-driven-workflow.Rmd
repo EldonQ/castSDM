@@ -1,0 +1,131 @@
+---
+title: "YAML-driven Workflow for Multi-species Runs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{YAML-driven Workflow for Multi-species Runs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Why a YAML config?
+
+Reproducibility for multi-species batches lives or dies on parameter
+discipline. A single `cast_batch()` call already carries dozens of named
+arguments; tracking which seed, fold count, or DAG threshold was used for
+which run quickly becomes a chore.
+
+`cast_run_from_config()` makes the parameter set the *artifact*. Save it
+alongside your data, version it with git, and a year later you can re-run
+the analysis with one line. The same YAML doubles as the documentation of
+the run.
+
+## Quick start
+
+Generate a starter template and edit it:
+
+```{r}
+library(castSDM)
+cast_config_template("my_run.yaml")
+```
+
+The generated file (also bundled at
+`system.file("templates", "castSDM_config.yaml.tmpl", package = "castSDM")`)
+is annotated; the bare-minimum schema is:
+
+```yaml
+run:
+  output_dir: "castSDM_output"
+  seed: 1234
+  parallel: true
+  worker_budget:
+    total_workers: 8
+  resume: true
+
+species:
+  species_a:
+    file: "data/species_a.csv"
+  species_b:
+    file: "data/species_b.csv"
+
+models: [cast, rf, maxent, brt]
+backend: r            # pure-R CI-MLP (no torch needed)
+
+cast_batch_args:
+  train_fraction: 0.7
+  do_cv: true
+  cv_k: 5
+```
+
+Each `species.<name>.file` CSV must contain at least `lon`, `lat`,
+`presence`, plus any environmental columns. Paths are resolved relative
+to the directory containing the YAML file.
+
+Run the pipeline:
+
+```{r}
+out <- cast_run_from_config("my_run.yaml")
+```
+
+`out` is a `cast_batch` object — same as if you had called
+`cast_batch()` directly.
+
+## Resuming after a crash
+
+Long batches can be interrupted by anything from a kernel panic to a
+power loss. The toolkit writes per-step checkpoints under
+`output_dir/<species>/.steps/` (DAG, ATE, screen, fit, CV, predict, CATE,
+consistency) and a per-species `cast_result.rds` once everything is done.
+
+When `run.resume: true` is set in the YAML and any species in
+`output_dir` has a finished `cast_result.rds`, the helper transparently
+delegates to `cast_batch_resume()`. Already-complete species are skipped;
+species that were *partially* finished load their cached steps and pick
+up where they left off.
+
+To recover manually:
+
+```{r}
+cast_batch_resume(
+  output_dir   = "castSDM_output",
+  species_list = list(species_a = df_a, species_b = df_b),
+  models       = c("cast", "rf", "maxent", "brt")
+)
+```
+
+## Worker budget on Windows
+
+Set `run.worker_budget.total_workers` to keep the CPU busy without
+oversubscribing cores. Internally this calls `cast_worker_budget()`,
+which splits workers across two nested layers:
+
+* the species fan-out, and
+* per-species DAG bootstraps / ATE folds / CV folds.
+
+For example, 8 cores with 4 species → 4 species in parallel × 2
+intra-species workers each.
+
+## Resource log
+
+Each run appends to `output_dir/resource_log.csv` with one row per step
+per species: timestamp, species, step name, elapsed seconds, peak RAM
+(MiB; via `peakRAM` if installed, else `gc()`-derived). Plot it with
+the `perf-profile` vignette to find the slowest stages.
+
+## Overrides at the call site
+
+You can override any YAML setting from R without touching the file:
+
+```{r}
+cast_run_from_config(
+  "my_run.yaml",
+  cv_k = 10,                     # override cast_batch_args.cv_k
+  models = c("cast", "rf")       # subset models
+)
+```
+
+This is handy for quick sensitivity checks; for the canonical run, edit
+the YAML so the change is captured in version control.

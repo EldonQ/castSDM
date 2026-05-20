@@ -120,8 +120,7 @@ new_cast_fit <- function(models, cast_vars, env_vars, scaling,
 #' Create a cast_eval Object
 #'
 #' @param metrics A `data.frame` with per-model evaluation metrics.
-#'   Columns: `model`, `auc_mean`, `tss_mean`, `cbi_mean`, `sedi_mean`,
-#'   `kappa_mean`, `prauc_mean` (and `_sd` counterparts).
+#'   Columns: `model`, `auc_mean`, `tss_mean`, `cbi_mean`.
 #' @param cv_source Logical. Whether metrics came from spatial CV.
 #'   Default `FALSE`.
 #'

@@ -607,19 +607,17 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
 
 #' Plot Evaluation Metrics Comparison
 #'
-#' Multi-panel bar chart comparing AUC, TSS, CBI, SEDI, Kappa, and PRAUC
-#' across fitted models.
+#' Multi-panel bar chart comparing AUC, TSS, and CBI across fitted models.
 #'
 #' @param x A `cast_eval` object.
-#' @param metrics Character vector. Which metrics to show. Default shows all
-#'   six: `c("auc","tss","cbi","sedi","kappa","prauc")`.
+#' @param metrics Character vector. Which metrics to show. Default
+#'   `c("auc","tss","cbi")`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object (faceted).
 #' @export
 plot.cast_eval <- function(x,
-                           metrics = c("auc", "tss", "cbi",
-                                       "sedi", "kappa", "prauc"),
+                           metrics = c("auc", "tss", "cbi"),
                            ...) {
   check_suggested("ggplot2", "for plotting")
 

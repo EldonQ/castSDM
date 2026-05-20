@@ -8,8 +8,7 @@ new_cast_eval(metrics, cv_source = FALSE)
 }
 \arguments{
 \item{metrics}{A \code{data.frame} with per-model evaluation metrics.
-Columns: \code{model}, \code{auc_mean}, \code{tss_mean}, \code{cbi_mean}, \code{sedi_mean},
-\code{kappa_mean}, \code{prauc_mean} (and \verb{_sd} counterparts).}
+Columns: \code{model}, \code{auc_mean}, \code{tss_mean}, \code{cbi_mean}.}
 
 \item{cv_source}{Logical. Whether metrics came from spatial CV.
 Default \code{FALSE}.}

@@ -26,7 +26,7 @@ cast_shap_xgb(
 \item{response}{Name of the binary response column. Default \code{"presence"}.}
 
 \item{env_vars}{Predictor column names. If \code{NULL}, columns are chosen in
-order: (1) if \code{dag} is set, \strong{\code{intersect(dag$nodes, names(data))}} — the
+order: (1) if \code{dag} is set, \strong{\code{intersect(dag$nodes, names(data))}} -- the
 same convention as \code{\link[=cast_fit]{cast_fit()}} for traditional models; (2) else if
 \code{screen} is set, \code{intersect(get_env_vars(), screen$selected)}; (3) else
 \code{\link[=get_env_vars]{get_env_vars()}}.}

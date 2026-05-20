@@ -550,7 +550,7 @@ dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 
 cat("\n[Plot] Multi-species model performance comparison...\n")
 
-p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi", "sedi"))
+p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi"))
 ggplot2::ggsave(
   file.path(fig_dir, "multi_species_comparison.png"),
   p_compare,

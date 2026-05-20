@@ -88,10 +88,7 @@ print.cast_cv <- function(x, ...) {
       " | AUC=", round(m$auc_mean[i], 3),
       " (", round(m$auc_sd[i], 3), ")",
       " TSS=", round(m$tss_mean[i], 3),
-      " CBI=", round(m$cbi_mean[i], 3),
-      " SEDI=", round(m$sedi_mean[i], 3),
-      " Kappa=", round(m$kappa_mean[i], 3),
-      " PRAUC=", round(m$prauc_mean[i], 3)
+      " CBI=", round(m$cbi_mean[i], 3)
     ))
   }
   cli::cli_h2("Optimal thresholds (max TSS)")

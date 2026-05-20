@@ -27,6 +27,8 @@ cast_fit(
   batch_size = NULL,
   max_interactions = 15L,
   tune_grid = FALSE,
+  tune_result = NULL,
+  backend = c("r", "torch"),
   seed = NULL,
   verbose = TRUE
 )
@@ -93,6 +95,16 @@ on the internal validation split before the full training run. Best
 hyperparameters are then used for the \code{n_runs} ensemble. Default \code{FALSE}.
 Adds ~3x training time.}
 
+\item{tune_result}{Optional \code{cast_tune} object returned by \code{\link[=cast_tune]{cast_tune()}}.
+When provided, its best per-algorithm hyperparameters override the
+matching arguments (\code{hidden_size}, \code{dropout}, \code{lr}, \code{rf_ntree},
+\code{brt_n_trees}, \code{brt_depth}). Default \code{NULL}.}
+
+\item{backend}{Character. CI-MLP backend. \code{"r"} (default) uses the pure-R
+CPU implementation in \code{\link[=cast_mlp_fit]{cast_mlp_fit()}} — no \code{torch} install required.
+\code{"torch"} falls back to the legacy \pkg{torch} module (kept for users who
+already have torch installed and prefer GPU/large-batch acceleration).}
+
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
@@ -102,8 +114,8 @@ A \code{cast_fit} object containing fitted models and metadata.
 }
 \description{
 Trains one or more SDM models on prepared data. Supports the causal CI-MLP
-architecture (requires \pkg{torch}) and traditional methods (RF, MaxEnt,
-BRT).
+architecture (pure-R CPU backend by default; legacy \pkg{torch} backend
+optional) and traditional methods (RF, MaxEnt, BRT, GAM).
 }
 \details{
 \subsection{CI-MLP Architecture (CAST, MLP_ATE, MLP)}{

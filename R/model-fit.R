@@ -1,8 +1,8 @@
 #' Fit Species Distribution Models
 #'
 #' Trains one or more SDM models on prepared data. Supports the causal CI-MLP
-#' architecture (requires \pkg{torch}) and traditional methods (RF, MaxEnt,
-#' BRT).
+#' architecture (pure-R CPU backend by default; legacy \pkg{torch} backend
+#' optional) and traditional methods (RF, MaxEnt, BRT, GAM).
 #'
 #' @param data A `data.frame` with `presence` column and predictor variables.
 #' @param screen A [cast_screen] object, or `NULL`.
@@ -43,6 +43,14 @@
 #'   on the internal validation split before the full training run. Best
 #'   hyperparameters are then used for the `n_runs` ensemble. Default `FALSE`.
 #'   Adds ~3x training time.
+#' @param tune_result Optional `cast_tune` object returned by [cast_tune()].
+#'   When provided, its best per-algorithm hyperparameters override the
+#'   matching arguments (`hidden_size`, `dropout`, `lr`, `rf_ntree`,
+#'   `brt_n_trees`, `brt_depth`). Default `NULL`.
+#' @param backend Character. CI-MLP backend. `"r"` (default) uses the pure-R
+#'   CPU implementation in [cast_mlp_fit()] — no `torch` install required.
+#'   `"torch"` falls back to the legacy \pkg{torch} module (kept for users who
+#'   already have torch installed and prefer GPU/large-batch acceleration).
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
@@ -87,27 +95,48 @@ cast_fit <- function(data,
                      batch_size       = NULL,
                      max_interactions = 15L,
                      tune_grid        = FALSE,
+                     tune_result      = NULL,
+                     backend          = c("r", "torch"),
                      seed             = NULL,
                      verbose          = TRUE) {
   focal_alpha_mode <- match.arg(focal_alpha_mode)
+  backend <- match.arg(backend)
   models <- tolower(models)
-  nn_models <- intersect(models, c("cast", "mlp_ate", "mlp"))
-  trad_models <- intersect(models, c("rf", "maxent", "brt"))
 
-  # Validate NN prerequisites
-  if (length(nn_models) > 0) {
+  # ---- Apply cast_tune() result (overrides defaults per algo) -----------
+  if (!is.null(tune_result)) {
+    if (!inherits(tune_result, "cast_tune"))
+      cli::cli_abort("{.arg tune_result} must be a {.cls cast_tune} object.")
+    tb <- tune_result$best
+    if (!is.null(tb$cast)) {
+      if (!is.null(tb$cast$hidden_size)) hidden_size <- tb$cast$hidden_size
+      if (!is.null(tb$cast$dropout))     dropout     <- tb$cast$dropout
+      if (!is.null(tb$cast$lr))          lr          <- tb$cast$lr
+    }
+    if (!is.null(tb$rf$rf_ntree))     rf_ntree     <- tb$rf$rf_ntree
+    if (!is.null(tb$brt$brt_n_trees)) brt_n_trees  <- tb$brt$brt_n_trees
+    if (!is.null(tb$brt$brt_depth))   brt_depth    <- tb$brt$brt_depth
+    if (verbose)
+      cli::cli_inform("cast_fit: applied tune_result hyperparameters.")
+  }
+  nn_models <- intersect(models, c("cast", "mlp_ate", "mlp"))
+  trad_models <- intersect(models, c("rf", "maxent", "brt", "gam"))
+
+  # Validate NN prerequisites (only required for torch backend)
+  if (length(nn_models) > 0 && backend == "torch") {
     if (!has_torch()) {
       cli::cli_warn(
-        "torch not available. Skipping NN models: {.val {nn_models}}."
+        "torch backend requested but not available; falling back to {.val r} (pure-R CPU)."
       )
-      nn_models <- character(0)
+      backend <- "r"
     }
-    if ("cast" %in% nn_models || "mlp_ate" %in% nn_models) {
-      if (is.null(screen) || is.null(dag) || is.null(ate)) {
-        cli::cli_abort(
-          "CAST/MLP_ATE models require {.arg screen}, {.arg dag}, and {.arg ate}."
-        )
-      }
+  }
+  if (length(nn_models) > 0 &&
+      ("cast" %in% nn_models || "mlp_ate" %in% nn_models)) {
+    if (is.null(screen) || is.null(dag) || is.null(ate)) {
+      cli::cli_abort(
+        "CAST/MLP_ATE models require {.arg screen}, {.arg dag}, and {.arg ate}."
+      )
     }
   }
 
@@ -158,7 +187,7 @@ cast_fit <- function(data,
   best_dropout <- dropout
   best_lr      <- lr
 
-  if (tune_grid && length(nn_models) > 0 && has_torch()) {
+  if (tune_grid && length(nn_models) > 0 && backend == "torch" && has_torch()) {
     if (verbose) cli::cli_inform("Running hyperparameter grid search...")
     hs_grid  <- c(64L, 128L, 256L)
     dr_grid  <- c(0.1, 0.2, 0.3)
@@ -250,25 +279,46 @@ cast_fit <- function(data,
 
     for (ri in seq_len(n_runs)) {
       tryCatch({
-        torch::torch_manual_seed(seeds[ri])
-        set.seed(seeds[ri])
-
-        ds <- build_flat_dataset(X_tr_nn, y_tr)
-        dl <- torch::dataloader(ds, batch_size = bs,
-                                shuffle = TRUE, drop_last = TRUE)
-        vt <- torch::torch_tensor(
-          as.matrix(X_val_nn), dtype = torch::torch_float()
-        )
-
-        m <- build_ci_mlp(n_input, hs, run_dr)
-        res <- train_ci_mlp(
-          m, dl, vt, y_val,
-          epochs = n_epochs, lr = run_lr, patience = patience,
-          focal_alpha = focal_alpha_used, focal_gamma = focal_gamma
-        )
-
-        run_aucs[ri] <- res$best_val_auc
-        run_trained[[ri]] <- res$model
+        if (backend == "torch") {
+          torch::torch_manual_seed(seeds[ri])
+          set.seed(seeds[ri])
+          ds <- build_flat_dataset(X_tr_nn, y_tr)
+          dl <- torch::dataloader(ds, batch_size = bs,
+                                  shuffle = TRUE, drop_last = TRUE)
+          vt <- torch::torch_tensor(
+            as.matrix(X_val_nn), dtype = torch::torch_float()
+          )
+          m <- build_ci_mlp(n_input, hs, run_dr)
+          res <- train_ci_mlp(
+            m, dl, vt, y_val,
+            epochs = n_epochs, lr = run_lr, patience = patience,
+            focal_alpha = focal_alpha_used, focal_gamma = focal_gamma
+          )
+          run_aucs[ri] <- res$best_val_auc
+          run_trained[[ri]] <- res$model
+        } else {
+          # Pure-R backend (default)
+          X_full <- rbind(as.matrix(X_tr_nn), as.matrix(X_val_nn))
+          y_full <- c(y_tr, y_val)
+          tr_n <- nrow(X_tr_nn)
+          v_idx <- seq_len(nrow(X_val_nn)) + tr_n
+          res_r <- cast_mlp_fit(
+            X_full, y_full,
+            hidden       = hs,
+            dropout      = run_dr,
+            epochs       = n_epochs,
+            batch_size   = bs,
+            lr           = run_lr,
+            patience     = patience,
+            val_idx      = v_idx,
+            focal_alpha  = focal_alpha_used,
+            focal_gamma  = focal_gamma,
+            seed         = seeds[ri],
+            verbose      = FALSE
+          )
+          run_aucs[ri] <- res_r$best_val_auc
+          run_trained[[ri]] <- res_r
+        }
       }, error = function(e) {
         run_aucs[ri] <<- NA_real_
         if (verbose) cli::cli_warn("  Run {ri} failed: {e$message}")
@@ -280,7 +330,8 @@ cast_fit <- function(data,
     best_model <- if (length(best_ri) > 0) run_trained[[best_ri]] else NULL
 
     fitted_models[[mdl]] <- list(
-      type = "nn",
+      type = if (backend == "torch") "nn" else "nn_r",
+      backend = backend,
       model = best_model,
       auc_runs = run_aucs,
       feature_type = feat_type,
@@ -581,6 +632,31 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       )
       bt <- gbm::gbm.perf(m, method = "cv", plot.it = FALSE)
       list(type = "traditional", model = m, name = "brt", best_trees = bt)
+    },
+    "gam" = {
+      check_suggested("mgcv", "for GAM")
+      df <- cbind(presence = Y, X)
+      pred_terms <- vapply(seq_len(ncol(X)), function(i) {
+        v <- X[, i]
+        nm <- colnames(X)[i]
+        if (is.numeric(v) && length(unique(v)) >= 8L)
+          sprintf("s(%s, k = 5)", nm) else nm
+      }, character(1))
+      f <- stats::as.formula(
+        paste("presence ~", paste(pred_terms, collapse = " + "))
+      )
+      m <- tryCatch(
+        mgcv::gam(f, data = df, family = stats::binomial(),
+                  method = "REML"),
+        error = function(e) {
+          # Fall back to linear if smooths fail (e.g. too few unique values)
+          flin <- stats::as.formula(
+            paste("presence ~", paste(colnames(X), collapse = " + "))
+          )
+          mgcv::gam(flin, data = df, family = stats::binomial())
+        }
+      )
+      list(type = "traditional", model = m, name = "gam")
     }
   )
 }

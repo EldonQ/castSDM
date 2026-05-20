@@ -124,11 +124,11 @@ compute_edge_degrees <- function(edges, variables) {
 }
 
 
-#' Full Model Evaluation: AUC, TSS, CBI, SEDI, Kappa, PRAUC
+#' Full Model Evaluation: AUC, TSS, CBI
 #'
 #' @param pred Numeric vector of predicted probabilities [0,1].
 #' @param obs  Integer/numeric binary observed outcomes (0/1).
-#' @return Named numeric vector with all metrics.
+#' @return Named numeric vector with AUC, TSS, CBI.
 #' @keywords internal
 #' @noRd
 evaluate_model_full <- function(pred, obs) {
@@ -148,76 +148,14 @@ evaluate_model_full <- function(pred, obs) {
     as.numeric(coords$sensitivity[1] + coords$specificity[1] - 1)
   }, error = function(e) NA_real_)
 
-  # -- PRAUC (Precision-Recall AUC) -------------------------------------------
-  # More informative than ROC-AUC under strong class imbalance (many backgrounds)
-  prauc_val <- tryCatch({
-    ord   <- order(pred, decreasing = TRUE)
-    o_ord <- obs[ord]
-    p_ord <- pred[ord]
-    tp    <- cumsum(o_ord)
-    fp    <- cumsum(1L - o_ord)
-    fn    <- sum(obs) - tp
-    prec  <- tp / (tp + fp)
-    rec   <- tp / (tp + fn)
-    # Remove NaN at zero-recall boundary
-    keep  <- !is.nan(prec) & !is.nan(rec)
-    prec  <- prec[keep]; rec <- rec[keep]
-    # Trapezoidal integration
-    if (length(rec) < 2) return(NA_real_)
-    abs(sum(diff(rec) * (prec[-length(prec)] + prec[-1]) / 2))
-  }, error = function(e) NA_real_)
-
   # -- CBI (Continuous Boyce Index) -------------------------------------------
-  # Measures habitat preference along the suitability gradient;
-  # positive = model predictions align with presence distribution;
-  # range (-1, 1), values > 0.5 indicate good predictive power.
   cbi_val <- tryCatch({
     compute_cbi(pred, obs)
   }, error = function(e) NA_real_)
 
-  # -- SEDI (Symmetric Extremal Dependence Index) ----------------------------
-  # Log-scale measure robust to prevalence; -1 (worst) to +1 (perfect).
-  # Recommended for rare-species SDMs (Ferro & Stephenson 2011 MWR).
-  sedi_val <- tryCatch({
-    roc_obj <- pROC::roc(obs, pred, quiet = TRUE)
-    coords  <- pROC::coords(roc_obj, "best",
-                            ret = c("sensitivity", "specificity"))
-    sens <- as.numeric(coords$sensitivity[1])
-    spec <- as.numeric(coords$specificity[1])
-    fp_rate <- 1 - spec
-    fn_rate <- 1 - sens
-    # Guard against log(0)
-    if (fp_rate <= 0 || fp_rate >= 1 || fn_rate <= 0 || fn_rate >= 1) {
-      return(NA_real_)
-    }
-    (log(fp_rate) - log(sens) - log(fn_rate) + log(spec)) /
-      (log(fp_rate) + log(sens) + log(fn_rate) + log(spec))
-  }, error = function(e) NA_real_)
-
-  # -- Cohen's Kappa ---------------------------------------------------------
-  kappa_val <- tryCatch({
-    roc_obj  <- pROC::roc(obs, pred, quiet = TRUE)
-    coords   <- pROC::coords(roc_obj, "best",
-                             ret = c("sensitivity", "specificity", "threshold"))
-    thr      <- as.numeric(coords$threshold[1])
-    pred_bin <- as.integer(pred >= thr)
-    n  <- length(obs)
-    tp <- sum(pred_bin == 1L & obs == 1L)
-    tn <- sum(pred_bin == 0L & obs == 0L)
-    fp <- sum(pred_bin == 1L & obs == 0L)
-    fn <- sum(pred_bin == 0L & obs == 1L)
-    po <- (tp + tn) / n
-    pe <- ((tp + fp) * (tp + fn) + (tn + fn) * (tn + fp)) / (n^2)
-    if (abs(1 - pe) < 1e-10) return(NA_real_)
-    (po - pe) / (1 - pe)
-  }, error = function(e) NA_real_)
-
-  c(auc   = auc_val,
-    tss   = tss_val,
-    cbi   = cbi_val,
-    sedi  = sedi_val,
-    kappa = kappa_val,
-    prauc = prauc_val)
+  c(auc = auc_val,
+    tss = tss_val,
+    cbi = cbi_val)
 }
 
 
@@ -257,6 +195,16 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
   ratio <- pred_f[keep] / exp_f[keep]
   as.numeric(stats::cor(mids[keep], ratio, method = "spearman"))
 }
+
+
+#' Null-Coalescing Operator
+#'
+#' Returns `b` if `a` is `NULL`, else `a`. Defined locally to support R < 4.4.
+#'
+#' @param a,b Values to compare.
+#' @keywords internal
+#' @noRd
+`%||%` <- function(a, b) if (is.null(a)) b else a
 
 
 #' Check and Require a Suggested Package
