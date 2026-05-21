@@ -37,6 +37,7 @@ cast_run_step <- function(step_name, output_dir, species, expr,
 
   has_pram <- requireNamespace("peakRAM", quietly = TRUE)
   t0 <- Sys.time()
+  val <- NULL
   if (has_pram) {
     pram <- tryCatch(
       peakRAM::peakRAM({ val <- expr }),
@@ -48,8 +49,10 @@ cast_run_step <- function(step_name, output_dir, species, expr,
     invisible(gc(reset = TRUE))
     val <- expr
     g <- tryCatch(gc(), error = function(e) NULL)
-    peak_mb <- if (is.null(g)) NA_real_ else
-      suppressWarnings(sum(g[, "max used (Mb)"], na.rm = TRUE))
+    peak_mb <- if (is.null(g)) NA_real_ else tryCatch({
+      idx <- which(colnames(g) == "(Mb)" & seq_len(ncol(g)) > 4L)
+      if (length(idx)) sum(g[, idx[1]], na.rm = TRUE) else NA_real_
+    }, error = function(e) NA_real_)
   }
   elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 

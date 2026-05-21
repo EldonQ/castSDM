@@ -492,10 +492,10 @@ cast_batch <- function(species_list,
       sp <- sp_names[i]
       if (verbose) cli::cli_inform("[{i}/{n_sp}] Processing {.val {sp}}...")
       seed_i <- if (!is.null(seed)) seed + i else NULL
-      results[[i]] <- .cast_batch_run_one_species(
+      results[i] <- list(.cast_batch_run_one_species(
         sp, species_list[[sp]], env_data, models, output_dir,
         fig_dpi, seed_i, cfg, fit_args, FALSE, dev_root_workers
-      )
+      ))
     }
   }
 
