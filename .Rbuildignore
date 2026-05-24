@@ -13,6 +13,7 @@
 ^castSDM_multi_species$
 ^cast_ovis_ammon_figures$
 ^castSDM\.Rcheck$
+^cast\.Rcheck$
 ^\.\.Rcheck$
 ^\.git$
 ^\.gitignore$

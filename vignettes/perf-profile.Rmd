@@ -15,8 +15,8 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE,
 ## Where the time goes
 
 Every `cast_batch()` (or `cast_run_from_config()`) run appends one row
-per species × pipeline-step to `<output_dir>/resource_log.csv`. Steps
-are: `prepare`, `dag`, `ate`, `screen`, `fit`, `eval`, `cv`, `predict`,
+per species x pipeline-step to `<output_dir>/resource_log.csv`. Steps
+are: `prepare`, `dag`, `select`, `fit`, `eval`, `cv`, `predict`,
 `cate`, `consistency`. Columns:
 
 ```
@@ -25,7 +25,7 @@ timestamp, species, step, elapsed_sec, peak_mb
 
 The vignette below uses base R + ggplot2 to show the two views I find
 most useful: a **stacked bar** of cumulative wall time per species, and
-a **dot plot** of peak RAM per step. No hidden helper — copy and adapt.
+a **dot plot** of peak RAM per step. No hidden helper -- copy and adapt.
 
 ## Read & tidy
 
@@ -34,7 +34,7 @@ log_path <- file.path("castSDM_output", "resource_log.csv")
 log <- read.csv(log_path, stringsAsFactors = FALSE)
 log$step <- factor(
   log$step,
-  levels = c("prepare", "dag", "ate", "screen", "fit",
+  levels = c("prepare", "dag", "select", "fit",
              "eval", "cv", "predict", "cate", "consistency")
 )
 head(log)
@@ -63,7 +63,7 @@ ggplot(log, aes(x = species, y = elapsed_sec, fill = step)) +
 ```
 
 The stacked bars make it obvious which species dominate the budget and
-which steps inside each species do most of the work — usually `dag`
+which steps inside each species do most of the work -- usually `dag`
 (bootstrap structure learning) or `cv` (k-fold refits).
 
 ## Peak RAM per step
@@ -78,7 +78,7 @@ ggplot(log, aes(x = step, y = peak_mb, color = species)) +
 ```
 
 If `peakRAM` was not installed when the run executed, `peak_mb` is the
-total `gc()`-reported maximum since each step's reset — an upper bound
+total `gc()`-reported maximum since each step's reset -- an upper bound
 that includes prior allocations. Install `peakRAM` for tighter numbers:
 
 ```{r}
@@ -87,20 +87,19 @@ install.packages("peakRAM")
 
 ## Quick targets for tuning
 
-* `dag` taking >> the rest — lower `dag_R` (bootstrap replicates) or
+* `dag` taking >> the rest -- lower `dag_R` (bootstrap replicates) or
   `dag_max_rows` (subsample cap).
-* `cv` taking >> the rest — drop `cv_n_runs` to 1 for tuning, restore
-  for final runs; or run with `cv_parallel = TRUE` once a worker
+* `cv` taking >> the rest -- run with `parallel = TRUE` once a worker
   budget is set.
-* High `peak_mb` on `predict` — switch to `cast_predict_tiled()` with a
+* High `peak_mb` on `predict` -- switch to `cast_predict_tiled()` with a
   modest `tile_size`.
-* Highly variable `cv` cost across species — usually a presence-count
+* Highly variable `cv` cost across species -- usually a presence-count
   effect; the rare ones are picking up `esm` paths or hitting RF
   internal parallelism limits.
 
 ## Drop-in helper
 
 If you call this often, wrap the read/normalise/plot into a script
-local to your project. Keep it short — the columns are stable, and a
+local to your project. Keep it short -- the columns are stable, and a
 20-line script you understand is more useful than a packaged plot you
 have to look up.

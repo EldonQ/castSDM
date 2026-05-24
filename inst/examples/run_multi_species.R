@@ -15,7 +15,6 @@
 #   - cast_worker_budget(): auto-allocate species x intra parallelism
 #   - cast_batch_resume(): crash-safe checkpoint/resume
 #   - GAM algorithm in default model set
-#   - cast_tune(): unified hyper-parameter grid search (optional)
 #   - Per-step checkpoints + resource_log.csv
 #   - DAG-guided variable selection via Markov Blanket (first in SDM)
 #   - Performance-weighted ensemble prediction
@@ -195,7 +194,6 @@ CONFIG <- list(
   fit_rf_ntree          = 300L,
   fit_brt_n_trees       = 500L,
   fit_brt_depth         = 5L,
-  fit_tune_grid         = FALSE,
   fit_verbose           = FALSE,
 
   # -- cast_evaluate --
@@ -537,8 +535,7 @@ batch_args <- list(
   shap_max_explain_rows = CONFIG$shap_max_explain_rows,
   rf_ntree         = CONFIG$fit_rf_ntree,
   brt_n_trees      = CONFIG$fit_brt_n_trees,
-  brt_depth         = CONFIG$fit_brt_depth,
-  tune_grid        = CONFIG$fit_tune_grid
+  brt_depth         = CONFIG$fit_brt_depth
 )
 
 if (do_resume) {

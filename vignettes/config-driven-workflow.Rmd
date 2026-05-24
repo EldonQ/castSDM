@@ -51,8 +51,7 @@ species:
   species_b:
     file: "data/species_b.csv"
 
-models: [cast, rf, maxent, brt]
-backend: r            # pure-R CI-MLP (no torch needed)
+models: [rf, brt, maxent, gam]
 
 cast_batch_args:
   train_fraction: 0.7
@@ -70,14 +69,14 @@ Run the pipeline:
 out <- cast_run_from_config("my_run.yaml")
 ```
 
-`out` is a `cast_batch` object — same as if you had called
+`out` is a `cast_batch` object -- same as if you had called
 `cast_batch()` directly.
 
 ## Resuming after a crash
 
 Long batches can be interrupted by anything from a kernel panic to a
 power loss. The toolkit writes per-step checkpoints under
-`output_dir/<species>/.steps/` (DAG, ATE, screen, fit, CV, predict, CATE,
+`output_dir/<species>/.steps/` (DAG, select, fit, CV, predict, CATE,
 consistency) and a per-species `cast_result.rds` once everything is done.
 
 When `run.resume: true` is set in the YAML and any species in
@@ -92,7 +91,7 @@ To recover manually:
 cast_batch_resume(
   output_dir   = "castSDM_output",
   species_list = list(species_a = df_a, species_b = df_b),
-  models       = c("cast", "rf", "maxent", "brt")
+  models       = c("rf", "brt", "maxent", "gam")
 )
 ```
 
@@ -103,9 +102,9 @@ oversubscribing cores. Internally this calls `cast_worker_budget()`,
 which splits workers across two nested layers:
 
 * the species fan-out, and
-* per-species DAG bootstraps / ATE folds / CV folds.
+* per-species DAG bootstraps / CV folds.
 
-For example, 8 cores with 4 species → 4 species in parallel × 2
+For example, 8 cores with 4 species -> 4 species in parallel x 2
 intra-species workers each.
 
 ## Resource log
@@ -123,7 +122,7 @@ You can override any YAML setting from R without touching the file:
 cast_run_from_config(
   "my_run.yaml",
   cv_k = 10,                     # override cast_batch_args.cv_k
-  models = c("cast", "rf")       # subset models
+  models = c("rf", "brt")        # subset models
 )
 ```
 

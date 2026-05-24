@@ -16,17 +16,17 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-**castSDM** (Causal Structure-informed Species Distribution Modeling) integrates
-causal inference methods with species distribution modeling to produce
+**castSDM** (Causal-Aware Species Distribution Modeling) integrates
+causal DAG learning with species distribution modeling to produce
 ecologically interpretable and transferable predictions.
 
 Unlike traditional SDMs that capture correlations, castSDM:
 
 1. Discovers causal structure among environmental variables via DAGs
-2. Estimates causal effect sizes using Double Machine Learning
-3. Engineers features guided by causal theory
-4. Trains causally-informed neural networks for prediction
-5. Maps spatially heterogeneous treatment effects
+2. Uses the Markov Blanket for principled variable selection
+3. Assigns causal roles (parent, child, co-parent) to selected variables
+4. Trains multi-algorithm ensembles (RF, BRT, MaxEnt, GAM) for prediction
+5. Projects habitat suitability under future climate scenarios
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ library(castSDM)
 result <- cast(
   species_data = my_species_df,
   env_data = my_env_grid,
-  models = c("cast", "rf", "maxent", "brt")
+  models = c("rf", "brt", "maxent", "gam")
 )
 
 summary(result)
@@ -52,28 +52,35 @@ For more control, use individual pipeline functions:
 # 1. VIF screening
 clean <- cast_vif(env_data, threshold = 10)
 
-# 2. DAG learning
+# 2. DAG learning (with presence as a node)
 dag <- cast_dag(train_data, R = 100)
 
-# 3. ATE estimation
-ate <- cast_ate(train_data, K = 2)
+# 3. Variable selection (Markov Blanket + RF importance)
+screen <- cast_select(dag, train_data)
 
-# 4. Variable screening
-vars <- cast_screen(dag, ate, train_data)
+# 4. Causal role assignment
+roles <- cast_roles(screen, dag)
 
-# 5. Causal role assignment
-roles <- cast_roles(vars, dag)
+# 5. Model fitting
+fit <- cast_fit(train_data, screen = screen, dag = dag,
+                models = c("rf", "brt", "maxent", "gam"))
 
-# 6. Model fitting (feature engineering is handled internally)
-fit <- cast_fit(train_data, screen = vars, dag = dag, ate = ate,
-                models = c("cast", "rf"))
+# 6. Spatial cross-validation
+cv <- cast_cv(train_data, screen = screen, dag = dag,
+              models = c("rf", "brt"))
 
-# 7. Evaluation
+# 7. Evaluation on holdout
 eval <- cast_evaluate(fit, test_data)
 
-# 8. Prediction
+# 8. Spatial prediction
 pred <- cast_predict(fit, env_grid)
 
-# 9. CATE estimation
-cate <- cast_cate(train_data, ate = ate, top_n = 3)
+# 9. Ensemble prediction
+ens <- cast_ensemble(fit, cv, env_grid)
+
+# 10. Future projection (optional)
+proj <- cast_project(fit, cv, current_env, future_envs)
+
+# 11. CATE estimation (optional)
+cate <- cast_cate(train_data, screen = screen, dag = dag, top_n = 3)
 ```

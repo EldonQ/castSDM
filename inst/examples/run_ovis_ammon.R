@@ -329,7 +329,6 @@ CONFIG <- list(
   fit_rf_ntree          = 300L,
   fit_brt_n_trees       = 500L,
   fit_brt_depth         = 5L,
-  fit_tune_grid         = FALSE,  #speed
   fit_verbose           = TRUE,
   # cast_evaluate
   eval_response = "presence",
@@ -371,8 +370,6 @@ CONFIG <- list(
   shap_max_explain_rows   = 50L,
   # cast_backdoor
   do_backdoor             = TRUE,
-  # cast_report (需 rmarkdown)
-  do_report               = FALSE,
   # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
@@ -706,7 +703,6 @@ fit_full <- cast_fit(
   rf_ntree           = CONFIG$fit_rf_ntree,
   brt_n_trees        = CONFIG$fit_brt_n_trees,
   brt_depth          = CONFIG$fit_brt_depth,
-  tune_grid          = CONFIG$fit_tune_grid,
   seed               = CONFIG$seed,
   verbose            = CONFIG$fit_verbose
 )
@@ -1111,18 +1107,6 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     p_cast <- plot(result, var_labels = var_labels)
     print(p_cast)
     ovis_save_plot(p_cast, "ovis_cast_pipeline.png", 12, 10)
-  }
-  # Pipeline 模式下生成 HTML 报告
-  if (isTRUE(CONFIG$do_report) &&
-      requireNamespace("rmarkdown", quietly = TRUE)) {
-    cast_report(
-      result      = result,
-      output_file = file.path(OVIS_FIG_DIR, "ovis_ammon_report.html"),
-      species     = "Ovis ammon",
-      var_labels  = var_labels,
-      open        = FALSE,
-      verbose     = TRUE
-    )
   }
 }
 

@@ -17,9 +17,6 @@
 #' @param rf_ntree Integer. Number of RF trees. Default `300`.
 #' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
-#' @param tune_result Optional `cast_tune` object returned by [cast_tune()].
-#'   When provided, its best per-algorithm hyperparameters override the
-#'   matching arguments. Default `NULL`.
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
@@ -43,7 +40,6 @@ cast_fit <- function(data,
                      rf_ntree     = 300L,
                      brt_n_trees  = 500L,
                      brt_depth    = 5L,
-                     tune_result  = NULL,
                      seed         = NULL,
                      verbose      = TRUE) {
   models <- tolower(models)
@@ -53,18 +49,6 @@ cast_fit <- function(data,
     cli::cli_abort(
       "Unknown model(s): {.val {bad}}. Use one or more of: {.val {valid_models}}."
     )
-  }
-
-  # ---- Apply cast_tune() result (overrides defaults per algo) -----------
-  if (!is.null(tune_result)) {
-    if (!inherits(tune_result, "cast_tune"))
-      cli::cli_abort("{.arg tune_result} must be a {.cls cast_tune} object.")
-    tb <- tune_result$best
-    if (!is.null(tb$rf$rf_ntree))     rf_ntree    <- tb$rf$rf_ntree
-    if (!is.null(tb$brt$brt_n_trees)) brt_n_trees <- tb$brt$brt_n_trees
-    if (!is.null(tb$brt$brt_depth))   brt_depth   <- tb$brt$brt_depth
-    if (verbose)
-      cli::cli_inform("cast_fit: applied tune_result hyperparameters.")
   }
 
   # ---- Determine variables ------------------------------------------------

@@ -35,13 +35,9 @@ species:
 # env_data:
 #   file: "data/env_grid.csv"
 
-# Models to fit per species. Currently supported: cast (CI-MLP), rf,
-# maxent, brt, gam, esm. Use "esm" for rare species (low presence count).
-models: [cast, rf, maxent, brt]
-
-# CI-MLP (cast) backend: "r" = pure-R CPU implementation (default,
-# Windows-friendly, no Rtools), "torch" = legacy GPU/CPU torch backend.
-backend: r
+# Models to fit per species. Supported: rf, brt, maxent, gam.
+# Use cast_esm() separately for rare species with low presence counts.
+models: [rf, brt, maxent, gam]
 
 # ---------- Pipeline configuration --------------------------------------
 # Any key under `cast_batch_args` is forwarded as a named argument to
@@ -56,8 +52,9 @@ cast_batch_args:
   cate_top_n: 3
   cate_n_trees: 1000
   dag_R: 100
+  dag_structure_method: pc
   dag_strength_threshold: 0.7
   dag_direction_threshold: 0.6
-  ate_K: 5
-  ate_alpha: 0.05
+  select_min_vars: 5
+  select_min_fraction: 0.3
   do_shap: false

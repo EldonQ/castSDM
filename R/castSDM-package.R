@@ -19,20 +19,19 @@
 #'    classification ([cast_roles()])
 #' 5. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
-#' 6. **Hyperparameter Tuning**: Per-algorithm grid search ([cast_tune()])
-#' 7. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),
+#' 6. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),
 #'    spatial block cross-validation ([cast_cv()])
-#' 8. **Prediction**: In-memory ([cast_predict()]) or tile-based
+#' 7. **Prediction**: In-memory ([cast_predict()]) or tile-based
 #'    ([cast_predict_tiled()]) spatial habitat suitability mapping
-#' 9. **Ensemble**: Performance-weighted, best-model, or equal-weight
+#' 8. **Ensemble**: Performance-weighted, best-model, or equal-weight
 #'    ensemble prediction ([cast_ensemble()])
-#' 10. **Future Projection**: Range change analysis under climate scenarios
+#' 9. **Future Projection**: Range change analysis under climate scenarios
 #'     ([cast_project()])
-#' 11. **CATE Estimation**: Spatially heterogeneous treatment effects with
+#' 10. **CATE Estimation**: Spatially heterogeneous treatment effects with
 #'     DAG-guided confounders ([cast_cate()])
-#' 12. **SHAP Explanations**: XGBoost surrogate TreeSHAP and RF fastshap
+#' 11. **SHAP Explanations**: XGBoost surrogate TreeSHAP and RF fastshap
 #'     ([cast_shap_xgb()], [cast_shap_fit()])
-#' 13. **Batch Workflows**: Multi-species runs with checkpoint/resume
+#' 12. **Batch Workflows**: Multi-species runs with checkpoint/resume
 #'     ([cast_batch()], [cast_batch_resume()]), YAML-driven config
 #'     ([cast_run_from_config()]), and worker budget allocation
 #'     ([cast_worker_budget()])

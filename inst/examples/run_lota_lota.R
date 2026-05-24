@@ -153,9 +153,6 @@ SELECT_MIN_VARS     <- 5L
 SELECT_MIN_FRACTION <- 0.5
 SELECT_NUM_TREES    <- 300L
 
-# ── cast_fit() ───────────────────────────────────────────────────────────────
-FIT_TUNE_GRID  <- TRUE
-
 # ── CATE maps: mask by HSS (plot.cast_cate) when global predictions exist ────
 CATE_HSS_MODEL     <- "rf"
 CATE_HSS_THRESHOLD <- 0.1
@@ -558,8 +555,7 @@ fit_result <- checkpoint(file.path(MODEL_DIR, "fit_result.rds"), {
     dag       = dag_result,
     models    = MODELS,
     seed      = SEED,
-    verbose   = TRUE,
-    tune_grid = FIT_TUNE_GRID
+    verbose   = TRUE
   )
 })
 

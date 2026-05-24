@@ -13,7 +13,6 @@ cast_fit(
   rf_ntree = 300L,
   brt_n_trees = 500L,
   brt_depth = 5L,
-  tune_result = NULL,
   seed = NULL,
   verbose = TRUE
 )
@@ -35,10 +34,6 @@ cast_fit(
 \item{brt_n_trees}{Integer. Number of BRT iterations. Default \code{500}.}
 
 \item{brt_depth}{Integer. BRT tree depth. Default \code{5}.}
-
-\item{tune_result}{Optional \code{cast_tune} object returned by \code{\link[=cast_tune]{cast_tune()}}.
-When provided, its best per-algorithm hyperparameters override the
-matching arguments. Default \code{NULL}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 
