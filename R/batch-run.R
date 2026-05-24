@@ -60,6 +60,8 @@
 #' @param dag_include_response Logical. Default `TRUE`.
 #' @param dag_pc_alpha Numeric. Default `0.05`.
 #' @param dag_pc_test Character or `NULL`. Default `NULL`.
+#' @param dag_mb_method Character. MB discovery algorithm. Default `"fast.iamb"`.
+#' @param dag_mb_alpha Numeric. MB discovery significance. Default `0.05`.
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
 #' @param dag_algorithm Character. Default `"hc"`.
 #' @param dag_score Character or `NULL`. Default `NULL`.
@@ -119,6 +121,8 @@ cast_batch <- function(species_list,
                        dag_include_response   = TRUE,
                        dag_pc_alpha           = 0.05,
                        dag_pc_test            = NULL,
+                       dag_mb_method          = "fast.iamb",
+                       dag_mb_alpha           = 0.05,
                        dag_bidag_algorithm    = "order",
                        dag_bidag_iterations   = NULL,
                        dag_algorithm          = "hc",
@@ -295,6 +299,8 @@ cast_batch <- function(species_list,
           structure_method = dag_structure_method,
           pc_alpha = dag_pc_alpha,
           pc_test = dag_pc_test,
+          mb_method = dag_mb_method,
+          mb_alpha = dag_mb_alpha,
           bidag_algorithm = dag_bidag_algorithm,
           bidag_iterations = dag_bidag_iterations
         )
@@ -319,6 +325,8 @@ cast_batch <- function(species_list,
     dag_structure_method = dag_structure_method,
     dag_pc_alpha = dag_pc_alpha,
     dag_pc_test = dag_pc_test,
+    dag_mb_method = dag_mb_method,
+    dag_mb_alpha = dag_mb_alpha,
     dag_bidag_algorithm = dag_bidag_algorithm,
     dag_bidag_iterations = dag_bidag_iterations,
     dag_algorithm = dag_algorithm,

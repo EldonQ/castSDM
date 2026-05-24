@@ -52,7 +52,9 @@ cast_batch_args:
   cate_top_n: 3
   cate_n_trees: 1000
   dag_R: 100
-  dag_structure_method: pc
+  dag_structure_method: pc        # pc | bootstrap_hc | mb_first | bidag_bge
+  # dag_mb_method: fast.iamb     # MB discovery (mb_first only): fast.iamb | iamb | inter.iamb | gs
+  # dag_mb_alpha: 0.05           # significance for MB discovery phase
   dag_strength_threshold: 0.7
   dag_direction_threshold: 0.6
   select_min_vars: 5

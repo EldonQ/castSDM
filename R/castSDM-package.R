@@ -11,8 +11,9 @@
 #'
 #' 1. **Data Preparation**: Train/test splitting, VIF-based collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Causal Structure Learning**: DAG discovery via PC algorithm or
-#'    bootstrap Hill-Climbing, with presence as a node ([cast_dag()])
+#' 2. **Causal Structure Learning**: DAG discovery via PC algorithm,
+#'    two-stage MB-First (IAMB + local PC), or bootstrap Hill-Climbing,
+#'    with presence as a node ([cast_dag()])
 #' 3. **Variable Selection**: Markov Blanket extraction + RF importance
 #'    fusion ([cast_select()])
 #' 4. **Causal Role Assignment**: Parent/child/co-parent/predictive

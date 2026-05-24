@@ -6,7 +6,7 @@
 # Results are saved to <output_dir>/<Species>/ sub-directories.
 #
 # v0.3.0 pipeline per species:
-#   cast_prepare -> cast_dag (PC, presence as node) -> cast_select (MB + RF)
+#   cast_prepare -> cast_dag (PC/MB-First, presence as node) -> cast_select (MB + RF)
 #   -> cast_roles -> cast_fit (RF/BRT/MaxEnt/GAM) -> cast_evaluate
 #   -> cast_cv -> cast_predict -> cast_ensemble -> (optional) cast_cate
 #   -> (optional) SHAP
@@ -175,10 +175,12 @@ CONFIG <- list(
   dag_direction_threshold = 0.6,
   dag_max_rows            = 8000L,
   dag_verbose             = FALSE,
-  dag_structure_method    = "pc",    # v0.3.0 default
+  dag_structure_method    = "pc",    # pc | bootstrap_hc | mb_first | bidag_bge
   dag_include_response    = TRUE,    # v0.3.0: presence as DAG node
   dag_pc_alpha            = 0.05,
   dag_pc_test             = NULL,    # auto: mi-cg for mixed data
+  dag_mb_method           = "fast.iamb", # MB discovery (mb_first only): fast.iamb | iamb | inter.iamb | gs
+  dag_mb_alpha            = 0.05,        # significance for MB discovery phase
   dag_bidag_algorithm     = "order",
   dag_bidag_iterations    = NULL,
 
@@ -491,6 +493,8 @@ batch_args <- list(
   dag_include_response    = CONFIG$dag_include_response,
   dag_pc_alpha            = CONFIG$dag_pc_alpha,
   dag_pc_test             = CONFIG$dag_pc_test,
+  dag_mb_method           = CONFIG$dag_mb_method,
+  dag_mb_alpha            = CONFIG$dag_mb_alpha,
   dag_bidag_algorithm     = CONFIG$dag_bidag_algorithm,
   dag_bidag_iterations    = CONFIG$dag_bidag_iterations,
   dag_algorithm           = CONFIG$dag_algorithm,

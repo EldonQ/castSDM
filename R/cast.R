@@ -23,6 +23,10 @@
 #' @param dag_pc_alpha Significance level for PC.
 #' @param dag_pc_test Conditional-independence test for [cast_dag()].
 #'   Default `NULL` (auto-selects `"mi-cg"` for mixed data).
+#' @param dag_mb_method Character. MB discovery algorithm for
+#'   `structure_method = "mb_first"`. Default `"fast.iamb"`.
+#' @param dag_mb_alpha Numeric. Significance level for MB discovery stage.
+#'   Default `0.05`.
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG options.
 #' @param strength_threshold Numeric. Minimum edge strength. Default `0.7`.
 #' @param direction_threshold Numeric. Minimum direction consistency. Default
@@ -66,6 +70,8 @@ cast <- function(species_data,
                  dag_include_response = TRUE,
                  dag_pc_alpha = 0.05,
                  dag_pc_test = NULL,
+                 dag_mb_method = "fast.iamb",
+                 dag_mb_alpha = 0.05,
                  dag_bidag_algorithm = "order",
                  dag_bidag_iterations = NULL,
                  strength_threshold = 0.7,
@@ -119,6 +125,8 @@ cast <- function(species_data,
     structure_method = dag_structure_method,
     pc_alpha = dag_pc_alpha,
     pc_test = dag_pc_test,
+    mb_method = dag_mb_method,
+    mb_alpha = dag_mb_alpha,
     bidag_algorithm = dag_bidag_algorithm,
     bidag_iterations = dag_bidag_iterations,
     blacklist = blacklist,

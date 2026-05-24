@@ -14,6 +14,8 @@ cast(
   dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
+  dag_mb_method = "fast.iamb",
+  dag_mb_alpha = 0.05,
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
   strength_threshold = 0.7,
@@ -65,6 +67,12 @@ Markov Blanket extraction. Default \code{TRUE}.}
 
 \item{dag_pc_test}{Conditional-independence test for \code{\link[=cast_dag]{cast_dag()}}.
 Default \code{NULL} (auto-selects \code{"mi-cg"} for mixed data).}
+
+\item{dag_mb_method}{Character. MB discovery algorithm for
+\code{structure_method = "mb_first"}. Default \code{"fast.iamb"}.}
+
+\item{dag_mb_alpha}{Numeric. Significance level for MB discovery stage.
+Default \code{0.05}.}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG options.}
 

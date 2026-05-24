@@ -66,6 +66,8 @@
           structure_method = cfg$dag_structure_method,
           pc_alpha = cfg$dag_pc_alpha,
           pc_test = cfg$dag_pc_test,
+          mb_method = cfg$dag_mb_method,
+          mb_alpha = cfg$dag_mb_alpha,
           bidag_algorithm = cfg$dag_bidag_algorithm,
           bidag_iterations = cfg$dag_bidag_iterations
         )

@@ -17,9 +17,11 @@ cast_dag(
   max_rows = 8000L,
   seed = NULL,
   verbose = TRUE,
-  structure_method = c("pc", "bootstrap_hc", "bidag_bge"),
+  structure_method = c("pc", "bootstrap_hc", "mb_first", "bidag_bge"),
   pc_alpha = 0.05,
   pc_test = NULL,
+  mb_method = c("fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"),
+  mb_alpha = 0.05,
   bidag_algorithm = c("order", "orderIter"),
   bidag_iterations = NULL,
   blacklist = NULL,
@@ -64,15 +66,39 @@ HC only). Default \code{0.6}.}
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 
 \item{structure_method}{Character. One of \code{"pc"} (default),
-\code{"bootstrap_hc"}, \code{"bidag_bge"}.}
+\code{"bootstrap_hc"}, \code{"mb_first"}, \code{"bidag_bge"}.
+
+The \code{"mb_first"} method uses a \strong{two-stage} approach that is
+dramatically faster than \code{"pc"} for high-dimensional data (p > 20):
+\itemize{
+\item \strong{Stage 1} — Direct Markov Blanket discovery via IAMB-family
+algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
+\item \strong{Stage 2} — Full DAG learning via PC, restricted to the MB
+subset plus the response node.  Because |MB| is typically 5–15,
+this is near-instantaneous.
+}
+
+Under the Faithfulness assumption the two-stage result is
+theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).}
 
 \item{pc_alpha}{Significance level for constraint-based PC. Default \code{0.05}.
-Used only when \code{structure_method = "pc"}.}
+Used when \code{structure_method} is \code{"pc"} or \code{"mb_first"} (Stage 2).}
 
 \item{pc_test}{Conditional-independence test passed as \code{test} to
 \code{bnlearn::pc.stable()}. Default \code{"mi-cg"} (mutual information for
 conditional Gaussian data when \code{include_response = TRUE}; \code{"zf"} for
-pure-numeric networks). Used only when \code{structure_method = "pc"}.}
+pure-numeric networks). Used when \code{structure_method} is \code{"pc"} or
+\code{"mb_first"}.}
+
+\item{mb_method}{Character.  Algorithm for Stage 1 Markov Blanket
+discovery (only used when \code{structure_method = "mb_first"}).  One of
+\code{"fast.iamb"} (default), \code{"iamb"}, \code{"inter.iamb"}, \code{"gs"},
+\code{"iamb.fdr"}.  See \code{bnlearn::learn.mb}.}
+
+\item{mb_alpha}{Numeric.  Significance level for Stage 1 MB discovery
+(only used when \code{structure_method = "mb_first"}).  Default \code{0.05}.
+This may differ from \code{pc_alpha} if you want a more liberal (larger)
+threshold in the MB screening phase.}
 
 \item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
 \code{"orderIter"}. Default \code{"order"}.}
@@ -120,6 +146,15 @@ Scutari, M. (2010). Learning Bayesian Networks with the bnlearn R Package.
 Suter, P., Kuipers, J., Moffa, G., & Beerenwinkel, N. (2023). Bayesian
 structure learning and sampling of Bayesian networks with the R package
 BiDAG. \emph{Journal of Statistical Software}, 105(9), 1-32.
+
+Tsamardinos, I., Aliferis, C. F., & Statnikov, A. (2003). Algorithms for
+Large Scale Markov Blanket Discovery. \emph{Proceedings of the Sixteenth
+International Florida Artificial Intelligence Research Society Conference},
+376-381.
+
+Pellet, J.-P. & Elisseeff, A. (2008). Using Markov Blankets for Causal
+Structure Learning. \emph{Journal of Machine Learning Research}, 9(43),
+1295-1342.
 }
 \seealso{
 \pkg{bnlearn} (\code{boot.strength}, \code{pc.stable}),

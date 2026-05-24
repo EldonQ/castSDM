@@ -12,12 +12,12 @@
 #
 # 或者已安装包后直接：
 #   library(castSDM)
-#   source(system.file("examples/run_ovis_ammon.R", package = "castSDM"))
+#   source(system.file("examples/run_Ovis_ammon.R", package = "castSDM"))
 #
-# DAG 三种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
+# DAG 四种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
 # 依赖: 建议一次安装
 #   install.packages(c("bnlearn", "BiDAG", "ranger"))
-# 说明: bidag_bge 需 BiDAG。仅想跑主流程、不做 DAG 三法自检可设
+# 说明: bidag_bge 需 BiDAG。仅想跑主流程、不做 DAG 四法自检可设
 #   RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 # ==============================================================================
 #
@@ -117,9 +117,9 @@ if (!is.na(pkg_root)) {
 }
 
 # 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
-OVIS_FIG_DIR <- file.path(getwd(), "cast_ovis_ammon_figures")
+OVIS_FIG_DIR <- file.path(getwd(), "cast_Ovis_ammon_figures")
 OVIS_FIG_DPI <- 1200L
-OVIS_SHAP_CACHE <- file.path(OVIS_FIG_DIR, "ovis_shap_cache.rds")
+OVIS_SHAP_CACHE <- file.path(OVIS_FIG_DIR, "Ovis_shap_cache.rds")
 dir.create(OVIS_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
 
 ovis_save_plot <- function(plot_obj, filename, width, height) {
@@ -221,12 +221,12 @@ ovis_save_plot <- function(plot_obj, filename, width, height) {
 }
 
 # ── Step 0: 加载示例数据 ─────────────────────────────────────────────────────
-data(ovis_ammon)
+data(Ovis_ammon)
 data(china_env_grid)
 
-cat("盘羊数据:", nrow(ovis_ammon), "行,", ncol(ovis_ammon), "列\n")
-cat("存在点:", sum(ovis_ammon$presence == 1),
-    "| 缺失点:", sum(ovis_ammon$presence == 0), "\n")
+cat("盘羊数据:", nrow(Ovis_ammon), "行,", ncol(Ovis_ammon), "列\n")
+cat("存在点:", sum(Ovis_ammon$presence == 1),
+    "| 缺失点:", sum(Ovis_ammon$presence == 0), "\n")
 
 # Keep native environmental variable names (English) in all plots.
 var_labels <- NULL
@@ -259,6 +259,15 @@ var_labels <- NULL
 #               max_rows, seed, verbose, env_vars, response, include_response
 #     忽略：R, algorithm, score, pc_*
 #
+# (4) mb_first — 两阶段 MB-First (IAMB + local PC)
+#     依赖：bnlearn
+#     Stage 1: learn.mb() 快速发现 Markov Blanket
+#     Stage 2: pc.stable() 在 MB 子集上学习有向 DAG
+#     生效参数：mb_method, mb_alpha (Stage 1), pc_alpha, pc_test (Stage 2),
+#               max_rows, seed, verbose, env_vars, response, include_response
+#     忽略：R, algorithm, score, strength_threshold, direction_threshold, bidag_*
+#     优势：当变量数多 (p>30) 时远快于全局 PC，但与 PC 理论等价 (Pellet 2008)
+#
 # 一键安装常用建议包（按需删减后运行）：
 #   install.packages(c("bnlearn", "BiDAG"))
 # ==============================================================================
@@ -289,6 +298,8 @@ CONFIG <- list(
   dag_pc_test             = NULL,
   dag_bidag_algorithm     = "order",
   dag_bidag_iterations    = NULL,
+  dag_mb_method           = "fast.iamb", # MB discovery (mb_first only): fast.iamb | iamb | inter.iamb | gs
+  dag_mb_alpha            = 0.05,        # significance for MB discovery phase
   dag_include_response    = TRUE,
   dag_blacklist           = NULL,   # data.frame(from, to) 禁止边
   dag_whitelist           = NULL,   # data.frame(from, to) 强制边
@@ -392,7 +403,7 @@ dag_whitelist_use <- CONFIG$dag_whitelist
 ovis_dag_selftest_all <- function(train_df, cfg) {
   ncap <- min(1600L, nrow(train_df))
   d <- train_df[seq_len(ncap), , drop = FALSE]
-  methods <- c("bootstrap_hc", "pc", "bidag_bge")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge", "mb_first")
 
   for (sm in methods) {
     miss <- character(0)
@@ -447,6 +458,8 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
         } else {
           cfg$dag_bidag_iterations
         },
+        mb_method = cfg$dag_mb_method,
+        mb_alpha  = cfg$dag_mb_alpha,
         blacklist = cfg$dag_blacklist,
         whitelist = cfg$dag_whitelist
       ),
@@ -494,7 +507,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
     )
   }
 
-  message("cast_dag 三种 structure_method 自检均通过 (bootstrap_hc, pc, bidag_bge)。")
+  message("cast_dag 四种 structure_method 自检均通过 (bootstrap_hc, pc, bidag_bge, mb_first)。")
   invisible(TRUE)
 }
 
@@ -569,7 +582,7 @@ if (isTRUE(CONFIG$only_run_shap_plots)) {
 
 # ── Step 1: 数据准备 ─────────────────────────────────────────────────────────
 split <- cast_prepare(
-  data           = ovis_ammon,
+  data           = Ovis_ammon,
   train_fraction = CONFIG$prepare_train_fraction,
   seed           = CONFIG$seed,
   env_vars       = CONFIG$prepare_env_vars,
@@ -660,6 +673,8 @@ dag <- cast_dag(
   pc_test              = CONFIG$dag_pc_test,
   bidag_algorithm      = CONFIG$dag_bidag_algorithm,
   bidag_iterations     = CONFIG$dag_bidag_iterations,
+  mb_method            = CONFIG$dag_mb_method,
+  mb_alpha             = CONFIG$dag_mb_alpha,
   blacklist            = dag_blacklist_use,
   whitelist            = dag_whitelist_use
 )
@@ -727,7 +742,7 @@ tryCatch(
 # ── Step 6b (可选): 空间交叉验证 ────────────────────────────────────────────
 if (isTRUE(CONFIG$run_spatial_cv)) {
   cv_ovis <- cast_cv(
-    data         = ovis_ammon,
+    data         = Ovis_ammon,
     screen       = screen,
     dag          = dag,
     k            = CONFIG$cv_k,
@@ -742,11 +757,11 @@ if (isTRUE(CONFIG$run_spatial_cv)) {
   )
   print(cv_ovis)
   if (requireNamespace("ggplot2", quietly = TRUE) &&
-      all(c("lon", "lat") %in% names(ovis_ammon))) {
+      all(c("lon", "lat") %in% names(Ovis_ammon))) {
     p_cv <- plot(
       cv_ovis,
-      lon = ovis_ammon$lon,
-      lat = ovis_ammon$lat,
+      lon = Ovis_ammon$lon,
+      lat = Ovis_ammon$lat,
       basemap = "china"
     )
     print(p_cv)
@@ -1068,6 +1083,75 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 方式 B-1 (可选): 未来气候情景投射
+# ══════════════════════════════════════════════════════════════════════════════
+# 需要: geodata (CMIP6下载), cast_prepare_future_env, cast_project, cast_cv
+# 将 RUN_FUTURE_PROJECTION 改为 TRUE 再运行本段。
+RUN_FUTURE_PROJECTION <- FALSE
+
+if (isTRUE(RUN_FUTURE_PROJECTION)) {
+  message("\n══ Future Climate Projection ══\n")
+
+  # (1) 下载 CMIP6 数据 (首次运行会下载, 之后复用缓存)
+  cmip6_data <- cast_download_cmip6(
+    gcms     = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
+                 "MRI-ESM2-0", "IPSL-CM6A-LR"),
+    ssps     = c("245", "585"),
+    periods  = c("2041-2060", "2061-2080"),
+    var      = "bioc",
+    res      = 2.5,
+    ensemble = TRUE,
+    path     = file.path(OVIS_FIG_DIR, "cmip6_cache"),
+    verbose  = TRUE
+  )
+
+  # (2) 在 china_env_grid 的 lon/lat 上提取未来环境变量
+  future_envs <- cast_prepare_future_env(
+    rasters     = cmip6_data,
+    grid        = china_env_grid,
+    current_env = china_env_grid,
+    verbose     = TRUE
+  )
+
+  # (3) 运行空间 CV (cast_project 需要 cv 结果来计算 ensemble 权重)
+  if (!exists("cv_ovis") || is.null(cv_ovis)) {
+    message("  Running spatial CV for ensemble weights...")
+    cv_ovis <- cast_cv(
+      data    = Ovis_ammon,
+      screen  = screen,
+      dag     = dag,
+      k       = CONFIG$cv_k,
+      models  = CONFIG$cv_models,
+      block_method = CONFIG$cv_block_method,
+      response = CONFIG$response,
+      seed    = CONFIG$seed,
+      verbose = TRUE
+    )
+  }
+
+  # (4) 未来投射: 当前 vs 未来 + 范围变化统计
+  proj <- cast_project(
+    fit         = fit_full,
+    cv          = cv_ovis,
+    current_env = china_env_grid,
+    future_envs = future_envs,
+    method      = "weighted",
+    save_dir    = file.path(OVIS_FIG_DIR, "future_projection")
+  )
+  print(proj)
+
+  # (5) 绘图
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    p_proj <- plot(proj, basemap = "china")
+    print(p_proj)
+    ovis_save_plot(p_proj, "ovis_future_projection.png", width = 14, height = 10)
+  }
+
+  message("Future climate projection complete.\n")
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 方式 B: 一键 Pipeline cast() (与上面模块化等价; 列出 cast() 全部形参)
 # ══════════════════════════════════════════════════════════════════════════════
 # 注意: 完整流程含空间 CV 时耗时较长。将 RUN_CAST_PIPELINE 改为 TRUE 再运行本段。
@@ -1075,7 +1159,7 @@ RUN_CAST_PIPELINE <- FALSE
 
 if (isTRUE(RUN_CAST_PIPELINE)) {
   result <- cast(
-    species_data           = ovis_ammon,
+    species_data           = Ovis_ammon,
     env_data               = china_env_grid,
     models                 = c("rf", "maxent", "brt"),
     train_fraction         = CONFIG$prepare_train_fraction,
@@ -1084,6 +1168,8 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     dag_include_response   = CONFIG$dag_include_response,
     dag_pc_alpha           = CONFIG$dag_pc_alpha,
     dag_pc_test            = CONFIG$dag_pc_test,
+    dag_mb_method          = CONFIG$dag_mb_method,
+    dag_mb_alpha           = CONFIG$dag_mb_alpha,
     dag_bidag_algorithm    = CONFIG$dag_bidag_algorithm,
     dag_bidag_iterations   = CONFIG$dag_bidag_iterations,
     strength_threshold     = CONFIG$dag_strength_threshold,
@@ -1118,7 +1204,7 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
 RUN_DAG_METHOD_SHOWCASE <- TRUE
 
 if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
-  methods <- c("bootstrap_hc", "pc", "bidag_bge")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge", "mb_first")
   for (sm in methods) {
     dm <- tryCatch(
       cast_dag(
@@ -1139,6 +1225,8 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
         pc_test = CONFIG$dag_pc_test,
         bidag_algorithm = CONFIG$dag_bidag_algorithm,
         bidag_iterations = CONFIG$dag_bidag_iterations,
+        mb_method = CONFIG$dag_mb_method,
+        mb_alpha  = CONFIG$dag_mb_alpha,
         blacklist = dag_blacklist_use,
         whitelist = dag_whitelist_use
       ),

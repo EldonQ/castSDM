@@ -48,13 +48,34 @@
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #' @param structure_method Character. One of `"pc"` (default),
-#'   `"bootstrap_hc"`, `"bidag_bge"`.
+#'   `"bootstrap_hc"`, `"mb_first"`, `"bidag_bge"`.
+#'
+#'   The `"mb_first"` method uses a **two-stage** approach that is
+#'   dramatically faster than `"pc"` for high-dimensional data (p > 20):
+#'
+#'   * **Stage 1** — Direct Markov Blanket discovery via IAMB-family
+#'     algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
+#'   * **Stage 2** — Full DAG learning via PC, restricted to the MB
+#'     subset plus the response node.  Because |MB| is typically 5–15,
+#'     this is near-instantaneous.
+#'
+#'   Under the Faithfulness assumption the two-stage result is
+#'   theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).
 #' @param pc_alpha Significance level for constraint-based PC. Default `0.05`.
-#'   Used only when `structure_method = "pc"`.
+#'   Used when `structure_method` is `"pc"` or `"mb_first"` (Stage 2).
 #' @param pc_test Conditional-independence test passed as `test` to
 #'   \code{bnlearn::pc.stable()}. Default `"mi-cg"` (mutual information for
 #'   conditional Gaussian data when `include_response = TRUE`; `"zf"` for
-#'   pure-numeric networks). Used only when `structure_method = "pc"`.
+#'   pure-numeric networks). Used when `structure_method` is `"pc"` or
+#'   `"mb_first"`.
+#' @param mb_method Character.  Algorithm for Stage 1 Markov Blanket
+#'   discovery (only used when `structure_method = "mb_first"`).  One of
+#'   `"fast.iamb"` (default), `"iamb"`, `"inter.iamb"`, `"gs"`,
+#'   `"iamb.fdr"`.  See \code{bnlearn::learn.mb}.
+#' @param mb_alpha Numeric.  Significance level for Stage 1 MB discovery
+#'   (only used when `structure_method = "mb_first"`).  Default `0.05`.
+#'   This may differ from `pc_alpha` if you want a more liberal (larger)
+#'   threshold in the MB screening phase.
 #' @param bidag_algorithm Passed to \code{BiDAG::learnBN()}: `"order"` or
 #'   `"orderIter"`. Default `"order"`.
 #' @param bidag_iterations Optional integer MCMC iterations for BiDAG.
@@ -75,6 +96,15 @@
 #' structure learning and sampling of Bayesian networks with the R package
 #' BiDAG. *Journal of Statistical Software*, 105(9), 1-32.
 #'
+#' Tsamardinos, I., Aliferis, C. F., & Statnikov, A. (2003). Algorithms for
+#' Large Scale Markov Blanket Discovery. *Proceedings of the Sixteenth
+#' International Florida Artificial Intelligence Research Society Conference*,
+#' 376-381.
+#'
+#' Pellet, J.-P. & Elisseeff, A. (2008). Using Markov Blankets for Causal
+#' Structure Learning. *Journal of Machine Learning Research*, 9(43),
+#' 1295-1342.
+#'
 #' @seealso \pkg{bnlearn} (\code{boot.strength}, \code{pc.stable}),
 #'   \pkg{BiDAG} (\code{learnBN}).
 #'
@@ -92,16 +122,30 @@ cast_dag <- function(data,
                      seed = NULL,
                      verbose = TRUE,
                      structure_method = c(
-                       "pc", "bootstrap_hc", "bidag_bge"
+                       "pc", "bootstrap_hc", "mb_first", "bidag_bge"
                      ),
                      pc_alpha = 0.05,
                      pc_test = NULL,
+                     mb_method = c(
+                       "fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"
+                     ),
+                     mb_alpha = 0.05,
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
                      blacklist = NULL,
                      whitelist = NULL) {
   structure_method <- match.arg(structure_method)
   bidag_algorithm <- match.arg(bidag_algorithm)
+  mb_method <- match.arg(mb_method)
+
+  # mb_first requires response in the DAG
+
+  if (structure_method == "mb_first" && !isTRUE(include_response)) {
+    cli::cli_abort(c(
+      "{.code structure_method = \"mb_first\"} requires {.code include_response = TRUE}.",
+      "i" = "The two-stage MB approach discovers the Markov Blanket of the response node."
+    ))
+  }
 
   # --- Resolve smart defaults for mixed-data settings ----------------------
   has_mixed <- isTRUE(include_response) && response %in% names(data)
@@ -221,6 +265,12 @@ cast_dag <- function(data,
       seed = seed, verbose = verbose,
       blacklist = blacklist, whitelist = whitelist
     ),
+    mb_first = .dag_mb_first(
+      dag_df, response = response_node, mb_method = mb_method,
+      mb_alpha = mb_alpha, pc_alpha = pc_alpha, test = pc_test,
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
+    ),
     bidag_bge = .dag_bidag_edges(
       dag_df,
       algorithm = bidag_algorithm,
@@ -236,6 +286,8 @@ cast_dag <- function(data,
     score
   } else if (structure_method == "bidag_bge") {
     "bge"
+  } else if (structure_method == "mb_first") {
+    paste0("mb_first:", mb_method)
   } else {
     structure_method
   }
@@ -392,6 +444,107 @@ extract_markov_blanket <- function(dag, node) {
     direction = 1,
     stringsAsFactors = FALSE
   )
+}
+
+
+# ---- MB-First: Two-stage MB discovery + local DAG --------------------------
+
+#' Two-Stage MB-Guided Structure Learning
+#'
+#' Stage 1: Uses [bnlearn::learn.mb()] (IAMB-family) to discover the
+#' Markov Blanket of the response — complexity O(|MB|^2 x p).
+#' Stage 2: Runs [bnlearn::pc.stable()] on the MB subset + response to
+#' recover edge directions — near-instantaneous for typical |MB| ~ 5-15.
+#'
+#' Under the Faithfulness assumption this recovers the same MB as full-DAG
+#' PC (Pellet & Elisseeff 2008, JMLR).
+#'
+#' @keywords internal
+#' @noRd
+.dag_mb_first <- function(dag_df, response, mb_method, mb_alpha,
+                          pc_alpha, test, seed, verbose,
+                          blacklist = NULL, whitelist = NULL) {
+  check_suggested("bnlearn", "for Markov Blanket discovery")
+  if (!is.null(seed)) set.seed(seed)
+
+  # --- Stage 1: Direct MB discovery -----------------------------------------
+  learn_mb_fn <- utils::getFromNamespace("learn.mb", "bnlearn")
+
+  if (is.null(response) || !response %in% names(dag_df)) {
+    cli::cli_abort(c(
+      "{.code structure_method = \"mb_first\"} requires a response node in the DAG.",
+      "i" = "Set {.code include_response = TRUE} (the default)."
+    ))
+  }
+
+  if (verbose) {
+    p <- ncol(dag_df) - 1L
+    cli::cli_inform(
+      "Stage 1: MB discovery ({mb_method}) for {.val {response}} among {p} variables..."
+    )
+  }
+
+  mb_args <- list(x = dag_df, node = response, method = mb_method,
+                  test = test, alpha = mb_alpha)
+  mb_vars <- tryCatch(
+    suppressWarnings(do.call(learn_mb_fn, mb_args)),
+    error = function(e) {
+      cli::cli_warn("MB discovery ({mb_method}) failed: {e$message}")
+      character()
+    }
+  )
+
+  if (verbose) {
+    cli::cli_inform(
+      "  MB({response}): {length(mb_vars)} variable{?s}: {.val {mb_vars}}"
+    )
+  }
+
+  # --- Fallback: empty MB → full PC -----------------------------------------
+  if (length(mb_vars) == 0L) {
+    if (verbose) {
+      cli::cli_warn(
+        "MB discovery returned empty set; falling back to full PC on all {ncol(dag_df)} nodes."
+      )
+    }
+    return(.dag_pc_edges(
+      dag_df, alpha = pc_alpha, test = test,
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
+    ))
+  }
+
+  # --- Stage 2: Local DAG on MB subset --------------------------------------
+  local_vars <- unique(c(mb_vars, response))
+  local_df <- dag_df[, local_vars, drop = FALSE]
+
+  if (verbose) {
+    cli::cli_inform(
+      "Stage 2: Local DAG (PC) on {length(local_vars)} nodes..."
+    )
+  }
+
+  # Filter blacklist/whitelist to local vars only
+  local_bl <- .filter_edge_list(blacklist, local_vars)
+  local_wl <- .filter_edge_list(whitelist, local_vars)
+
+  .dag_pc_edges(
+    local_df, alpha = pc_alpha, test = test,
+    seed = seed, verbose = FALSE,
+    blacklist = local_bl, whitelist = local_wl
+  )
+}
+
+
+#' Filter an edge list (blacklist/whitelist) to only contain edges
+#' between nodes in `node_set`.
+#' @keywords internal
+#' @noRd
+.filter_edge_list <- function(edge_df, node_set) {
+  if (is.null(edge_df) || nrow(edge_df) == 0L) return(NULL)
+  keep <- edge_df$from %in% node_set & edge_df$to %in% node_set
+  if (!any(keep)) return(NULL)
+  edge_df[keep, , drop = FALSE]
 }
 
 

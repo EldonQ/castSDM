@@ -20,6 +20,8 @@ cast_batch(
   dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
+  dag_mb_method = "fast.iamb",
+  dag_mb_alpha = 0.05,
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
   dag_algorithm = "hc",
@@ -104,6 +106,10 @@ cast_batch(
 \item{dag_pc_alpha}{Numeric. Default \code{0.05}.}
 
 \item{dag_pc_test}{Character or \code{NULL}. Default \code{NULL}.}
+
+\item{dag_mb_method}{Character. MB discovery algorithm. Default \code{"fast.iamb"}.}
+
+\item{dag_mb_alpha}{Numeric. MB discovery significance. Default \code{0.05}.}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
 
