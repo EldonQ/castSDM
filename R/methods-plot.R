@@ -723,8 +723,8 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
   check_suggested("sf", "for geographic mapping")
 
   pred <- x$predictions
-  if (!all(c("lon", "lat", "ensemble_hss") %in% names(pred))) {
-    cli::cli_abort("Ensemble predictions must contain lon, lat, ensemble_hss.")
+  if (!all(c("lon", "lat", "hss_ensemble") %in% names(pred))) {
+    cli::cli_abort("Ensemble predictions must contain lon, lat, hss_ensemble.")
   }
 
   p <- ggplot2::ggplot()
@@ -742,7 +742,7 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
     ggplot2::geom_point(
       data = pred,
       ggplot2::aes(x = .data$lon, y = .data$lat,
-                   color = .data$ensemble_hss),
+                   color = .data$hss_ensemble),
       size = 0.4, alpha = 0.85
     ) +
     ggplot2::scale_color_viridis_c(
@@ -804,8 +804,8 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
   }
 
   change_colors <- c(
-    gain = "#27AE60", loss = "#C0392B", stable = "#3498DB",
-    absent = "grey85"
+    gain = "#27AE60", loss = "#C0392B", stable_present = "#3498DB",
+    stable_absent = "grey85"
   )
 
   p <- ggplot2::ggplot()
@@ -832,7 +832,7 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
         s <- x$stats[x$stats$scenario == scenario, ]
         if (nrow(s) > 0)
           sprintf("Gain=%d | Loss=%d | Stable=%d | Shift=%.1f km",
-                  s$gain[1], s$loss[1], s$stable[1], s$centroid_shift_km[1])
+                  s$n_gain[1], s$n_loss[1], s$n_stable_present[1], s$centroid_shift_km[1])
         else ""
       }
     ) +

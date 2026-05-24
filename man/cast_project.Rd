@@ -11,7 +11,8 @@ cast_project(
   future_envs,
   method = c("weighted", "best", "equal"),
   threshold_method = "maxTSS",
-  models = NULL
+  models = NULL,
+  save_dir = NULL
 )
 }
 \arguments{
@@ -34,6 +35,16 @@ variables for the current (baseline) period.}
 \code{"maxTSS"}.}
 
 \item{models}{Character vector. Models to use. Default \code{NULL} (all).}
+
+\item{save_dir}{Optional character. When provided, saves CSV and (if
+\code{terra} is available) GeoTIFF outputs to this directory:
+\itemize{
+\item \code{current_prediction.csv} / \code{.tif}
+\item \verb{\{scenario\}_prediction.csv} / \code{.tif}
+\item \verb{\{scenario\}_change.csv} / \code{.tif}
+\item \code{projection_stats.csv}
+Default \code{NULL} (no file output).
+}}
 }
 \value{
 A \code{cast_project} object with components:

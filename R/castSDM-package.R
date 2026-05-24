@@ -26,7 +26,8 @@
 #' 8. **Ensemble**: Performance-weighted, best-model, or equal-weight
 #'    ensemble prediction ([cast_ensemble()])
 #' 9. **Future Projection**: Range change analysis under climate scenarios
-#'     ([cast_project()])
+#'     ([cast_project()]), with CMIP6 data download helpers
+#'     ([cast_download_cmip6()], [cast_prepare_future_env()])
 #' 10. **CATE Estimation**: Spatially heterogeneous treatment effects with
 #'     DAG-guided confounders ([cast_cate()])
 #' 11. **SHAP Explanations**: XGBoost surrogate TreeSHAP and RF fastshap

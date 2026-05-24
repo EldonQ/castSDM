@@ -17,6 +17,13 @@
 #' @param threshold_method Character. Binary threshold method. Default
 #'   `"maxTSS"`.
 #' @param models Character vector. Models to use. Default `NULL` (all).
+#' @param save_dir Optional character. When provided, saves CSV and (if
+#'   `terra` is available) GeoTIFF outputs to this directory:
+#'   - `current_prediction.csv` / `.tif`
+#'   - `{scenario}_prediction.csv` / `.tif`
+#'   - `{scenario}_change.csv` / `.tif`
+#'   - `projection_stats.csv`
+#'   Default `NULL` (no file output).
 #'
 #' @return A `cast_project` object with components:
 #' \describe{
@@ -46,7 +53,8 @@
 cast_project <- function(fit, cv, current_env, future_envs,
                          method = c("weighted", "best", "equal"),
                          threshold_method = "maxTSS",
-                         models = NULL) {
+                         models = NULL,
+                         save_dir = NULL) {
   method <- match.arg(method)
 
   if (!is.list(future_envs) || length(future_envs) == 0) {
@@ -152,6 +160,57 @@ cast_project <- function(fit, cv, current_env, future_envs,
   stats_df <- do.call(rbind, stats_rows)
   rownames(stats_df) <- NULL
 
+  # ---- Save outputs (optional) ---------------------------------------------
+  if (!is.null(save_dir)) {
+    dir.create(save_dir, recursive = TRUE, showWarnings = FALSE)
+
+    # CSV outputs
+    utils::write.csv(
+      current$predictions, file.path(save_dir, "current_prediction.csv"),
+      row.names = FALSE
+    )
+    utils::write.csv(stats_df, file.path(save_dir, "projection_stats.csv"),
+                     row.names = FALSE)
+    for (scen in names(future_list)) {
+      utils::write.csv(
+        future_list[[scen]]$predictions,
+        file.path(save_dir, paste0(scen, "_prediction.csv")),
+        row.names = FALSE
+      )
+      utils::write.csv(
+        changes_list[[scen]],
+        file.path(save_dir, paste0(scen, "_change.csv")),
+        row.names = FALSE
+      )
+    }
+
+    # GeoTIFF outputs (if terra available and data has coordinates)
+    has_coords <- all(c("lon", "lat") %in% names(current$predictions))
+    if (has_coords && requireNamespace("terra", quietly = TRUE)) {
+      .save_prediction_tif(
+        current$predictions, "lon", "lat", "hss_ensemble",
+        file.path(save_dir, "current_prediction.tif")
+      )
+      for (scen in names(future_list)) {
+        .save_prediction_tif(
+          future_list[[scen]]$predictions, "lon", "lat", "hss_ensemble",
+          file.path(save_dir, paste0(scen, "_prediction.tif"))
+        )
+        # Change map as numeric: gain=1, loss=-1, stable_present=2, stable_absent=0
+        ch <- changes_list[[scen]]
+        ch$change_num <- ifelse(ch$change == "gain", 1L,
+                         ifelse(ch$change == "loss", -1L,
+                         ifelse(ch$change == "stable_present", 2L, 0L)))
+        .save_prediction_tif(
+          ch, "lon", "lat", "change_num",
+          file.path(save_dir, paste0(scen, "_change.tif"))
+        )
+      }
+    }
+
+    cli::cli_inform("Projection outputs saved to {.path {save_dir}}.")
+  }
+
   new_cast_project(
     current = current,
     future  = future_list,
@@ -172,4 +231,24 @@ cast_project <- function(fit, cv, current_env, future_envs,
   a <- sin(dlat / 2)^2 +
     cos(lat1 * to_rad) * cos(lat2 * to_rad) * sin(dlon / 2)^2
   R * 2 * atan2(sqrt(a), sqrt(1 - a))
+}
+
+
+#' Save a prediction data.frame as GeoTIFF via terra
+#' @keywords internal
+#' @noRd
+.save_prediction_tif <- function(df, lon_col, lat_col, val_col, path) {
+  tryCatch({
+    pts <- terra::vect(
+      cbind(df[[lon_col]], df[[lat_col]]),
+      type = "points",
+      atts = data.frame(value = df[[val_col]]),
+      crs = "EPSG:4326"
+    )
+    r <- terra::rasterize(pts, terra::rast(pts, res = 0.05), field = "value",
+                          fun = "mean")
+    terra::writeRaster(r, path, overwrite = TRUE)
+  }, error = function(e) {
+    cli::cli_warn("Failed to save GeoTIFF {.path {path}}: {e$message}")
+  })
 }
