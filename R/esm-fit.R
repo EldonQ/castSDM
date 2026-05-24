@@ -5,7 +5,7 @@
 #' (GLM or GAM) for each pair of selected predictors and combines them via
 #' AUC-weighted averaging on a held-out validation split.
 #'
-#' Designed as the recommended fallback when CI-MLP and BRT would over-fit
+#' Designed as the recommended fallback when BRT would over-fit
 #' on rare species (typically `n_pres < presence_threshold`). Complementary
 #' to [cast_fit()] — see [cast_batch()]'s `auto_esm` argument for automatic
 #' selection.

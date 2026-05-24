@@ -1,20 +1,18 @@
-#' SHAP explanations for fitted SDM models (RF, CAST)
+#' SHAP explanations for fitted RF models
 #'
 #' Uses the \pkg{fastshap} package (Monte Carlo Shapley with optional
-#' sum-to-prediction adjustment) on the **same** fitted objects produced by
-#' [cast_fit()] — unlike [cast_shap_xgb()], which trains a separate XGBoost
-#' surrogate. Interaction strengths for the circular plot are a **proxy**
-#' derived from cross-products of mean absolute SHAP values (TreeSHAP-style
-#' pairwise interactions are not computed here).
+#' sum-to-prediction adjustment) on the **same** fitted RF object produced by
+#' [cast_fit()]. Interaction strengths for the circular plot are a **proxy**
+#' derived from cross-products of mean absolute SHAP values.
 #'
 #' @param fit A [cast_fit()] object that already contains the requested model.
-#' @param which Character: `"rf"` or `"cast"` (the CAST CI-MLP). The model must
-#'   appear in `names(fit$models)`.
+#' @param which Character: `"rf"`. The model must appear in
+#'   `names(fit$models)`.
 #' @param data Training-like `data.frame` with `response` and columns
 #'   `fit$env_vars` (e.g. `split$train` from [cast_prepare()]).
 #' @param response Binary response column name. Default `"presence"`.
 #' @param test_fraction Fraction of rows (after `na.omit`) held out for rows in
-#'   the SHAP matrix; same idea as [cast_shap_xgb()]. Default `0.2`.
+#'   the SHAP matrix. Default `0.2`.
 #' @param seed Optional integer seed.
 #' @param fastshap_nsim Monte Carlo replications per feature column in
 #'   [fastshap::explain()]. Default `60`. Increase for stability (slower).
@@ -22,7 +20,6 @@
 #'   `fastshap::explain()` (subsampled). Default `500`.
 #' @param max_explain_rows Cap on the number of held-out rows explained.
 #'   Default `80`.
-#' @param max_interactions Passed to [cast_features()] for CAST. Default `15`.
 #' @param verbose Logical.
 #'
 #' @return A `cast_shap` object compatible with [plot.cast_shap()]:
@@ -31,17 +28,14 @@
 #'   `fitted_model`, `shap_engine_note`.
 #'
 #' @details
-#' **Random forest**: Shapley values are on the **probability scale** (positive
-#' class), matching `ranger` probability predictions.
-#'
-#' **CAST**: Explanations are in the **engineered feature space** returned by
-#' [cast_features()] (DAG interactions, etc.), not raw environmental columns.
+#' Shapley values are on the **probability scale** (positive class),
+#' matching `ranger` probability predictions.
 #'
 #' @seealso [cast_shap_xgb()], [plot.cast_shap()], [cast_fit()]
 #'
 #' @export
 cast_shap_fit <- function(fit,
-                          which = c("rf", "cast"),
+                          which = "rf",
                           data,
                           response = "presence",
                           test_fraction = 0.2,
@@ -49,9 +43,8 @@ cast_shap_fit <- function(fit,
                           fastshap_nsim = 60L,
                           max_background_rows = 500L,
                           max_explain_rows = 80L,
-                          max_interactions = 15L,
                           verbose = FALSE) {
-  which <- match.arg(which)
+  which <- match.arg(which, choices = "rf")
   fastshap_nsim <- max(2L, as.integer(fastshap_nsim)[1L])
   check_suggested("fastshap", "for cast_shap_fit()")
 
@@ -64,17 +57,8 @@ cast_shap_fit <- function(fit,
     )
   }
   mdl <- fit$models[[which]]
-  if (which == "rf" &&
-      (is.null(mdl$model) || !inherits(mdl$model, "ranger"))) {
+  if (is.null(mdl$model) || !inherits(mdl$model, "ranger")) {
     cli::cli_abort("{.arg fit} does not contain a fitted ranger RF model.")
-  }
-  if (which == "cast") {
-    check_suggested("torch", "for CAST SHAP")
-    if (is.null(mdl$model) || !inherits(mdl$model, "nn_module")) {
-      cli::cli_abort(
-        "{.arg fit} does not contain a fitted CAST torch {.cls nn_module}."
-      )
-    }
   }
 
   env_vars <- fit$env_vars
@@ -88,13 +72,7 @@ cast_shap_fit <- function(fit,
   X_raw <- as.data.frame(df[, env_vars, drop = FALSE])
   X_raw[is.na(X_raw)] <- 0
 
-  sc <- fit$scaling
-  X_sc <- as.data.frame(
-    scale(X_raw, center = sc$means, scale = sc$sds)
-  )
-  X_sc[is.na(X_sc)] <- 0
-
-  n <- nrow(X_sc)
+  n <- nrow(X_raw)
   if (!is.null(seed)) set.seed(seed)
   n_te <- max(5L, floor(n * test_fraction))
   ii <- sample.int(n, size = n - n_te)
@@ -106,102 +84,40 @@ cast_shap_fit <- function(fit,
   n_bg <- min(length(ii), max_background_rows)
   ii_use <- sample(ii, n_bg)
 
-  if (which == "rf") {
-    rf_mod <- mdl$model
-    X_bg <- X_raw[ii_use, , drop = FALSE]
-    X_exp <- X_raw[te, , drop = FALSE]
+  rf_mod <- mdl$model
+  X_bg <- X_raw[ii_use, , drop = FALSE]
+  X_exp <- X_raw[te, , drop = FALSE]
 
-    pfun_rf <- function(object, newdata) {
-      nd <- as.data.frame(newdata)
-      pr <- stats::predict(object, data = nd)
-      pm <- as.matrix(pr$predictions)
-      if (!("1" %in% colnames(pm))) {
-        cli::cli_abort("Expected probability column {.val {'1'}} in ranger predictions.")
-      }
-      as.numeric(pm[, "1", drop = TRUE])
+  pfun_rf <- function(object, newdata) {
+    nd <- as.data.frame(newdata)
+    pr <- stats::predict(object, data = nd)
+    pm <- as.matrix(pr$predictions)
+    if (!("1" %in% colnames(pm))) {
+      cli::cli_abort("Expected probability column {.val {'1'}} in ranger predictions.")
     }
-
-    fs <- .fastshap_rows(
-      object = rf_mod,
-      X_bg = X_bg,
-      X_exp = X_exp,
-      pred_wrapper = pfun_rf,
-      fastshap_nsim = fastshap_nsim,
-      verbose = verbose
-    )
-    sh_mat <- fs$shap
-    bias_sh <- fs$bias_shap
-    exp_val <- mean(pfun_rf(rf_mod, X_exp))
-    eng <- "ranger"
-    note <- "fastshap (MC Shapley, adjust=TRUE) on ranger probability; Vint = proxy from |SHAP|."
-    cap <- paste0(
-      "SHAP for the ranger model inside cast_fit(). p=", ncol(sh_mat),
-      " raw env columns (= fit$env_vars). fastshap on probability scale. ",
-      "Vint edges: proxy from mean |SHAP| cross-products (not exact RF interaction SHAP)."
-    )
-    feat_sp <- "raw_env"
-    sh_sc <- "probability"
-    n_int <- 0L
-  } else {
-    # CAST: engineered features
-    screen <- fit$screen
-    dag <- fit$dag
-    ate <- fit$ate
-    if (is.null(screen) || is.null(dag) || is.null(ate)) {
-      cli::cli_abort("CAST SHAP requires {.arg fit} to carry screen, dag, and ate.")
-    }
-    feat_type <- mdl$feature_type %||% "cast"
-    feat_bg <- cast_features(
-      X_sc[ii_use, , drop = FALSE],
-      screen, dag, ate,
-      model_type = feat_type,
-      max_interactions = max_interactions
-    )
-    feat_te <- cast_features(
-      X_sc[te, , drop = FALSE],
-      screen, dag, ate,
-      model_type = feat_type,
-      max_interactions = max_interactions
-    )
-    X_bg <- feat_bg$features
-    X_exp <- feat_te$features
-    nn_mod <- mdl$model
-
-    pfun_nn <- function(object, newdata) {
-      object$eval()
-      xt <- torch::torch_tensor(
-        as.matrix(newdata),
-        dtype = torch::torch_float()
-      )
-      as.numeric(torch::torch_sigmoid(object(xt))$squeeze()$cpu())
-    }
-
-    fs <- .fastshap_rows(
-      object = nn_mod,
-      X_bg = X_bg,
-      X_exp = X_exp,
-      pred_wrapper = pfun_nn,
-      fastshap_nsim = fastshap_nsim,
-      verbose = verbose
-    )
-    sh_mat <- fs$shap
-    bias_sh <- fs$bias_shap
-    exp_val <- mean(pfun_nn(nn_mod, X_exp))
-    eng <- "torch_cast"
-    note <- paste0(
-      "fastshap (MC Shapley, adjust=TRUE) on CAST logits->prob; ",
-      "columns are cast_features() inputs; Vint = proxy from |SHAP|."
-    )
-    n_int <- as.integer(feat_te$n_interactions %||% length(feat_te$interaction_names))
-    cap <- paste0(
-      "SHAP for the CAST nn in cast_fit() on cast_features() matrix: p=", ncol(sh_mat),
-      " inputs (ATE-weighted base + int_*). ",
-      "Name int_A_B = standardized A * standardized B * edge strength for DAG edge A-B (see ?cast_features). ",
-      "Vint = proxy. Axes differ from XGBoost (logit) / RF (raw env only)."
-    )
-    feat_sp <- "cast_engineered"
-    sh_sc <- "probability"
+    as.numeric(pm[, "1", drop = TRUE])
   }
+
+  fs <- .fastshap_rows(
+    object = rf_mod,
+    X_bg = X_bg,
+    X_exp = X_exp,
+    pred_wrapper = pfun_rf,
+    fastshap_nsim = fastshap_nsim,
+    verbose = verbose
+  )
+  sh_mat <- fs$shap
+  bias_sh <- fs$bias_shap
+  exp_val <- mean(pfun_rf(rf_mod, X_exp))
+  eng <- "ranger"
+  note <- "fastshap (MC Shapley, adjust=TRUE) on ranger probability; Vint = proxy from |SHAP|."
+  cap <- paste0(
+    "SHAP for the ranger model inside cast_fit(). p=", ncol(sh_mat),
+    " raw env columns (= fit$env_vars). fastshap on probability scale. ",
+    "Vint edges: proxy from mean |SHAP| cross-products (not exact RF interaction SHAP)."
+  )
+  feat_sp <- "raw_env"
+  sh_sc <- "probability"
 
   mean_inter <- .shap_interaction_proxy(sh_mat)
   base_score <- mean(bias_sh, na.rm = TRUE)
@@ -226,7 +142,7 @@ cast_shap_fit <- function(fit,
       feature_space = feat_sp,
       shap_scale = sh_sc,
       n_features = n_feat,
-      n_interactions = n_int,
+      n_interactions = 0L,
       shap_plot_caption = cap
     ),
     class = "cast_shap"
@@ -287,4 +203,3 @@ cast_shap_fit <- function(fit,
     bias_shap = rep(bias_scalar, n_ex)
   )
 }
-

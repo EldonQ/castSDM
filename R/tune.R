@@ -8,7 +8,6 @@
 #'
 #' Supported algorithms (`models`):
 #' \itemize{
-#'   \item `"cast"` (CI-MLP): tunes `hidden_size`, `dropout`, `lr`.
 #'   \item `"rf"`: tunes `rf_ntree`, plus internally `mtry` defaults via
 #'     `ranger`.
 #'   \item `"brt"`: tunes `brt_n_trees`, `brt_depth`, learning rate.
@@ -22,9 +21,8 @@
 #'
 #' @param data Training `data.frame`. Must contain `response`.
 #' @param models Character vector. Algorithms to tune. Default
-#'   `c("cast", "rf", "brt")`.
-#' @param screen,dag,ate As in [cast_fit()] (only required when tuning
-#'   `"cast"`).
+#'   `c("rf", "brt")`.
+#' @param screen,dag As in [cast_fit()].
 #' @param grid Optional named list of per-model parameter grids. Each
 #'   element is a `data.frame` (or list-of-vectors that gets passed to
 #'   `expand.grid`). If `NULL`, uses [cast_default_grid()].
@@ -42,10 +40,9 @@
 #' @seealso [cast_fit()], [cast_default_grid()]
 #' @export
 cast_tune <- function(data,
-                      models       = c("cast", "rf", "brt"),
+                      models       = c("rf", "brt"),
                       screen       = NULL,
                       dag          = NULL,
-                      ate          = NULL,
                       grid         = NULL,
                       n_splits     = 30L,
                       val_fraction = 0.25,
@@ -88,7 +85,7 @@ cast_tune <- function(data,
         va <- data[sp$val, , drop = FALSE]
         y_va <- Y[sp$val]
         pv <- tryCatch(
-          .cast_tune_fit_predict(mdl, tr, va, params, screen, dag, ate,
+          .cast_tune_fit_predict(mdl, tr, va, params, screen, dag,
                                  response = response),
           error = function(e) rep(NA_real_, length(y_va))
         )
@@ -131,12 +128,6 @@ cast_tune <- function(data,
 #' @export
 cast_default_grid <- function() {
   list(
-    cast = expand.grid(
-      hidden_size = c(32L, 64L, 128L),
-      dropout     = c(0.1, 0.2, 0.3),
-      lr          = c(5e-4, 1e-3, 2e-3),
-      stringsAsFactors = FALSE
-    ),
     rf = expand.grid(
       rf_ntree = c(200L, 500L, 1000L),
       stringsAsFactors = FALSE
@@ -171,30 +162,20 @@ print.cast_tune <- function(x, ...) {
 
 # Internal: fit a single algo with given params, return val predictions.
 .cast_tune_fit_predict <- function(mdl, tr, va, params,
-                                   screen, dag, ate, response) {
+                                   screen, dag, response) {
   fit_args <- list(
     data     = tr,
     models   = mdl,
     response = response,
-    n_runs   = 1L,
-    n_epochs = 100L,
     verbose  = FALSE
   )
-  if (mdl == "cast") {
-    fit_args$screen <- screen
-    fit_args$dag    <- dag
-    fit_args$ate    <- ate
-  }
+  if (!is.null(screen)) fit_args$screen <- screen
+  if (!is.null(dag))    fit_args$dag    <- dag
   fit_args <- utils::modifyList(fit_args, params)
   f <- do.call(cast_fit, fit_args)
-  ev <- cast_evaluate(f, va, response = response)
-  # cast_evaluate returns a data.frame; we re-predict directly to get raw probs:
+  # Predict on validation set
   mdl_info <- f$models[[mdl]]
   X_raw <- as.data.frame(va[, f$env_vars, drop = FALSE])
   X_raw[is.na(X_raw)] <- 0
-  X_sc <- as.data.frame(
-    scale(X_raw, center = f$scaling$means, scale = f$scaling$sds)
-  )
-  X_sc[is.na(X_sc)] <- 0
-  predict_single_model(mdl_info, X_raw, X_sc, f$screen, f$dag, f$ate)
+  predict_single_model(mdl_info, X_raw)
 }

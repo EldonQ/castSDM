@@ -7,7 +7,7 @@
 cast_batch(
   species_list,
   env_data = NULL,
-  models = c("cast", "rf", "maxent", "brt"),
+  models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
   output_dir = "castSDM_batch_output",
   fig_dpi = 300L,
@@ -16,50 +16,35 @@ cast_batch(
   verbose = TRUE,
   fit_verbose = FALSE,
   dag_R = 100L,
-  dag_structure_method = "bootstrap_hc",
+  dag_structure_method = "pc",
+  dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
-  dag_pc_test = "zf",
+  dag_pc_test = NULL,
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
-  dag_notears_lambda = 0.03,
-  dag_notears_max_iter = 2000L,
-  dag_notears_lr = 0.02,
-  dag_notears_tol = 0.001,
-  dag_notears_rho_init = 0.1,
-  dag_notears_alpha_mult = 1.01,
   dag_algorithm = "hc",
-  dag_score = "bic-g",
+  dag_score = NULL,
   dag_strength_threshold = 0.7,
   dag_direction_threshold = 0.6,
   dag_max_rows = 8000L,
-  ate_K = 5L,
-  ate_alpha = 0.05,
-  ate_num_trees = 300L,
-  ate_quantile_cuts = c(0.25, 0.5, 0.75),
-  ate_p_adjust = "fdr",
-  ate_parallel = FALSE,
-  screen_min_vars = 5L,
-  screen_min_fraction = 0.5,
-  screen_num_trees = 300L,
+  select_min_vars = 5L,
+  select_min_fraction = 0.3,
+  select_num_trees = 300L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
   do_cate = TRUE,
   cate_top_n = 3L,
   cate_n_trees = 1000L,
-  cate_hss_model = "cast",
+  cate_hss_model = "rf",
   cate_hss_threshold = 0.1,
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
   dag_env_vars = NULL,
   dag_verbose = FALSE,
-  ate_variables = NULL,
-  ate_verbose = FALSE,
-  screen_verbose = FALSE,
+  select_verbose = FALSE,
   cv_models = NULL,
-  cv_n_epochs = 200L,
-  cv_n_runs = 3L,
   cv_rf_ntree = 300L,
   cv_brt_n_trees = 500L,
   cv_parallel = FALSE,
@@ -83,237 +68,127 @@ cast_batch(
   shap_fastshap_nsim = 40L,
   shap_max_explain_rows = 50L,
   dev_package_root = NULL,
+  learn_shared_dag = FALSE,
+  shared_dag = NULL,
+  shared_dag_data = NULL,
   ...
 )
 }
 \arguments{
-\item{species_list}{A named list of \code{data.frame}s. Each element is a
-species dataset with \code{lon}, \code{lat}, \code{presence}, and environmental
-variables. Names are used as species identifiers.}
+\item{species_list}{A named list of \code{data.frame}s.}
 
-\item{env_data}{Optional shared \code{data.frame} for spatial prediction.
-If \code{NULL}, spatial prediction is skipped.}
+\item{env_data}{Optional shared \code{data.frame} for spatial prediction.}
 
-\item{models}{Character vector. Models to fit per species. Default
-\code{c("cast", "rf", "maxent", "brt")}.}
+\item{models}{Character vector. Default \code{c("rf", "brt", "maxent", "gam")}.}
 
-\item{train_fraction}{Numeric. Train/test split ratio. Default \code{0.7}.}
+\item{train_fraction}{Numeric. Default \code{0.7}.}
 
-\item{output_dir}{Character. Top-level directory for per-species
-outputs. Default \code{"castSDM_batch_output"}.}
+\item{output_dir}{Character. Default \code{"castSDM_batch_output"}.}
 
-\item{fig_dpi}{Integer. DPI for all saved figures. Default \code{300}.}
+\item{fig_dpi}{Integer. Default \code{300}.}
 
-\item{parallel}{Logical. If \code{TRUE}, run species in parallel using
-\pkg{future}. Set a \code{\link[future:plan]{future::plan()}} before calling. Default \code{TRUE}.}
+\item{parallel}{Logical. Default \code{TRUE}.}
 
-\item{seed}{Integer or \code{NULL}. Base seed. Each species gets
-\code{seed + species_index} for reproducibility.}
+\item{seed}{Integer or \code{NULL}.}
 
-\item{verbose}{Logical. Progress messages for the batch driver itself.
-Default \code{TRUE}.}
+\item{verbose}{Logical. Default \code{TRUE}.}
 
-\item{fit_verbose}{Logical. Passed to \code{\link[=cast_fit]{cast_fit()}} as \code{verbose} for each
-species. Default \code{FALSE}. (Do not pass \code{verbose} in \code{...} to \code{cast_batch};
-it would clash with \code{verbose} here; use \code{fit_verbose} instead.)}
+\item{fit_verbose}{Logical. Default \code{FALSE}.}
 
-\item{dag_R}{Integer. Number of DAG bootstrap replicates.
-Default \code{100}.}
+\item{dag_R}{Integer. Bootstrap replicates. Default \code{100}.}
 
-\item{dag_structure_method}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as
-\code{structure_method}. Default \code{"bootstrap_hc"}.}
+\item{dag_structure_method}{Character. Default \code{"pc"}.}
 
-\item{dag_pc_alpha}{PC alpha level. Default \code{0.05}.}
+\item{dag_include_response}{Logical. Default \code{TRUE}.}
 
-\item{dag_pc_test}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{pc_test}. Default \code{"zf"}.}
+\item{dag_pc_alpha}{Numeric. Default \code{0.05}.}
+
+\item{dag_pc_test}{Character or \code{NULL}. Default \code{NULL}.}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
 
-\item{dag_notears_lambda}{NOTEARS L1 penalty (see \code{cast_dag()}).}
+\item{dag_algorithm}{Character. Default \code{"hc"}.}
 
-\item{dag_notears_max_iter}{Maximum NOTEARS optimization steps.}
+\item{dag_score}{Character or \code{NULL}. Default \code{NULL}.}
 
-\item{dag_notears_lr}{Adam learning rate for NOTEARS.}
+\item{dag_strength_threshold}{Numeric. Default \code{0.7}.}
 
-\item{dag_notears_tol}{Acyclicity tolerance for NOTEARS.}
+\item{dag_direction_threshold}{Numeric. Default \code{0.6}.}
 
-\item{dag_notears_rho_init}{Initial augmented-Lagrangian rho for NOTEARS.}
+\item{dag_max_rows}{Integer. Default \code{8000}.}
 
-\item{dag_notears_alpha_mult}{Rho multiplier for NOTEARS.}
+\item{select_min_vars}{Integer. Default \code{5}.}
 
-\item{dag_algorithm}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{algorithm}.
-\strong{Only} used when \code{dag_structure_method = "bootstrap_hc"} (score-based
-learner inside each bootstrap, e.g. \code{"hc"}, \code{"tabu"}). Default \code{"hc"}.}
+\item{select_min_fraction}{Numeric. Default \code{0.3}.}
 
-\item{dag_score}{Character. Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{score} for
-bootstrap HC only. Default \code{"bic-g"}.}
+\item{select_num_trees}{Integer. Default \code{300}.}
 
-\item{dag_strength_threshold}{Numeric. Minimum bootstrap edge
-strength to retain. Default \code{0.7}.}
+\item{do_cv}{Logical. Default \code{TRUE}.}
 
-\item{dag_direction_threshold}{Numeric. Minimum direction
-consistency to retain. Default \code{0.6}.}
+\item{cv_k}{Integer. Default \code{5}.}
 
-\item{dag_max_rows}{Integer. Subsample size for DAG learning.
-Default \code{8000}.}
+\item{cv_block_method}{Character. Default \code{"grid"}.}
 
-\item{ate_K}{Integer. DML cross-fitting folds. Default \code{5}.}
+\item{do_cate}{Logical. Default \code{TRUE}.}
 
-\item{ate_alpha}{Numeric. Significance level for ATE tests.
-Default \code{0.05}.}
+\item{cate_top_n}{Integer. Default \code{3}.}
 
-\item{ate_num_trees}{Integer. Trees per nuisance RF model.
-Default \code{300}.}
+\item{cate_n_trees}{Integer. Default \code{1000}.}
 
-\item{ate_quantile_cuts}{Numeric vector. Quantile thresholds for
-binarization. Default \code{c(0.25, 0.50, 0.75)}.}
+\item{cate_hss_model, cate_hss_threshold}{CATE masking. Defaults \code{"rf"},
+\code{0.1}.}
 
-\item{ate_p_adjust}{Character. Multiple-testing correction method
-(passed to \code{\link[stats:p.adjust]{stats::p.adjust()}}). Default \code{"fdr"}.}
+\item{response}{Character. Default \code{"presence"}.}
 
-\item{ate_parallel}{Logical. Parallel ATE estimation within each
-species (via \pkg{future}). Default \code{FALSE}.}
+\item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}}.}
 
-\item{screen_min_vars}{Integer. Minimum variables to retain.
-Default \code{5}.}
+\item{dag_env_vars, dag_verbose}{Passed to \code{\link[=cast_dag]{cast_dag()}}.}
 
-\item{screen_min_fraction}{Numeric. Minimum fraction of variables.
-Default \code{0.5}.}
+\item{select_verbose}{Passed to \code{\link[=cast_select]{cast_select()}}. Default \code{FALSE}.}
 
-\item{screen_num_trees}{Integer. RF trees for importance ranking.
-Default \code{300}.}
+\item{cv_models}{Character or \code{NULL}. Models for CV.}
 
-\item{do_cv}{Logical. Run spatial block CV. Default \code{TRUE}.}
+\item{cv_rf_ntree, cv_brt_n_trees, cv_parallel, cv_verbose}{CV controls.}
 
-\item{cv_k}{Integer. Number of spatial CV folds. Default \code{5}.}
+\item{predict_models}{Passed to \code{\link[=cast_predict]{cast_predict()}}.}
 
-\item{cv_block_method}{Character. Blocking strategy: \code{"grid"} or
-\code{"cluster"}. Default \code{"grid"}.}
+\item{plot_basemap}{Character. Default \code{"world"}.}
 
-\item{do_cate}{Logical. Estimate CATE via causal forests.
-Default \code{TRUE}.}
+\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}.}
 
-\item{cate_top_n}{Integer. Number of top variables for CATE.
-Default \code{3}.}
+\item{cate_point_size}{Numeric. Default \code{0.45}.}
 
-\item{cate_n_trees}{Integer. Trees in each causal forest.
-Default \code{1000}.}
+\item{eval_response}{Character or \code{NULL}.}
 
-\item{cate_hss_model, cate_hss_threshold}{When saving CATE maps, pass to
-\code{\link[=plot.cast_cate]{plot.cast_cate()}} to mask by \verb{HSS_<model> >= threshold}. Defaults
-\code{cast} and \code{0.1}. Set \code{cate_hss_model = NULL} to disable masking.}
+\item{var_labels}{Named character vector or \code{NULL}.}
 
-\item{response}{Character. Response column name in each species
-\code{data.frame}. Default \code{"presence"}.}
+\item{do_shap}{Logical. Default \code{FALSE}.}
 
-\item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}} as
-\code{env_vars} and \code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+\item{shap_nrounds, shap_max_depth, shap_eta, shap_subsample, shap_colsample_bytree, shap_test_fraction, shap_verbose}{SHAP controls.}
 
-\item{dag_env_vars, dag_verbose}{Passed to \code{\link[=cast_dag]{cast_dag()}} as \code{env_vars} and
-\code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+\item{shap_plot_top_n}{Integer. Default \code{15}.}
 
-\item{ate_variables, ate_verbose}{Passed to \code{\link[=cast_ate]{cast_ate()}} as \code{variables} and
-\code{verbose}. Defaults \code{NULL} and \code{FALSE}.}
+\item{shap_fastshap_nsim, shap_max_explain_rows}{SHAP controls.}
 
-\item{screen_verbose}{Passed to \code{\link[=cast_screen]{cast_screen()}} as \code{verbose}. Default \code{FALSE}.}
+\item{dev_package_root}{Character or \code{NULL}.}
 
-\item{cv_models}{Character vector or \code{NULL}. Models for \code{\link[=cast_cv]{cast_cv()}}. If
-\code{NULL}, uses the same vector as \code{models}.}
+\item{learn_shared_dag}{Logical. Default \code{FALSE}.}
 
-\item{cv_n_epochs, cv_n_runs, cv_rf_ntree, cv_brt_n_trees, cv_parallel, cv_verbose}{Passed to \code{\link[=cast_cv]{cast_cv()}}. Defaults match that function.}
+\item{shared_dag}{Optional precomputed \link{cast_dag}.}
 
-\item{predict_models}{Passed to \code{\link[=cast_predict]{cast_predict()}} as \code{models}. Default \code{NULL}
-(all fitted models).}
+\item{shared_dag_data}{Optional \code{data.frame}.}
 
-\item{plot_basemap}{Character. \code{basemap} for spatial plots (CV, HSS, CATE).
-Default \code{"world"}.}
-
-\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}. Defaults \code{NULL}
-and \code{FALSE}.}
-
-\item{cate_point_size}{Numeric. Point size for saved \code{\link[=plot.cast_cate]{plot.cast_cate()}} maps.
-Default \code{0.45} (matches \code{run_ovis_ammon.R}).}
-
-\item{eval_response}{Character or \code{NULL}. Passed to \code{\link[=cast_evaluate]{cast_evaluate()}} as
-\code{response}. If \code{NULL}, uses \code{response}.}
-
-\item{var_labels}{Named character vector or \code{NULL}. Optional labels for
-\code{\link[=plot.cast_dag]{plot.cast_dag()}}, \code{\link[=plot.cast_ate]{plot.cast_ate()}}, \code{\link[=plot.cast_screen]{plot.cast_screen()}}, \code{\link[=plot.cast_cate]{plot.cast_cate()}}.}
-
-\item{do_shap}{Logical. If \code{TRUE}, saves SHAP figures (XGBoost surrogate,
-RF and CAST via \code{\link[=cast_shap_xgb]{cast_shap_xgb()}} / \code{\link[=cast_shap_fit]{cast_shap_fit()}}) when dependencies
-are available. Default \code{FALSE} (can be slow in parallel batches).}
-
-\item{shap_nrounds, shap_max_depth, shap_eta, shap_subsample, shap_colsample_bytree, shap_test_fraction, shap_verbose}{Passed to \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}.}
-
-\item{shap_plot_top_n}{Integer. Passed to SHAP plot methods.}
-
-\item{shap_fastshap_nsim, shap_max_explain_rows}{Passed to \code{\link[=cast_shap_fit]{cast_shap_fit()}}.}
-
-\item{dev_package_root}{Character or \code{NULL}. Absolute path to the package
-source root (folder containing \code{DESCRIPTION}). When \code{parallel = TRUE},
-each PSOCK worker runs \code{\link[pkgload:load_all]{pkgload::load_all()}} on this path before fitting
-(so code matches \code{\link[devtools:load_all]{devtools::load_all()}} on the host). Example: pass the
-same path as in \code{inst/examples/run_multi_species.R} after locating the
-project root.}
-
-\item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}} for
-model hyper-parameter tuning (e.g., \code{n_epochs}, \code{n_runs},
-\code{rf_ntree}, \code{brt_n_trees}, \code{tune_grid}).}
+\item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}}.}
 }
 \value{
-A \code{cast_batch} object with components:
-\describe{
-\item{\code{species_metrics}}{\code{data.frame} with per-species per-model
-evaluation metrics (from spatial CV when available).}
-\item{\code{species}}{Character vector of species names.}
-\item{\code{models}}{Character vector of model names.}
-\item{\code{results}}{Named list of per-species result lists.}
-\item{\code{output_dir}}{Output directory path.}
-}
+A \code{cast_batch} object.
 }
 \description{
 One-stop interface that runs the full castSDM pipeline on multiple
-species, optionally in parallel. Every pipeline parameter can be
-configured from this single function call. Each species is processed
-independently and results (RDS + all diagnostic figures) are saved
-to separate subdirectories. A comparative summary of model performance
-across species is returned.
+species, optionally in parallel. Results (RDS + diagnostic figures) are
+saved to separate subdirectories per species.
 }
-\section{Pipeline parameters}{
-
-All major stages of the castSDM pipeline are configurable through
-explicit arguments. Parameters are grouped by prefix:
-\itemize{
-\item \strong{General}: \code{models}, \code{train_fraction}, \code{output_dir},
-\code{fig_dpi}, \code{parallel}, \code{seed}, \code{verbose}.
-When \code{dev_package_root} is set and \code{parallel = TRUE}, species run on a
-\code{\link[parallel:makeCluster]{parallel::makeCluster()}} backend: each worker calls \code{\link[pkgload:load_all]{pkgload::load_all()}}
-first (see \code{inst/examples/run_multi_species.R}). Without it, \code{parallel}
-uses \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}} and the installed package must match
-your DAG API.
-\item \strong{DAG} (\verb{dag_*}): Bootstrap replicates, edge thresholds,
-structure learning algorithm and scoring criterion.
-\item \strong{ATE} (\verb{ate_*}): Cross-fitting folds, significance level,
-nuisance model trees, quantile discretization, Bonferroni,
-parallel ATE estimation.
-\item \strong{Screen} (\verb{screen_*}): Minimum retained variables, fraction,
-importance trees.
-\item \strong{CV} (\verb{cv_*}): Whether to run, folds, blocking method.
-\item \strong{CATE} (\verb{cate_*}): Whether to run, number of variables,
-causal forest trees.
-\item \strong{Fit} (via \code{...}): Model hyper-parameters such as
-\code{n_epochs}, \code{n_runs}, \code{patience}, \code{rf_ntree}, \code{brt_n_trees},
-\code{brt_depth}, \code{hidden_size}, \code{dropout}, \code{lr}, \code{batch_size},
-\code{max_interactions}, \code{tune_grid} are forwarded to \code{\link[=cast_fit]{cast_fit()}}.
-Use \code{fit_verbose} for \code{\link[=cast_fit]{cast_fit()}} console output (not \code{verbose} in \code{...}).
-\item \strong{Spatial plots}: \code{plot_basemap} for CV / HSS / CATE maps.
-\item \strong{SHAP} (\code{do_shap}, \verb{shap_*}): optional XGBoost + fastshap figures.
-}
-}
-
 \seealso{
-\code{\link[=cast]{cast()}}, \code{\link[=plot.cast_batch]{plot.cast_batch()}}, \code{\link[=cast_consistency]{cast_consistency()}},
-\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}},
-\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}, \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, \code{\link[=cast_shap_fit]{cast_shap_fit()}}
+\code{\link[=cast]{cast()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}},
+\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
 }

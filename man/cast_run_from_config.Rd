@@ -44,7 +44,6 @@ species in \code{output_dir} already has a saved \code{cast_result.rds}.}
 \item{\code{env_data.file}}{Optional CSV with shared environmental data
 for spatial HSS prediction.}
 \item{\code{models}}{Character vector forwarded to \code{\link[=cast_batch]{cast_batch()}}.}
-\item{\code{backend}}{\code{"r"} (default, pure-R) or \code{"torch"} for CI-MLP.}
 \item{\code{cast_batch_args}}{Map of any other named arg accepted by
 \code{\link[=cast_batch]{cast_batch()}}.}
 }

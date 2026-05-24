@@ -18,15 +18,15 @@ predictor variables used in fitting.}
 A \code{cast_eval} object (S3 class).
 }
 \description{
-Computes AUC (Area Under ROC Curve) and TSS (True Skill Statistic) for
-fitted models on test data.
+Computes AUC (Area Under ROC Curve), TSS (True Skill Statistic), and
+CBI (Continuous Boyce Index) for fitted models on test data.
 }
 \details{
 \itemize{
 \item \strong{AUC}: Area Under the Receiver Operating Characteristic curve,
 measuring discrimination ability. Computed via \code{\link[pROC:roc]{pROC::roc()}}.
 \item \strong{TSS}: True Skill Statistic = Sensitivity + Specificity - 1.
-Threshold-independent measure of predictive skill.
+\item \strong{CBI}: Continuous Boyce Index, measuring predicted–expected ratio.
 }
 }
 \seealso{

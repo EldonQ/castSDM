@@ -13,12 +13,11 @@
 #' @return A `cast_predict` object containing a `predictions` data.frame
 #'   with `lon`, `lat`, and one `HSS_*` column per model.
 #'
-#' @seealso [cast_fit()], [cast_evaluate()], [cast_cate()]
+#' @seealso [cast_fit()], [cast_evaluate()], [cast_ensemble()]
 #'
 #' @export
 cast_predict <- function(fit, new_data, models = NULL) {
   env_vars <- fit$env_vars
-  scaling <- fit$scaling
   mdl_names <- models %||% names(fit$models)
   mdl_names <- intersect(mdl_names, names(fit$models))
 
@@ -28,11 +27,8 @@ cast_predict <- function(fit, new_data, models = NULL) {
 
   # Prepare new data
   X_raw <- as.data.frame(new_data[, env_vars, drop = FALSE])
+  for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
   X_raw[is.na(X_raw)] <- 0
-  X_sc <- as.data.frame(
-    scale(X_raw, center = scaling$means, scale = scaling$sds)
-  )
-  X_sc[is.na(X_sc)] <- 0
 
   # Extract coordinates if available
   has_coords <- all(c("lon", "lat") %in% names(new_data))
@@ -47,10 +43,7 @@ cast_predict <- function(fit, new_data, models = NULL) {
     col_name <- paste0("HSS_", mdl_name)
 
     pred_df[[col_name]] <- tryCatch(
-      predict_single_model(
-        mdl_info, X_raw, X_sc,
-        fit$screen, fit$dag, fit$ate
-      ),
+      predict_single_model(mdl_info, X_raw),
       error = function(e) {
         cli::cli_warn("Prediction failed for {.val {mdl_name}}: {e$message}")
         rep(NA_real_, nrow(new_data))

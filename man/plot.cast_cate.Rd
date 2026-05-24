@@ -13,7 +13,7 @@
   point_size = 0.5,
   legend_position = "bottom",
   hss_predict = NULL,
-  hss_model = "cast",
+  hss_model = "rf",
   hss_threshold = 0.1,
   ...
 )
@@ -33,8 +33,8 @@ to display labels.}
 
 \item{point_size}{Numeric. Point size. Default \code{0.5}.}
 
-\item{legend_position}{Character. \code{"bottom"} (horizontal colorbar, like
-the reference figures) or \code{"right"}. Default \code{"bottom"}.}
+\item{legend_position}{Character. \code{"bottom"} (horizontal colorbar) or
+\code{"right"}. Default \code{"bottom"}.}
 
 \item{hss_predict}{Optional \link{cast_predict} object. When provided together
 with \code{hss_model}, CATE values are set to \code{NA} wherever the chosen model's
@@ -42,7 +42,7 @@ habitat suitability (\verb{HSS_<model>}) is below \code{hss_threshold} (spatial
 masking by suitability).}
 
 \item{hss_model}{Character. Which model's HSS column to use for masking.
-Default \code{"cast"}.}
+Default \code{"rf"}.}
 
 \item{hss_threshold}{Numeric in \verb{[0, 1]}. Default \code{0.1}.}
 

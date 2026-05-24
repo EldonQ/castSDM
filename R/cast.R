@@ -1,106 +1,83 @@
-#' Run the Full CAST Pipeline
+#' Run the Full castSDM Pipeline
 #'
-#' One-step pipeline that executes the entire CAST workflow: data splitting,
-#' DAG learning, ATE estimation, variable screening, causal role assignment,
-#' feature engineering, model fitting, evaluation, and optionally spatial
-#' prediction and CATE estimation.
+#' One-step pipeline that executes the entire workflow: data splitting,
+#' DAG learning (with response node), DAG-guided variable selection via
+#' Markov Blanket + RF importance, causal role assignment, model fitting,
+#' spatial cross-validation, evaluation, ensemble prediction, and optionally
+#' CATE estimation and SHAP explanations.
 #'
 #' @param species_data A `data.frame` with columns: `lon`, `lat`, `presence`
 #'   (0/1), and environmental variables.
 #' @param env_data Optional `data.frame` of environmental variables for the
 #'   full spatial grid (used for prediction). Must contain `lon`, `lat`, and
 #'   the same environmental columns as `species_data`.
-#' @param models Character vector of models to fit. Options: `"cast"`,
-#'   `"mlp_ate"`, `"mlp"`, `"rf"`, `"maxent"`, `"brt"`. Default is
-#'   `c("cast", "rf", "maxent", "brt")`.
+#' @param models Character vector of models to fit. Options: `"rf"`,
+#'   `"maxent"`, `"brt"`, `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
 #' @param n_bootstrap Integer. Number of bootstrap replicates for DAG when
 #'   `dag_structure_method = "bootstrap_hc"`. Default `100`.
 #' @param dag_structure_method Character passed to [cast_dag()] as
-#'   `structure_method`. Default `"bootstrap_hc"`. Alternatives: `"pc"`,
-#'   `"bidag_bge"`, `"notears_linear"`.
+#'   `structure_method`. Default `"pc"`.
+#' @param dag_include_response Logical. Include response in DAG learning for
+#'   Markov Blanket extraction. Default `TRUE`.
 #' @param dag_pc_alpha Significance level for PC.
-#' @param dag_pc_test Conditional-independence test passed to
-#'   [cast_dag()] as `pc_test` (default `"zf"`).
+#' @param dag_pc_test Conditional-independence test for [cast_dag()].
+#'   Default `NULL` (auto-selects `"mi-cg"` for mixed data).
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG options.
-#' @param dag_notears_lambda NOTEARS L1 penalty; passed to \code{cast_dag()}.
-#' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
-#' @param dag_notears_lr Adam learning rate for NOTEARS.
-#' @param dag_notears_tol Acyclicity tolerance for NOTEARS.
-#' @param dag_notears_rho_init Initial augmented-Lagrangian rho for NOTEARS.
-#' @param dag_notears_alpha_mult Rho multiplier (every 100 steps) for NOTEARS.
 #' @param strength_threshold Numeric. Minimum edge strength. Default `0.7`.
 #' @param direction_threshold Numeric. Minimum direction consistency. Default
 #'   `0.6`.
-#' @param ate_folds Integer. DML cross-fitting folds. Default `2`.
-#' @param ate_alpha Numeric. ATE significance level. Default `0.05`.
-#' @param screen_min_vars Integer. Minimum retained variables. Default `5`.
-#' @param do_cv Logical. Whether to run spatial k-fold cross-validation for
-#'   honest model evaluation. Default `TRUE`. Results are stored in
-#'   `$cv` of the returned object. Setting `FALSE` falls back to a single
-#'   random hold-out evaluation via [cast_evaluate()].
-#' @param cv_k Integer. Number of spatial folds. Default `5`. Pass `3` for
-#'   small datasets (< 100 presences) or `10` for large ones.
-#' @param cv_block_method Character. Spatial blocking strategy: `"grid"`
-#'   (default) or `"cluster"`. See [cast_cv()] for details.
-#' @param do_predict Logical. Whether to generate spatial predictions using
-#'   `env_data`. Default `TRUE` if `env_data` is provided.
-#' @param do_cate Logical. Whether to estimate spatial CATE. Default `FALSE`.
+#' @param select_min_vars Integer. Minimum retained variables. Default `5`.
+#' @param select_min_fraction Numeric. Minimum fraction of variables. Default
+#'   `0.3`.
+#' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
+#' @param cv_k Integer. Number of spatial folds. Default `5`.
+#' @param cv_block_method Character. Spatial blocking strategy. Default
+#'   `"grid"`.
+#' @param do_predict Logical. Generate spatial predictions. Default `TRUE`
+#'   if `env_data` is provided.
+#' @param do_ensemble Logical. Generate ensemble prediction. Default `TRUE`.
+#' @param ensemble_method Character. Ensemble method: `"weighted"`,
+#'   `"best"`, `"equal"`. Default `"weighted"`.
+#' @param do_cate Logical. Estimate spatial CATE. Default `FALSE`.
 #' @param cate_top_n Integer. Top variables for CATE. Default `3`.
-#' @param do_shap Logical. Whether to compute SHAP explanations after model
-#'   fitting. Produces up to three `cast_shap` objects (XGBoost surrogate, RF,
-#'   and CAST) stored in the returned result. Default `FALSE`.
-#' @param shap_nrounds Integer. XGBoost boosting rounds for
-#'   [cast_shap_xgb()]. Default `400`.
-#' @param shap_test_fraction Numeric. Fraction held out for SHAP
-#'   visualisation. Default `0.2`.
-#' @param shap_fastshap_nsim Integer. Monte Carlo reps per feature in
-#'   [cast_shap_fit()]. Default `60`.
-#' @param shap_max_explain_rows Integer. Cap on explained rows in
-#'   [cast_shap_fit()]. Default `80`.
-#' @param blacklist A `data.frame` with columns `from` and `to` specifying
-#'   forbidden directed edges in DAG learning. Default `NULL`.
-#' @param whitelist A `data.frame` with columns `from` and `to` specifying
-#'   required directed edges in DAG learning. Default `NULL`.
-#' @param do_evalue Logical. Compute E-value sensitivity analysis on ATE
-#'   estimates. Default `FALSE`.
-#' @param do_backdoor Logical. Run backdoor criterion check via dagitty.
-#'   Default `FALSE`.
+#' @param do_shap Logical. Compute SHAP explanations. Default `FALSE`.
+#' @param shap_nrounds Integer. XGBoost boosting rounds. Default `400`.
+#' @param shap_test_fraction Numeric. SHAP hold-out fraction. Default `0.2`.
+#' @param shap_fastshap_nsim Integer. SHAP MC reps. Default `60`.
+#' @param shap_max_explain_rows Integer. SHAP explained rows cap. Default `80`.
+#' @param blacklist,whitelist DAG edge constraints. Default `NULL`.
 #' @param seed Integer or `NULL`. Random seed.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #'
 #' @return A `cast_result` object (S3 class) containing all pipeline outputs.
 #'   Use [print()], [summary()], and [plot()] for inspection.
 #'
-#' @seealso [cast_dag()], [cast_ate()], [cast_screen()], [cast_fit()],
-#'   [cast_predict()], [cast_cate()], [cast_shap_xgb()], [cast_shap_fit()]
+#' @seealso [cast_dag()], [cast_select()], [cast_fit()], [cast_ensemble()],
+#'   [cast_predict()], [cast_cate()]
 #'
 #' @export
 cast <- function(species_data,
                  env_data = NULL,
-                 models = c("cast", "rf", "maxent", "brt"),
+                 models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
                  n_bootstrap = 100L,
-                 dag_structure_method = "bootstrap_hc",
+                 dag_structure_method = "pc",
+                 dag_include_response = TRUE,
                  dag_pc_alpha = 0.05,
-                 dag_pc_test = "zf",
+                 dag_pc_test = NULL,
                  dag_bidag_algorithm = "order",
                  dag_bidag_iterations = NULL,
-                 dag_notears_lambda = 0.03,
-                 dag_notears_max_iter = 2000L,
-                 dag_notears_lr = 0.02,
-                 dag_notears_tol = 1e-3,
-                 dag_notears_rho_init = 0.1,
-                 dag_notears_alpha_mult = 1.01,
                  strength_threshold = 0.7,
                  direction_threshold = 0.6,
-                 ate_folds = 2L,
-                 ate_alpha = 0.05,
-                 screen_min_vars = 5L,
+                 select_min_vars = 5L,
+                 select_min_fraction = 0.3,
                  do_cv = TRUE,
                  cv_k = 5L,
                  cv_block_method = "grid",
                  do_predict = NULL,
+                 do_ensemble = TRUE,
+                 ensemble_method = "weighted",
                  do_cate = FALSE,
                  cate_top_n = 3L,
                  do_shap = FALSE,
@@ -110,13 +87,11 @@ cast <- function(species_data,
                  shap_max_explain_rows = 80L,
                  blacklist = NULL,
                  whitelist = NULL,
-                 do_evalue = FALSE,
-                 do_backdoor = FALSE,
                  seed = NULL,
                  verbose = TRUE) {
   do_predict <- do_predict %||% !is.null(env_data)
 
-  if (verbose) cli::cli_h1("CAST Pipeline")
+  if (verbose) cli::cli_h1("castSDM Pipeline")
 
   # === Step 1: Data Preparation ===
   if (verbose) cli::cli_h2("Step 1: Data Preparation")
@@ -135,6 +110,7 @@ cast <- function(species_data,
   if (verbose) cli::cli_h2("Step 2: DAG Learning")
   dag <- cast_dag(
     train_data,
+    include_response = dag_include_response,
     R = n_bootstrap,
     strength_threshold = strength_threshold,
     direction_threshold = direction_threshold,
@@ -145,47 +121,21 @@ cast <- function(species_data,
     pc_test = dag_pc_test,
     bidag_algorithm = dag_bidag_algorithm,
     bidag_iterations = dag_bidag_iterations,
-    notears_lambda = dag_notears_lambda,
-    notears_max_iter = dag_notears_max_iter,
-    notears_lr = dag_notears_lr,
-    notears_tol = dag_notears_tol,
-    notears_rho_init = dag_notears_rho_init,
-    notears_alpha_mult = dag_notears_alpha_mult,
     blacklist = blacklist,
     whitelist = whitelist
   )
 
-  # === Step 3: ATE Estimation ===
-  if (verbose) cli::cli_h2("Step 3: ATE Estimation")
-  ate <- cast_ate(
-    train_data,
-    K = ate_folds, alpha = ate_alpha,
+  # === Step 3: Variable Selection (DAG MB + RF Importance) ===
+  if (verbose) cli::cli_h2("Step 3: Variable Selection")
+  screen <- cast_select(
+    dag, train_data,
+    min_vars = select_min_vars,
+    min_fraction = select_min_fraction,
     seed = seed, verbose = verbose
   )
 
-  # === Step 3b: E-value Sensitivity (optional) ===
-  if (do_evalue) {
-    if (verbose) cli::cli_h2("Step 3b: E-value Sensitivity Analysis")
-    ate <- cast_evalue(ate, verbose = verbose)
-  }
-
-  # === Step 3c: Backdoor Criterion (optional) ===
-  backdoor <- NULL
-  if (do_backdoor) {
-    if (verbose) cli::cli_h2("Step 3c: Backdoor Criterion Check")
-    backdoor <- cast_backdoor(dag, verbose = verbose)
-  }
-
-  # === Step 4: Variable Screening ===
-  if (verbose) cli::cli_h2("Step 4: Variable Screening")
-  screen <- cast_screen(
-    dag, ate, train_data,
-    min_vars = screen_min_vars,
-    seed = seed, verbose = verbose
-  )
-
-  # === Step 5: Causal Roles ===
-  if (verbose) cli::cli_h2("Step 5: Causal Role Assignment")
+  # === Step 4: Causal Roles ===
+  if (verbose) cli::cli_h2("Step 4: Causal Role Assignment")
   roles <- cast_roles(screen, dag)
   if (verbose) {
     role_tbl <- table(roles$roles$role)
@@ -194,37 +144,26 @@ cast <- function(species_data,
     )
   }
 
-  # === Step 6: Model Fitting ===
-  if (verbose) cli::cli_h2("Step 6: Model Fitting")
+  # === Step 5: Model Fitting ===
+  if (verbose) cli::cli_h2("Step 5: Model Fitting")
   fit <- cast_fit(
     train_data,
-    screen = screen, dag = dag, ate = ate,
+    screen = screen, dag = dag,
     models = models,
     seed = seed, verbose = verbose
   )
 
-  # === Step 7: Model Evaluation ===
-  if (verbose) cli::cli_h2("Step 7: Model Evaluation")
-
+  # === Step 6: Cross-Validation ===
   cv_result <- NULL
   if (do_cv) {
-    # Spatial k-fold CV on the full dataset (preferred: more data, honest geo)
-    if (verbose) {
-      cli::cli_inform(
-        "Running spatial {cv_k}-fold CV ({cv_block_method} blocks)..."
-      )
-    }
+    if (verbose) cli::cli_h2("Step 6: Spatial Cross-Validation")
     cv_result <- tryCatch(
       cast_cv(
         species_data,
-        screen       = screen,
-        dag          = dag,
-        ate          = ate,
-        k            = cv_k,
-        models       = models,
+        screen = screen, dag = dag,
+        k = cv_k, models = models,
         block_method = cv_block_method,
-        seed         = seed,
-        verbose      = FALSE
+        seed = seed, verbose = verbose
       ),
       error = function(e) {
         cli::cli_warn(
@@ -235,20 +174,32 @@ cast <- function(species_data,
     )
   }
 
-  # Always compute hold-out eval on the random test split (complementary)
+  # === Step 7: Hold-out Evaluation ===
+  if (verbose) cli::cli_h2("Step 7: Model Evaluation")
   eval_result <- cast_evaluate(fit, test_data)
   if (verbose) {
     if (!is.null(cv_result)) print(cv_result) else print(eval_result)
   }
 
-  # === Step 8: Spatial Prediction (optional) ===
+  # === Step 8: Spatial Prediction & Ensemble ===
   pred_result <- NULL
+  ensemble_result <- NULL
   if (do_predict && !is.null(env_data)) {
     if (verbose) cli::cli_h2("Step 8: Spatial Prediction")
     pred_result <- cast_predict(fit, env_data)
     if (verbose) {
-      cli::cli_inform(
-        "Predicted {nrow(pred_result$predictions)} sites."
+      cli::cli_inform("Predicted {nrow(pred_result$predictions)} sites.")
+    }
+
+    # Ensemble prediction (requires CV for weights)
+    if (do_ensemble && !is.null(cv_result)) {
+      if (verbose) cli::cli_inform("Building ensemble ({ensemble_method})...")
+      ensemble_result <- tryCatch(
+        cast_ensemble(fit, cv_result, env_data, method = ensemble_method),
+        error = function(e) {
+          cli::cli_warn("Ensemble failed: {e$message}")
+          NULL
+        }
       )
     }
   }
@@ -258,12 +209,18 @@ cast <- function(species_data,
   if (do_cate) {
     if (verbose) cli::cli_h2("Step 9: CATE Estimation")
     pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-    cate_result <- cast_cate(
-      train_data,
-      ate = ate, screen = screen,
-      top_n = cate_top_n,
-      predict_data = pred_for_cate,
-      seed = seed, verbose = verbose
+    cate_result <- tryCatch(
+      cast_cate(
+        train_data,
+        dag = dag, screen = screen,
+        top_n = cate_top_n,
+        predict_data = pred_for_cate,
+        seed = seed, verbose = verbose
+      ),
+      error = function(e) {
+        cli::cli_warn("CATE failed: {e$message}")
+        NULL
+      }
     )
   }
 
@@ -278,13 +235,9 @@ cast <- function(species_data,
       if (verbose) cli::cli_inform("  Computing XGBoost TreeSHAP...")
       shap_result$xgb <- tryCatch(
         cast_shap_xgb(
-          train_data,
-          response = "presence",
-          dag = dag,
-          nrounds = shap_nrounds,
-          test_fraction = shap_test_fraction,
-          seed = seed,
-          verbose = FALSE
+          train_data, response = "presence", dag = dag,
+          nrounds = shap_nrounds, test_fraction = shap_test_fraction,
+          seed = seed, verbose = FALSE
         ),
         error = function(e) {
           if (verbose) cli::cli_warn("XGBoost SHAP failed: {e$message}")
@@ -300,43 +253,13 @@ cast <- function(species_data,
       if (verbose) cli::cli_inform("  Computing RF SHAP (fastshap)...")
       shap_result$rf <- tryCatch(
         cast_shap_fit(
-          fit = fit,
-          which = "rf",
-          data = train_data,
-          test_fraction = shap_test_fraction,
-          seed = seed,
+          fit = fit, which = "rf", data = train_data,
+          test_fraction = shap_test_fraction, seed = seed,
           fastshap_nsim = shap_fastshap_nsim,
-          max_explain_rows = shap_max_explain_rows,
-          verbose = FALSE
+          max_explain_rows = shap_max_explain_rows, verbose = FALSE
         ),
         error = function(e) {
           if (verbose) cli::cli_warn("RF SHAP failed: {e$message}")
-          NULL
-        }
-      )
-    }
-
-    # CAST SHAP (fastshap on CI-MLP)
-    torch_ok <- requireNamespace("torch", quietly = TRUE) &&
-      tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
-    if (requireNamespace("fastshap", quietly = TRUE) &&
-        isTRUE(torch_ok) &&
-        "cast" %in% names(fit$models) &&
-        !is.null(fit$models$cast$model)) {
-      if (verbose) cli::cli_inform("  Computing CAST SHAP (fastshap)...")
-      shap_result$cast <- tryCatch(
-        cast_shap_fit(
-          fit = fit,
-          which = "cast",
-          data = train_data,
-          test_fraction = shap_test_fraction,
-          seed = seed,
-          fastshap_nsim = shap_fastshap_nsim,
-          max_explain_rows = shap_max_explain_rows,
-          verbose = FALSE
-        ),
-        error = function(e) {
-          if (verbose) cli::cli_warn("CAST SHAP failed: {e$message}")
           NULL
         }
       )
@@ -354,11 +277,12 @@ cast <- function(species_data,
   if (verbose) cli::cli_h1("Pipeline Complete")
 
   new_cast_result(
-    dag = dag, ate = ate, screen = screen, roles = roles,
+    dag = dag, screen = screen, roles = roles,
     fit = fit, eval = eval_result,
     cv = cv_result,
-    predict = pred_result, cate = cate_result,
-    shap = shap_result,
-    backdoor = backdoor
+    predict = pred_result,
+    ensemble = ensemble_result,
+    cate = cate_result,
+    shap = shap_result
   )
 }

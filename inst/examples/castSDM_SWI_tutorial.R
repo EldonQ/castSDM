@@ -10,8 +10,8 @@
 #   2. 读取 SWI 数据并探索格式
 #   3. 选择物种, 构造 presence/absence 训练数据
 #   4. 瑞士坐标系 → WGS84 经纬度转换
-#   5. cast_prepare / cast_dag / cast_ate / cast_screen / cast_roles
-#   6. cast_fit 训练模型 (RF 快速版 + 完整版含 CAST 神经网络)
+#   5. cast_prepare / cast_dag / cast_select / cast_roles
+#   6. cast_fit 训练模型 (RF, BRT, MaxEnt, GAM ensemble)
 #   7. cast_evaluate 评估
 #   8. cast_predict 空间预测 → 世界地图
 #   9. cast_cate 空间异质性因果效应 → CATE 地图
@@ -45,10 +45,6 @@
 #   "scales",       # 颜色辅助
 #   "car"           # VIF 共线性检验
 # ))
-
-# torch 安装 (CI-MLP 神经网络需要, 较大约 500MB):
-# install.packages("torch")
-# torch::install_torch()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -238,7 +234,7 @@ cat("环境变量:", paste(split$env_vars, collapse = ", "), "\n\n")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 第 7 步: 因果 DAG 学习
-# cast_dag 使用 bnlearn (Hill-climbing + bootstrap) 学习变量间因果结构
+# cast_dag 使用 PC 算法学习变量间因果结构
 # R = 引导重采样次数: 正式分析用 100+, 本教程用 50 加速
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -254,92 +250,70 @@ print(dag)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 8 步: ATE 因果效应估计 (Double Machine Learning)
-# DML 使用交叉拟合 RF 分离混杂, 估计每个环境变量对物种出现的平均因果效应
+# 第 8 步: 自适应变量筛选 (cast_select)
+# 综合 DAG 拓扑分、RF 重要性等维度, 选出核心变量
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 8: 估计 ATE (双机器学习) ===\n")
-ate <- cast_ate(
-  split$train,
-  K         = 2,    # K 折交叉拟合 (正式分析用 5)
-  num_trees = 200,  # RF 树数
-  seed      = 42,
-  verbose   = TRUE
-)
-print(ate)
-# 输出: 每个变量的 ATE 系数、标准误、p 值, 是否显著
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 第 9 步: 自适应变量筛选 (CAST Screening)
-# 综合 DAG 拓扑分、ATE 因果分、RF 重要性三维度, 选出核心变量
-# ══════════════════════════════════════════════════════════════════════════════
-
-cat("=== Step 9: 自适应变量筛选 ===\n")
-screen <- cast_screen(
-  dag, ate, split$train,
-  seed = 42,
-  verbose = TRUE
+cat("=== Step 8: 自适应变量筛选 ===\n")
+screen <- cast_select(
+  dag, split$train,
+  response     = "presence",
+  num_trees    = 200,
+  min_vars     = 3L,
+  min_fraction = 0.5,
+  seed         = 42,
+  verbose      = TRUE
 )
 print(screen)
 cat("选出变量:", paste(screen$selected, collapse = ", "), "\n\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 10 步: 因果角色分配
+# 第 9 步: 因果角色分配
 # 根据 DAG 结构为每个变量分配角色: Root (根节点), Mediator (中介), Terminal (终端)
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 10: 因果角色分配 ===\n")
+cat("=== Step 9: 因果角色分配 ===\n")
 roles <- cast_roles(screen, dag)
 print(roles)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 11 步: 模型训练
+# 第 10 步: 模型训练
 #
-# 方案 A: 仅 RF (快速, 无需 torch, 适合初学者验证)
-# 方案 B: 完整版 (含 CAST 神经网络, 需要 torch)
-# tune_grid = TRUE 会在内部验证集上搜索 hidden_size × dropout × lr,
-#   找到最佳超参后再做 n_runs 集成 (大约增加 3× 训练时间)
+# 默认使用 RF, BRT, MaxEnt, GAM 四模型集成
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 11: 训练模型 ===\n")
+cat("=== Step 10: 训练模型 ===\n")
 
-## ── 方案 A: 仅随机森林 (推荐初次运行) ───────────────────────────────────────
+## ── 快速版: 仅随机森林 (推荐初次运行) ──────────────────────────────────────
 fit <- cast_fit(
   split$train,
   screen   = screen,
   dag      = dag,
-  ate      = ate,
-  models   = c("rf"),          # 仅 RF, 不需要 torch
+  models   = c("rf"),
   rf_ntree = 300,
   seed     = 42,
   verbose  = TRUE
 )
 print(fit)
 
-## ── 方案 B: RF + BRT + MaxEnt + CAST 神经网络 (需要 torch) ──────────────────
-## 取消注释后运行; n_epochs=50/n_runs=1 是快速测试参数, 正式分析用默认值
-## tune_grid=TRUE 开启超参网格搜索 (正式分析推荐)
+## ── 完整版: RF + BRT + MaxEnt + GAM 多模型集成 ─────────────────────────────
+## 取消注释后运行
 # fit <- cast_fit(
 #   split$train,
 #   screen      = screen,
 #   dag         = dag,
-#   ate         = ate,
-#   models      = c("cast", "rf", "brt", "maxent"),
-#   n_epochs    = 50,        # 正式: 200
-#   n_runs      = 1,         # 正式: 3
+#   models      = c("rf", "brt", "maxent", "gam"),
 #   rf_ntree    = 300,
 #   brt_n_trees = 500,
-#   tune_grid   = FALSE,     # TRUE = 开启超参搜索 (需更多时间)
 #   seed        = 42,
 #   verbose     = TRUE
 # )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 12 步: 空间交叉验证 (Spatial k-fold CV)
+# 第 11 步: 空间交叉验证 (Spatial k-fold CV)
 #
 # cast_cv() 将数据按空间格网分成 k 个地理块，每次用 k-1 个块训练、
 # 第 k 块测试，输出：
@@ -356,14 +330,13 @@ print(fit)
 #   "cluster"        ── k-means 聚类分块，更自适应分布
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 12: 空间交叉验证 ===\n")
+cat("=== Step 11: 空间交叉验证 ===\n")
 
-## ── 方案 A: RF 空间CV (快速, 无需 torch) ─────────────────────────────────────
+## ── 仅 RF 空间CV (推荐初次运行) ──────────────────────────────────────────────
 cv_result <- cast_cv(
   species_data,        # 用全量数据做CV (比只用 split$train 更充分)
   screen       = screen,
   dag          = dag,
-  ate          = ate,
   k            = 5L,   # 折数: 用户可修改为 3 / 5 / 10
   models       = c("rf"),
   block_method = "grid",
@@ -373,17 +346,14 @@ cv_result <- cast_cv(
 )
 print(cv_result)
 
-## ── 方案 B: 多模型空间CV (含神经网络, 需要 torch) ────────────────────────────
+## ── 多模型空间CV ────────────────────────────────────────────────────────────
 # cv_result <- cast_cv(
 #   species_data,
 #   screen       = screen,
 #   dag          = dag,
-#   ate          = ate,
 #   k            = 5L,
-#   models       = c("cast", "rf", "brt", "maxent"),
+#   models       = c("rf", "brt", "maxent", "gam"),
 #   block_method = "grid",
-#   n_epochs     = 50L,   # 正式: 100
-#   n_runs       = 1L,    # 正式: 2
 #   rf_ntree     = 300L,
 #   seed         = 42,
 #   verbose      = TRUE
@@ -408,7 +378,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 13 步: 保留集评估 (Hold-out AUC/TSS/CBI)
+# 第 12 步: 保留集评估 (Hold-out AUC/TSS/CBI)
 #
 # cast_evaluate() 在随机保留测试集上计算 3 个判别/校准指标。
 # 配合 cast_cv() 使用：
@@ -416,33 +386,33 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 #   - cast_evaluate()  → 快速参考指标 (补充对比)
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 13: 保留集评估 ===\n")
+cat("=== Step 12: 保留集评估 ===\n")
 eval_result <- cast_evaluate(fit, split$test)
 print(eval_result)
 # 输出: AUC, TSS, CBI (3 个指标)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 14 步: 空间预测 → 栖息地适宜性地图 (HSS)
+# 第 13 步: 空间预测 → 栖息地适宜性地图 (HSS)
 # 用 pred_grid (瑞士全域环境网格) 生成每个格点的栖息地适宜性评分
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 14: 空间预测 ===\n")
+cat("=== Step 13: 空间预测 ===\n")
 pred <- cast_predict(fit, pred_grid)
 print(pred)
 cat("HSS 列:", names(pred$predictions), "\n\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 15 步: CATE 空间异质性因果效应
+# 第 14 步: CATE 空间异质性因果效应
 # 用因果随机森林估计每个格点处每个关键变量对物种出现的条件平均因果效应
 # 揭示"哪里的气温变化对物种影响最大"
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 15: CATE 空间估计 ===\n")
+cat("=== Step 14: CATE 空间估计 ===\n")
 cate_result <- cast_cate(
   data         = split$train,     # 用训练数据拟合因果森林
-  ate          = ate,             # ATE 结果 (用于选择显著变量)
+  dag          = dag,             # DAG 结果 (用于确定变量关系)
   screen       = screen,          # 筛选结果 (用于选择核心变量)
   predict_data = pred_grid,       # 在整个预测网格上估计 CATE
   top_n        = 3L,              # 选 top 3 显著变量
@@ -455,17 +425,17 @@ cat("CATE 估计变量:", paste(cate_result$variables, collapse = ", "), "\n\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 16 步: 可视化
+# 第 15 步: 可视化
 # 需要: ggplot2, ggraph, igraph, sf, patchwork, scales
 # ══════════════════════════════════════════════════════════════════════════════
 
-cat("=== Step 16: 绘图 ===\n")
+cat("=== Step 15: 绘图 ===\n")
 
 if (!requireNamespace("ggplot2", quietly = TRUE)) {
   message("请先安装 ggplot2: install.packages('ggplot2')")
 } else {
 
-  ## ── 16.1 DAG 因果网络图 ────────────────────────────────────────────────────
+  ## ── 15.1 DAG 因果网络图 ────────────────────────────────────────────────────
   # 节点颜色: 因果角色 (Root/Mediator/Terminal)
   # 节点形状: 是否被 CAST 选中
   # 边粗细/透明度: bootstrap 强度
@@ -474,26 +444,18 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
   # ggsave("swi_dag.png", p_dag, width = 8, height = 6, dpi = 150)
 
 
-  ## ── 16.2 ATE 森林图 ─────────────────────────────────────────────────────────
-  # 红色: 显著 (p < 0.05), 灰色: 不显著
-  # 横轴: ATE 系数 (正 = 促进物种出现, 负 = 抑制)
-  p_ate <- plot(ate)
-  print(p_ate)
-
-
-  ## ── 16.3 CAST 变量筛选评分分解图 ──────────────────────────────────────────
-  # 三色堆叠条形图: DAG 拓扑分 + ATE 因果分 + RF 重要性分
+  ## ── 15.2 变量筛选评分分解图 ──────────────────────────────────────────────
   # 深色: 被选中变量, 浅色: 未被选中
   p_screen <- plot(screen)
   print(p_screen)
 
 
-  ## ── 16.4 模型性能对比图 (3 指标 facet) ────────────────────────────────────
+  ## ── 15.3 模型性能对比图 (3 指标 facet) ────────────────────────────────────
   # 展示 AUC / TSS / CBI
   p_eval <- plot(eval_result)
   print(p_eval)
 
-  ## ── 16.4b 空间CV折叠地图 + 折间AUC变化 ────────────────────────────────────
+  ## ── 15.3b 空间CV折叠地图 + 折间AUC变化 ────────────────────────────────────
   p_cv <- plot(
     cv_result,
     lon     = species_data$lon,
@@ -504,20 +466,20 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
   print(p_cv)
 
 
-  ## ── 16.5 栖息地适宜性空间地图 (HSS) ──────────────────────────────────────
+  ## ── 15.4 栖息地适宜性空间地图 (HSS) ──────────────────────────────────────
   # basemap = "world" 自动加载世界底图 (需要包内 basemap/countries.shp)
   # 颜色: turbo 色板, 0 (不适宜) → 1 (高度适宜)
   if (requireNamespace("sf", quietly = TRUE)) {
     p_hss <- plot(
       pred,
-      model   = "rf",         # 若训练了 "cast", 改为 model = "cast"
+      model   = "rf",         # 可改为 "brt", "maxent", "gam"
       basemap = "world",
       title   = paste("Habitat Suitability:", gsub("_", " ", target_species))
     )
     print(p_hss)
     # ggsave("swi_hss_rf.png", p_hss, width = 8, height = 5, dpi = 150)
   }
-    ## ── 16.5b 模型间空间一致性热力图 ──────────────────────────────────────────
+    ## ── 15.4b 模型间空间一致性热力图 ──────────────────────────────────────────
   if (length(pred$models) >= 2 &&
       requireNamespace("patchwork", quietly = TRUE)) {
     consistency <- cast_consistency(pred)
@@ -528,7 +490,7 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
   }
 
 
-  ## ── 16.6 CATE 空间异质性因果效应地图 ─────────────────────────────────────
+  ## ── 15.5 CATE 空间异质性因果效应地图 ─────────────────────────────────────
   # 蓝色: 负效应 (该变量增加 → 物种出现概率下降)
   # 红色: 正效应 (该变量增加 → 物种出现概率上升)
   # 揭示"环境驱动力的空间异质性"
@@ -573,7 +535,7 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 第 17 步: 快速汇总
+# 第 16 步: 快速汇总
 # ══════════════════════════════════════════════════════════════════════════════
 
 cat("\n", strrep("=", 60), "\n")
@@ -582,9 +544,7 @@ cat(strrep("=", 60), "\n\n")
 cat("物种:", gsub("_", " ", target_species), "\n")
 cat("训练数据:", nrow(split$train), "条 (存在:", sum(split$train$presence), ")\n")
 cat("因果 DAG:", nrow(dag$edges), "条边\n")
-sig_n <- sum(ate$estimates$significant, na.rm = TRUE)
-cat("显著 ATE 变量:", sig_n, "/", nrow(ate$estimates), "\n")
-cat("CAST 选出变量:", paste(screen$selected, collapse=", "), "\n")
+cat("选出变量:", paste(screen$selected, collapse=", "), "\n")
 cat("CATE 变量:", paste(cate_result$variables, collapse=", "), "\n")
 cat("预测格点:", nrow(pred_grid), "\n\n")
 
@@ -606,10 +566,9 @@ if (exists("cv_result") && nrow(cv_result$metrics) > 0) {
 
 cat("主要输出对象:\n")
 cat("  dag        → 因果 DAG (cast_dag)\n")
-cat("  ate        → 因果效应 (cast_ate)\n")
-cat("  screen     → 变量筛选 (cast_screen)\n")
+cat("  screen     → 变量筛选 (cast_select)\n")
 cat("  fit        → 拟合模型 (cast_fit)\n")
-cat("  cv_result  → 空间交叉验证 (cast_cv)  ← 新增\n")
+cat("  cv_result  → 空间交叉验证 (cast_cv)\n")
 cat("  eval_result → 保留集评估 (cast_eval)\n")
 cat("  pred       → 空间预测 (cast_predict)\n")
 cat("  cate_result → CATE 估计 (cast_cate)\n")

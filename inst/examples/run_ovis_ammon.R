@@ -14,11 +14,10 @@
 #   library(castSDM)
 #   source(system.file("examples/run_ovis_ammon.R", package = "castSDM"))
 #
-# DAG 四种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
-# 依赖 (自检 + 后续 ATE 必用 ranger): 建议一次安装
-#   install.packages(c("bnlearn", "BiDAG", "torch", "ranger"))
-# 说明: bidag_bge 需 BiDAG;
-# notears_linear 需 torch。仅想跑主流程、不做 DAG 五法自检可设
+# DAG 三种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
+# 依赖: 建议一次安装
+#   install.packages(c("bnlearn", "BiDAG", "ranger"))
+# 说明: bidag_bge 需 BiDAG。仅想跑主流程、不做 DAG 三法自检可设
 #   RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 # ==============================================================================
 #
@@ -233,44 +232,38 @@ cat("存在点:", sum(ovis_ammon$presence == 1),
 var_labels <- NULL
 
 # ==============================================================================
-# cast_dag()：四种 structure_method 的参数与依赖（正式跑前必读）
+# cast_dag()：三种 structure_method 的参数与依赖（正式跑前必读）
 # ==============================================================================
 # 入口：cast_dag(data, response = "presence", env_vars = NULL, ...,
-#               structure_method = "<下列之一>", ...)
+#               structure_method = "<下列之一>", include_response = TRUE, ...)
 #
-# (1) bootstrap_hc — 自助法 + 打分搜索（默认 CAST 流程）
+# (1) bootstrap_hc — 自助法 + 打分搜索
 #     依赖：bnlearn
 #     生效参数：R, algorithm, score, strength_threshold, direction_threshold,
-#               max_rows, seed, verbose, env_vars, response
+#               max_rows, seed, verbose, env_vars, response, include_response
 #     algorithm：传给 bnlearn::boot.strength() 的学习器，如 "hc","tabu",
 #                 "mmhc","pc.stable"（注意：选约束型 PC 本体应设
 #                 structure_method="pc"，不要把 algorithm 写成 "pc"）
-#     忽略：pc_alpha/pc_test、bidag_*、notears_*（仍会传入，包内忽略）
+#     忽略：pc_alpha/pc_test、bidag_*（仍会传入，包内忽略）
 #
-# (2) pc — 约束型 PC（bnlearn::pc.stable）
+# (2) pc — 约束型 PC（bnlearn::pc.stable）（默认）
 #     依赖：bnlearn
-#     生效参数：pc_alpha, pc_test（如连续高斯常用 "zf"）, max_rows, seed,
-#               verbose, env_vars, response
+#     生效参数：pc_alpha, pc_test, max_rows, seed,
+#               verbose, env_vars, response, include_response
 #     忽略：R, algorithm, score, strength_threshold, direction_threshold,
-#           bidag_*, notears_*
-
+#           bidag_*
+#
 # (3) bidag_bge — BiDAG + BGe 分数
 #     依赖：BiDAG（及数据矩阵）
 #     生效参数：bidag_algorithm ("order"|"orderIter"), bidag_iterations,
-#               max_rows, seed, verbose, env_vars, response
-#     忽略：R, algorithm, score, pc_*, notears_*
-#
-# (4) notears_linear — 线性 NOTEARS（torch 实现）
-#     依赖：torch；变量数 p 不宜过大（包内约 p<=60）
-#     生效参数：notears_lambda, notears_max_iter, notears_lr, notears_tol,
-#               notears_rho_init, notears_alpha_mult, max_rows, seed, verbose
-#     忽略：R, algorithm, score, pc_*, bidag_*
+#               max_rows, seed, verbose, env_vars, response, include_response
+#     忽略：R, algorithm, score, pc_*
 #
 # 一键安装常用建议包（按需删减后运行）：
-#   install.packages(c("bnlearn", "BiDAG", "torch"))
+#   install.packages(c("bnlearn", "BiDAG"))
 # ==============================================================================
 
-# ── 集中配置: 与 cast_prepare / cast_dag / cast_ate / cast_screen / cast_fit /
+# ── 集中配置: 与 cast_prepare / cast_dag / cast_select / cast_roles / cast_fit /
 #    cast_evaluate / cast_predict / cast_cv / cast_cate / cast_shap_xgb /
 #    cast_shap_fit（需 fastshap）等
 #    的形参一一对应, 便于对照帮助文档调参 ───────────────────────────────────
@@ -281,27 +274,22 @@ CONFIG <- list(
   prepare_train_fraction = 0.7,
   prepare_env_vars       = NULL,
   prepare_verbose        = TRUE,
-  # cast_dag (注意: 选 PC/NOTEARS/BiDAG 时改 dag_structure_method;
+  # cast_dag (注意: 选 PC/BiDAG 时改 dag_structure_method;
   #   dag_algorithm / dag_score 仅当 structure_method = "bootstrap_hc" 时生效)
   dag_env_vars            = NULL,
   dag_R                   = 100L,  #speed
   dag_algorithm           = "hc",
-  dag_score               = "bic-g",
+  dag_score               = NULL,
   dag_strength_threshold  = 0.7,
   dag_direction_threshold = 0.6,
   dag_max_rows            = 8000L,
   dag_verbose             = TRUE,
-  dag_structure_method    = "bootstrap_hc",
+  dag_structure_method    = "pc",
   dag_pc_alpha            = 0.05,
-  dag_pc_test             = "zf",
+  dag_pc_test             = NULL,
   dag_bidag_algorithm     = "order",
   dag_bidag_iterations    = NULL,
-  dag_notears_lambda      = 0.03,
-  dag_notears_max_iter    = 2000L,
-  dag_notears_lr          = 0.02,
-  dag_notears_tol         = 1e-3,
-  dag_notears_rho_init    = 0.1,
-  dag_notears_alpha_mult  = 1.01,
+  dag_include_response    = TRUE,
   dag_blacklist           = NULL,   # data.frame(from, to) 禁止边
   dag_whitelist           = NULL,   # data.frame(from, to) 强制边
   # 可选简便写法：每条规则可写为 "from->to" 或 "from,to"
@@ -331,37 +319,16 @@ CONFIG <- list(
   dag_use_posterior_rules   = FALSE,
   dag_posterior_blacklist_rules = NULL,
   dag_posterior_whitelist_rules = NULL,
-  # cast_ate
-  ate_variables     = NULL,
-  ate_K             = 10L,
-  ate_num_trees     = 300L,
-  ate_alpha         = 0.05,
-  ate_quantile_cuts = c(0.25, 0.5, 0.75),
-  ate_p_adjust     = "fdr",
-  ate_parallel      = TRUE,
-  ate_verbose       = TRUE,
-  # cast_screen
-  screen_min_vars     = 5L,
-  screen_min_fraction = 0.5,
-  screen_num_trees    = 500L,
-  screen_verbose      = TRUE,
-  # cast_fit (快速演示: n_epochs / n_runs 较小; 正式分析请增大并打开 tune_grid)
-  fit_models            = c("cast", "rf", "maxent", "brt"),
-  fit_n_epochs          = 50L,  #speed
-  fit_n_runs            = 1L, #speed
-  fit_patience          = 40L,
-  fit_val_fraction      = 0.2,
-  fit_focal_gamma       = 2.0,
-  fit_focal_alpha_mode  = "sqrt",
-  fit_focal_alpha       = 0.75,
+  # cast_select
+  select_min_vars     = 5L,
+  select_min_fraction = 0.5,
+  select_num_trees    = 500L,
+  select_verbose      = TRUE,
+  # cast_fit
+  fit_models            = c("rf", "brt", "maxent", "gam"),
   fit_rf_ntree          = 300L,
   fit_brt_n_trees       = 500L,
   fit_brt_depth         = 5L,
-  fit_hidden_size       = NULL,
-  fit_dropout           = 0.2,
-  fit_lr                = 1e-3,
-  fit_batch_size        = NULL,
-  fit_max_interactions  = 15L,
   fit_tune_grid         = FALSE,  #speed
   fit_verbose           = TRUE,
   # cast_evaluate
@@ -372,8 +339,6 @@ CONFIG <- list(
   cv_k             = 5L,
   cv_models        = c("rf", "maxent", "brt"),
   cv_block_method  = "grid",
-  cv_n_epochs      = 120L,
-  cv_n_runs        = 2L,
   cv_rf_ntree      = 300L,
   cv_brt_n_trees   = 500L,
   cv_parallel      = TRUE,
@@ -381,7 +346,6 @@ CONFIG <- list(
   run_spatial_cv   = FALSE,
   # cast_cate
   # CATE 变量可选策略：
-  #   "auto"        = 原默认逻辑（显著 ATE 与 screen 交集，再受 cate_top_n 限制）
   #   "screen_top_n"= 固定画 screen$selected 前 cate_top_n 个（按筛选顺序）
   #   "screen_all"  = 画全部 screen$selected
   #   "env_all"     = 画全部 split$env_vars
@@ -391,7 +355,7 @@ CONFIG <- list(
   cate_top_n         = 8L,
   cate_n_trees       = 300L,
   cate_verbose       = FALSE,
-  cate_hss_model     = "cast",  # HSS 遮罩模型 (cast/rf/maxent/brt)
+  cate_hss_model     = "rf",  # HSS 遮罩模型 (rf/maxent/brt/gam)
   cate_hss_threshold = 0.1,   # HSS < 阈值的网格 CATE 设为 NA（不显示）
   # cast_shap_xgb
   shap_nrounds          = 200L,
@@ -402,13 +366,9 @@ CONFIG <- list(
   shap_test_fraction    = 0.2,
   shap_verbose          = FALSE,
   shap_plot_top_n       = 15L,
-  # cast_shap_fit（RF / CAST，依赖 fastshap；MC 次数越大越稳但更慢）
+  # cast_shap_fit（RF，依赖 fastshap；MC 次数越大越稳但更慢）
   shap_fastshap_nsim      = 40L,
   shap_max_explain_rows   = 50L,
-  # cast_evalue
-  do_evalue               = TRUE,
-  evalue_transform        = "RR",
-  evalue_p0               = 0.5,
   # cast_backdoor
   do_backdoor             = TRUE,
   # cast_report (需 rmarkdown)
@@ -422,7 +382,7 @@ CONFIG <- list(
   only_run_shap_plots           = FALSE
 )
 
-# 是否对四种 cast_dag structure_method 逐一做「DAG → ATE → screen → roles」闭环自检
+# 是否对三种 cast_dag structure_method 逐一做「DAG → select → roles」闭环自检
 RUN_DAG_SELFTEST_ALL_METHODS <- TRUE
 
 # DAG 实际生效参数（运行后会按 active env vars 过滤更新）
@@ -430,19 +390,12 @@ dag_env_vars_use <- CONFIG$dag_env_vars
 dag_blacklist_use <- CONFIG$dag_blacklist
 dag_whitelist_use <- CONFIG$dag_whitelist
 
-#' 盘羊示例：四种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
+#' 盘羊示例：三种 DAG 结构学习 + 下游最小闭环 (内部函数，仅本脚本使用)
 #' @noRd
 ovis_dag_selftest_all <- function(train_df, cfg) {
-  if (!requireNamespace("ranger", quietly = TRUE)) {
-    stop(
-      "cast_ate 需要 ranger。install.packages(\"ranger\")",
-      call. = FALSE
-    )
-  }
-
   ncap <- min(1600L, nrow(train_df))
   d <- train_df[seq_len(ncap), , drop = FALSE]
-  methods <- c("bootstrap_hc", "pc", "bidag_bge", "notears_linear")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge")
 
   for (sm in methods) {
     miss <- character(0)
@@ -451,9 +404,6 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
     }
     if (identical(sm, "bidag_bge") && !requireNamespace("BiDAG", quietly = TRUE)) {
       miss <- c(miss, "BiDAG")
-    }
-    if (identical(sm, "notears_linear") && !requireNamespace("torch", quietly = TRUE)) {
-      miss <- c(miss, "torch")
     }
     if (length(miss)) {
       stop(
@@ -470,6 +420,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
         data = d,
         response = cfg$response,
         env_vars = cfg$dag_env_vars,
+        include_response = TRUE,
         R = if (identical(sm, "bootstrap_hc")) 15L else cfg$dag_R,
         algorithm = cfg$dag_algorithm,
         score = cfg$dag_score,
@@ -499,20 +450,6 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
         } else {
           cfg$dag_bidag_iterations
         },
-        notears_lambda = cfg$dag_notears_lambda,
-        notears_max_iter = if (identical(sm, "notears_linear")) {
-          min(700L, cfg$dag_notears_max_iter)
-        } else {
-          cfg$dag_notears_max_iter
-        },
-        notears_lr = cfg$dag_notears_lr,
-        notears_tol = if (identical(sm, "notears_linear")) {
-          max(0.01, cfg$dag_notears_tol)
-        } else {
-          cfg$dag_notears_tol
-        },
-        notears_rho_init = cfg$dag_notears_rho_init,
-        notears_alpha_mult = cfg$dag_notears_alpha_mult,
         blacklist = cfg$dag_blacklist,
         whitelist = cfg$dag_whitelist
       ),
@@ -531,45 +468,25 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
       stop("DAG 自检返回异常: ", sm, call. = FALSE)
     }
 
-    ate <- tryCatch(
-      cast_ate(
-        data = d,
-        response = cfg$response,
-        variables = dag$nodes,
-        K = 3L,
-        num_trees = 120L,
-        alpha = cfg$ate_alpha,
-        quantile_cuts = cfg$ate_quantile_cuts,
-        p_adjust = cfg$ate_p_adjust,
-        parallel = FALSE,
-        seed = cfg$seed,
-        verbose = FALSE
-      ),
-      error = function(e) {
-        stop("cast_ate (", sm, "): ", conditionMessage(e), call. = FALSE)
-      }
-    )
-
     screen <- tryCatch(
-      cast_screen(
+      cast_select(
         dag = dag,
-        ate = ate,
         data = d,
         response = cfg$response,
-        min_vars = cfg$screen_min_vars,
-        min_fraction = cfg$screen_min_fraction,
+        min_vars = cfg$select_min_vars,
+        min_fraction = cfg$select_min_fraction,
         num_trees = 180L,
         seed = cfg$seed,
         verbose = FALSE
       ),
       error = function(e) {
-        stop("cast_screen (", sm, "): ", conditionMessage(e), call. = FALSE)
+        stop("cast_select (", sm, "): ", conditionMessage(e), call. = FALSE)
       }
     )
 
     roles <- cast_roles(screen = screen, dag = dag)
     if (length(screen$selected) < 1L) {
-      stop("cast_screen 未保留任何变量 (", sm, ")", call. = FALSE)
+      stop("cast_select 未保留任何变量 (", sm, ")", call. = FALSE)
     }
 
     message(
@@ -580,7 +497,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
     )
   }
 
-  message("cast_dag 四种 structure_method 自检均通过 (bootstrap_hc, pc, bidag_bge, notears_linear)。")
+  message("cast_dag 三种 structure_method 自检均通过 (bootstrap_hc, pc, bidag_bge)。")
   invisible(TRUE)
 }
 
@@ -703,7 +620,7 @@ message(sprintf(
   if (is.null(dag_whitelist_use)) 0L else nrow(dag_whitelist_use)
 ))
 
-# ── DAG 四种算法 + ATE/screen/roles 最小闭环自检 (默认必须全部通过) ─────────
+# ── DAG 三种算法 + select/roles 最小闭环自检 (默认必须全部通过) ─────────
 if (isTRUE(RUN_DAG_SELFTEST_ALL_METHODS)) {
   cfg_for_selftest <- CONFIG
   cfg_for_selftest$dag_env_vars <- dag_env_vars_use
@@ -726,12 +643,13 @@ if (requireNamespace("car", quietly = TRUE)) {
 
 # ── Step 2: DAG 因果结构学习 ─────────────────────────────────────────────────
 # structure_method 可选:
-#   "bootstrap_hc"(默认), "pc", "bidag_bge"(需 BiDAG), "notears_linear"(需 torch)
+#   "bootstrap_hc", "pc"（默认）, "bidag_bge"(需 BiDAG)
 # 下面列出 cast_dag() 全部形参; R / algorithm / score 仅用于 bootstrap_hc。
 dag <- cast_dag(
   data                 = split$train,
   response             = CONFIG$response,
   env_vars             = dag_env_vars_use,
+  include_response     = CONFIG$dag_include_response,
   R                    = CONFIG$dag_R,
   algorithm            = CONFIG$dag_algorithm,
   score                = CONFIG$dag_score,
@@ -745,45 +663,12 @@ dag <- cast_dag(
   pc_test              = CONFIG$dag_pc_test,
   bidag_algorithm      = CONFIG$dag_bidag_algorithm,
   bidag_iterations     = CONFIG$dag_bidag_iterations,
-  notears_lambda       = CONFIG$dag_notears_lambda,
-  notears_max_iter     = CONFIG$dag_notears_max_iter,
-  notears_lr           = CONFIG$dag_notears_lr,
-  notears_tol          = CONFIG$dag_notears_tol,
-  notears_rho_init     = CONFIG$dag_notears_rho_init,
-  notears_alpha_mult   = CONFIG$dag_notears_alpha_mult,
   blacklist            = dag_blacklist_use,
   whitelist            = dag_whitelist_use
 )
 print(dag)
 
-# ── Step 3: ATE 因果效应估计 ─────────────────────────────────────────────────
-ate <- cast_ate(
-  data          = split$train,
-  response      = CONFIG$response,
-  variables     = CONFIG$ate_variables,
-  K             = CONFIG$ate_K,
-  num_trees     = CONFIG$ate_num_trees,
-  alpha         = CONFIG$ate_alpha,
-  quantile_cuts = CONFIG$ate_quantile_cuts,
-  p_adjust        = CONFIG$ate_p_adjust,
-  parallel      = CONFIG$ate_parallel,
-  seed          = CONFIG$seed,
-  verbose       = CONFIG$ate_verbose
-)
-print(ate)
-
-# ── Step 3b: E-value 敏感性分析 ──────────────────────────────────────────────
-if (isTRUE(CONFIG$do_evalue)) {
-  evalue <- cast_evalue(
-    ate       = ate,
-    transform = CONFIG$evalue_transform,
-    p0        = CONFIG$evalue_p0,
-    verbose   = TRUE
-  )
-  print(evalue)
-}
-
-# ── Step 3c: 后门准则检查 ────────────────────────────────────────────────────
+# ── Step 3: 后门准则检查 ─────────────────────────────────────────────────────
 if (isTRUE(CONFIG$do_backdoor) &&
     requireNamespace("dagitty", quietly = TRUE)) {
   backdoor <- cast_backdoor(
@@ -795,16 +680,15 @@ if (isTRUE(CONFIG$do_backdoor) &&
 }
 
 # ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
-screen <- cast_screen(
+screen <- cast_select(
   dag            = dag,
-  ate            = ate,
   data           = split$train,
   response       = CONFIG$response,
-  min_vars       = CONFIG$screen_min_vars,
-  min_fraction   = CONFIG$screen_min_fraction,
-  num_trees      = CONFIG$screen_num_trees,
+  min_vars       = CONFIG$select_min_vars,
+  min_fraction   = CONFIG$select_min_fraction,
+  num_trees      = CONFIG$select_num_trees,
   seed           = CONFIG$seed,
-  verbose        = CONFIG$screen_verbose
+  verbose        = CONFIG$select_verbose
 )
 print(screen)
 
@@ -813,29 +697,15 @@ roles <- cast_roles(screen = screen, dag = dag)
 print(roles)
 
 # ── Step 6: 模型训练 ─────────────────────────────────────────────────────────
-# 若已安装 torch, 可将 fit_models 设为含 "cast" / "mlp_ate" 等并增大 n_epochs。
 fit_full <- cast_fit(
   data               = split$train,
   screen             = screen,
   dag                = dag,
-  ate                = ate,
   models             = CONFIG$fit_models,
   response           = CONFIG$response,
-  n_epochs           = CONFIG$fit_n_epochs,
-  n_runs             = CONFIG$fit_n_runs,
-  patience           = CONFIG$fit_patience,
-  val_fraction       = CONFIG$fit_val_fraction,
-  focal_gamma        = CONFIG$fit_focal_gamma,
-  focal_alpha_mode   = CONFIG$fit_focal_alpha_mode,
-  focal_alpha        = CONFIG$fit_focal_alpha,
   rf_ntree           = CONFIG$fit_rf_ntree,
   brt_n_trees        = CONFIG$fit_brt_n_trees,
   brt_depth          = CONFIG$fit_brt_depth,
-  hidden_size        = CONFIG$fit_hidden_size,
-  dropout            = CONFIG$fit_dropout,
-  lr                 = CONFIG$fit_lr,
-  batch_size         = CONFIG$fit_batch_size,
-  max_interactions   = CONFIG$fit_max_interactions,
   tune_grid          = CONFIG$fit_tune_grid,
   seed               = CONFIG$seed,
   verbose            = CONFIG$fit_verbose
@@ -864,13 +734,10 @@ if (isTRUE(CONFIG$run_spatial_cv)) {
     data         = ovis_ammon,
     screen       = screen,
     dag          = dag,
-    ate          = ate,
     k            = CONFIG$cv_k,
     models       = CONFIG$cv_models,
     block_method = CONFIG$cv_block_method,
     response     = CONFIG$response,
-    n_epochs     = CONFIG$cv_n_epochs,
-    n_runs       = CONFIG$cv_n_runs,
     rf_ntree     = CONFIG$cv_rf_ntree,
     brt_n_trees  = CONFIG$cv_brt_n_trees,
     parallel     = CONFIG$cv_parallel,
@@ -957,18 +824,6 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   )
   print(p_dag)
   ovis_save_plot(p_dag, "ovis_dag.png", width = 12, height = 9)
-
-  # ATE 森林图
-  p_ate <- plot(ate, var_labels = var_labels)
-  print(p_ate)
-  ovis_save_plot(p_ate, "ovis_ate.png", width = 8, height = 10)
-
-  # E-value 敏感性分析图
-  if (isTRUE(CONFIG$do_evalue) && exists("evalue")) {
-    p_evalue <- plot(evalue, var_labels = var_labels, type = "evalue")
-    print(p_evalue)
-    ovis_save_plot(p_evalue, "ovis_evalue.png", width = 9, height = 8)
-  }
 
   # Backdoor 识别性检验表格图
   if (isTRUE(CONFIG$do_backdoor) && exists("backdoor") &&
@@ -1068,18 +923,12 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       cate_variables_use <- split$env_vars
     } else if (identical(cate_mode, "manual")) {
       cate_variables_use <- CONFIG$cate_variables
-    } else {
-      # auto: 保持原默认行为（允许 cate_variables 手动覆盖）
-      cate_variables_use <- CONFIG$cate_variables
-      if (is.null(cate_variables_use) && exists("ate_variables_use")) {
-        cate_variables_use <- ate_variables_use
-      }
     }
 
     cate <- cast_cate(
       data           = split$train,
       variables      = cate_variables_use,
-      ate            = ate,
+      dag            = dag,
       screen         = screen,
       response       = CONFIG$response,
       top_n          = CONFIG$cate_top_n,
@@ -1113,12 +962,10 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     }
   }
 
-  # ── SHAP 三种路径（变量个数与含义不同，勿混读一张图）────────────────────────
+  # ── SHAP 两种路径（变量个数与含义不同，勿混读一张图）────────────────────────
   # 1) XGBoost：单独训练的 surrogate，TreeSHAP；自 dag 传入后与 RF 共用 **dag$nodes**
-  #    原始环境列（非 cast_features 的 int_*）。瀑布图纵轴为 **logit**。
+  #    原始环境列。瀑布图纵轴为 **logit**。
   # 2) RF：cast_fit 里的 ranger，fastshap，**原始环境列**，概率尺度。
-  # 3) CAST：cast_fit 里的神经网络，fastshap，输入为 **cast_features()**（含 int_A_B
-  #    = DAG 边 A-B 上的标准化乘积×边强度）；与 XGB/RF 的列空间不同，属预期行为。
   # XGBoost（TreeSHAP）
   if (requireNamespace("xgboost", quietly = TRUE)) {
     sh_xgb <- cast_shap_xgb(
@@ -1164,34 +1011,6 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     )
     if (!is.null(sh_rf)) {
       ovis_shap_save_pair(sh_rf, "ovis_shap_rf")
-    }
-  }
-
-  # CAST 神经网络（fastshap + torch；列为 cast_features 工程特征）
-  torch_ok <- requireNamespace("torch", quietly = TRUE) &&
-    tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
-  if (requireNamespace("fastshap", quietly = TRUE) && isTRUE(torch_ok) &&
-      "cast" %in% names(fit_full$models) &&
-      !is.null(fit_full$models$cast$model)) {
-    sh_cast <- tryCatch(
-      cast_shap_fit(
-        fit                  = fit_full,
-        which                = "cast",
-        data                 = split$train,
-        response             = CONFIG$response,
-        test_fraction        = CONFIG$shap_test_fraction,
-        seed                 = CONFIG$seed,
-        fastshap_nsim        = CONFIG$shap_fastshap_nsim,
-        max_explain_rows     = CONFIG$shap_max_explain_rows,
-        verbose              = FALSE
-      ),
-      error = function(e) {
-        message("cast_shap_fit(cast) 跳过: ", conditionMessage(e))
-        NULL
-      }
-    )
-    if (!is.null(sh_cast)) {
-      ovis_shap_save_pair(sh_cast, "ovis_shap_cast")
     }
   }
 
@@ -1266,21 +1085,15 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     train_fraction         = CONFIG$prepare_train_fraction,
     n_bootstrap            = CONFIG$dag_R,
     dag_structure_method   = CONFIG$dag_structure_method,
+    dag_include_response   = CONFIG$dag_include_response,
     dag_pc_alpha           = CONFIG$dag_pc_alpha,
     dag_pc_test            = CONFIG$dag_pc_test,
     dag_bidag_algorithm    = CONFIG$dag_bidag_algorithm,
     dag_bidag_iterations   = CONFIG$dag_bidag_iterations,
-    dag_notears_lambda     = CONFIG$dag_notears_lambda,
-    dag_notears_max_iter   = CONFIG$dag_notears_max_iter,
-    dag_notears_lr         = CONFIG$dag_notears_lr,
-    dag_notears_tol        = CONFIG$dag_notears_tol,
-    dag_notears_rho_init   = CONFIG$dag_notears_rho_init,
-    dag_notears_alpha_mult = CONFIG$dag_notears_alpha_mult,
     strength_threshold     = CONFIG$dag_strength_threshold,
     direction_threshold    = CONFIG$dag_direction_threshold,
-    ate_folds                = 2L,
-    ate_alpha                = CONFIG$ate_alpha,
-    screen_min_vars          = CONFIG$screen_min_vars,
+    select_min_vars          = CONFIG$select_min_vars,
+    select_min_fraction      = CONFIG$select_min_fraction,
     do_cv                    = TRUE,
     cv_k                     = CONFIG$cv_k,
     cv_block_method          = CONFIG$cv_block_method,
@@ -1289,7 +1102,6 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     cate_top_n               = 3L,
     blacklist                = dag_blacklist_use,
     whitelist                = dag_whitelist_use,
-    do_evalue                = CONFIG$do_evalue,
     do_backdoor              = CONFIG$do_backdoor,
     seed                     = CONFIG$seed,
     verbose                  = TRUE
@@ -1316,19 +1128,20 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 方式 C (可选): 将五种 DAG 网络图落盘 (依赖已通过上面自检)
+# 方式 C (可选): 将三种 DAG 网络图落盘 (依赖已通过上面自检)
 # ══════════════════════════════════════════════════════════════════════════════
 # 与「全算法自检」重复时可关；需要对比图时改为 TRUE。
 RUN_DAG_METHOD_SHOWCASE <- TRUE
 
 if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
-  methods <- c("bootstrap_hc", "pc", "bidag_bge", "notears_linear")
+  methods <- c("bootstrap_hc", "pc", "bidag_bge")
   for (sm in methods) {
     dm <- tryCatch(
       cast_dag(
         data = split$train,
         response = CONFIG$response,
         env_vars = dag_env_vars_use,
+        include_response = TRUE,
         R = CONFIG$dag_R,
         algorithm = CONFIG$dag_algorithm,
         score = CONFIG$dag_score,
@@ -1342,12 +1155,6 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
         pc_test = CONFIG$dag_pc_test,
         bidag_algorithm = CONFIG$dag_bidag_algorithm,
         bidag_iterations = CONFIG$dag_bidag_iterations,
-        notears_lambda = CONFIG$dag_notears_lambda,
-        notears_max_iter = CONFIG$dag_notears_max_iter,
-        notears_lr = CONFIG$dag_notears_lr,
-        notears_tol = CONFIG$dag_notears_tol,
-        notears_rho_init = CONFIG$dag_notears_rho_init,
-        notears_alpha_mult = CONFIG$dag_notears_alpha_mult,
         blacklist = dag_blacklist_use,
         whitelist = dag_whitelist_use
       ),
@@ -1357,19 +1164,8 @@ if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRU
       }
     )
     if (is.null(dm)) next
-    am <- cast_ate(
-      data = split$train,
-      response = CONFIG$response,
-      variables = dm$nodes,
-      K = 5L,
-      num_trees = 200L,
-      parallel = FALSE,
-      seed = CONFIG$seed,
-      verbose = FALSE
-    )
-    smc <- cast_screen(
+    smc <- cast_select(
       dag = dm,
-      ate = am,
       data = split$train,
       response = CONFIG$response,
       num_trees = 300L,

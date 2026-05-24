@@ -15,11 +15,10 @@
 #'   `screen` is set, `intersect(get_env_vars(), screen$selected)`; (3) else
 #'   [get_env_vars()].
 #' @param dag Optional [cast_dag]; when supplied with `env_vars = NULL`,
-#'   fixes SHAP inputs to **DAG nodes** so the XGBoost surrogate uses the **same
-#'   raw environmental columns** as `cast_fit(..., models = "rf", ...)` (not
-#'   `cast_features()` interaction columns).
-#' @param screen Optional [cast_screen]; used only when `dag` is `NULL` and
-#'   `env_vars` is `NULL` (legacy screening of numeric env names).
+#'   fixes SHAP inputs to **DAG nodes** so the XGBoost surrogate uses the
+#'   **same raw environmental columns** as `cast_fit()`.
+#' @param screen Optional `cast_screen` object; used only when `dag` is `NULL` and
+#'   `env_vars` is `NULL`.
 #' @param nrounds Maximum boosting rounds. Default `400`.
 #' @param max_depth,eta,subsample,colsample_bytree Passed to \pkg{xgboost}
 #'   (see [xgboost::xgb.train()]).
@@ -37,7 +36,7 @@
 #'   (`NULL`), `shap_engine_note` (`NULL`). Objects from [cast_shap_fit()]
 #'   reuse the same slots with `engine`/`method` describing the source model.
 #'
-#' @seealso [plot.cast_shap()], [cast_fit()], [cast_screen()]
+#' @seealso [plot.cast_shap()], [cast_fit()], [cast_select()]
 #'
 #' @export
 cast_shap_xgb <- function(data,
@@ -163,7 +162,7 @@ cast_shap_xgb <- function(data,
   }
 
   cap <- paste0(
-    "Separate XGBoost classifier (not cast_fit RF/CAST). ",
+    "Separate XGBoost classifier (not cast_fit RF). ",
     "TreeSHAP on p=", length(env_vars), " raw env columns",
     if (!is.null(dag)) " (= intersect(dag$nodes, names(data)))" else "",
     ". Waterfall: y = logit margin; P(presence) from plogis in subtitle."

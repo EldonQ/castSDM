@@ -55,7 +55,7 @@ for species with low presence counts. Fits one bivariate sub-model
 AUC-weighted averaging on a held-out validation split.
 }
 \details{
-Designed as the recommended fallback when CI-MLP and BRT would over-fit
+Designed as the recommended fallback when BRT would over-fit
 on rare species (typically \code{n_pres < presence_threshold}). Complementary
 to \code{\link[=cast_fit]{cast_fit()}} — see \code{\link[=cast_batch]{cast_batch()}}'s \code{auto_esm} argument for automatic
 selection.

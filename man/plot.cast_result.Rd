@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_result}
 \alias{plot.cast_result}
-\title{Plot CAST Pipeline Result (Multi-Panel)}
+\title{Plot castSDM Pipeline Result (Multi-Panel)}
 \usage{
 \method{plot}{cast_result}(x, var_labels = NULL, ...)
 }
@@ -17,6 +17,6 @@
 A \code{patchwork} combined plot.
 }
 \description{
-Combines DAG, ATE, and screening plots into a 3-panel figure using
+Combines DAG and variable selection plots into a 2-panel figure using
 patchwork.
 }

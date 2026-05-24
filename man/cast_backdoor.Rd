@@ -53,5 +53,5 @@ graphs: the R package 'dagitty'. \emph{International Journal of Epidemiology},
 45(6), 1887-1894.
 }
 \seealso{
-\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}
+\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}}
 }

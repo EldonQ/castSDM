@@ -1,355 +1,95 @@
 #' Fit Species Distribution Models
 #'
-#' Trains one or more SDM models on prepared data. Supports the causal CI-MLP
-#' architecture (pure-R CPU backend by default; legacy \pkg{torch} backend
-#' optional) and traditional methods (RF, MaxEnt, BRT, GAM).
+#' Trains one or more SDM algorithms on prepared data. Supported models:
+#' Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
+#' Generalised Additive Models (GAM).
+#'
+#' Variable selection is driven by the `cast_screen` object from
+#' [cast_select()]. If no screen is provided, all environmental variables
+#' from the DAG (or data) are used.
 #'
 #' @param data A `data.frame` with `presence` column and predictor variables.
-#' @param screen A [cast_screen] object, or `NULL`.
+#' @param screen A `cast_screen` object from [cast_select()], or `NULL`.
 #' @param dag A [cast_dag] object, or `NULL`.
-#' @param ate A [cast_ate] object, or `NULL`.
-#' @param models Character vector. Models to fit: `"cast"`, `"mlp_ate"`,
-#'   `"mlp"`, `"rf"`, `"maxent"`, `"brt"`. Default `c("cast", "rf")`.
+#' @param models Character vector. Models to fit: `"rf"`, `"maxent"`, `"brt"`,
+#'   `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param response Character. Response column name. Default `"presence"`.
-#' @param n_epochs Integer. Training epochs for neural networks. Default `300`.
-#' @param n_runs Integer. Number of random seeds for NN ensembling. Default
-#'   `5`. Each run uses a different random seed; the best-AUC run is kept.
-#' @param patience Integer. Early stopping patience (epochs). Default `40`.
-#'   Increased from the original 20 to avoid premature stopping during the
-#'   cosine-annealing tail of the schedule.
-#' @param val_fraction Numeric. Validation split for early stopping. Default
-#'   `0.2`. Split is stratified by presence/absence.
-#' @param focal_gamma Numeric. Focal loss gamma parameter. Default `2.0`.
-#'   Higher values down-weight easy negatives more aggressively.
-#' @param focal_alpha_mode Character. How to set the focal loss alpha weight.
-#'   `"sqrt"` (default) uses `sqrt(1 - prevalence)` which is less aggressive
-#'   than the original `1 - prevalence` and prevents over-focusing on
-#'   presences in highly imbalanced data. `"prevalence"` restores the original
-#'   `1 - prevalence` behaviour. `"fixed"` uses `focal_alpha` directly.
-#' @param focal_alpha Numeric. Used only when `focal_alpha_mode = "fixed"`.
-#'   Default `0.75`.
 #' @param rf_ntree Integer. Number of RF trees. Default `300`.
 #' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
-#' @param hidden_size Integer or `NULL`. CI-MLP hidden layer size. `NULL` for
-#'   auto (4x input features, capped at 128).
-#' @param dropout Numeric. CI-MLP dropout rate. Default `0.2`.
-#' @param lr Numeric. CI-MLP learning rate. Default `1e-3`.
-#' @param batch_size Integer or `NULL`. `NULL` for auto-tuning.
-#' @param max_interactions Integer. Passed to [cast_features()]. Maximum DAG
-#'   interaction terms. Default `15L`.
-#' @param tune_grid Logical. If `TRUE` (and `"cast"` or `"mlp*"` in models),
-#'   performs a small grid search over `hidden_size` x `dropout` x `lr`
-#'   on the internal validation split before the full training run. Best
-#'   hyperparameters are then used for the `n_runs` ensemble. Default `FALSE`.
-#'   Adds ~3x training time.
 #' @param tune_result Optional `cast_tune` object returned by [cast_tune()].
 #'   When provided, its best per-algorithm hyperparameters override the
-#'   matching arguments (`hidden_size`, `dropout`, `lr`, `rf_ntree`,
-#'   `brt_n_trees`, `brt_depth`). Default `NULL`.
-#' @param backend Character. CI-MLP backend. `"r"` (default) uses the pure-R
-#'   CPU implementation in [cast_mlp_fit()] — no `torch` install required.
-#'   `"torch"` falls back to the legacy \pkg{torch} module (kept for users who
-#'   already have torch installed and prefer GPU/large-batch acceleration).
+#'   matching arguments. Default `NULL`.
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
 #' @return A `cast_fit` object containing fitted models and metadata.
 #'
 #' @details
-#' ## CI-MLP Architecture (CAST, MLP_ATE, MLP)
-#' A 5-layer feedforward network with Layer Normalization, SiLU activation,
-#' residual connections, and dropout. Trained with AdamW optimizer, warmup +
-#' cosine annealing schedule, and focal loss for class imbalance handling.
-#'
-#' Requires the \pkg{torch} package. If \pkg{torch} is not installed, neural
-#' network models will be skipped with a warning.
-#'
-#' ## Traditional Models
+#' ## Supported Models
 #' - **RF**: [ranger::ranger()] with probability output.
 #' - **MaxEnt**: [maxnet::maxnet()] with logistic output.
 #' - **BRT**: [gbm::gbm()] with Bernoulli loss and 5-fold CV.
+#' - **GAM**: [mgcv::gam()] with thin-plate splines.
 #'
-#' @seealso [cast_features()], [cast_evaluate()], [cast_predict()]
+#' @seealso [cast_select()], [cast_evaluate()], [cast_predict()]
 #'
 #' @export
 cast_fit <- function(data,
-                     screen           = NULL,
-                     dag              = NULL,
-                     ate              = NULL,
-                     models           = c("cast", "rf"),
-                     response         = "presence",
-                     n_epochs         = 300L,
-                     n_runs           = 5L,
-                     patience         = 40L,
-                     val_fraction     = 0.2,
-                     focal_gamma      = 2.0,
-                     focal_alpha_mode = c("sqrt", "prevalence", "fixed"),
-                     focal_alpha      = 0.75,
-                     rf_ntree         = 300L,
-                     brt_n_trees      = 500L,
-                     brt_depth        = 5L,
-                     hidden_size      = NULL,
-                     dropout          = 0.2,
-                     lr               = 1e-3,
-                     batch_size       = NULL,
-                     max_interactions = 15L,
-                     tune_grid        = FALSE,
-                     tune_result      = NULL,
-                     backend          = c("r", "torch"),
-                     seed             = NULL,
-                     verbose          = TRUE) {
-  focal_alpha_mode <- match.arg(focal_alpha_mode)
-  backend <- match.arg(backend)
+                     screen       = NULL,
+                     dag          = NULL,
+                     models       = c("rf", "brt", "maxent", "gam"),
+                     response     = "presence",
+                     rf_ntree     = 300L,
+                     brt_n_trees  = 500L,
+                     brt_depth    = 5L,
+                     tune_result  = NULL,
+                     seed         = NULL,
+                     verbose      = TRUE) {
   models <- tolower(models)
+  valid_models <- c("rf", "maxent", "brt", "gam")
+  bad <- setdiff(models, valid_models)
+  if (length(bad) > 0) {
+    cli::cli_abort(
+      "Unknown model(s): {.val {bad}}. Use one or more of: {.val {valid_models}}."
+    )
+  }
 
   # ---- Apply cast_tune() result (overrides defaults per algo) -----------
   if (!is.null(tune_result)) {
     if (!inherits(tune_result, "cast_tune"))
       cli::cli_abort("{.arg tune_result} must be a {.cls cast_tune} object.")
     tb <- tune_result$best
-    if (!is.null(tb$cast)) {
-      if (!is.null(tb$cast$hidden_size)) hidden_size <- tb$cast$hidden_size
-      if (!is.null(tb$cast$dropout))     dropout     <- tb$cast$dropout
-      if (!is.null(tb$cast$lr))          lr          <- tb$cast$lr
-    }
-    if (!is.null(tb$rf$rf_ntree))     rf_ntree     <- tb$rf$rf_ntree
-    if (!is.null(tb$brt$brt_n_trees)) brt_n_trees  <- tb$brt$brt_n_trees
-    if (!is.null(tb$brt$brt_depth))   brt_depth    <- tb$brt$brt_depth
+    if (!is.null(tb$rf$rf_ntree))     rf_ntree    <- tb$rf$rf_ntree
+    if (!is.null(tb$brt$brt_n_trees)) brt_n_trees <- tb$brt$brt_n_trees
+    if (!is.null(tb$brt$brt_depth))   brt_depth   <- tb$brt$brt_depth
     if (verbose)
       cli::cli_inform("cast_fit: applied tune_result hyperparameters.")
   }
-  nn_models <- intersect(models, c("cast", "mlp_ate", "mlp"))
-  trad_models <- intersect(models, c("rf", "maxent", "brt", "gam"))
 
-  # Validate NN prerequisites (only required for torch backend)
-  if (length(nn_models) > 0 && backend == "torch") {
-    if (!has_torch()) {
-      cli::cli_warn(
-        "torch backend requested but not available; falling back to {.val r} (pure-R CPU)."
-      )
-      backend <- "r"
-    }
+  # ---- Determine variables ------------------------------------------------
+  env_vars <- if (!is.null(screen)) {
+    screen$selected
+  } else if (!is.null(dag)) {
+    setdiff(dag$nodes, c(response, "lon", "lat"))
+  } else {
+    get_env_vars(data, response)
   }
-  if (length(nn_models) > 0 &&
-      ("cast" %in% nn_models || "mlp_ate" %in% nn_models)) {
-    if (is.null(screen) || is.null(dag) || is.null(ate)) {
-      cli::cli_abort(
-        "CAST/MLP_ATE models require {.arg screen}, {.arg dag}, and {.arg ate}."
-      )
-    }
-  }
+  cast_vars <- env_vars
 
-  env_vars <- if (!is.null(dag)) dag$nodes else get_env_vars(data, response)
   Y <- data[[response]]
   X_raw <- as.data.frame(data[, env_vars, drop = FALSE])
+  for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
   X_raw[is.na(X_raw)] <- 0
 
-  # -- Standardize --
+  # -- Standardize (stored for prediction) --
   X_means <- colMeans(X_raw, na.rm = TRUE)
-  X_sds <- apply(X_raw, 2, stats::sd, na.rm = TRUE)
+  X_sds   <- apply(X_raw, 2, stats::sd, na.rm = TRUE)
   X_sds[X_sds < 1e-10] <- 1
-  X_sc <- as.data.frame(scale(X_raw, center = X_means, scale = X_sds))
-  X_sc[is.na(X_sc)] <- 0
 
-  # -- Validation split (stratified) --
-  if (!is.null(seed)) set.seed(seed + 1000L)
-  pos_idx <- which(Y == 1)
-  neg_idx <- which(Y == 0)
-  val_pos <- sample(pos_idx, round(val_fraction * length(pos_idx)))
-  val_neg <- sample(neg_idx, round(val_fraction * length(neg_idx)))
-  val_idx <- c(val_pos, val_neg)
-  y_val <- Y[val_idx]
-  y_tr <- Y[-val_idx]
-
-  prevalence <- mean(y_tr)
-  focal_alpha_used <- switch(focal_alpha_mode,
-    sqrt       = sqrt(1 - prevalence),
-    prevalence = 1 - prevalence,
-    fixed      = focal_alpha
-  )
-  bs <- batch_size %||%
-    min(128L, max(32L, as.integer(length(y_tr) / 100)))
-
+  # ---- Fit each model -----------------------------------------------------
   fitted_models <- list()
-  cast_vars <- if (!is.null(screen)) screen$selected else env_vars
-
-  # ======================================================================
-  # Neural Network Models
-  # ======================================================================
-  seeds <- if (!is.null(seed)) seed + seq_len(n_runs) else
-    sample.int(1e6, n_runs)
-
-  # -- Hyperparameter grid search (optional) ----------------------------------
-  # Evaluated on the internal val split (same as early stopping split).
-  # Grid is deliberately small to avoid excessive runtime.
-  best_hs      <- hidden_size
-  best_dropout <- dropout
-  best_lr      <- lr
-
-  if (tune_grid && length(nn_models) > 0 && backend == "torch" && has_torch()) {
-    if (verbose) cli::cli_inform("Running hyperparameter grid search...")
-    hs_grid  <- c(64L, 128L, 256L)
-    dr_grid  <- c(0.1, 0.2, 0.3)
-    lr_grid  <- c(1e-3, 3e-4)
-    tune_epochs <- min(50L, as.integer(n_epochs / 4))
-    tune_seed   <- if (!is.null(seed)) seed + 9999L else 42L
-
-    # Use the first NN model's features for tuning
-    tune_mdl <- nn_models[1]
-    tune_feat_type <- switch(tune_mdl,
-                             cast = "cast", mlp_ate = "mlp_ate", "mlp")
-    if (tune_feat_type != "mlp") {
-      tf <- cast_features(X_sc, screen, dag, ate,
-                          model_type       = tune_feat_type,
-                          max_interactions = max_interactions)
-      x_tune <- tf$features
-    } else {
-      x_tune <- X_sc
-    }
-    x_tr_t  <- x_tune[-val_idx, , drop = FALSE]
-    x_val_t <- x_tune[val_idx,  , drop = FALSE]
-    n_in_t  <- ncol(x_tr_t)
-    vt_tune <- torch::torch_tensor(
-      as.matrix(x_val_t), dtype = torch::torch_float()
-    )
-    ds_tune <- build_flat_dataset(x_tr_t, y_tr)
-    dl_tune <- torch::dataloader(
-      ds_tune, batch_size = bs, shuffle = TRUE, drop_last = TRUE
-    )
-
-    best_grid_auc <- -Inf
-    for (hs_i in hs_grid) {
-      for (dr_i in dr_grid) {
-        for (lr_i in lr_grid) {
-          torch::torch_manual_seed(tune_seed)
-          m_tmp <- build_ci_mlp(n_in_t, hs_i, dr_i)
-          res_tmp <- tryCatch(
-            train_ci_mlp(
-              m_tmp, dl_tune, vt_tune, y_val,
-              epochs = tune_epochs,
-              lr = lr_i,
-              patience = as.integer(tune_epochs / 2),
-              focal_alpha = focal_alpha_used,
-              focal_gamma = focal_gamma
-            ),
-            error = function(e) list(best_val_auc = -Inf)
-          )
-          if (res_tmp$best_val_auc > best_grid_auc) {
-            best_grid_auc <- res_tmp$best_val_auc
-            best_hs      <- hs_i
-            best_dropout <- dr_i
-            best_lr      <- lr_i
-          }
-        }
-      }
-    }
-    if (verbose) {
-      cli::cli_inform(
-        "  Best grid: hidden={best_hs} dropout={best_dropout} lr={best_lr} val_AUC={round(best_grid_auc,4)}"
-      )
-    }
-  }
-
-  for (mdl in nn_models) {
-    if (verbose) cli::cli_inform("Training {.val {mdl}}...")
-
-    # Build features
-    feat_type <- switch(mdl, cast = "cast", mlp_ate = "mlp_ate", "mlp")
-    if (feat_type != "mlp") {
-      feat_all <- cast_features(X_sc, screen, dag, ate,
-                                model_type       = feat_type,
-                                max_interactions = max_interactions)
-      X_feat <- feat_all$features
-    } else {
-      X_feat <- X_sc
-    }
-
-    X_tr_nn <- X_feat[-val_idx, , drop = FALSE]
-    X_val_nn <- X_feat[val_idx, , drop = FALSE]
-    n_input <- ncol(X_tr_nn)
-    # Use grid-searched values when available, else fall back to args/auto
-    hs       <- best_hs %||%
-      max(32L, min(128L, as.integer(n_input * 4)))
-    run_dr   <- best_dropout
-    run_lr   <- best_lr
-
-    run_aucs <- numeric(n_runs)
-    run_trained <- vector("list", n_runs)
-
-    for (ri in seq_len(n_runs)) {
-      tryCatch({
-        if (backend == "torch") {
-          torch::torch_manual_seed(seeds[ri])
-          set.seed(seeds[ri])
-          ds <- build_flat_dataset(X_tr_nn, y_tr)
-          dl <- torch::dataloader(ds, batch_size = bs,
-                                  shuffle = TRUE, drop_last = TRUE)
-          vt <- torch::torch_tensor(
-            as.matrix(X_val_nn), dtype = torch::torch_float()
-          )
-          m <- build_ci_mlp(n_input, hs, run_dr)
-          res <- train_ci_mlp(
-            m, dl, vt, y_val,
-            epochs = n_epochs, lr = run_lr, patience = patience,
-            focal_alpha = focal_alpha_used, focal_gamma = focal_gamma
-          )
-          run_aucs[ri] <- res$best_val_auc
-          run_trained[[ri]] <- res$model
-        } else {
-          # Pure-R backend (default)
-          X_full <- rbind(as.matrix(X_tr_nn), as.matrix(X_val_nn))
-          y_full <- c(y_tr, y_val)
-          tr_n <- nrow(X_tr_nn)
-          v_idx <- seq_len(nrow(X_val_nn)) + tr_n
-          res_r <- cast_mlp_fit(
-            X_full, y_full,
-            hidden       = hs,
-            dropout      = run_dr,
-            epochs       = n_epochs,
-            batch_size   = bs,
-            lr           = run_lr,
-            patience     = patience,
-            val_idx      = v_idx,
-            focal_alpha  = focal_alpha_used,
-            focal_gamma  = focal_gamma,
-            seed         = seeds[ri],
-            verbose      = FALSE
-          )
-          run_aucs[ri] <- res_r$best_val_auc
-          run_trained[[ri]] <- res_r
-        }
-      }, error = function(e) {
-        run_aucs[ri] <<- NA_real_
-        if (verbose) cli::cli_warn("  Run {ri} failed: {e$message}")
-      })
-    }
-
-    # Select best run
-    best_ri <- which.max(run_aucs)
-    best_model <- if (length(best_ri) > 0) run_trained[[best_ri]] else NULL
-
-    fitted_models[[mdl]] <- list(
-      type = if (backend == "torch") "nn" else "nn_r",
-      backend = backend,
-      model = best_model,
-      auc_runs = run_aucs,
-      feature_type = feat_type,
-      n_input = n_input,
-      hidden_size = hs
-    )
-
-    if (verbose && !is.null(best_model)) {
-      cli::cli_inform(
-        "  {mdl}: best val AUC = {round(max(run_aucs, na.rm = TRUE), 4)}"
-      )
-    }
-  }
-
-  # ======================================================================
-  # Traditional Models
-  # ======================================================================
-  for (mdl in trad_models) {
+  for (mdl in models) {
     if (verbose) cli::cli_inform("Training {.val {mdl}}...")
     fitted_models[[mdl]] <- tryCatch(
       fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth, seed),
@@ -361,239 +101,20 @@ cast_fit <- function(data,
   }
 
   new_cast_fit(
-    models = fitted_models,
+    models    = fitted_models,
     cast_vars = cast_vars,
-    env_vars = env_vars,
-    scaling = list(means = X_means, sds = X_sds),
-    dag = dag, ate = ate, screen = screen
+    env_vars  = env_vars,
+    scaling   = list(means = X_means, sds = X_sds),
+    dag       = dag,
+    screen    = screen
   )
 }
 
 
 # ========================================================================
-# Internal: CI-MLP torch module
+# Internal: Fit Traditional SDM
 # ========================================================================
 
-#' Build CI-MLP torch Module with Residual Connections
-#'
-#' Architecture: input projection -> 3 residual blocks -> bottleneck -> output.
-#'
-#' Each residual block follows the Pre-Norm pattern:
-#'   F(z) = dropout( SiLU( LayerNorm( Linear_b( SiLU( LayerNorm( Linear_a(z) ) ) ) ) ) )
-#'   z    = z + F(z)
-#'
-#' Both linear layers inside each block now have activations, fixing the
-#' original design where the second linear had no activation before the
-#' skip-add. The pre-norm pattern (LayerNorm before activation) is more
-#' stable than the original post-norm variant.
-#'
-#' @keywords internal
-#' @noRd
-build_ci_mlp <- function(n_input, hidden = 64L, dropout = 0.2) {
-  if (!has_torch()) cli::cli_abort("torch is required.")
-  torch::nn_module(
-    "CI_MLP_Res",
-    initialize = function(n_in, h, dr) {
-      # Input projection (aligns dim for residuals)
-      self$proj      <- torch::nn_linear(n_in, h)
-      self$proj_norm <- torch::nn_layer_norm(h)
-
-      # Residual block 1 (pre-norm: LN -> act -> linear -> LN -> act -> linear)
-      self$res1_n1 <- torch::nn_layer_norm(h)
-      self$res1_a  <- torch::nn_linear(h, h)
-      self$res1_n2 <- torch::nn_layer_norm(h)
-      self$res1_b  <- torch::nn_linear(h, h)
-      self$res1_dr <- torch::nn_dropout(dr)
-
-      # Residual block 2
-      self$res2_n1 <- torch::nn_layer_norm(h)
-      self$res2_a  <- torch::nn_linear(h, h)
-      self$res2_n2 <- torch::nn_layer_norm(h)
-      self$res2_b  <- torch::nn_linear(h, h)
-      self$res2_dr <- torch::nn_dropout(dr)
-
-      # Residual block 3
-      self$res3_n1 <- torch::nn_layer_norm(h)
-      self$res3_a  <- torch::nn_linear(h, h)
-      self$res3_n2 <- torch::nn_layer_norm(h)
-      self$res3_b  <- torch::nn_linear(h, h)
-      self$res3_dr <- torch::nn_dropout(dr)
-
-      # Bottleneck -> output
-      half_h       <- as.integer(h %/% 2)
-      self$neck_n  <- torch::nn_layer_norm(h)
-      self$neck    <- torch::nn_linear(h, half_h)
-      self$neck_dr <- torch::nn_dropout(dr * 0.5)
-      self$head    <- torch::nn_linear(half_h, 1L)
-    },
-    forward = function(x) {
-      # Input projection
-      z <- torch::nnf_silu(self$proj_norm(self$proj(x)))
-
-      # Residual block 1 (pre-norm): F(z) = dr( silu( ln( b( silu( ln( a(z) ) ) ) ) ) )
-      r <- self$res1_dr(
-        torch::nnf_silu(
-          self$res1_n2(
-            self$res1_b(
-              torch::nnf_silu(self$res1_n1(self$res1_a(z)))
-            )
-          )
-        )
-      )
-      z <- z + r
-
-      # Residual block 2
-      r <- self$res2_dr(
-        torch::nnf_silu(
-          self$res2_n2(
-            self$res2_b(
-              torch::nnf_silu(self$res2_n1(self$res2_a(z)))
-            )
-          )
-        )
-      )
-      z <- z + r
-
-      # Residual block 3
-      r <- self$res3_dr(
-        torch::nnf_silu(
-          self$res3_n2(
-            self$res3_b(
-              torch::nnf_silu(self$res3_n1(self$res3_a(z)))
-            )
-          )
-        )
-      )
-      z <- z + r
-
-      # Bottleneck
-      z <- self$neck_dr(
-        torch::nnf_silu(self$neck(torch::nnf_silu(self$neck_n(z))))
-      )
-      self$head(z)
-    }
-  )(n_input, hidden, dropout)
-}
-
-
-#' Focal Loss
-#' @keywords internal
-#' @noRd
-focal_loss <- function(logits, targets, alpha = 0.25, gamma = 2.0) {
-  bce <- torch::nn_bce_with_logits_loss(reduction = "none")(logits, targets)
-  probs <- torch::torch_sigmoid(logits)
-  pt <- targets * probs + (1 - targets) * (1 - probs)
-  focal_w <- alpha * (1 - pt)^gamma
-  (focal_w * bce)$mean()
-}
-
-
-#' Train CI-MLP
-#' @keywords internal
-#' @noRd
-train_ci_mlp <- function(model, train_dl, val_tensor, y_val_vec,
-                         epochs = 200, lr = 1e-3, wd = 1e-4,
-                         patience = 30, warmup_epochs = 10,
-                         focal_alpha = 0.25, focal_gamma = 2.0) {
-  optimizer <- torch::optim_adamw(
-    model$parameters, lr = lr, weight_decay = wd
-  )
-  best_auc <- 0
-  best_state <- NULL
-  no_imp <- 0L
-
-  for (epoch in seq_len(epochs)) {
-    # Learning rate schedule: warmup + cosine annealing
-    current_lr <- if (epoch <= warmup_epochs) {
-      lr * epoch / warmup_epochs
-    } else {
-      1e-5 + 0.5 * (lr - 1e-5) *
-        (1 + cos(pi * (epoch - warmup_epochs) /
-                   (epochs - warmup_epochs)))
-    }
-    for (pg in optimizer$param_groups) pg$lr <- current_lr
-
-    # Training
-    model$train()
-    coro_loop <- train_dl$.iter()
-    tryCatch({
-      while (TRUE) {
-        batch <- coro_loop$.next()
-        if (!is.list(batch)) break
-        bx <- batch[["x"]]
-        by <- batch[["y"]]
-        optimizer$zero_grad()
-        logits <- model(bx)
-        loss <- focal_loss(
-          logits, by,
-          alpha = focal_alpha, gamma = focal_gamma
-        )
-        if (is.nan(loss$item())) next
-        loss$backward()
-        torch::nn_utils_clip_grad_norm_(model$parameters, max_norm = 1.0)
-        optimizer$step()
-      }
-    }, error = function(e) {
-      if (!grepl("StopIteration|exhausted", e$message, ignore.case = TRUE))
-        stop(e)
-    })
-
-    # Validation
-    model$eval()
-    torch::with_no_grad({
-      vp <- as.numeric(
-        torch::torch_sigmoid(model(val_tensor))$squeeze()$cpu()
-      )
-    })
-
-    va <- if (any(is.nan(vp))) 0 else {
-      tryCatch(
-        as.numeric(pROC::auc(pROC::roc(y_val_vec, vp, quiet = TRUE))),
-        error = function(e) 0
-      )
-    }
-
-    if (va > best_auc + 1e-4) {
-      best_auc <- va
-      best_state <- lapply(
-        model$state_dict(), function(p) p$clone()
-      )
-      no_imp <- 0L
-    } else {
-      no_imp <- no_imp + 1L
-    }
-    if (no_imp >= patience) break
-  }
-
-  if (!is.null(best_state)) model$load_state_dict(best_state)
-  list(model = model, best_val_auc = best_auc)
-}
-
-
-#' Build Flat Dataset for torch
-#' @keywords internal
-#' @noRd
-build_flat_dataset <- function(X, y) {
-  torch::dataset("FlatDS",
-    initialize = function(X, y) {
-      self$x <- torch::torch_tensor(
-        as.matrix(X), dtype = torch::torch_float()
-      )
-      self$y <- torch::torch_tensor(
-        y, dtype = torch::torch_float()
-      )$unsqueeze(2)
-    },
-    .getitem = function(i) {
-      list(x = self$x[i, ], y = self$y[i, ])
-    },
-    .length = function() {
-      self$y$size(1)
-    }
-  )(X, y)
-}
-
-
-#' Fit Traditional SDM
 #' @keywords internal
 #' @noRd
 fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
@@ -649,7 +170,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         mgcv::gam(f, data = df, family = stats::binomial(),
                   method = "REML"),
         error = function(e) {
-          # Fall back to linear if smooths fail (e.g. too few unique values)
           flin <- stats::as.formula(
             paste("presence ~", paste(colnames(X), collapse = " + "))
           )

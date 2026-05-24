@@ -2,34 +2,30 @@
 % Please edit documentation in R/cast.R
 \name{cast}
 \alias{cast}
-\title{Run the Full CAST Pipeline}
+\title{Run the Full castSDM Pipeline}
 \usage{
 cast(
   species_data,
   env_data = NULL,
-  models = c("cast", "rf", "maxent", "brt"),
+  models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
   n_bootstrap = 100L,
-  dag_structure_method = "bootstrap_hc",
+  dag_structure_method = "pc",
+  dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
-  dag_pc_test = "zf",
+  dag_pc_test = NULL,
   dag_bidag_algorithm = "order",
   dag_bidag_iterations = NULL,
-  dag_notears_lambda = 0.03,
-  dag_notears_max_iter = 2000L,
-  dag_notears_lr = 0.02,
-  dag_notears_tol = 0.001,
-  dag_notears_rho_init = 0.1,
-  dag_notears_alpha_mult = 1.01,
   strength_threshold = 0.7,
   direction_threshold = 0.6,
-  ate_folds = 2L,
-  ate_alpha = 0.05,
-  screen_min_vars = 5L,
+  select_min_vars = 5L,
+  select_min_fraction = 0.3,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
   do_predict = NULL,
+  do_ensemble = TRUE,
+  ensemble_method = "weighted",
   do_cate = FALSE,
   cate_top_n = 3L,
   do_shap = FALSE,
@@ -39,8 +35,6 @@ cast(
   shap_max_explain_rows = 80L,
   blacklist = NULL,
   whitelist = NULL,
-  do_evalue = FALSE,
-  do_backdoor = FALSE,
   seed = NULL,
   verbose = TRUE
 )
@@ -53,9 +47,8 @@ cast(
 full spatial grid (used for prediction). Must contain \code{lon}, \code{lat}, and
 the same environmental columns as \code{species_data}.}
 
-\item{models}{Character vector of models to fit. Options: \code{"cast"},
-\code{"mlp_ate"}, \code{"mlp"}, \code{"rf"}, \code{"maxent"}, \code{"brt"}. Default is
-\code{c("cast", "rf", "maxent", "brt")}.}
+\item{models}{Character vector of models to fit. Options: \code{"rf"},
+\code{"maxent"}, \code{"brt"}, \code{"gam"}. Default \code{c("rf", "brt", "maxent", "gam")}.}
 
 \item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
 
@@ -63,84 +56,58 @@ the same environmental columns as \code{species_data}.}
 \code{dag_structure_method = "bootstrap_hc"}. Default \code{100}.}
 
 \item{dag_structure_method}{Character passed to \code{\link[=cast_dag]{cast_dag()}} as
-\code{structure_method}. Default \code{"bootstrap_hc"}. Alternatives: \code{"pc"},
-\code{"bidag_bge"}, \code{"notears_linear"}.}
+\code{structure_method}. Default \code{"pc"}.}
+
+\item{dag_include_response}{Logical. Include response in DAG learning for
+Markov Blanket extraction. Default \code{TRUE}.}
 
 \item{dag_pc_alpha}{Significance level for PC.}
 
-\item{dag_pc_test}{Conditional-independence test passed to
-\code{\link[=cast_dag]{cast_dag()}} as \code{pc_test} (default \code{"zf"}).}
+\item{dag_pc_test}{Conditional-independence test for \code{\link[=cast_dag]{cast_dag()}}.
+Default \code{NULL} (auto-selects \code{"mi-cg"} for mixed data).}
 
 \item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG options.}
-
-\item{dag_notears_lambda}{NOTEARS L1 penalty; passed to \code{cast_dag()}.}
-
-\item{dag_notears_max_iter}{Maximum NOTEARS optimization steps.}
-
-\item{dag_notears_lr}{Adam learning rate for NOTEARS.}
-
-\item{dag_notears_tol}{Acyclicity tolerance for NOTEARS.}
-
-\item{dag_notears_rho_init}{Initial augmented-Lagrangian rho for NOTEARS.}
-
-\item{dag_notears_alpha_mult}{Rho multiplier (every 100 steps) for NOTEARS.}
 
 \item{strength_threshold}{Numeric. Minimum edge strength. Default \code{0.7}.}
 
 \item{direction_threshold}{Numeric. Minimum direction consistency. Default
 \code{0.6}.}
 
-\item{ate_folds}{Integer. DML cross-fitting folds. Default \code{2}.}
+\item{select_min_vars}{Integer. Minimum retained variables. Default \code{5}.}
 
-\item{ate_alpha}{Numeric. ATE significance level. Default \code{0.05}.}
+\item{select_min_fraction}{Numeric. Minimum fraction of variables. Default
+\code{0.3}.}
 
-\item{screen_min_vars}{Integer. Minimum retained variables. Default \code{5}.}
+\item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 
-\item{do_cv}{Logical. Whether to run spatial k-fold cross-validation for
-honest model evaluation. Default \code{TRUE}. Results are stored in
-\verb{$cv} of the returned object. Setting \code{FALSE} falls back to a single
-random hold-out evaluation via \code{\link[=cast_evaluate]{cast_evaluate()}}.}
+\item{cv_k}{Integer. Number of spatial folds. Default \code{5}.}
 
-\item{cv_k}{Integer. Number of spatial folds. Default \code{5}. Pass \code{3} for
-small datasets (< 100 presences) or \code{10} for large ones.}
+\item{cv_block_method}{Character. Spatial blocking strategy. Default
+\code{"grid"}.}
 
-\item{cv_block_method}{Character. Spatial blocking strategy: \code{"grid"}
-(default) or \code{"cluster"}. See \code{\link[=cast_cv]{cast_cv()}} for details.}
+\item{do_predict}{Logical. Generate spatial predictions. Default \code{TRUE}
+if \code{env_data} is provided.}
 
-\item{do_predict}{Logical. Whether to generate spatial predictions using
-\code{env_data}. Default \code{TRUE} if \code{env_data} is provided.}
+\item{do_ensemble}{Logical. Generate ensemble prediction. Default \code{TRUE}.}
 
-\item{do_cate}{Logical. Whether to estimate spatial CATE. Default \code{FALSE}.}
+\item{ensemble_method}{Character. Ensemble method: \code{"weighted"},
+\code{"best"}, \code{"equal"}. Default \code{"weighted"}.}
+
+\item{do_cate}{Logical. Estimate spatial CATE. Default \code{FALSE}.}
 
 \item{cate_top_n}{Integer. Top variables for CATE. Default \code{3}.}
 
-\item{do_shap}{Logical. Whether to compute SHAP explanations after model
-fitting. Produces up to three \code{cast_shap} objects (XGBoost surrogate, RF,
-and CAST) stored in the returned result. Default \code{FALSE}.}
+\item{do_shap}{Logical. Compute SHAP explanations. Default \code{FALSE}.}
 
-\item{shap_nrounds}{Integer. XGBoost boosting rounds for
-\code{\link[=cast_shap_xgb]{cast_shap_xgb()}}. Default \code{400}.}
+\item{shap_nrounds}{Integer. XGBoost boosting rounds. Default \code{400}.}
 
-\item{shap_test_fraction}{Numeric. Fraction held out for SHAP
-visualisation. Default \code{0.2}.}
+\item{shap_test_fraction}{Numeric. SHAP hold-out fraction. Default \code{0.2}.}
 
-\item{shap_fastshap_nsim}{Integer. Monte Carlo reps per feature in
-\code{\link[=cast_shap_fit]{cast_shap_fit()}}. Default \code{60}.}
+\item{shap_fastshap_nsim}{Integer. SHAP MC reps. Default \code{60}.}
 
-\item{shap_max_explain_rows}{Integer. Cap on explained rows in
-\code{\link[=cast_shap_fit]{cast_shap_fit()}}. Default \code{80}.}
+\item{shap_max_explain_rows}{Integer. SHAP explained rows cap. Default \code{80}.}
 
-\item{blacklist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
-forbidden directed edges in DAG learning. Default \code{NULL}.}
-
-\item{whitelist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
-required directed edges in DAG learning. Default \code{NULL}.}
-
-\item{do_evalue}{Logical. Compute E-value sensitivity analysis on ATE
-estimates. Default \code{FALSE}.}
-
-\item{do_backdoor}{Logical. Run backdoor criterion check via dagitty.
-Default \code{FALSE}.}
+\item{blacklist, whitelist}{DAG edge constraints. Default \code{NULL}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed.}
 
@@ -151,12 +118,13 @@ A \code{cast_result} object (S3 class) containing all pipeline outputs.
 Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, and \code{\link[=plot]{plot()}} for inspection.
 }
 \description{
-One-step pipeline that executes the entire CAST workflow: data splitting,
-DAG learning, ATE estimation, variable screening, causal role assignment,
-feature engineering, model fitting, evaluation, and optionally spatial
-prediction and CATE estimation.
+One-step pipeline that executes the entire workflow: data splitting,
+DAG learning (with response node), DAG-guided variable selection via
+Markov Blanket + RF importance, causal role assignment, model fitting,
+spatial cross-validation, evaluation, ensemble prediction, and optionally
+CATE estimation and SHAP explanations.
 }
 \seealso{
-\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_ate]{cast_ate()}}, \code{\link[=cast_screen]{cast_screen()}}, \code{\link[=cast_fit]{cast_fit()}},
-\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}, \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, \code{\link[=cast_shap_fit]{cast_shap_fit()}}
+\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_ensemble]{cast_ensemble()}},
+\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}
 }

@@ -4,15 +4,17 @@
 \alias{new_cast_screen}
 \title{Create a cast_screen Object}
 \usage{
-new_cast_screen(selected, scores, weights)
+new_cast_screen(selected, scores, roles)
 }
 \arguments{
 \item{selected}{Character vector of selected variable names.}
 
-\item{scores}{A \code{data.frame} with per-variable composite scores.}
+\item{scores}{A \code{data.frame} with per-variable scores (RF importance and
+DAG Markov Blanket membership).}
 
-\item{weights}{Named numeric vector of adaptive weights (\code{w_dag}, \code{w_ate},
-\code{w_imp}).}
+\item{roles}{A \code{data.frame} with columns \code{variable} and \code{role} indicating
+each variable's causal role: \code{"parent"}, \code{"child"}, \code{"co_parent"}, or
+\code{"predictive"}.}
 }
 \value{
 A \code{cast_screen} object.

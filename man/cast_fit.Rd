@@ -8,27 +8,12 @@ cast_fit(
   data,
   screen = NULL,
   dag = NULL,
-  ate = NULL,
-  models = c("cast", "rf"),
+  models = c("rf", "brt", "maxent", "gam"),
   response = "presence",
-  n_epochs = 300L,
-  n_runs = 5L,
-  patience = 40L,
-  val_fraction = 0.2,
-  focal_gamma = 2,
-  focal_alpha_mode = c("sqrt", "prevalence", "fixed"),
-  focal_alpha = 0.75,
   rf_ntree = 300L,
   brt_n_trees = 500L,
   brt_depth = 5L,
-  hidden_size = NULL,
-  dropout = 0.2,
-  lr = 0.001,
-  batch_size = NULL,
-  max_interactions = 15L,
-  tune_grid = FALSE,
   tune_result = NULL,
-  backend = c("r", "torch"),
   seed = NULL,
   verbose = TRUE
 )
@@ -36,40 +21,14 @@ cast_fit(
 \arguments{
 \item{data}{A \code{data.frame} with \code{presence} column and predictor variables.}
 
-\item{screen}{A \link{cast_screen} object, or \code{NULL}.}
+\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
 
 \item{dag}{A \link{cast_dag} object, or \code{NULL}.}
 
-\item{ate}{A \link{cast_ate} object, or \code{NULL}.}
-
-\item{models}{Character vector. Models to fit: \code{"cast"}, \code{"mlp_ate"},
-\code{"mlp"}, \code{"rf"}, \code{"maxent"}, \code{"brt"}. Default \code{c("cast", "rf")}.}
+\item{models}{Character vector. Models to fit: \code{"rf"}, \code{"maxent"}, \code{"brt"},
+\code{"gam"}. Default \code{c("rf", "brt", "maxent", "gam")}.}
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
-
-\item{n_epochs}{Integer. Training epochs for neural networks. Default \code{300}.}
-
-\item{n_runs}{Integer. Number of random seeds for NN ensembling. Default
-\code{5}. Each run uses a different random seed; the best-AUC run is kept.}
-
-\item{patience}{Integer. Early stopping patience (epochs). Default \code{40}.
-Increased from the original 20 to avoid premature stopping during the
-cosine-annealing tail of the schedule.}
-
-\item{val_fraction}{Numeric. Validation split for early stopping. Default
-\code{0.2}. Split is stratified by presence/absence.}
-
-\item{focal_gamma}{Numeric. Focal loss gamma parameter. Default \code{2.0}.
-Higher values down-weight easy negatives more aggressively.}
-
-\item{focal_alpha_mode}{Character. How to set the focal loss alpha weight.
-\code{"sqrt"} (default) uses \code{sqrt(1 - prevalence)} which is less aggressive
-than the original \code{1 - prevalence} and prevents over-focusing on
-presences in highly imbalanced data. \code{"prevalence"} restores the original
-\code{1 - prevalence} behaviour. \code{"fixed"} uses \code{focal_alpha} directly.}
-
-\item{focal_alpha}{Numeric. Used only when \code{focal_alpha_mode = "fixed"}.
-Default \code{0.75}.}
 
 \item{rf_ntree}{Integer. Number of RF trees. Default \code{300}.}
 
@@ -77,33 +36,9 @@ Default \code{0.75}.}
 
 \item{brt_depth}{Integer. BRT tree depth. Default \code{5}.}
 
-\item{hidden_size}{Integer or \code{NULL}. CI-MLP hidden layer size. \code{NULL} for
-auto (4x input features, capped at 128).}
-
-\item{dropout}{Numeric. CI-MLP dropout rate. Default \code{0.2}.}
-
-\item{lr}{Numeric. CI-MLP learning rate. Default \code{1e-3}.}
-
-\item{batch_size}{Integer or \code{NULL}. \code{NULL} for auto-tuning.}
-
-\item{max_interactions}{Integer. Passed to \code{\link[=cast_features]{cast_features()}}. Maximum DAG
-interaction terms. Default \code{15L}.}
-
-\item{tune_grid}{Logical. If \code{TRUE} (and \code{"cast"} or \code{"mlp*"} in models),
-performs a small grid search over \code{hidden_size} x \code{dropout} x \code{lr}
-on the internal validation split before the full training run. Best
-hyperparameters are then used for the \code{n_runs} ensemble. Default \code{FALSE}.
-Adds ~3x training time.}
-
 \item{tune_result}{Optional \code{cast_tune} object returned by \code{\link[=cast_tune]{cast_tune()}}.
 When provided, its best per-algorithm hyperparameters override the
-matching arguments (\code{hidden_size}, \code{dropout}, \code{lr}, \code{rf_ntree},
-\code{brt_n_trees}, \code{brt_depth}). Default \code{NULL}.}
-
-\item{backend}{Character. CI-MLP backend. \code{"r"} (default) uses the pure-R
-CPU implementation in \code{\link[=cast_mlp_fit]{cast_mlp_fit()}} — no \code{torch} install required.
-\code{"torch"} falls back to the legacy \pkg{torch} module (kept for users who
-already have torch installed and prefer GPU/large-batch acceleration).}
+matching arguments. Default \code{NULL}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 
@@ -113,29 +48,23 @@ already have torch installed and prefer GPU/large-batch acceleration).}
 A \code{cast_fit} object containing fitted models and metadata.
 }
 \description{
-Trains one or more SDM models on prepared data. Supports the causal CI-MLP
-architecture (pure-R CPU backend by default; legacy \pkg{torch} backend
-optional) and traditional methods (RF, MaxEnt, BRT, GAM).
+Trains one or more SDM algorithms on prepared data. Supported models:
+Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
+Generalised Additive Models (GAM).
 }
 \details{
-\subsection{CI-MLP Architecture (CAST, MLP_ATE, MLP)}{
-
-A 5-layer feedforward network with Layer Normalization, SiLU activation,
-residual connections, and dropout. Trained with AdamW optimizer, warmup +
-cosine annealing schedule, and focal loss for class imbalance handling.
-
-Requires the \pkg{torch} package. If \pkg{torch} is not installed, neural
-network models will be skipped with a warning.
-}
-
-\subsection{Traditional Models}{
+Variable selection is driven by the \code{cast_screen} object from
+\code{\link[=cast_select]{cast_select()}}. If no screen is provided, all environmental variables
+from the DAG (or data) are used.
+\subsection{Supported Models}{
 \itemize{
 \item \strong{RF}: \code{\link[ranger:ranger]{ranger::ranger()}} with probability output.
 \item \strong{MaxEnt}: \code{\link[maxnet:maxnet]{maxnet::maxnet()}} with logistic output.
 \item \strong{BRT}: \code{\link[gbm:gbm]{gbm::gbm()}} with Bernoulli loss and 5-fold CV.
+\item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
 }
 \seealso{
-\code{\link[=cast_features]{cast_features()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_predict]{cast_predict()}}
+\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_predict]{cast_predict()}}
 }

@@ -8,13 +8,10 @@ cast_cv(
   data,
   screen = NULL,
   dag = NULL,
-  ate = NULL,
   k = 5L,
   models = c("rf"),
   block_method = c("grid", "cluster"),
   response = "presence",
-  n_epochs = 200L,
-  n_runs = 3L,
   rf_ntree = 300L,
   brt_n_trees = 500L,
   parallel = FALSE,
@@ -24,47 +21,31 @@ cast_cv(
 }
 \arguments{
 \item{data}{A \code{data.frame} with \code{lon}, \code{lat}, \code{presence} columns and
-environmental variables. Typically the full dataset before any split,
-or \code{split$train} from \code{\link[=cast_prepare]{cast_prepare()}}.}
+environmental variables.}
 
-\item{screen}{A \link{cast_screen} object, or \code{NULL}.}
+\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
 
 \item{dag}{A \link{cast_dag} object, or \code{NULL}.}
 
-\item{ate}{A \link{cast_ate} object, or \code{NULL}.}
+\item{k}{Integer. Number of spatial folds. Default \code{5}.}
 
-\item{k}{Integer. Number of spatial folds. Default \code{5}. Increase to \code{10}
-for large datasets; reduce to \code{3} for small (<200 presence points).}
-
-\item{models}{Character vector. Models to cross-validate. Same options as
-\code{\link[=cast_fit]{cast_fit()}}: \code{"cast"}, \code{"rf"}, \code{"brt"}, \code{"maxent"}. Default \code{c("rf")}.}
+\item{models}{Character vector. Models to cross-validate: \code{"rf"}, \code{"brt"},
+\code{"maxent"}, \code{"gam"}. Default \code{c("rf")}.}
 
 \item{block_method}{Character. How to create spatial blocks:
 \describe{
-\item{\code{"grid"}}{(Default) Divide bounding box into a k-by-k grid, then
-assign each point to the nearest grid cell, merging until k non-empty
-folds are obtained. No external packages required.}
-\item{\code{"cluster"}}{k-means clustering on lon/lat. Fast but ignores
-spatial extent balance.}
+\item{\code{"grid"}}{(Default) Divide bounding box into a grid and
+round-robin assign cells to folds.}
+\item{\code{"cluster"}}{k-means clustering on lon/lat.}
 }}
 
 \item{response}{Character. Response column. Default \code{"presence"}.}
-
-\item{n_epochs}{Integer. Epochs for CI-MLP per fold. Default \code{200}.
-Aligned with \code{\link[=cast_fit]{cast_fit()}} default to ensure comparable training depth
-in each CV fold.}
-
-\item{n_runs}{Integer. NN ensemble runs per fold. Default \code{3}. Aligned
-with \code{\link[=cast_fit]{cast_fit()}} default.}
 
 \item{rf_ntree}{Integer. RF trees per fold. Default \code{300}.}
 
 \item{brt_n_trees}{Integer. BRT iterations per fold. Default \code{500}.}
 
-\item{parallel}{Logical. If \code{TRUE}, run folds in parallel using
-\pkg{future.apply}. Set a \code{\link[future:plan]{future::plan()}} before calling. Note:
-torch-based models (\code{"cast"}, \code{"mlp_ate"}, \code{"mlp"}) are not
-fork-safe; use \code{plan(multisession)} when including NN models.
+\item{parallel}{Logical. Run folds in parallel via \pkg{future.apply}.
 Default \code{FALSE}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
@@ -74,39 +55,19 @@ Default \code{FALSE}.}
 \value{
 A \code{cast_cv} object with components:
 \describe{
-\item{\code{metrics}}{\code{data.frame} -- per-model mean +/- SD for all metrics.}
+\item{\code{metrics}}{\code{data.frame} -- per-model mean +/- SD.}
 \item{\code{fold_metrics}}{\code{data.frame} -- per-fold per-model raw metrics.}
-\item{\code{folds}}{Integer vector -- fold assignment for each row of \code{data}.}
+\item{\code{folds}}{Integer vector -- fold assignment for each row.}
 \item{\code{k}}{Number of folds used.}
 \item{\code{block_method}}{Blocking method used.}
-\item{\code{thresholds}}{Named numeric -- optimal threshold per model (from
-pooled OOF predictions, used by \code{\link[=cast_predict]{cast_predict()}} for binary maps).}
+\item{\code{thresholds}}{Named numeric -- optimal TSS threshold per model.}
 }
 }
 \description{
 Evaluates fitted models using spatially blocked k-fold cross-validation.
 Unlike random splitting, spatial blocks ensure test folds are geographically
 separated from training folds, providing honest estimates of model
-transferability. The resulting metrics (AUC, TSS, CBI) feed directly into
-\code{\link[=cast_predict]{cast_predict()}} for threshold-calibrated HSS maps.
-}
-\details{
-\subsection{Why spatial CV matters for HSS maps}{
-
-Random CV recycles nearby points across train/test splits, causing AUC
-inflation due to spatial autocorrelation (Roberts et al. 2017 MEE). Spatial
-CV ensures each test fold lies in a geographic region unseen during training,
-so metrics approximate true extrapolation ability -- the same challenge faced
-when predicting the full environmental grid for HSS maps.
-}
-
-\subsection{Optimal threshold}{
-
-The function pools out-of-fold (OOF) predictions across all k folds and
-finds the threshold maximising TSS on the full training set. This threshold
-is returned in \verb{$thresholds} and used by \code{\link[=cast_predict]{cast_predict()}} when
-\code{threshold_from_cv = TRUE}.
-}
+transferability.
 }
 \references{
 Roberts, D.R. et al. (2017). Cross-validation strategies for data with
@@ -114,5 +75,5 @@ temporal, spatial, hierarchical, or phylogenetic structure.
 \emph{Ecography}, 40(8), 913-929.
 }
 \seealso{
-\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_predict]{cast_predict()}}
+\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}
 }

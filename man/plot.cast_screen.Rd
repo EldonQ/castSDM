@@ -2,12 +2,12 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_screen}
 \alias{plot.cast_screen}
-\title{Plot CAST Screening Score Decomposition}
+\title{Plot Variable Selection (Markov Blanket + RF Importance)}
 \usage{
 \method{plot}{cast_screen}(x, var_labels = NULL, ...)
 }
 \arguments{
-\item{x}{A \code{cast_screen} object.}
+\item{x}{A \code{cast_screen} object (from \code{\link[=cast_select]{cast_select()}}).}
 
 \item{var_labels}{Optional named character vector for display labels.}
 
@@ -17,6 +17,6 @@
 A \code{ggplot} object.
 }
 \description{
-Stacked bar chart showing the DAG, ATE, and RF importance components
-of the composite screening score for each variable.
+Bar chart showing MB membership (in_mb flag) and RF permutation importance
+for each variable. Selected variables are highlighted; roles are color-coded.
 }

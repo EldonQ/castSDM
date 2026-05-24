@@ -6,23 +6,20 @@
 \usage{
 new_cast_result(
   dag,
-  ate,
   screen,
   roles,
   fit,
   eval,
   cv = NULL,
   predict = NULL,
+  ensemble = NULL,
   cate = NULL,
   shap = NULL,
-  backdoor = NULL,
   call = NULL
 )
 }
 \arguments{
 \item{dag}{A \code{cast_dag} object.}
-
-\item{ate}{A \code{cast_ate} object.}
 
 \item{screen}{A \code{cast_screen} object.}
 
@@ -36,12 +33,11 @@ new_cast_result(
 
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
+\item{ensemble}{A \code{cast_ensemble} object (or \code{NULL}).}
+
 \item{cate}{A \code{cast_cate} object (or \code{NULL}).}
 
-\item{shap}{A named list of \code{cast_shap} objects (or \code{NULL}). Keys are
-model names such as \code{"xgb"}, \code{"rf"}, \code{"cast"}.}
-
-\item{backdoor}{A \code{data.frame} from \code{\link[=cast_backdoor]{cast_backdoor()}} (or \code{NULL}).}
+\item{shap}{A named list of \code{cast_shap} objects (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

@@ -6,10 +6,9 @@
 \usage{
 cast_tune(
   data,
-  models = c("cast", "rf", "brt"),
+  models = c("rf", "brt"),
   screen = NULL,
   dag = NULL,
-  ate = NULL,
   grid = NULL,
   n_splits = 30L,
   val_fraction = 0.25,
@@ -22,10 +21,9 @@ cast_tune(
 \item{data}{Training \code{data.frame}. Must contain \code{response}.}
 
 \item{models}{Character vector. Algorithms to tune. Default
-\code{c("cast", "rf", "brt")}.}
+\code{c("rf", "brt")}.}
 
-\item{screen, dag, ate}{As in \code{\link[=cast_fit]{cast_fit()}} (only required when tuning
-\code{"cast"}).}
+\item{screen, dag}{As in \code{\link[=cast_fit]{cast_fit()}}.}
 
 \item{grid}{Optional named list of per-model parameter grids. Each
 element is a \code{data.frame} (or list-of-vectors that gets passed to
@@ -57,7 +55,6 @@ ties broken by AUC.
 \details{
 Supported algorithms (\code{models}):
 \itemize{
-\item \code{"cast"} (CI-MLP): tunes \code{hidden_size}, \code{dropout}, \code{lr}.
 \item \code{"rf"}: tunes \code{rf_ntree}, plus internally \code{mtry} defaults via
 \code{ranger}.
 \item \code{"brt"}: tunes \code{brt_n_trees}, \code{brt_depth}, learning rate.

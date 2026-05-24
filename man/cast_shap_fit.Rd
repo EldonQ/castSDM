@@ -2,11 +2,11 @@
 % Please edit documentation in R/shap-fit-models.R
 \name{cast_shap_fit}
 \alias{cast_shap_fit}
-\title{SHAP explanations for fitted SDM models (RF, CAST)}
+\title{SHAP explanations for fitted RF models}
 \usage{
 cast_shap_fit(
   fit,
-  which = c("rf", "cast"),
+  which = "rf",
   data,
   response = "presence",
   test_fraction = 0.2,
@@ -14,15 +14,14 @@ cast_shap_fit(
   fastshap_nsim = 60L,
   max_background_rows = 500L,
   max_explain_rows = 80L,
-  max_interactions = 15L,
   verbose = FALSE
 )
 }
 \arguments{
 \item{fit}{A \code{\link[=cast_fit]{cast_fit()}} object that already contains the requested model.}
 
-\item{which}{Character: \code{"rf"} or \code{"cast"} (the CAST CI-MLP). The model must
-appear in \code{names(fit$models)}.}
+\item{which}{Character: \code{"rf"}. The model must appear in
+\code{names(fit$models)}.}
 
 \item{data}{Training-like \code{data.frame} with \code{response} and columns
 \code{fit$env_vars} (e.g. \code{split$train} from \code{\link[=cast_prepare]{cast_prepare()}}).}
@@ -30,7 +29,7 @@ appear in \code{names(fit$models)}.}
 \item{response}{Binary response column name. Default \code{"presence"}.}
 
 \item{test_fraction}{Fraction of rows (after \code{na.omit}) held out for rows in
-the SHAP matrix; same idea as \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}. Default \code{0.2}.}
+the SHAP matrix. Default \code{0.2}.}
 
 \item{seed}{Optional integer seed.}
 
@@ -43,8 +42,6 @@ the SHAP matrix; same idea as \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}. Def
 \item{max_explain_rows}{Cap on the number of held-out rows explained.
 Default \code{80}.}
 
-\item{max_interactions}{Passed to \code{\link[=cast_features]{cast_features()}} for CAST. Default \code{15}.}
-
 \item{verbose}{Logical.}
 }
 \value{
@@ -55,18 +52,13 @@ A \code{cast_shap} object compatible with \code{\link[=plot.cast_shap]{plot.cast
 }
 \description{
 Uses the \pkg{fastshap} package (Monte Carlo Shapley with optional
-sum-to-prediction adjustment) on the \strong{same} fitted objects produced by
-\code{\link[=cast_fit]{cast_fit()}} — unlike \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, which trains a separate XGBoost
-surrogate. Interaction strengths for the circular plot are a \strong{proxy}
-derived from cross-products of mean absolute SHAP values (TreeSHAP-style
-pairwise interactions are not computed here).
+sum-to-prediction adjustment) on the \strong{same} fitted RF object produced by
+\code{\link[=cast_fit]{cast_fit()}}. Interaction strengths for the circular plot are a \strong{proxy}
+derived from cross-products of mean absolute SHAP values.
 }
 \details{
-\strong{Random forest}: Shapley values are on the \strong{probability scale} (positive
-class), matching \code{ranger} probability predictions.
-
-\strong{CAST}: Explanations are in the \strong{engineered feature space} returned by
-\code{\link[=cast_features]{cast_features()}} (DAG interactions, etc.), not raw environmental columns.
+Shapley values are on the \strong{probability scale} (positive class),
+matching \code{ranger} probability predictions.
 }
 \seealso{
 \code{\link[=cast_shap_xgb]{cast_shap_xgb()}}, \code{\link[=plot.cast_shap]{plot.cast_shap()}}, \code{\link[=cast_fit]{cast_fit()}}

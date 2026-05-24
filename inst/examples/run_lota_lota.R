@@ -23,8 +23,8 @@
 #     → Sample background → Assemble training data → Save checkpoint
 #
 #   Phase 2 — castSDM Modeling:
-#     VIF → cast_prepare → cast_dag → cast_ate → cast_screen
-#     → cast_roles → cast_fit → cast_evaluate → cast_cv → cast_predict
+#     VIF → cast_prepare → cast_dag → cast_select → cast_roles
+#     → cast_fit → cast_evaluate → cast_cv → cast_predict
 #     → cast_cate → cast_consistency → Plotting & Export
 #
 # ── CHECKPOINT SYSTEM ────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ BG_TOTAL_CAP    <- 100000L
 MAX_SNAP_DIST   <- 0.5     # degrees (~55 km)
 
 # ── Model selection ──────────────────────────────────────────────────────────
-MODELS <- c("cast", "rf", "maxent", "brt")
+MODELS <- c("rf", "brt", "maxent", "gam")
 
 # ── Spatial cross-validation ─────────────────────────────────────────────────
 DO_SPATIAL_CV <- TRUE
@@ -133,47 +133,31 @@ NON_ENV_COLS <- c(
 # ── DAG parameters ───────────────────────────────────────────────────────────
 DAG_R                   <- 50L
 DAG_ALGORITHM           <- "hc"
-DAG_SCORE               <- "bic-g"
+DAG_SCORE               <- NULL
 DAG_STRENGTH_THRESHOLD  <- 0.7
 DAG_DIRECTION_THRESHOLD <- 0.6
 DAG_MAX_ROWS            <- 8000L
-# cast_dag() structure_method: "bootstrap_hc" | "pc" | "bidag_bge" | "notears_linear"
-DAG_STRUCTURE_METHOD    <- "bootstrap_hc"
+# cast_dag() structure_method: "pc" | "bootstrap_hc" | "bidag_bge"
+DAG_STRUCTURE_METHOD    <- "pc"
 DAG_PC_ALPHA            <- 0.05
 DAG_BIDAG_ALGORITHM     <- "order"
 DAG_BIDAG_ITERATIONS    <- NULL
-DAG_NOTEARS_LAMBDA      <- 0.03
-DAG_NOTEARS_MAX_ITER    <- 2000L
-DAG_NOTEARS_LR          <- 0.02
-DAG_NOTEARS_TOL         <- 1e-3
-DAG_NOTEARS_RHO_INIT    <- 0.1
-DAG_NOTEARS_ALPHA_MULT  <- 1.01
 
 SEED <- 2024L
 
 # ── cast_prepare() ────────────────────────────────────────────────────────────
 TRAIN_FRACTION <- 0.7
 
-# ── cast_ate() ───────────────────────────────────────────────────────────────
-ATE_K              <- 5L
-ATE_QUANTILE_CUTS  <- c(0.25, 0.50, 0.75)
-ATE_BONFERRONI     <- TRUE
-ATE_NUM_TREES      <- 300L
-ATE_PARALLEL       <- TRUE
-
-# ── cast_screen() ────────────────────────────────────────────────────────────
-SCREEN_MIN_VARS     <- 5L
-SCREEN_MIN_FRACTION <- 0.5
-SCREEN_NUM_TREES    <- 300L
+# ── cast_select() ────────────────────────────────────────────────────────────
+SELECT_MIN_VARS     <- 5L
+SELECT_MIN_FRACTION <- 0.5
+SELECT_NUM_TREES    <- 300L
 
 # ── cast_fit() ───────────────────────────────────────────────────────────────
-FIT_N_EPOCHS   <- 400L
-FIT_N_RUNS     <- 5L
-FIT_PATIENCE   <- 40L
 FIT_TUNE_GRID  <- TRUE
 
 # ── CATE maps: mask by HSS (plot.cast_cate) when global predictions exist ────
-CATE_HSS_MODEL     <- "cast"
+CATE_HSS_MODEL     <- "rf"
 CATE_HSS_THRESHOLD <- 0.1
 
 # ── Figure output ────────────────────────────────────────────────────────────
@@ -468,7 +452,7 @@ if (is.null(MANUAL_ENV_VARS)) {
 # 2. VIF collinearity screening
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[2/9] VIF screening (threshold = 10)...")
+message("\n[2/8] VIF screening (threshold = 10)...")
 
 vif_result <- checkpoint(file.path(MODEL_DIR, "vif_result.rds"), {
   exclude_for_vif <- setdiff(
@@ -490,7 +474,7 @@ message(sprintf("  VIF: %d -> %d variables retained",
 # 3. Data split
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[3/9] cast_prepare(): data split...")
+message("\n[3/8] cast_prepare(): data split...")
 
 split <- checkpoint(file.path(MODEL_DIR, "split.rds"), {
   cast_prepare(cast_data, train_fraction = TRAIN_FRACTION, seed = SEED,
@@ -507,7 +491,7 @@ message(sprintf("  Train %d | Test %d | Env vars %d",
 # 4. Causal DAG learning
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[4/9] cast_dag(): learning causal DAG...")
+message("\n[4/8] cast_dag(): learning causal DAG...")
 
 dag_result <- checkpoint(file.path(MODEL_DIR, "dag_result.rds"), {
   cast_dag(
@@ -525,12 +509,7 @@ dag_result <- checkpoint(file.path(MODEL_DIR, "dag_result.rds"), {
     pc_alpha              = DAG_PC_ALPHA,
     bidag_algorithm       = DAG_BIDAG_ALGORITHM,
     bidag_iterations      = DAG_BIDAG_ITERATIONS,
-    notears_lambda        = DAG_NOTEARS_LAMBDA,
-    notears_max_iter      = DAG_NOTEARS_MAX_ITER,
-    notears_lr            = DAG_NOTEARS_LR,
-    notears_tol           = DAG_NOTEARS_TOL,
-    notears_rho_init      = DAG_NOTEARS_RHO_INIT,
-    notears_alpha_mult    = DAG_NOTEARS_ALPHA_MULT
+    include_response      = TRUE
   )
 })
 
@@ -539,42 +518,19 @@ message(sprintf("  DAG: %d nodes, %d edges",
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. ATE causal effect estimation
+# 5. Adaptive variable selection + causal role assignment
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[5/9] cast_ate(): DML ATE estimation...")
-
-ate_result <- checkpoint(file.path(MODEL_DIR, "ate_result.rds"), {
-  cast_ate(train_data,
-           variables     = dag_result$nodes,
-           K             = ATE_K,
-           quantile_cuts = ATE_QUANTILE_CUTS,
-           bonferroni    = ATE_BONFERRONI,
-           num_trees     = ATE_NUM_TREES,
-           parallel      = ATE_PARALLEL,
-           seed          = SEED,
-           verbose       = TRUE)
-})
-
-n_sig <- sum(ate_result$estimates$significant, na.rm = TRUE)
-message(sprintf("  ATE: %d / %d variables significant (Bonferroni)",
-                n_sig, nrow(ate_result$estimates)))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. Adaptive variable screening + causal role assignment
-# ─────────────────────────────────────────────────────────────────────────────
-
-message("\n[6/9] cast_screen() + cast_roles()...")
+message("\n[5/8] cast_select() + cast_roles()...")
 
 screened <- checkpoint(file.path(MODEL_DIR, "screened_result.rds"), {
-  cast_screen(
-    dag_result,
-    ate_result,
-    train_data,
-    min_vars     = SCREEN_MIN_VARS,
-    min_fraction = SCREEN_MIN_FRACTION,
-    num_trees    = SCREEN_NUM_TREES,
+  cast_select(
+    dag          = dag_result,
+    data         = train_data,
+    response     = "presence",
+    num_trees    = SELECT_NUM_TREES,
+    min_vars     = SELECT_MIN_VARS,
+    min_fraction = SELECT_MIN_FRACTION,
     seed         = SEED,
     verbose      = TRUE
   )
@@ -584,29 +540,25 @@ roles_data <- checkpoint(file.path(MODEL_DIR, "roles_result.rds"), {
   cast_roles(screened, dag_result)
 })
 
-message(sprintf("  Screened variables: %d (%s)",
+message(sprintf("  Selected variables: %d (%s)",
                 length(screened$selected),
                 paste(screened$selected, collapse = ", ")))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. Model fitting
+# 6. Model fitting
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[7/9] cast_fit(): fitting [", paste(MODELS, collapse=", "), "]...")
+message("\n[6/8] cast_fit(): fitting [", paste(MODELS, collapse=", "), "]...")
 
 fit_result <- checkpoint(file.path(MODEL_DIR, "fit_result.rds"), {
   cast_fit(
     train_data,
     screen    = screened,
     dag       = dag_result,
-    ate       = ate_result,
     models    = MODELS,
     seed      = SEED,
     verbose   = TRUE,
-    n_epochs  = FIT_N_EPOCHS,
-    n_runs    = FIT_N_RUNS,
-    patience  = FIT_PATIENCE,
     tune_grid = FIT_TUNE_GRID
   )
 })
@@ -626,18 +578,17 @@ if (!is.null(eval_result$metrics))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Spatial cross-validation
+# 7. Spatial cross-validation
 # ─────────────────────────────────────────────────────────────────────────────
 
 if (DO_SPATIAL_CV) {
-  message("\n[8/9] cast_cv(): spatial CV (", CV_METHOD, ", k=", CV_FOLDS, ")...")
+  message("\n[7/8] cast_cv(): spatial CV (", CV_METHOD, ", k=", CV_FOLDS, ")...")
 
   cv_result <- checkpoint(file.path(MODEL_DIR, "cv_result.rds"), {
     cast_cv(
       cast_data,
       screen       = screened,
       dag          = dag_result,
-      ate          = ate_result,
       k            = CV_FOLDS,
       models       = MODELS,
       block_method = CV_METHOD,
@@ -657,10 +608,10 @@ if (DO_SPATIAL_CV) {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. Plots (all castSDM native plot functions)
+# 8. Plots (all castSDM native plot functions)
 # ─────────────────────────────────────────────────────────────────────────────
 
-message("\n[9/9] Saving castSDM figures...")
+message("\n[8/8] Saving castSDM figures...")
 
 save_plot <- function(plot_obj, filename, width = 12, height = 8,
                       dpi = FIG_DPI) {
@@ -681,19 +632,15 @@ if (requireNamespace("ggraph", quietly = TRUE) &&
   save_plot(p_dag, "causal_dag.png", width = 16, height = 12)
 }
 
-# 9b. ATE forest plot
-p_ate <- plot(ate_result)
-save_plot(p_ate, "ate_forest_plot.png", width = 10, height = 7)
-
-# 9c. Variable screening scores
+# 9b. Variable selection scores
 p_screen <- plot(screened)
-save_plot(p_screen, "variable_screening.png", width = 10, height = 7)
+save_plot(p_screen, "variable_selection.png", width = 10, height = 7)
 
-# 9d. Model evaluation comparison (6 metrics)
+# 9c. Model evaluation comparison (6 metrics)
 p_eval <- plot(eval_result)
 save_plot(p_eval, "model_evaluation.png", width = 10, height = 6)
 
-# 9e. Spatial CV map
+# 9d. Spatial CV map
 if (DO_SPATIAL_CV && exists("cv_result") && !is.null(cv_result)) {
   p_cv <- tryCatch(
     plot(cv_result,
@@ -711,7 +658,7 @@ if (DO_SPATIAL_CV && exists("cv_result") && !is.null(cv_result)) {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 10. Spatial prediction (per region) + HSS maps
+# 9. Spatial prediction (per region) + HSS maps
 # ─────────────────────────────────────────────────────────────────────────────
 
 fitted_models <- names(fit_result$models)
@@ -796,7 +743,7 @@ if (!is.null(PREDICT_REGIONS) && length(PREDICT_REGIONS) > 0) {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 11. CATE spatial heterogeneous causal effects
+# 10. CATE spatial heterogeneous causal effects
 # ─────────────────────────────────────────────────────────────────────────────
 
 message("\n[CATE] cast_cate(): spatial CATE (requires grf)...")
@@ -838,7 +785,7 @@ if (file.exists(cate_rds)) {
 
     cast_cate(
       data         = cate_train_slim,
-      ate          = ate_result,
+      dag          = dag_result,
       screen       = screened,
       predict_data = cate_pred_slim,
       top_n        = 3L,
@@ -888,19 +835,12 @@ if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 12. Global merged maps + Inter-model Consistency
+# 11. Global merged maps + Inter-model Consistency
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Release torch objects before heavy plotting
-if (requireNamespace("torch", quietly = TRUE) &&
-    exists("fit_result") && !is.null(fit_result)) {
-  fit_result <- NULL
-  invisible(gc(verbose = FALSE))
-}
 
 message("\n[Global] Merging regional predictions...")
 
-# ── 12a. Global HSS maps ─────────────────────────────────────────────────────
+# ── 11a. Global HSS maps ─────────────────────────────────────────────────────
 hss_parts <- lapply(PREDICT_REGIONS, function(reg) {
   f <- file.path(PRED_DIR, paste0(SPECIES_TAG, "_HSS_", reg, ".csv"))
   if (!file.exists(f)) return(NULL)
@@ -934,7 +874,7 @@ if (length(hss_parts) > 0 && requireNamespace("sf", quietly = TRUE)) {
   }
 }
 
-# ── 12b. Global CATE maps ────────────────────────────────────────────────────
+# ── 11b. Global CATE maps ────────────────────────────────────────────────────
 if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
   for (cv in cate_result$variables) {
     fig_name <- sprintf("CATE_GLOBAL_%s.png", cv)
@@ -964,7 +904,7 @@ if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
   }
 }
 
-# ── 12c. Inter-model Spatial Consistency Heatmaps ─────────────────────────────
+# ── 11c. Inter-model Spatial Consistency Heatmaps ─────────────────────────────
 if (!is.null(global_pred_obj) && length(global_pred_obj$models) >= 2 &&
     requireNamespace("patchwork", quietly = TRUE)) {
   message("\n[Consistency] Computing inter-model spatial consistency...")
@@ -987,19 +927,16 @@ if (!is.null(global_pred_obj) && length(global_pred_obj$models) >= 2 &&
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 13. Summary
+# 12. Summary
 # ─────────────────────────────────────────────────────────────────────────────
 
 cat("\n", strrep("=", 60), "\n")
 cat("castSDM modeling complete:", SPECIES_TAG, "\n")
 cat(strrep("=", 60), "\n\n")
 cat(sprintf("  Models          : %s\n", paste(MODELS, collapse = ", ")))
-cat(sprintf("  Active env vars : %d (after VIF + cast_screen)\n",
+cat(sprintf("  Active env vars : %d (after VIF + cast_select)\n",
             length(screened$selected)))
 cat(sprintf("  DAG edges       : %d\n", nrow(dag_result$edges)))
-cat(sprintf("  Significant ATE : %d / %d\n",
-            sum(ate_result$estimates$significant, na.rm = TRUE),
-            nrow(ate_result$estimates)))
 cat(sprintf("  Output dir      : %s\n\n", OUT_DIR))
 
 if (DO_SPATIAL_CV && exists("cv_result") && !is.null(cv_result) &&
@@ -1019,7 +956,7 @@ for (f in sort(list.files(FIG_DIR, pattern = "\\.png$")))
 
 cat("\nCheckpoint files (delete to recompute):\n")
 for (f in c("vif_result.rds", "split.rds", "dag_result.rds",
-            "ate_result.rds", "screened_result.rds", "roles_result.rds",
+            "screened_result.rds", "roles_result.rds",
             "fit_result.rds", "eval_result.rds", "cv_result.rds",
             "cate_result.rds")) {
   mark <- if (file.exists(file.path(MODEL_DIR, f))) "+" else "-"

@@ -41,7 +41,7 @@
 #' graphs: the R package 'dagitty'. *International Journal of Epidemiology*,
 #' 45(6), 1887-1894.
 #'
-#' @seealso [cast_dag()], [cast_ate()]
+#' @seealso [cast_dag()], [cast_select()]
 #'
 #' @export
 cast_backdoor <- function(dag, outcome = "presence", verbose = TRUE) {

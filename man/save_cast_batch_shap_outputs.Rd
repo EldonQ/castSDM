@@ -2,7 +2,7 @@
 % Please edit documentation in R/batch-shap-save.R
 \name{save_cast_batch_shap_outputs}
 \alias{save_cast_batch_shap_outputs}
-\title{Save SHAP figures for one species (XGB / RF / CAST + 2x3 panel)}
+\title{Save SHAP figures for one species (XGB / RF + 2x2 panel)}
 \usage{
 save_cast_batch_shap_outputs(
   train_df,
@@ -34,7 +34,7 @@ as in \code{\link[=cast_batch]{cast_batch()}}).}
 }
 \description{
 Writes \verb{shap_*_interaction_network.png}, \verb{shap_*_waterfall.png}, and
-\code{shap_panel_2x3.png} (patchwork: row1 = networks, row2 = waterfalls).
+\code{shap_panel_2x2.png} (patchwork: row1 = networks, row2 = waterfalls).
 Used by \code{\link[=cast_batch]{cast_batch()}} when \code{do_shap = TRUE}; can be called manually after
 reading \code{cast_result.rds} if you replay \code{\link[=cast_prepare]{cast_prepare()}} with the same
 \code{train_fraction} and \code{seed} as the original batch.

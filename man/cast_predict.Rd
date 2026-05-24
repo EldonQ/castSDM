@@ -25,5 +25,5 @@ fitted models. Each model produces a probability representing the
 predicted suitability of each site.
 }
 \seealso{
-\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}
 }

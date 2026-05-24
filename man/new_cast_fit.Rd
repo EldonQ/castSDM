@@ -4,28 +4,18 @@
 \alias{new_cast_fit}
 \title{Create a cast_fit Object}
 \usage{
-new_cast_fit(
-  models,
-  cast_vars,
-  env_vars,
-  scaling,
-  dag = NULL,
-  ate = NULL,
-  screen = NULL
-)
+new_cast_fit(models, cast_vars, env_vars, scaling, dag = NULL, screen = NULL)
 }
 \arguments{
 \item{models}{Named list of fitted model objects.}
 
-\item{cast_vars}{Character vector of variables used by CAST model.}
+\item{cast_vars}{Character vector of variables used for modeling.}
 
 \item{env_vars}{Character vector of all environmental variable names.}
 
 \item{scaling}{List with \code{means} and \code{sds} used for standardization.}
 
 \item{dag}{A \code{cast_dag} object (or \code{NULL}).}
-
-\item{ate}{A \code{cast_ate} object (or \code{NULL}).}
 
 \item{screen}{A \code{cast_screen} object (or \code{NULL}).}
 }

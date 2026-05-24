@@ -8,32 +8,27 @@ cast_dag(
   data,
   response = "presence",
   env_vars = NULL,
+  include_response = TRUE,
   R = 100L,
   algorithm = "hc",
-  score = "bic-g",
+  score = NULL,
   strength_threshold = 0.7,
   direction_threshold = 0.6,
   max_rows = 8000L,
   seed = NULL,
   verbose = TRUE,
-  structure_method = c("bootstrap_hc", "pc", "bidag_bge", "notears_linear"),
+  structure_method = c("pc", "bootstrap_hc", "bidag_bge"),
   pc_alpha = 0.05,
-  pc_test = "zf",
+  pc_test = NULL,
   bidag_algorithm = c("order", "orderIter"),
   bidag_iterations = NULL,
-  notears_lambda = 0.03,
-  notears_max_iter = 2000L,
-  notears_lr = 0.02,
-  notears_tol = 0.001,
-  notears_rho_init = 0.1,
-  notears_alpha_mult = 1.01,
   blacklist = NULL,
   whitelist = NULL
 )
 }
 \arguments{
 \item{data}{A \code{data.frame} containing the \code{presence} column and
-environmental variables. Must be numeric (no factors).}
+environmental variables.}
 
 \item{response}{Character. Name of the response column. Default
 \code{"presence"}.}
@@ -42,17 +37,19 @@ environmental variables. Must be numeric (no factors).}
 to include in DAG learning. When \code{NULL} (default), all numeric columns
 in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
 
+\item{include_response}{Logical. Include the \code{response} column as a node
+in DAG learning so that its Markov Blanket can be extracted. Default
+\code{TRUE}.}
+
 \item{R}{Integer. Number of bootstrap replicates for \code{structure_method = "bootstrap_hc"}. Ignored otherwise (stored as \code{NA} for documentation).}
 
 \item{algorithm}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: score-based learner passed to
 \code{bnlearn::boot.strength()} (e.g. \code{"hc"}, \code{"tabu"}, \code{"mmhc"},
-\code{"pc.stable"}). Ignored for \code{"pc"}, \code{"bidag_bge"}, and
-\code{"notears_linear"}. Do not set this to \code{"pc"} here; that name refers to
-a constraint-based algorithm and requires
-\code{structure_method = "pc"} instead.}
+\code{"pc.stable"}). Ignored for \code{"pc"} and \code{"bidag_bge"}.}
 
 \item{score}{Character. \strong{Only used} when \code{structure_method = "bootstrap_hc"}: scoring criterion in \code{algorithm.args} for
-\code{bnlearn::boot.strength()}. Default \code{"bic-g"}. Ignored otherwise.}
+\code{bnlearn::boot.strength()}. Default \code{"bic-cg"} (conditional
+Gaussian) when \code{include_response = TRUE}, \code{"bic-g"} otherwise.}
 
 \item{strength_threshold}{Numeric. Minimum edge strength (bootstrap HC) or
 auxiliary threshold metadata for other methods. Default \code{0.7}.}
@@ -66,69 +63,59 @@ HC only). Default \code{0.6}.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 
-\item{structure_method}{Character. One of \code{"bootstrap_hc"} (default),
-\code{"pc"}, \code{"bidag_bge"}, \code{"notears_linear"}.}
+\item{structure_method}{Character. One of \code{"pc"} (default),
+\code{"bootstrap_hc"}, \code{"bidag_bge"}.}
 
 \item{pc_alpha}{Significance level for constraint-based PC. Default \code{0.05}.
 Used only when \code{structure_method = "pc"}.}
 
 \item{pc_test}{Conditional-independence test passed as \code{test} to
-\code{bnlearn::pc.stable()} (e.g. \code{"zf"} for Gaussian data). Default
-\code{"zf"}. Used only when \code{structure_method = "pc"}.}
+\code{bnlearn::pc.stable()}. Default \code{"mi-cg"} (mutual information for
+conditional Gaussian data when \code{include_response = TRUE}; \code{"zf"} for
+pure-numeric networks). Used only when \code{structure_method = "pc"}.}
 
 \item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
 \code{"orderIter"}. Default \code{"order"}.}
 
 \item{bidag_iterations}{Optional integer MCMC iterations for BiDAG.
-\code{NULL} uses a \strong{bounded} default derived from the number of nodes (avoids
-BiDAG's internal \verb{6 n^2 log(n)} blowing up when \code{n} is mis-resolved as
-sample size). Explicit values are clamped to a safe range.}
-
-\item{notears_lambda}{L1 penalty weight for \code{notears_linear}. Default \code{0.03}.}
-
-\item{notears_max_iter}{Maximum optimization steps. Default \code{2000}.}
-
-\item{notears_lr}{Adam learning rate. Default \code{0.02}.}
-
-\item{notears_tol}{Stop when acyclicity metric \verb{|h(W)| < notears_tol}.
-Default \code{1e-3}.}
-
-\item{notears_rho_init}{Initial augmented-Lagrangian rho. Default \code{0.1}.}
-
-\item{notears_alpha_mult}{Multiplier on rho each 100 steps. Default \code{1.01}.}
+\code{NULL} uses a \strong{bounded} default derived from the number of nodes.}
 
 \item{blacklist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
-\strong{forbidden} directed edges. These edges will never appear in the learned
-DAG. Use this to encode expert knowledge (e.g., "temperature cannot cause
-elevation"). Default \code{NULL} (no forbidden edges).}
+\strong{forbidden} directed edges. Default \code{NULL}.}
 
 \item{whitelist}{A \code{data.frame} with columns \code{from} and \code{to} specifying
-\strong{required} directed edges. These edges are guaranteed to appear in the
-learned DAG. Use this when domain knowledge dictates certain causal
-relationships (e.g., "elevation causes temperature"). Default \code{NULL}
-(no required edges).}
+\strong{required} directed edges. Default \code{NULL}.}
 }
 \value{
-A \code{cast_dag} object (\code{structure_method} is stored on the object).
+A \code{cast_dag} object with a \code{response_node} field when
+\code{include_response = TRUE}.
 }
 \description{
-Discovers the causal structure among environmental variables. The default
-(\code{structure_method = "bootstrap_hc"}) uses bootstrap-aggregated
-Hill-Climbing as in the original CAST workflow. Alternative \strong{constraint-based}
-(\code{"pc"}), \strong{Bayesian MAP search} via \pkg{BiDAG} (\code{"bidag_bge"},
-recommended for many variables), and \strong{continuous optimization} linear NOTEARS
-(\code{"notears_linear"}, requires \pkg{torch}) are also available.
+Discovers the causal structure among environmental variables and
+(optionally) the species response.
 }
 \details{
-The DAG is always learned on \strong{environmental variables only} (presence
-excluded); see Details in previous versions for rationale.
+When \code{include_response = TRUE} (the default), the \code{response} column is
+included as a factor node in the DAG so that its \strong{Markov Blanket} can be
+extracted later by \code{\link[=cast_select]{cast_select()}}.
+Because the network is then \emph{mixed} (one discrete node among continuous
+variables), the conditional-independence test / scoring criterion is
+automatically adjusted:
+\itemize{
+\item \strong{PC} (\code{structure_method = "pc"}): uses \code{test = "mi-cg"} (mutual
+information for conditional Gaussian data).
+\item \strong{Bootstrap HC} (\code{structure_method = "bootstrap_hc"}): uses
+\code{score = "bic-cg"}.
+\item \strong{BiDAG} (\code{structure_method = "bidag_bge"}): the BGe score requires
+continuous data, so the response is kept as numeric 0/1 (an acceptable
+approximation).
+}
+
+The default method is \code{"pc"} (fast, constraint-based).
 }
 \references{
 Scutari, M. (2010). Learning Bayesian Networks with the bnlearn R Package.
 \emph{Journal of Statistical Software}, 35(3), 1-22.
-
-Zheng, X., Aragam, B., Ravikumar, P., & Xing, E. P. (2018). DAGs with NO
-TEARS: Continuous Optimization for Structure Learning. \emph{NeurIPS}.
 
 Suter, P., Kuipers, J., Moffa, G., & Beerenwinkel, N. (2023). Bayesian
 structure learning and sampling of Bayesian networks with the R package

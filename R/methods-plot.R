@@ -1,15 +1,15 @@
 # Plot Methods ----------------------------------------------------------------
 
-#' Plot a CAST DAG as a Network Graph
+#' Plot a castSDM DAG as a Network Graph
 #'
 #' Visualizes the learned causal DAG using ggraph. Nodes are colored by
-#' causal role, sized by degree, and edges weighted by bootstrap strength.
-#' Follows the single-species showcase style (Fig 2) with edge alpha mapped
-#' to actual bootstrap strength.
+#' causal role (parent/child/co_parent/predictive), sized by degree, and
+#' edges weighted by bootstrap strength. The response node (presence) is
+#' highlighted when present.
 #'
 #' @param x A `cast_dag` object.
 #' @param roles Optional [cast_roles] object for node coloring.
-#' @param screen Optional [cast_screen] object to mark selected variables.
+#' @param screen Optional `cast_screen` object from [cast_select()] to mark selected variables.
 #' @param var_labels Optional named character vector mapping variable names
 #'   to display labels (e.g., `c(bio02 = "Diurnal Temp Range")`).
 #' @param species Optional character string. Species name for the title
@@ -48,7 +48,7 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
   igraph::E(g)$edge_strength <- edges$strength
   igraph::V(g)$deg <- igraph::degree(g, mode = "all")
 
-  # Causal roles
+  # Causal roles (MB-based: parent/child/co_parent/predictive)
   if (!is.null(roles)) {
     rmap <- stats::setNames(roles$roles$role, roles$roles$variable)
     igraph::V(g)$role <- ifelse(
@@ -58,7 +58,14 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     igraph::V(g)$role <- "Unscreened"
   }
 
-  # CAST selection
+  # Mark response node
+  resp_node <- x$response_node
+  if (!is.null(resp_node) && resp_node %in% node_names) {
+    idx <- which(node_names == resp_node)
+    igraph::V(g)$role[idx] <- "Response"
+  }
+
+  # Selection status
   if (!is.null(screen)) {
     igraph::V(g)$selected <- ifelse(
       node_names %in% screen$selected, "Selected", "Dropped"
@@ -78,8 +85,9 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
   igraph::V(g)$label <- vapply(node_names, label_fn, character(1))
 
   role_colors <- c(
-    Root = "#2C3E50", Mediator = "#E67E22",
-    Terminal = "#27AE60", Unscreened = "grey75"
+    parent = "#2C3E50", child = "#E67E22",
+    co_parent = "#8E44AD", predictive = "#27AE60",
+    Response = "#C0392B", Unscreened = "grey75"
   )
 
   # Title and subtitle
@@ -92,15 +100,15 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
 
   if (!is.null(species)) {
     sp_display <- gsub("_", " ", species)
-    main_title <- sprintf("Causal DAG \u2014 %s", sp_display)
+    main_title <- sprintf("Causal DAG -- %s", sp_display)
   } else {
     main_title <- "Causal DAG"
   }
 
-  sm <- x$structure_method %||% "bootstrap_hc"
+  sm <- x$structure_method %||% "pc"
   br <- x$boot_R
   boot_txt <- if (isTRUE(!is.na(br))) {
-    sprintf("HC bootstrap R = %d", br)
+    sprintf("bootstrap R = %d", br)
   } else {
     "bootstrap n/a"
   }
@@ -129,10 +137,10 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     ggplot2::scale_color_manual(values = role_colors, name = "Causal\nRole") +
     ggplot2::scale_size_continuous(range = c(3, 9), name = "Degree") +
     ggplot2::scale_shape_manual(
-      values = c(Selected = 16, Dropped = 1), name = "CAST"
+      values = c(Selected = 16, Dropped = 1), name = "Selection"
     ) +
     ggraph::scale_edge_alpha_continuous(
-      range = c(0.3, 0.9), name = "Bootstrap\nStrength"
+      range = c(0.3, 0.9), name = "Edge\nStrength"
     ) +
     ggplot2::labs(title = main_title, subtitle = sub_title) +
     ggplot2::theme_void(base_size = 10) +
@@ -153,96 +161,12 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
 }
 
 
-#' Plot ATE Forest Plot
+#' Plot Variable Selection (Markov Blanket + RF Importance)
 #'
-#' Displays Average Treatment Effects with 95% confidence intervals.
-#' Significant effects are highlighted in red.
+#' Bar chart showing MB membership (in_mb flag) and RF permutation importance
+#' for each variable. Selected variables are highlighted; roles are color-coded.
 #'
-#' @param x A `cast_ate` object.
-#' @param var_labels Optional named character vector for display labels.
-#' @param ... Ignored.
-#' @param type Character. `"ate"` (default) for coefficient forest plot,
-#'   `"evalue"` for E-value sensitivity plot (requires [cast_evalue()] to
-#'   have been called first).
-#' @return A `ggplot` object.
-#' @export
-plot.cast_ate <- function(x, var_labels = NULL, type = c("ate", "evalue"),
-                          ...) {
-  check_suggested("ggplot2", "for plotting")
-  type <- match.arg(type)
-
-  if (type == "evalue") return(plot_ate_evalue(x, var_labels))
-
-  est <- x$estimates
-  est$ci_lower <- est$coef - 1.96 * est$se
-  est$ci_upper <- est$coef + 1.96 * est$se
-  p_method <- x$p_adjust %||% "bonferroni"
-  sig_label_text <- paste0("Significant (", p_method, " p < ", x$alpha, ")")
-  nonsig_label_text <- "Not significant"
-  est$sig_label <- ifelse(
-    est$significant, sig_label_text, nonsig_label_text
-  )
-
-  # Labels
-  if (!is.null(var_labels)) {
-    est$display <- ifelse(
-      est$variable %in% names(var_labels),
-      var_labels[est$variable], est$variable
-    )
-  } else {
-    est$display <- est$variable
-  }
-  est$display <- factor(
-    est$display,
-    levels = rev(est$display[order(abs(est$coef))])
-  )
-
-  n_sig <- sum(est$significant, na.rm = TRUE)
-  n_total <- nrow(est)
-
-  ggplot2::ggplot(est, ggplot2::aes(
-    x = .data$coef, y = .data$display, color = .data$sig_label
-  )) +
-    ggplot2::geom_vline(
-      xintercept = 0, linetype = "dashed",
-      color = "grey60", linewidth = 0.6
-    ) +
-    ggplot2::geom_errorbarh(
-      ggplot2::aes(xmin = .data$ci_lower, xmax = .data$ci_upper),
-      height = 0.3, linewidth = 0.5, alpha = 0.7
-    ) +
-    ggplot2::geom_point(size = 3, alpha = 0.9) +
-    ggplot2::scale_color_manual(
-      values = stats::setNames(
-        c("#C0392B", "grey60"),
-        c(sig_label_text, nonsig_label_text)
-      ),
-      name = ""
-    ) +
-    ggplot2::labs(
-      title = "Causal Effects (ATE)",
-      subtitle = sprintf(
-        "DML %d-fold cross-fitting | %d/%d significant",
-        x$K, n_sig, n_total
-      ),
-      x = "Average Treatment Effect", y = ""
-    ) +
-    theme_cast() +
-    ggplot2::theme(
-      legend.position = "bottom",
-      panel.grid.major.y = ggplot2::element_line(
-        color = "grey93", linewidth = 0.3
-      )
-    )
-}
-
-
-#' Plot CAST Screening Score Decomposition
-#'
-#' Stacked bar chart showing the DAG, ATE, and RF importance components
-#' of the composite screening score for each variable.
-#'
-#' @param x A `cast_screen` object.
+#' @param x A `cast_screen` object (from [cast_select()]).
 #' @param var_labels Optional named character vector for display labels.
 #' @param ... Ignored.
 #'
@@ -252,15 +176,20 @@ plot.cast_screen <- function(x, var_labels = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
 
   scr <- x$scores
-  w <- x$weights
-
-  scr$comp_dag <- scr$score_dag * w["w_dag"]
-  scr$comp_ate <- scr$score_ate * w["w_ate"]
-  scr$comp_imp <- scr$score_imp * w["w_imp"]
   scr$is_selected <- scr$variable %in% x$selected
 
-  scr <- scr[order(-scr$score_total), ]
-  scr$rank <- seq_len(nrow(scr))
+  # Merge role info
+  if (!is.null(x$roles) && nrow(x$roles) > 0) {
+    scr <- merge(scr, x$roles[, c("variable", "role"), drop = FALSE],
+                 by = "variable", all.x = TRUE)
+    scr$role[is.na(scr$role)] <- "not selected"
+  } else {
+    scr$role <- ifelse(scr$is_selected, "selected", "not selected")
+  }
+
+  # Sort by importance (RF)
+  imp_col <- if ("rf_importance" %in% names(scr)) "rf_importance" else "score_total"
+  scr <- scr[order(-scr[[imp_col]]), ]
 
   # Labels
   if (!is.null(var_labels)) {
@@ -271,76 +200,46 @@ plot.cast_screen <- function(x, var_labels = NULL, ...) {
   } else {
     scr$display <- scr$variable
   }
-  scr$display <- factor(scr$display, levels = scr$display)
+  scr$display <- factor(scr$display, levels = rev(scr$display))
 
-  # Pivot to long
-  long <- data.frame(
-    display = rep(scr$display, 3),
-    component = rep(
-      c("DAG topology", "ATE causal", "RF importance"),
-      each = nrow(scr)
-    ),
-    score = c(scr$comp_dag, scr$comp_ate, scr$comp_imp),
-    is_selected = rep(scr$is_selected, 3),
-    stringsAsFactors = FALSE
+  role_colors <- c(
+    parent = "#2C3E50", child = "#E67E22",
+    co_parent = "#8E44AD", predictive = "#27AE60",
+    selected = "#3498DB", `not selected` = "grey70"
   )
-  long$component <- factor(long$component, levels = c(
-    "DAG topology", "ATE causal", "RF importance"
-  ))
 
-  ggplot2::ggplot(long, ggplot2::aes(
-    x = .data$display, y = .data$score,
-    fill = .data$component, alpha = .data$is_selected
+  n_sel <- sum(scr$is_selected)
+  n_mb <- if ("in_mb" %in% names(scr)) sum(scr$in_mb, na.rm = TRUE) else NA
+  sub_txt <- sprintf(
+    "%d / %d variables selected",
+    n_sel, nrow(scr)
+  )
+  if (!is.na(n_mb)) {
+    sub_txt <- paste0(sub_txt, sprintf(" | %d in Markov Blanket", n_mb))
+  }
+
+  p <- ggplot2::ggplot(scr, ggplot2::aes(
+    x = .data[[imp_col]], y = .data$display,
+    fill = .data$role, alpha = .data$is_selected
   )) +
-    ggplot2::geom_col(position = "stack", width = 0.7) +
-    ggplot2::scale_fill_manual(
-      values = c(
-        "DAG topology" = "#3498DB",
-        "ATE causal" = "#E74C3C",
-        "RF importance" = "#2ECC71"
-      ),
-      name = ""
-    ) +
+    ggplot2::geom_col(width = 0.7) +
+    ggplot2::scale_fill_manual(values = role_colors, name = "Role") +
     ggplot2::scale_alpha_manual(
       values = c("TRUE" = 0.95, "FALSE" = 0.35), guide = "none"
     ) +
     ggplot2::labs(
-      title = "CAST Screening Scores",
-      subtitle = sprintf(
-        "Adaptive weights: w_DAG=%.2f  w_ATE=%.2f  w_RF=%.2f",
-        w["w_dag"], w["w_ate"], w["w_imp"]
-      ),
-      x = "", y = "Composite score"
+      title = "Variable Selection (MB + RF Importance)",
+      subtitle = sub_txt,
+      x = "RF Permutation Importance", y = ""
     ) +
-    theme_cast(base_size = 12) +
+    theme_cast(base_size = 11) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = "Arial"),
-      plot.title = ggplot2::element_text(
-        face = "bold", hjust = 0, size = 10
-      ),
-      plot.subtitle = ggplot2::element_text(
-        hjust = 0, size = 22, face = "plain"
-      ),
-      axis.title.x = ggplot2::element_text(
-        face = "bold", size = 22
-      ),
-      axis.title.y = ggplot2::element_text(
-        face = "bold", size = 22
-      ),
-      axis.text.x = ggplot2::element_text(
-        angle = 45, hjust = 1, vjust = 1, size = 22, face = "plain"
-      ),
-      axis.text.y = ggplot2::element_text(
-        size = 22, face = "plain"
-      ),
-      legend.title = ggplot2::element_text(
-        face = "bold", size = 22
-      ),
-      legend.text = ggplot2::element_text(
-        face = "plain", size = 22
-      ),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_line(
+        color = "grey93", linewidth = 0.3
+      )
     )
+  p
 }
 
 
@@ -443,14 +342,14 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 #' @param var_labels Optional named character vector mapping variable names
 #'   to display labels.
 #' @param point_size Numeric. Point size. Default `0.5`.
-#' @param legend_position Character. `"bottom"` (horizontal colorbar, like
-#'   the reference figures) or `"right"`. Default `"bottom"`.
+#' @param legend_position Character. `"bottom"` (horizontal colorbar) or
+#'   `"right"`. Default `"bottom"`.
 #' @param hss_predict Optional [cast_predict] object. When provided together
 #'   with `hss_model`, CATE values are set to `NA` wherever the chosen model's
 #'   habitat suitability (`HSS_<model>`) is below `hss_threshold` (spatial
 #'   masking by suitability).
 #' @param hss_model Character. Which model's HSS column to use for masking.
-#'   Default `"cast"`.
+#'   Default `"rf"`.
 #' @param hss_threshold Numeric in `[0, 1]`. Default `0.1`.
 #' @param ... Ignored.
 #'
@@ -461,7 +360,7 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
                            point_size = 0.5,
                            legend_position = "bottom",
                            hss_predict = NULL,
-                           hss_model = "cast",
+                           hss_model = "rf",
                            hss_threshold = 0.1,
                            ...) {
   check_suggested("ggplot2", "for plotting")
@@ -493,7 +392,7 @@ plot.cast_cate <- function(x, variable = NULL, species = NULL,
     variable
   }
 
-  # Symmetric limits at 98th percentile (like fig6 reference)
+  # Symmetric limits at 98th percentile
   finite_cate <- df$cate[is.finite(df$cate)]
   if (length(finite_cate) == 0) {
     cli::cli_warn("No finite CATE values after masking for {.val {variable}}. Returning empty plot.")
@@ -623,8 +522,8 @@ plot.cast_eval <- function(x,
 
   m <- x$metrics
   model_colors <- c(
-    cast = "#E64B35", mlp_ate = "#F39B7F", mlp = "#91D1C2",
-    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85"
+    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85",
+    gam = "#00A087", esm = "#E64B35"
   )
 
   src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test"
@@ -633,7 +532,6 @@ plot.cast_eval <- function(x,
   mean_cols <- paste0(metrics, "_mean")
   present   <- intersect(mean_cols, names(m))
   if (length(present) == 0) {
-    # Fallback: old-style object with only auc_mean / tss_mean
     present <- intersect(c("auc_mean", "tss_mean"), names(m))
   }
 
@@ -695,8 +593,8 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
   check_suggested("ggplot2", "for plotting")
 
   model_colors <- c(
-    cast = "#E64B35", mlp_ate = "#F39B7F", mlp = "#91D1C2",
-    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85"
+    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85",
+    gam = "#00A087", esm = "#E64B35"
   )
 
   fold_colors <- c(
@@ -789,9 +687,9 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
 }
 
 
-#' Plot CAST Pipeline Result (Multi-Panel)
+#' Plot castSDM Pipeline Result (Multi-Panel)
 #'
-#' Combines DAG, ATE, and screening plots into a 3-panel figure using
+#' Combines DAG and variable selection plots into a 2-panel figure using
 #' patchwork.
 #'
 #' @param x A `cast_result` object.
@@ -806,11 +704,159 @@ plot.cast_result <- function(x, var_labels = NULL, ...) {
 
   p_dag <- plot.cast_dag(x$dag, roles = x$roles, screen = x$screen,
                          var_labels = var_labels)
-  p_ate <- plot.cast_ate(x$ate, var_labels = var_labels)
   p_scr <- plot.cast_screen(x$screen, var_labels = var_labels)
 
-  combined <- p_dag | p_ate | p_scr
-  combined + patchwork::plot_layout(widths = c(1.2, 1, 1))
+  combined <- p_dag | p_scr
+  combined + patchwork::plot_layout(widths = c(1.2, 1))
+}
+
+
+#' Plot Ensemble Prediction Map
+#'
+#' @param x A `cast_ensemble` object.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param ... Ignored.
+#' @return A `ggplot` object.
+#' @export
+plot.cast_ensemble <- function(x, basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  pred <- x$predictions
+  if (!all(c("lon", "lat", "ensemble_hss") %in% names(pred))) {
+    cli::cli_abort("Ensemble predictions must contain lon, lat, ensemble_hss.")
+  }
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+
+  p <- p +
+    ggplot2::geom_point(
+      data = pred,
+      ggplot2::aes(x = .data$lon, y = .data$lat,
+                   color = .data$ensemble_hss),
+      size = 0.4, alpha = 0.85
+    ) +
+    ggplot2::scale_color_viridis_c(
+      option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1)
+    ) +
+    ggplot2::labs(
+      title = sprintf("Ensemble Habitat Suitability (%s)", x$method),
+      subtitle = sprintf("Threshold = %.3f", x$threshold)
+    ) +
+    ggplot2::coord_sf(expand = FALSE) +
+    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right",
+      legend.key.width = ggplot2::unit(0.5, "cm"),
+      legend.key.height = ggplot2::unit(1.5, "cm")
+    )
+
+  if (basemap == "china") {
+    dash_sf <- load_basemap("dashline")
+    if (!is.null(dash_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = dash_sf, fill = NA, color = "#bdc3c7", linewidth = 0.3
+      )
+    }
+  }
+  p
+}
+
+
+#' Plot Future Climate Projection
+#'
+#' @param x A `cast_project` object.
+#' @param scenario Character. Which scenario to plot. Default is the first.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param ... Ignored.
+#' @return A `ggplot` object or patchwork composite.
+#' @export
+plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  scenario <- scenario %||% names(x$future)[1]
+  if (!scenario %in% names(x$future)) {
+    cli::cli_abort("Scenario {.val {scenario}} not found. Available: {.val {names(x$future)}}.")
+  }
+
+  fut <- x$future[[scenario]]
+  change <- x$changes[[scenario]]
+
+  # Change map: gain / loss / stable
+  if (!all(c("lon", "lat", "change") %in% names(change))) {
+    cli::cli_abort("Change data must contain lon, lat, change columns.")
+  }
+
+  change_colors <- c(
+    gain = "#27AE60", loss = "#C0392B", stable = "#3498DB",
+    absent = "grey85"
+  )
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+
+  p <- p +
+    ggplot2::geom_point(
+      data = change,
+      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$change),
+      size = 0.4, alpha = 0.8
+    ) +
+    ggplot2::scale_color_manual(values = change_colors, name = "Range\nChange") +
+    ggplot2::labs(
+      title = sprintf("Range Change: %s", scenario),
+      subtitle = {
+        s <- x$stats[x$stats$scenario == scenario, ]
+        if (nrow(s) > 0)
+          sprintf("Gain=%d | Loss=%d | Stable=%d | Shift=%.1f km",
+                  s$gain[1], s$loss[1], s$stable[1], s$centroid_shift_km[1])
+        else ""
+      }
+    ) +
+    ggplot2::coord_sf(expand = FALSE) +
+    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right"
+    )
+
+  if (basemap == "china") {
+    dash_sf <- load_basemap("dashline")
+    if (!is.null(dash_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = dash_sf, fill = NA, color = "#bdc3c7", linewidth = 0.3
+      )
+    }
+  }
+  p
 }
 
 
@@ -843,7 +889,7 @@ plot.cast_result <- function(x, var_labels = NULL, ...) {
 }
 
 
-#' CAST Publication Theme
+#' castSDM Publication Theme
 #' @keywords internal
 #' @noRd
 theme_cast <- function(base_size = 11) {
@@ -900,65 +946,4 @@ load_basemap <- function(type = "world") {
     basemap <- sf::st_make_valid(basemap)
   }
   basemap
-}
-
-
-# -- E-value sensitivity plot (internal) --------------------------------------
-#' @noRd
-plot_ate_evalue <- function(x, var_labels = NULL) {
-  est <- x$estimates
-  if (!"evalue_point" %in% names(est)) {
-    cli::cli_abort("No E-value columns found. Run {.fn cast_evalue} first.")
-  }
-
-  if (!is.null(var_labels)) {
-    est$display <- ifelse(
-      est$variable %in% names(var_labels),
-      var_labels[est$variable], est$variable
-    )
-  } else {
-    est$display <- est$variable
-  }
-  est$display <- factor(
-    est$display,
-    levels = rev(est$display[order(est$evalue_point)])
-  )
-
-  ggplot2::ggplot(est, ggplot2::aes(
-    x = .data$evalue_point, y = .data$display
-  )) +
-    ggplot2::geom_vline(
-      xintercept = 1, linetype = "dashed", color = "grey60", linewidth = 0.6
-    ) +
-    ggplot2::geom_segment(
-      ggplot2::aes(
-        x = .data$evalue_ci, xend = .data$evalue_point,
-        y = .data$display, yend = .data$display
-      ),
-      linewidth = 0.8, color = "grey50"
-    ) +
-    ggplot2::geom_point(
-      ggplot2::aes(color = .data$significant), size = 3
-    ) +
-    ggplot2::geom_point(
-      ggplot2::aes(x = .data$evalue_ci), shape = 1, size = 2.5,
-      color = "grey40"
-    ) +
-    ggplot2::scale_color_manual(
-      values = c("TRUE" = "#C0392B", "FALSE" = "grey60"),
-      labels = c("TRUE" = "Significant", "FALSE" = "Not significant"),
-      name = ""
-    ) +
-    ggplot2::labs(
-      title = "E-value Sensitivity Analysis",
-      subtitle = "Filled = point estimate; Open = CI bound",
-      x = "E-value (minimum confounding strength)", y = ""
-    ) +
-    theme_cast() +
-    ggplot2::theme(
-      legend.position = "bottom",
-      panel.grid.major.y = ggplot2::element_line(
-        color = "grey93", linewidth = 0.3
-      )
-    )
 }

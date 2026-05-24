@@ -7,7 +7,7 @@
 cast_roles(screen, dag)
 }
 \arguments{
-\item{screen}{A \link{cast_screen} object.}
+\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}}.}
 
 \item{dag}{A \link{cast_dag} object.}
 }
@@ -15,21 +15,12 @@ cast_roles(screen, dag)
 A \link{cast_roles} object.
 }
 \description{
-Classifies screened variables into causal roles based on DAG topology:
-\strong{Root causes} (exogenous drivers), \strong{Mediators} (intermediate pathways),
-or \strong{Terminal} (outcome proxies).
-}
-\details{
-Role assignment is based on in-degree and out-degree in the DAG:
-\itemize{
-\item \strong{Root}: Zero in-degree, high out-degree (exogenous causal drivers).
-\item \strong{Mediator}: Both in-degree and out-degree > 0 (causal pathways).
-\item \strong{Terminal}: Low out-degree or high in-degree (close to outcome).
-}
-
-Role score: if \code{in_degree == 0} then \code{out_degree + 1}, else
-\code{out_degree / (in_degree + 1)}.
+Builds a role table from a \code{cast_screen} object produced by
+\code{\link[=cast_select]{cast_select()}}. When the screen contains Markov Blanket roles
+(\code{parent}, \code{child}, \code{co_parent}, \code{predictive}), those are used
+directly. For backward compatibility with older screen objects
+that lack roles, a degree-based heuristic is applied.
 }
 \seealso{
-\code{\link[=cast_screen]{cast_screen()}}, \code{\link[=cast_features]{cast_features()}}
+\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_dag]{cast_dag()}}
 }

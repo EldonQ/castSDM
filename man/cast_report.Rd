@@ -34,8 +34,8 @@ Default \code{TRUE}.}
 The output file path (invisibly).
 }
 \description{
-Creates an HTML report summarizing the CAST pipeline results, including
-DAG visualization, ATE estimates, variable screening, model evaluation,
+Creates an HTML report summarizing the castSDM pipeline results,
+including DAG visualization, variable selection, model evaluation,
 and optional SHAP explanations. Uses the rmarkdown package to render
 a self-contained HTML document.
 }

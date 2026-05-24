@@ -1,34 +1,45 @@
 #' Learn Causal DAG (Multiple Structure Learning Methods)
 #'
-#' Discovers the causal structure among environmental variables. The default
-#' (`structure_method = "bootstrap_hc"`) uses bootstrap-aggregated
-#' Hill-Climbing as in the original CAST workflow. Alternative **constraint-based**
-#' (`"pc"`), **Bayesian MAP search** via \pkg{BiDAG} (`"bidag_bge"`,
-#' recommended for many variables), and **continuous optimization** linear NOTEARS
-#' (`"notears_linear"`, requires \pkg{torch}) are also available.
+#' Discovers the causal structure among environmental variables and
+#' (optionally) the species response.
 #'
-#' The DAG is always learned on **environmental variables only** (presence
-#' excluded); see Details in previous versions for rationale.
+#' When `include_response = TRUE` (the default), the `response` column is
+#' included as a factor node in the DAG so that its **Markov Blanket** can be
+#' extracted later by [cast_select()].
+#' Because the network is then *mixed* (one discrete node among continuous
+#' variables), the conditional-independence test / scoring criterion is
+#' automatically adjusted:
+#'
+#' * **PC** (`structure_method = "pc"`): uses `test = "mi-cg"` (mutual
+#'   information for conditional Gaussian data).
+#' * **Bootstrap HC** (`structure_method = "bootstrap_hc"`): uses
+#'   `score = "bic-cg"`.
+#' * **BiDAG** (`structure_method = "bidag_bge"`): the BGe score requires
+#'   continuous data, so the response is kept as numeric 0/1 (an acceptable
+#'   approximation).
+#'
+#' The default method is `"pc"` (fast, constraint-based).
 #'
 #' @param data A `data.frame` containing the `presence` column and
-#'   environmental variables. Must be numeric (no factors).
+#'   environmental variables.
 #' @param response Character. Name of the response column. Default
 #'   `"presence"`.
 #' @param env_vars Character vector or `NULL`. Environmental variable names
 #'   to include in DAG learning. When `NULL` (default), all numeric columns
 #'   in `data` excluding `response`, `lon`, and `lat` are used.
+#' @param include_response Logical. Include the `response` column as a node
+#'   in DAG learning so that its Markov Blanket can be extracted. Default
+#'   `TRUE`.
 #' @param R Integer. Number of bootstrap replicates for `structure_method =
 #'   "bootstrap_hc"`. Ignored otherwise (stored as `NA` for documentation).
 #' @param algorithm Character. **Only used** when `structure_method =
 #'   "bootstrap_hc"`: score-based learner passed to
 #'   \code{bnlearn::boot.strength()} (e.g. `"hc"`, `"tabu"`, `"mmhc"`,
-#'   `"pc.stable"`). Ignored for `"pc"`, `"bidag_bge"`, and
-#'   `"notears_linear"`. Do not set this to `"pc"` here; that name refers to
-#'   a constraint-based algorithm and requires
-#'   `structure_method = "pc"` instead.
+#'   `"pc.stable"`). Ignored for `"pc"` and `"bidag_bge"`.
 #' @param score Character. **Only used** when `structure_method =
 #'   "bootstrap_hc"`: scoring criterion in `algorithm.args` for
-#'   \code{bnlearn::boot.strength()}. Default `"bic-g"`. Ignored otherwise.
+#'   \code{bnlearn::boot.strength()}. Default `"bic-cg"` (conditional
+#'   Gaussian) when `include_response = TRUE`, `"bic-g"` otherwise.
 #' @param strength_threshold Numeric. Minimum edge strength (bootstrap HC) or
 #'   auxiliary threshold metadata for other methods. Default `0.7`.
 #' @param direction_threshold Numeric. Minimum direction consistency (bootstrap
@@ -36,44 +47,29 @@
 #' @param max_rows Integer. Maximum rows; subsample if exceeded. Default `8000`.
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
-#' @param structure_method Character. One of `"bootstrap_hc"` (default),
-#'   `"pc"`, `"bidag_bge"`, `"notears_linear"`.
+#' @param structure_method Character. One of `"pc"` (default),
+#'   `"bootstrap_hc"`, `"bidag_bge"`.
 #' @param pc_alpha Significance level for constraint-based PC. Default `0.05`.
 #'   Used only when `structure_method = "pc"`.
 #' @param pc_test Conditional-independence test passed as `test` to
-#'   \code{bnlearn::pc.stable()} (e.g. `"zf"` for Gaussian data). Default
-#'   `"zf"`. Used only when `structure_method = "pc"`.
+#'   \code{bnlearn::pc.stable()}. Default `"mi-cg"` (mutual information for
+#'   conditional Gaussian data when `include_response = TRUE`; `"zf"` for
+#'   pure-numeric networks). Used only when `structure_method = "pc"`.
 #' @param bidag_algorithm Passed to \code{BiDAG::learnBN()}: `"order"` or
 #'   `"orderIter"`. Default `"order"`.
 #' @param bidag_iterations Optional integer MCMC iterations for BiDAG.
-#'   `NULL` uses a **bounded** default derived from the number of nodes (avoids
-#'   BiDAG's internal `6 n^2 log(n)` blowing up when `n` is mis-resolved as
-#'   sample size). Explicit values are clamped to a safe range.
-#' @param notears_lambda L1 penalty weight for `notears_linear`. Default `0.03`.
-#' @param notears_max_iter Maximum optimization steps. Default `2000`.
-#' @param notears_lr Adam learning rate. Default `0.02`.
-#' @param notears_tol Stop when acyclicity metric `|h(W)| < notears_tol`.
-#'   Default `1e-3`.
-#' @param notears_rho_init Initial augmented-Lagrangian rho. Default `0.1`.
-#' @param notears_alpha_mult Multiplier on rho each 100 steps. Default `1.01`.
+#'   `NULL` uses a **bounded** default derived from the number of nodes.
 #' @param blacklist A `data.frame` with columns `from` and `to` specifying
-#'   **forbidden** directed edges. These edges will never appear in the learned
-#'   DAG. Use this to encode expert knowledge (e.g., "temperature cannot cause
-#'   elevation"). Default `NULL` (no forbidden edges).
+#'   **forbidden** directed edges. Default `NULL`.
 #' @param whitelist A `data.frame` with columns `from` and `to` specifying
-#'   **required** directed edges. These edges are guaranteed to appear in the
-#'   learned DAG. Use this when domain knowledge dictates certain causal
-#'   relationships (e.g., "elevation causes temperature"). Default `NULL`
-#'   (no required edges).
+#'   **required** directed edges. Default `NULL`.
 #'
-#' @return A `cast_dag` object (`structure_method` is stored on the object).
+#' @return A `cast_dag` object with a `response_node` field when
+#'   `include_response = TRUE`.
 #'
 #' @references
 #' Scutari, M. (2010). Learning Bayesian Networks with the bnlearn R Package.
 #' *Journal of Statistical Software*, 35(3), 1-22.
-#'
-#' Zheng, X., Aragam, B., Ravikumar, P., & Xing, E. P. (2018). DAGs with NO
-#' TEARS: Continuous Optimization for Structure Learning. *NeurIPS*.
 #'
 #' Suter, P., Kuipers, J., Moffa, G., & Beerenwinkel, N. (2023). Bayesian
 #' structure learning and sampling of Bayesian networks with the R package
@@ -86,34 +82,38 @@
 cast_dag <- function(data,
                      response = "presence",
                      env_vars = NULL,
+                     include_response = TRUE,
                      R = 100L,
                      algorithm = "hc",
-                     score = "bic-g",
+                     score = NULL,
                      strength_threshold = 0.7,
                      direction_threshold = 0.6,
                      max_rows = 8000L,
                      seed = NULL,
                      verbose = TRUE,
                      structure_method = c(
-                       "bootstrap_hc", "pc",
-                       "bidag_bge", "notears_linear"
+                       "pc", "bootstrap_hc", "bidag_bge"
                      ),
                      pc_alpha = 0.05,
-                     pc_test = "zf",
+                     pc_test = NULL,
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
-                     notears_lambda = 0.03,
-                     notears_max_iter = 2000L,
-                     notears_lr = 0.02,
-                     notears_tol = 1e-3,
-                     notears_rho_init = 0.1,
-                     notears_alpha_mult = 1.01,
                      blacklist = NULL,
                      whitelist = NULL) {
   structure_method <- match.arg(structure_method)
   bidag_algorithm <- match.arg(bidag_algorithm)
 
-  # --- bootstrap_hc only: valid bnlearn learners for boot.strength() ----------
+  # --- Resolve smart defaults for mixed-data settings ----------------------
+  has_mixed <- isTRUE(include_response) && response %in% names(data)
+
+  if (is.null(score)) {
+    score <- if (has_mixed) "bic-cg" else "bic-g"
+  }
+  if (is.null(pc_test)) {
+    pc_test <- if (has_mixed) "mi-cg" else "zf"
+  }
+
+  # --- bootstrap_hc only: valid bnlearn learners for boot.strength() -------
   boot_learners <- c(
     "gs", "iamb", "fast.iamb", "inter.iamb", "iamb.fdr", "pc.stable", "mmpc",
     "si.hiton.pc", "hpc", "hc", "tabu", "rsmax2", "mmhc", "h2pc",
@@ -124,26 +124,19 @@ cast_dag <- function(data,
     if (algo_lc == "pc") {
       cli::cli_abort(c(
         "{.arg algorithm} = {.val {algorithm}} is not valid for {.code structure_method = \"bootstrap_hc\"}.",
-        "i" = "Use {.code structure_method = \"pc\"} for the constraint-based PC algorithm (and keep {.arg algorithm} at a bootstrap learner like {.val hc}, or omit it).",
+        "i" = "Use {.code structure_method = \"pc\"} for the constraint-based PC algorithm.",
         "i" = "For PC *inside* each bootstrap replicate, use {.code algorithm = \"pc.stable\"} instead."
-      ))
-    }
-    if (algo_lc == "fci") {
-      cli::cli_abort(c(
-        "{.arg algorithm} = {.val {algorithm}} is not supported.",
-        "i" = "FCI has been removed from castSDM DAG discovery. Use {.code structure_method = \"pc\"}, {.code \"bidag_bge\"}, or {.code \"notears_linear\"}."
       ))
     }
     if (!algorithm %in% boot_learners) {
       cli::cli_abort(c(
         "{.arg algorithm} = {.val {algorithm}} is not a valid learner for {.fn bnlearn::boot.strength}.",
-        "i" = "See {.pkg bnlearn} documentation (e.g. {.code ?bnlearn::bnlearn-package}) for allowed names.",
         "i" = "Examples: {.val hc}, {.val tabu}, {.val mmhc}, {.val pc.stable}."
       ))
     }
-  } else if (isTRUE(verbose) && (algorithm != "hc" || score != "bic-g")) {
+  } else if (isTRUE(verbose) && (algorithm != "hc")) {
     cli::cli_inform(c(
-      "i" = "Ignoring {.arg algorithm} and {.arg score} (only apply to {.code structure_method = \"bootstrap_hc\"})."
+      "i" = "Ignoring {.arg algorithm} (only applies to {.code structure_method = \"bootstrap_hc\"})."
     ))
   }
 
@@ -152,10 +145,27 @@ cast_dag <- function(data,
     cli::cli_abort("Need at least 3 environmental variables for DAG learning.")
   }
 
+  # --- Build DAG data frame ------------------------------------------------
+  # Environmental columns: always numeric
   dag_df <- as.data.frame(data[, env_vars, drop = FALSE])
   for (col in names(dag_df)) {
     dag_df[[col]] <- as.numeric(dag_df[[col]])
   }
+
+  # Include response as a node (for Markov Blanket extraction)
+  response_node <- NULL
+  if (has_mixed) {
+    resp_col <- data[[response]]
+    if (structure_method == "bidag_bge") {
+      # BiDAG BGe requires all-continuous; keep as numeric 0/1
+      dag_df[[response]] <- as.numeric(resp_col)
+    } else {
+      # bnlearn CG networks require discrete nodes as factor
+      dag_df[[response]] <- factor(resp_col, levels = c(0, 1))
+    }
+    response_node <- response
+  }
+
   dag_df <- stats::na.omit(dag_df)
 
   if (nrow(dag_df) < 10) {
@@ -169,9 +179,18 @@ cast_dag <- function(data,
     dag_df <- dag_df[sample.int(nrow(dag_df), max_rows), ]
   }
 
+  # All node names in DAG
+  all_nodes <- names(dag_df)
+
   if (verbose) {
+    n_nodes <- length(all_nodes)
+    resp_msg <- if (!is.null(response_node)) {
+      " (incl. response)"
+    } else {
+      ""
+    }
     cli::cli_inform(
-      "Learning DAG ({structure_method}): {length(env_vars)} env vars, {nrow(dag_df)} obs..."
+      "Learning DAG ({structure_method}): {n_nodes} nodes{resp_msg}, {nrow(dag_df)} obs..."
     )
   }
 
@@ -190,15 +209,15 @@ cast_dag <- function(data,
   }
 
   env_edges <- switch(structure_method,
+    pc = .dag_pc_edges(
+      dag_df, alpha = pc_alpha, test = pc_test,
+      seed = seed, verbose = verbose,
+      blacklist = blacklist, whitelist = whitelist
+    ),
     bootstrap_hc = .dag_bootstrap_hc(
       dag_df, R = R, algorithm = algorithm, score = score,
       strength_threshold = strength_threshold,
       direction_threshold = direction_threshold,
-      seed = seed, verbose = verbose,
-      blacklist = blacklist, whitelist = whitelist
-    ),
-    pc = .dag_pc_edges(
-      dag_df, alpha = pc_alpha, test = pc_test,
       seed = seed, verbose = verbose,
       blacklist = blacklist, whitelist = whitelist
     ),
@@ -209,18 +228,6 @@ cast_dag <- function(data,
       seed = seed, verbose = verbose,
       blacklist = blacklist, whitelist = whitelist
     ),
-    notears_linear = notears_learn_edges(
-      dag_df,
-      lambda = notears_lambda,
-      max_iter = notears_max_iter,
-      lr = notears_lr,
-      tol = notears_tol,
-      rho = notears_rho_init,
-      alpha_mult = notears_alpha_mult,
-      seed = seed,
-      verbose = verbose,
-      blacklist = blacklist, whitelist = whitelist
-    ),
     cli::cli_abort("Unknown {.arg structure_method}.")
   )
 
@@ -229,8 +236,6 @@ cast_dag <- function(data,
     score
   } else if (structure_method == "bidag_bge") {
     "bge"
-  } else if (structure_method == "notears_linear") {
-    "notears_linear"
   } else {
     structure_method
   }
@@ -241,15 +246,66 @@ cast_dag <- function(data,
 
   new_cast_dag(
     edges = env_edges,
-    nodes = env_vars,
+    nodes = all_nodes,
     boot_R = boot_R_out,
     strength_threshold = strength_threshold,
     direction_threshold = direction_threshold,
     score = score_out,
-    structure_method = structure_method
+    structure_method = structure_method,
+    response_node = response_node
   )
 }
 
+
+# ---- Internal: Extract Markov Blanket from DAG ---------------------------
+
+#' Extract Markov Blanket of a Node from a cast_dag
+#'
+#' `MB(Y) = parents(Y) U children(Y) U parents_of_children(Y)`.
+#' This is the minimal sufficient set of variables for predicting Y given
+#' the DAG structure.
+#'
+#' @param dag A `cast_dag` object.
+#' @param node Character. Target node name (typically the response).
+#'
+#' @return A list with components `parents`, `children`, `co_parents`, and
+#'   `all` (the union).
+#'
+#' @keywords internal
+#' @noRd
+extract_markov_blanket <- function(dag, node) {
+  edges <- dag$edges
+  if (is.null(edges) || nrow(edges) == 0) {
+    return(list(
+      parents = character(), children = character(),
+      co_parents = character(), all = character()
+    ))
+  }
+
+  # Parents: nodes with an edge TO the target node
+  parents <- unique(edges$from[edges$to == node])
+
+  # Children: nodes that the target node has an edge TO
+  children <- unique(edges$to[edges$from == node])
+
+  # Co-parents (spouses): other parents of children, excluding node itself
+  co_parents <- character()
+  for (ch in children) {
+    ch_parents <- edges$from[edges$to == ch]
+    co_parents <- c(co_parents, ch_parents)
+  }
+  co_parents <- unique(setdiff(co_parents, c(node, parents, children)))
+
+  list(
+    parents = parents,
+    children = children,
+    co_parents = co_parents,
+    all = unique(c(parents, children, co_parents))
+  )
+}
+
+
+# ---- Structure learning backends -----------------------------------------
 
 #' @keywords internal
 #' @noRd
@@ -338,6 +394,8 @@ cast_dag <- function(data,
   )
 }
 
+
+# ---- BiDAG backend -------------------------------------------------------
 
 #' @keywords internal
 #' @noRd
@@ -453,7 +511,7 @@ cast_dag <- function(data,
     error = function(e) {
       cli::cli_abort(c(
         "{.pkg BiDAG}::{.fn learnBN} failed: {e$message}",
-        "i" = "Try fewer variables, smaller {.arg max_rows} before BiDAG, or {.code structure_method = \"bootstrap_hc\"}."
+        "i" = "Try fewer variables, smaller {.arg max_rows} before BiDAG, or {.code structure_method = \"pc\"}."
       ))
     }
   )
@@ -487,176 +545,5 @@ cast_dag <- function(data,
   }
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
-  out
-}
-
-
-#' Resolve matrix exponential for NOTEARS across torch R package versions
-#' @keywords internal
-#' @noRd
-.notears_matrix_exp_fun <- function() {
-  ex <- tryCatch(getNamespaceExports("torch"), error = function(e) character(0))
-  if ("linalg_matrix_exp" %in% ex) {
-    return(utils::getFromNamespace("linalg_matrix_exp", "torch"))
-  }
-  if ("torch_matrix_exp" %in% ex) {
-    return(utils::getFromNamespace("torch_matrix_exp", "torch"))
-  }
-  ns <- asNamespace("torch")
-  if (exists("linalg_matrix_exp", envir = ns, inherits = FALSE)) {
-    return(get("linalg_matrix_exp", envir = ns))
-  }
-  if (exists("torch_matrix_exp", envir = ns, inherits = FALSE)) {
-    return(get("torch_matrix_exp", envir = ns))
-  }
-  cli::cli_abort(c(
-    "NOTEARS needs a matrix exponential in {.pkg torch} (not found).",
-    "i" = "Install/update {.pkg torch} from CRAN, or use {.code structure_method = 'bidag_bge'} / {.code 'bootstrap_hc'}."
-  ))
-}
-
-
-# Linear NOTEARS (torch). See dag-notears.R history; kept here for load order.
-#' @keywords internal
-#' @noRd
-notears_learn_edges <- function(dag_df,
-                                  lambda = 0.03,
-                                  max_iter = 2000L,
-                                  lr = 0.02,
-                                  tol = 1e-3,
-                                  mu_init = 0.0,
-                                  rho = 0.1,
-                                  alpha_mult = 1.01,
-                                  seed = NULL,
-                                  verbose = FALSE,
-                                  blacklist = NULL,
-                                  whitelist = NULL) {
-  check_suggested("torch", "for NOTEARS linear structure learning")
-
-  X <- as.matrix(dag_df)
-  storage.mode(X) <- "double"
-  X <- scale(X)
-  if (any(!is.finite(X))) {
-    cli::cli_abort("NOTEARS: non-finite values after scaling (check inputs).")
-  }
-
-  p <- ncol(X)
-  if (p > 60L) {
-    cli::cli_abort(c(
-      "NOTEARS linear is limited to moderate dimension (p <= 60).",
-      i = "Try {.code structure_method = 'bidag_bge'} for high-dimensional data."
-    ))
-  }
-
-  if (!is.null(seed)) {
-    set.seed(seed)
-    torch::torch_manual_seed(as.integer(seed))
-  }
-
-  Xt <- torch::torch_tensor(X, dtype = torch::torch_float32())
-
-  W <- torch::torch_zeros(p, p, requires_grad = TRUE)
-  opt <- torch::optim_adam(list(W), lr = lr)
-
-  mxexp <- .notears_matrix_exp_fun()
-
-  mu <- mu_init
-  h_np <- NA_real_
-
-  for (it in seq_len(max_iter)) {
-    opt$zero_grad()
-
-    pred <- torch::torch_matmul(Xt, W)
-    mse <- torch::torch_mean((Xt - pred)^2)
-    l1 <- torch::torch_mean(torch::torch_abs(W))
-    loss <- mse + lambda * l1
-
-    M <- W * W
-    E <- mxexp(M)
-    h <- torch::torch_trace(E) - torch::torch_tensor(
-      p, dtype = torch::torch_float32()
-    )
-    aug <- loss + mu * h + (rho / 2.0) * (h^2)
-
-    aug$backward()
-    opt$step()
-
-    torch::with_no_grad({
-      W$clamp_(-1.0, 1.0)
-    })
-    h_np <- as.numeric(h$detach())
-
-    if (it %% 100L == 0L) {
-      mu <- mu + rho * h_np
-      rho <- rho * alpha_mult
-      if (verbose) {
-        cli::cli_inform("  NOTEARS iter {it}: h={round(h_np, 6)} rho={round(rho, 4)}")
-      }
-    }
-
-    if (is.finite(h_np) && abs(h_np) < tol && it > 200L) break
-  }
-
-  Wm <- torch::as_array(W$detach())
-  if (!is.matrix(Wm)) Wm <- matrix(Wm, nrow = p, ncol = p)
-  diag(Wm) <- 0
-
-  # Apply blacklist: zero out forbidden edges
-  if (!is.null(blacklist)) {
-    for (r in seq_len(nrow(blacklist))) {
-      fi <- match(blacklist$from[r], colnames(X))
-      ti <- match(blacklist$to[r], colnames(X))
-      if (!is.na(fi) && !is.na(ti)) Wm[ti, fi] <- 0
-    }
-  }
-
-  thr <- stats::quantile(abs(Wm), probs = 0.85, na.rm = TRUE)
-  thr <- max(thr, 1e-3)
-
-  edges <- list()
-  ei <- 0L
-  for (i in seq_len(p)) {
-    for (j in seq_len(p)) {
-      if (i == j) next
-      if (abs(Wm[i, j]) >= thr) {
-        ei <- ei + 1L
-        edges[[ei]] <- data.frame(
-          from = colnames(X)[j],
-          to = colnames(X)[i],
-          strength = min(1, abs(Wm[i, j])),
-          direction = 1.0,
-          stringsAsFactors = FALSE
-        )
-      }
-    }
-  }
-
-  if (length(edges) == 0) {
-    return(data.frame(
-      from = character(), to = character(),
-      strength = numeric(), direction = numeric(),
-      stringsAsFactors = FALSE
-    ))
-  }
-
-  out <- do.call(rbind, edges)
-  rownames(out) <- NULL
-
-  # Inject whitelisted edges not already present
-  if (!is.null(whitelist)) {
-    for (r in seq_len(nrow(whitelist))) {
-      wl_from <- whitelist$from[r]
-      wl_to   <- whitelist$to[r]
-      found <- nrow(out) > 0 && any(out$from == wl_from & out$to == wl_to)
-      if (!found) {
-        out <- rbind(out, data.frame(
-          from = wl_from, to = wl_to,
-          strength = 1.0, direction = 1.0,
-          stringsAsFactors = FALSE
-        ))
-      }
-    }
-  }
-
   out
 }

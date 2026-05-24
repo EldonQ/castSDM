@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Causal Structure-Informed Species Distribution Modeling}
+\title{castSDM: Causal-Aware Species Distribution Modeling}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Integrates causal inference methods with species distribution modeling. Learns species-specific causal structures via Directed Acyclic Graphs (DAG), estimates Average Treatment Effects (ATE) using Double Machine Learning, and builds Causally-Informed Multi-Layer Perceptrons (CI-MLP) for habitat suitability prediction. Supports comparison with traditional SDM methods including Random Forest, MaxEnt, and Boosted Regression Trees. Provides spatially heterogeneous Conditional Average Treatment Effect (CATE) estimation via causal forests.
+Integrates causal DAG-guided variable selection with species distribution modeling. Learns species-specific causal structures via Directed Acyclic Graphs (DAG) using PC or bootstrap Hill-Climbing algorithms, then selects ecologically relevant predictors through Markov Blanket extraction and RF importance screening. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted or best-model ensemble prediction. Supports future climate projection, spatially heterogeneous Conditional Average Treatment Effect (CATE) estimation via causal forests, and SHAP-based model explanations.
 }
 \seealso{
 Useful links:

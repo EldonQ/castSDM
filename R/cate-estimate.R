@@ -4,46 +4,41 @@
 #' Average Treatment Effects at each spatial location. Reveals how
 #' environmental impacts on species presence vary across geographic space.
 #'
+#' When a DAG is provided, confounders for each treatment variable are
+#' identified as the remaining Markov Blanket variables (DAG-guided).
+#' Without a DAG, all other selected variables are used as confounders.
+#'
 #' @param data A `data.frame` with `presence`, environmental variables, and
 #'   optionally `lon`, `lat` coordinates.
 #' @param variables Character vector of treatment variables to estimate CATE
-#'   for. Default `NULL` uses top significant variables from ATE.
-#' @param ate A [cast_ate] object (used to select top variables if
-#'   `variables` is `NULL`). Default `NULL`.
-#' @param screen A [cast_screen] object (used to select top variables if
+#'   for. Default `NULL` uses top variables from the screen (by role priority:
+#'   parents first).
+#' @param dag A [cast_dag] object (used for DAG-guided confounder
+#'   selection). Default `NULL`.
+#' @param screen A `cast_screen` object from [cast_select()] (used to select top variables if
 #'   `variables` is `NULL`). Default `NULL`.
 #' @param response Character. Response column name. Default `"presence"`.
 #' @param top_n Integer. Number of top variables if `variables` is `NULL`.
 #'   Default `3`.
 #' @param n_trees Integer. Number of causal forest trees. Default `1000`.
 #' @param predict_data Optional `data.frame` for out-of-sample CATE
-#'   prediction. If `NULL`, predicts on the training data. Default `NULL`.
+#'   prediction. Default `NULL`.
 #' @param seed Integer or `NULL`. Random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
-#' @return A `cast_cate` object containing a `effects` data.frame with
+#' @return A `cast_cate` object containing an `effects` data.frame with
 #'   columns: `lon`, `lat`, `variable`, `cate`.
-#'
-#' @details
-#' For each treatment variable, a causal forest partitions the feature space
-#' to estimate location-specific effects:
-#'
-#' \deqn{\tau(x) = E[Y(1) - Y(0) | X = x]}
-#'
-#' This reveals spatial heterogeneity in how environmental drivers affect
-#' species presence -- e.g., "temperature sensitivity is stronger at range
-#' margins."
 #'
 #' @references
 #' Athey, S., Tibshirani, J., & Wager, S. (2019). Generalized random
 #' forests. *The Annals of Statistics*, 47(2), 1148-1178.
 #'
-#' @seealso [grf::causal_forest()], [cast_ate()]
+#' @seealso [grf::causal_forest()], [cast_select()]
 #'
 #' @export
 cast_cate <- function(data,
                       variables = NULL,
-                      ate = NULL,
+                      dag = NULL,
                       screen = NULL,
                       response = "presence",
                       top_n = 3L,
@@ -56,27 +51,24 @@ cast_cate <- function(data,
   env_vars <- get_env_vars(data, response = response)
   Y <- data[[response]]
   X_full <- as.data.frame(data[, env_vars, drop = FALSE])
+  for (col in names(X_full)) X_full[[col]] <- as.numeric(X_full[[col]])
   X_full[is.na(X_full)] <- 0
 
   # Determine which variables to estimate CATE for
   if (is.null(variables)) {
-    if (!is.null(screen) && !is.null(ate)) {
-      # Intersection: screened + significant
-      sig_vars <- ate$estimates$variable[
-        ate$estimates$significant == TRUE
-      ]
-      cate_vars <- intersect(screen$selected, sig_vars)
-      if (length(cate_vars) == 0) {
-        cate_vars <- screen$selected[seq_len(
-          min(top_n, length(screen$selected))
-        )]
-      } else {
-        cate_vars <- cate_vars[seq_len(min(top_n, length(cate_vars)))]
-      }
-    } else if (!is.null(ate)) {
-      sig <- ate$estimates[ate$estimates$significant == TRUE, ]
-      sig <- sig[order(abs(sig$coef), decreasing = TRUE), ]
-      cate_vars <- sig$variable[seq_len(min(top_n, nrow(sig)))]
+    if (!is.null(screen) && !is.null(screen$roles)) {
+      # Prioritise parents > children > co_parents > predictive
+      role_priority <- c("parent", "child", "co_parent", "predictive")
+      roles_df <- screen$roles
+      roles_df$priority <- match(roles_df$role, role_priority)
+      roles_df <- roles_df[order(roles_df$priority), ]
+      cate_vars <- roles_df$variable[seq_len(
+        min(top_n, nrow(roles_df))
+      )]
+    } else if (!is.null(screen)) {
+      cate_vars <- screen$selected[seq_len(
+        min(top_n, length(screen$selected))
+      )]
     } else {
       cate_vars <- env_vars[seq_len(min(top_n, length(env_vars)))]
     }
@@ -91,9 +83,16 @@ cast_cate <- function(data,
     cli::cli_inform("Estimating CATE for: {.val {cate_vars}}")
   }
 
+  # Extract Markov Blanket for DAG-guided confounder selection
+  mb <- NULL
+  if (!is.null(dag) && !is.null(dag$response_node)) {
+    mb <- extract_markov_blanket(dag, dag$response_node)
+  }
+
   # Prediction data
   pred_X <- if (!is.null(predict_data)) {
     pd <- as.data.frame(predict_data[, env_vars, drop = FALSE])
+    for (col in names(pd)) pd[[col]] <- as.numeric(pd[[col]])
     pd[is.na(pd)] <- 0
     pd
   } else {
@@ -101,7 +100,6 @@ cast_cate <- function(data,
   }
   pred_source <- predict_data %||% data
 
-  # Extract coords from prediction data
   has_coords <- all(c("lon", "lat") %in% names(pred_source))
 
   # Estimate CATE for each variable
@@ -110,9 +108,19 @@ cast_cate <- function(data,
     if (verbose) cli::cli_inform("  Causal forest: {.val {cv}}...")
 
     T_cont <- X_full[[cv]]
-    W_covs <- as.matrix(
-      X_full[, setdiff(env_vars, cv), drop = FALSE]
-    )
+
+    # DAG-guided confounder selection: use MB(presence) minus treatment var
+    if (!is.null(mb) && length(mb$all) > 0) {
+      confounders <- intersect(setdiff(mb$all, cv), env_vars)
+      if (length(confounders) < 2) {
+        # Fallback: use all env vars minus treatment
+        confounders <- setdiff(env_vars, cv)
+      }
+    } else {
+      confounders <- setdiff(env_vars, cv)
+    }
+
+    W_covs <- as.matrix(X_full[, confounders, drop = FALSE])
 
     cf <- tryCatch({
       if (!is.null(seed)) set.seed(seed)
@@ -127,7 +135,7 @@ cast_cate <- function(data,
 
     if (!is.null(cf)) {
       W_pred <- as.matrix(
-        pred_X[, setdiff(env_vars, cv), drop = FALSE]
+        pred_X[, confounders, drop = FALSE]
       )
       cate_preds <- stats::predict(
         cf, W_pred, estimate.variance = FALSE

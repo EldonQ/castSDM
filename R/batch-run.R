@@ -1,182 +1,111 @@
+.cast_batch_shared_dag_data <- function(species_list,
+                                        env_data,
+                                        env_vars,
+                                        response,
+                                        max_rows,
+                                        seed = NULL) {
+  env_vars <- unique(env_vars)
+  if (!is.null(env_data) && is.data.frame(env_data) &&
+      nrow(env_data) > 0L && all(env_vars %in% names(env_data))) {
+    out <- as.data.frame(env_data[, env_vars, drop = FALSE])
+  } else {
+    rows_per_species <- max(1L, ceiling(max_rows / max(1L, length(species_list))))
+    chunks <- vector("list", length(species_list))
+    if (!is.null(seed)) set.seed(seed)
+    for (i in seq_along(species_list)) {
+      d <- species_list[[i]]
+      if (!is.data.frame(d) || !all(env_vars %in% names(d))) next
+      take <- min(nrow(d), rows_per_species)
+      idx <- if (nrow(d) > take) sample.int(nrow(d), take) else seq_len(nrow(d))
+      chunks[[i]] <- as.data.frame(d[idx, env_vars, drop = FALSE])
+    }
+    chunks <- chunks[!vapply(chunks, is.null, logical(1L))]
+    if (!length(chunks)) {
+      cli::cli_abort(
+        "Could not build shared DAG data: {.arg env_vars} are absent from both {.arg env_data} and {.arg species_list}."
+      )
+    }
+    out <- do.call(rbind, chunks)
+  }
+  for (nm in names(out)) out[[nm]] <- suppressWarnings(as.numeric(out[[nm]]))
+  out <- stats::na.omit(out)
+  if (nrow(out) > max_rows) {
+    if (!is.null(seed)) set.seed(seed + 7919L)
+    out <- out[sample.int(nrow(out), max_rows), , drop = FALSE]
+  }
+  if (nrow(out) < 10L) {
+    cli::cli_abort("Shared DAG data has fewer than 10 complete rows.")
+  }
+  out
+}
+
 #' Batch Multi-Species Modeling
 #'
 #' One-stop interface that runs the full castSDM pipeline on multiple
-#' species, optionally in parallel. Every pipeline parameter can be
-#' configured from this single function call. Each species is processed
-#' independently and results (RDS + all diagnostic figures) are saved
-#' to separate subdirectories. A comparative summary of model performance
-#' across species is returned.
+#' species, optionally in parallel. Results (RDS + diagnostic figures) are
+#' saved to separate subdirectories per species.
 #'
-#' @section Pipeline parameters:
-#' All major stages of the castSDM pipeline are configurable through
-#' explicit arguments. Parameters are grouped by prefix:
-#' \itemize{
-#'   \item **General**: `models`, `train_fraction`, `output_dir`,
-#'     `fig_dpi`, `parallel`, `seed`, `verbose`.
-#'     When `dev_package_root` is set and `parallel = TRUE`, species run on a
-#'     [parallel::makeCluster()] backend: each worker calls [pkgload::load_all()]
-#'     first (see `inst/examples/run_multi_species.R`). Without it, `parallel`
-#'     uses [future.apply::future_lapply()] and the installed package must match
-#'     your DAG API.
-#'   \item **DAG** (`dag_*`): Bootstrap replicates, edge thresholds,
-#'     structure learning algorithm and scoring criterion.
-#'   \item **ATE** (`ate_*`): Cross-fitting folds, significance level,
-#'     nuisance model trees, quantile discretization, Bonferroni,
-#'     parallel ATE estimation.
-#'   \item **Screen** (`screen_*`): Minimum retained variables, fraction,
-#'     importance trees.
-#'   \item **CV** (`cv_*`): Whether to run, folds, blocking method.
-#'   \item **CATE** (`cate_*`): Whether to run, number of variables,
-#'     causal forest trees.
-#'   \item **Fit** (via `...`): Model hyper-parameters such as
-#'     `n_epochs`, `n_runs`, `patience`, `rf_ntree`, `brt_n_trees`,
-#'     `brt_depth`, `hidden_size`, `dropout`, `lr`, `batch_size`,
-#'     `max_interactions`, `tune_grid` are forwarded to [cast_fit()].
-#'     Use `fit_verbose` for [cast_fit()] console output (not `verbose` in `...`).
-#'   \item **Spatial plots**: `plot_basemap` for CV / HSS / CATE maps.
-#'   \item **SHAP** (`do_shap`, `shap_*`): optional XGBoost + fastshap figures.
-#' }
-#'
-#' @param species_list A named list of `data.frame`s. Each element is a
-#'   species dataset with `lon`, `lat`, `presence`, and environmental
-#'   variables. Names are used as species identifiers.
+#' @param species_list A named list of `data.frame`s.
 #' @param env_data Optional shared `data.frame` for spatial prediction.
-#'   If `NULL`, spatial prediction is skipped.
-#' @param models Character vector. Models to fit per species. Default
-#'   `c("cast", "rf", "maxent", "brt")`.
-#' @param train_fraction Numeric. Train/test split ratio. Default `0.7`.
-#' @param output_dir Character. Top-level directory for per-species
-#'   outputs. Default `"castSDM_batch_output"`.
-#' @param fig_dpi Integer. DPI for all saved figures. Default `300`.
-#' @param parallel Logical. If `TRUE`, run species in parallel using
-#'   \pkg{future}. Set a [future::plan()] before calling. Default `TRUE`.
-#' @param seed Integer or `NULL`. Base seed. Each species gets
-#'   `seed + species_index` for reproducibility.
-#' @param verbose Logical. Progress messages for the batch driver itself.
-#'   Default `TRUE`.
-#' @param dev_package_root Character or `NULL`. Absolute path to the package
-#'   source root (folder containing `DESCRIPTION`). When `parallel = TRUE`,
-#'   each PSOCK worker runs [pkgload::load_all()] on this path before fitting
-#'   (so code matches [devtools::load_all()] on the host). Example: pass the
-#'   same path as in `inst/examples/run_multi_species.R` after locating the
-#'   project root.
-#' @param fit_verbose Logical. Passed to [cast_fit()] as `verbose` for each
-#'   species. Default `FALSE`. (Do not pass `verbose` in `...` to `cast_batch`;
-#'   it would clash with `verbose` here; use `fit_verbose` instead.)
-#' @param response Character. Response column name in each species
-#'   `data.frame`. Default `"presence"`.
-#' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()] as
-#'   `env_vars` and `verbose`. Defaults `NULL` and `FALSE`.
-#' @param dag_env_vars,dag_verbose Passed to [cast_dag()] as `env_vars` and
-#'   `verbose`. Defaults `NULL` and `FALSE`.
-#' @param ate_variables,ate_verbose Passed to [cast_ate()] as `variables` and
-#'   `verbose`. Defaults `NULL` and `FALSE`.
-#' @param screen_verbose Passed to [cast_screen()] as `verbose`. Default `FALSE`.
-#' @param cv_models Character vector or `NULL`. Models for [cast_cv()]. If
-#'   `NULL`, uses the same vector as `models`.
-#' @param cv_n_epochs,cv_n_runs,cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose
-#'   Passed to [cast_cv()]. Defaults match that function.
-#' @param predict_models Passed to [cast_predict()] as `models`. Default `NULL`
-#'   (all fitted models).
-#' @param plot_basemap Character. `basemap` for spatial plots (CV, HSS, CATE).
-#'   Default `"world"`.
-#' @param cate_variables,cate_verbose Passed to [cast_cate()]. Defaults `NULL`
-#'   and `FALSE`.
-#' @param cate_point_size Numeric. Point size for saved [plot.cast_cate()] maps.
-#'   Default `0.45` (matches `run_ovis_ammon.R`).
-#' @param eval_response Character or `NULL`. Passed to [cast_evaluate()] as
-#'   `response`. If `NULL`, uses `response`.
-#' @param var_labels Named character vector or `NULL`. Optional labels for
-#'   [plot.cast_dag()], [plot.cast_ate()], [plot.cast_screen()], [plot.cast_cate()].
-#' @param do_shap Logical. If `TRUE`, saves SHAP figures (XGBoost surrogate,
-#'   RF and CAST via [cast_shap_xgb()] / [cast_shap_fit()]) when dependencies
-#'   are available. Default `FALSE` (can be slow in parallel batches).
-#' @param shap_nrounds,shap_max_depth,shap_eta,shap_subsample,shap_colsample_bytree,shap_test_fraction,shap_verbose
-#'   Passed to [cast_shap_xgb()].
-#' @param shap_plot_top_n Integer. Passed to SHAP plot methods.
-#' @param shap_fastshap_nsim,shap_max_explain_rows Passed to [cast_shap_fit()].
-#'
-#' @param dag_R Integer. Number of DAG bootstrap replicates.
-#'   Default `100`.
-#' @param dag_structure_method Character. Passed to [cast_dag()] as
-#'   `structure_method`. Default `"bootstrap_hc"`.
-#' @param dag_pc_alpha PC alpha level. Default `0.05`.
-#' @param dag_pc_test Passed to [cast_dag()] as `pc_test`. Default `"zf"`.
+#' @param models Character vector. Default `c("rf", "brt", "maxent", "gam")`.
+#' @param train_fraction Numeric. Default `0.7`.
+#' @param output_dir Character. Default `"castSDM_batch_output"`.
+#' @param fig_dpi Integer. Default `300`.
+#' @param parallel Logical. Default `TRUE`.
+#' @param seed Integer or `NULL`.
+#' @param verbose Logical. Default `TRUE`.
+#' @param fit_verbose Logical. Default `FALSE`.
+#' @param dag_R Integer. Bootstrap replicates. Default `100`.
+#' @param dag_structure_method Character. Default `"pc"`.
+#' @param dag_include_response Logical. Default `TRUE`.
+#' @param dag_pc_alpha Numeric. Default `0.05`.
+#' @param dag_pc_test Character or `NULL`. Default `NULL`.
 #' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
-#' @param dag_notears_lambda NOTEARS L1 penalty (see \code{cast_dag()}).
-#' @param dag_notears_max_iter Maximum NOTEARS optimization steps.
-#' @param dag_notears_lr Adam learning rate for NOTEARS.
-#' @param dag_notears_tol Acyclicity tolerance for NOTEARS.
-#' @param dag_notears_rho_init Initial augmented-Lagrangian rho for NOTEARS.
-#' @param dag_notears_alpha_mult Rho multiplier for NOTEARS.
-#' @param dag_algorithm Character. Passed to [cast_dag()] as `algorithm`.
-#'   **Only** used when `dag_structure_method = "bootstrap_hc"` (score-based
-#'   learner inside each bootstrap, e.g. `"hc"`, `"tabu"`). Default `"hc"`.
-#' @param dag_score Character. Passed to [cast_dag()] as `score` for
-#'   bootstrap HC only. Default `"bic-g"`.
-#' @param dag_strength_threshold Numeric. Minimum bootstrap edge
-#'   strength to retain. Default `0.7`.
-#' @param dag_direction_threshold Numeric. Minimum direction
-#'   consistency to retain. Default `0.6`.
-#' @param dag_max_rows Integer. Subsample size for DAG learning.
-#'   Default `8000`.
-#' @param cate_hss_model,cate_hss_threshold When saving CATE maps, pass to
-#'   [plot.cast_cate()] to mask by `HSS_<model> >= threshold`. Defaults
-#'   `cast` and `0.1`. Set `cate_hss_model = NULL` to disable masking.
+#' @param dag_algorithm Character. Default `"hc"`.
+#' @param dag_score Character or `NULL`. Default `NULL`.
+#' @param dag_strength_threshold Numeric. Default `0.7`.
+#' @param dag_direction_threshold Numeric. Default `0.6`.
+#' @param dag_max_rows Integer. Default `8000`.
+#' @param select_min_vars Integer. Default `5`.
+#' @param select_min_fraction Numeric. Default `0.3`.
+#' @param select_num_trees Integer. Default `300`.
+#' @param do_cv Logical. Default `TRUE`.
+#' @param cv_k Integer. Default `5`.
+#' @param cv_block_method Character. Default `"grid"`.
+#' @param do_cate Logical. Default `TRUE`.
+#' @param cate_top_n Integer. Default `3`.
+#' @param cate_n_trees Integer. Default `1000`.
+#' @param cate_hss_model,cate_hss_threshold CATE masking. Defaults `"rf"`,
+#'   `0.1`.
+#' @param response Character. Default `"presence"`.
+#' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
+#' @param dag_env_vars,dag_verbose Passed to [cast_dag()].
+#' @param select_verbose Passed to [cast_select()]. Default `FALSE`.
+#' @param cv_models Character or `NULL`. Models for CV.
+#' @param cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose CV controls.
+#' @param predict_models Passed to [cast_predict()].
+#' @param plot_basemap Character. Default `"world"`.
+#' @param cate_variables,cate_verbose Passed to [cast_cate()].
+#' @param cate_point_size Numeric. Default `0.45`.
+#' @param eval_response Character or `NULL`.
+#' @param var_labels Named character vector or `NULL`.
+#' @param do_shap Logical. Default `FALSE`.
+#' @param shap_nrounds,shap_max_depth,shap_eta,shap_subsample,shap_colsample_bytree,shap_test_fraction,shap_verbose SHAP controls.
+#' @param shap_plot_top_n Integer. Default `15`.
+#' @param shap_fastshap_nsim,shap_max_explain_rows SHAP controls.
+#' @param dev_package_root Character or `NULL`.
+#' @param learn_shared_dag Logical. Default `FALSE`.
+#' @param shared_dag Optional precomputed [cast_dag].
+#' @param shared_dag_data Optional `data.frame`.
+#' @param ... Additional arguments forwarded to [cast_fit()].
 #'
-#' @param ate_K Integer. DML cross-fitting folds. Default `5`.
-#' @param ate_alpha Numeric. Significance level for ATE tests.
-#'   Default `0.05`.
-#' @param ate_num_trees Integer. Trees per nuisance RF model.
-#'   Default `300`.
-#' @param ate_quantile_cuts Numeric vector. Quantile thresholds for
-#'   binarization. Default `c(0.25, 0.50, 0.75)`.
-#' @param ate_p_adjust Character. Multiple-testing correction method
-#'   (passed to [stats::p.adjust()]). Default `"fdr"`.
-#' @param ate_parallel Logical. Parallel ATE estimation within each
-#'   species (via \pkg{future}). Default `FALSE`.
-#'
-#' @param screen_min_vars Integer. Minimum variables to retain.
-#'   Default `5`.
-#' @param screen_min_fraction Numeric. Minimum fraction of variables.
-#'   Default `0.5`.
-#' @param screen_num_trees Integer. RF trees for importance ranking.
-#'   Default `300`.
-#'
-#' @param do_cv Logical. Run spatial block CV. Default `TRUE`.
-#' @param cv_k Integer. Number of spatial CV folds. Default `5`.
-#' @param cv_block_method Character. Blocking strategy: `"grid"` or
-#'   `"cluster"`. Default `"grid"`.
-#'
-#' @param do_cate Logical. Estimate CATE via causal forests.
-#'   Default `TRUE`.
-#' @param cate_top_n Integer. Number of top variables for CATE.
-#'   Default `3`.
-#' @param cate_n_trees Integer. Trees in each causal forest.
-#'   Default `1000`.
-#'
-#' @param ... Additional arguments forwarded to [cast_fit()] for
-#'   model hyper-parameter tuning (e.g., `n_epochs`, `n_runs`,
-#'   `rf_ntree`, `brt_n_trees`, `tune_grid`).
-#'
-#' @return A `cast_batch` object with components:
-#' \describe{
-#'   \item{`species_metrics`}{`data.frame` with per-species per-model
-#'     evaluation metrics (from spatial CV when available).}
-#'   \item{`species`}{Character vector of species names.}
-#'   \item{`models`}{Character vector of model names.}
-#'   \item{`results`}{Named list of per-species result lists.}
-#'   \item{`output_dir`}{Output directory path.}
-#' }
-#'
-#' @seealso [cast()], [plot.cast_batch()], [cast_consistency()],
-#'   [cast_fit()], [cast_dag()], [cast_ate()], [cast_screen()],
-#'   [cast_cv()], [cast_cate()], [cast_shap_xgb()], [cast_shap_fit()]
-#'
+#' @return A `cast_batch` object.
+#' @seealso [cast()], [cast_fit()], [cast_dag()], [cast_select()],
+#'   [cast_cv()], [cast_cate()]
 #' @export
 cast_batch <- function(species_list,
                        env_data    = NULL,
-                       models      = c("cast", "rf", "maxent", "brt"),
+                       models      = c("rf", "brt", "maxent", "gam"),
                        train_fraction = 0.7,
                        output_dir  = "castSDM_batch_output",
                        fig_dpi     = 300L,
@@ -186,33 +115,21 @@ cast_batch <- function(species_list,
                        fit_verbose = FALSE,
                        # ── DAG ──
                        dag_R                  = 100L,
-                       dag_structure_method   = "bootstrap_hc",
+                       dag_structure_method   = "pc",
+                       dag_include_response   = TRUE,
                        dag_pc_alpha           = 0.05,
-                       dag_pc_test            = "zf",
+                       dag_pc_test            = NULL,
                        dag_bidag_algorithm    = "order",
                        dag_bidag_iterations   = NULL,
-                       dag_notears_lambda     = 0.03,
-                       dag_notears_max_iter   = 2000L,
-                       dag_notears_lr         = 0.02,
-                       dag_notears_tol        = 1e-3,
-                       dag_notears_rho_init   = 0.1,
-                       dag_notears_alpha_mult = 1.01,
                        dag_algorithm          = "hc",
-                       dag_score              = "bic-g",
+                       dag_score              = NULL,
                        dag_strength_threshold = 0.7,
                        dag_direction_threshold = 0.6,
                        dag_max_rows           = 8000L,
-                       # ── ATE ──
-                       ate_K              = 5L,
-                       ate_alpha          = 0.05,
-                       ate_num_trees      = 300L,
-                       ate_quantile_cuts  = c(0.25, 0.50, 0.75),
-                       ate_p_adjust       = "fdr",
-                       ate_parallel       = FALSE,
-                       # ── Screen ──
-                       screen_min_vars     = 5L,
-                       screen_min_fraction = 0.5,
-                       screen_num_trees    = 300L,
+                       # ── Selection ──
+                       select_min_vars     = 5L,
+                       select_min_fraction = 0.3,
+                       select_num_trees    = 300L,
                        # ── CV ──
                        do_cv           = TRUE,
                        cv_k            = 5L,
@@ -221,19 +138,15 @@ cast_batch <- function(species_list,
                        do_cate      = TRUE,
                        cate_top_n   = 3L,
                        cate_n_trees = 1000L,
-                       cate_hss_model = "cast",
+                       cate_hss_model = "rf",
                        cate_hss_threshold = 0.1,
                        response = "presence",
                        prepare_env_vars = NULL,
                        prepare_verbose = FALSE,
                        dag_env_vars = NULL,
                        dag_verbose = FALSE,
-                       ate_variables = NULL,
-                       ate_verbose = FALSE,
-                       screen_verbose = FALSE,
+                       select_verbose = FALSE,
                        cv_models = NULL,
-                       cv_n_epochs = 200L,
-                       cv_n_runs = 3L,
                        cv_rf_ntree = 300L,
                        cv_brt_n_trees = 500L,
                        cv_parallel = FALSE,
@@ -257,6 +170,9 @@ cast_batch <- function(species_list,
                        shap_fastshap_nsim = 40L,
                        shap_max_explain_rows = 50L,
                        dev_package_root = NULL,
+                       learn_shared_dag = FALSE,
+                       shared_dag = NULL,
+                       shared_dag_data = NULL,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -268,7 +184,7 @@ cast_batch <- function(species_list,
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
   if (verbose) {
-    cli::cli_h1("CAST Batch: {n_sp} species")
+    cli::cli_h1("castSDM Batch: {n_sp} species")
     cli::cli_inform("Models: {.val {models}}")
     cli::cli_inform("Output: {output_dir}")
   }
@@ -312,11 +228,6 @@ cast_batch <- function(species_list,
       if (!isTRUE(in_lib)) Sys.setenv(CASTSDM_ROOT = root)
     }
   }
-  if (verbose && isTRUE(parallel) && nzchar(Sys.getenv("CASTSDM_ROOT", ""))) {
-    cli::cli_inform(
-      "Parallel: {.envvar CASTSDM_ROOT} = {.path {Sys.getenv('CASTSDM_ROOT')}}"
-    )
-  }
 
   fit_args <- list(...)
   if ("verbose" %in% names(fit_args)) {
@@ -329,7 +240,7 @@ cast_batch <- function(species_list,
     bad <- !names(fit_args) %in% cast_fit_names
     if (any(bad)) {
       cli::cli_warn(
-        "Dropping {.arg ...} names not in {.fn cast_fit}: {.val {names(fit_args)[bad]}} (use {.code devtools::load_all()} on current source if you meant batch options)."
+        "Dropping {.arg ...} names not in {.fn cast_fit}: {.val {names(fit_args)[bad]}}."
       )
       fit_args <- fit_args[!bad]
     }
@@ -338,13 +249,70 @@ cast_batch <- function(species_list,
   eval_resp <- if (is.null(eval_response)) response else eval_response
   cv_models_use <- if (is.null(cv_models)) models else cv_models
 
-  # Pack all pipeline config so workers receive a single list
+  if (!is.null(shared_dag) && !inherits(shared_dag, "cast_dag")) {
+    cli::cli_abort("{.arg shared_dag} must be a {.cls cast_dag} object or {.val NULL}.")
+  }
+
+  if (is.null(shared_dag) && isTRUE(learn_shared_dag)) {
+    shared_dir <- file.path(output_dir, ".shared")
+    dir.create(shared_dir, showWarnings = FALSE, recursive = TRUE)
+    shared_path <- file.path(shared_dir, "shared_dag.rds")
+    shared_dag <- tryCatch(
+      if (file.exists(shared_path)) readRDS(shared_path) else NULL,
+      error = function(e) NULL
+    )
+    if (!inherits(shared_dag, "cast_dag")) {
+      dag_vars <- dag_env_vars %||% prepare_env_vars %||%
+        get_env_vars(species_list[[sp_names[1L]]], response = response)
+      dag_data <- shared_dag_data %||%
+        .cast_batch_shared_dag_data(
+          species_list = species_list,
+          env_data = env_data,
+          env_vars = dag_vars,
+          response = response,
+          max_rows = max(dag_max_rows * 4L, dag_max_rows),
+          seed = seed
+        )
+      if (verbose) {
+        cli::cli_inform(
+          "Learning shared DAG once: {length(dag_vars)} env vars, {nrow(dag_data)} rows."
+        )
+      }
+      shared_dag <- cast_run_step("shared_dag", output_dir, ".shared",
+        cast_dag(
+          dag_data,
+          response = response,
+          include_response = dag_include_response,
+          env_vars = dag_vars,
+          R = dag_R,
+          algorithm = dag_algorithm,
+          score = dag_score,
+          strength_threshold = dag_strength_threshold,
+          direction_threshold = dag_direction_threshold,
+          max_rows = dag_max_rows,
+          seed = seed,
+          verbose = dag_verbose,
+          structure_method = dag_structure_method,
+          pc_alpha = dag_pc_alpha,
+          pc_test = dag_pc_test,
+          bidag_algorithm = dag_bidag_algorithm,
+          bidag_iterations = dag_bidag_iterations
+        )
+      )
+      saveRDS(shared_dag, shared_path)
+    } else if (verbose) {
+      cli::cli_inform("Shared DAG cache hit: {.path {shared_path}}")
+    }
+  }
+
+  # Pack all pipeline config
   cfg <- list(
     response = response,
     eval_response = eval_resp,
     prepare_env_vars = prepare_env_vars,
     prepare_verbose = prepare_verbose,
     train_fraction = train_fraction,
+    dag_include_response = dag_include_response,
     dag_env_vars = dag_env_vars,
     dag_verbose = dag_verbose,
     dag_R = dag_R,
@@ -353,32 +321,17 @@ cast_batch <- function(species_list,
     dag_pc_test = dag_pc_test,
     dag_bidag_algorithm = dag_bidag_algorithm,
     dag_bidag_iterations = dag_bidag_iterations,
-    dag_notears_lambda = dag_notears_lambda,
-    dag_notears_max_iter = dag_notears_max_iter,
-    dag_notears_lr = dag_notears_lr,
-    dag_notears_tol = dag_notears_tol,
-    dag_notears_rho_init = dag_notears_rho_init,
-    dag_notears_alpha_mult = dag_notears_alpha_mult,
     dag_algorithm = dag_algorithm,
     dag_score = dag_score,
     dag_strength_threshold = dag_strength_threshold,
     dag_direction_threshold = dag_direction_threshold,
     dag_max_rows = dag_max_rows,
-    ate_variables = ate_variables,
-    ate_verbose = ate_verbose,
-    ate_K = ate_K, ate_alpha = ate_alpha,
-    ate_num_trees = ate_num_trees,
-    ate_quantile_cuts = ate_quantile_cuts,
-    ate_p_adjust = ate_p_adjust,
-    ate_parallel = ate_parallel,
-    screen_verbose = screen_verbose,
-    screen_min_vars = screen_min_vars,
-    screen_min_fraction = screen_min_fraction,
-    screen_num_trees = screen_num_trees,
+    select_min_vars = select_min_vars,
+    select_min_fraction = select_min_fraction,
+    select_num_trees = select_num_trees,
+    select_verbose = select_verbose,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
     cv_models = cv_models_use,
-    cv_n_epochs = cv_n_epochs,
-    cv_n_runs = cv_n_runs,
     cv_rf_ntree = cv_rf_ntree,
     cv_brt_n_trees = cv_brt_n_trees,
     cv_parallel = cv_parallel,
@@ -404,7 +357,8 @@ cast_batch <- function(species_list,
     shap_plot_top_n = shap_plot_top_n,
     shap_fastshap_nsim = shap_fastshap_nsim,
     shap_max_explain_rows = shap_max_explain_rows,
-    fit_verbose = fit_verbose
+    fit_verbose = fit_verbose,
+    shared_dag = shared_dag
   )
 
   if (parallel && !is.null(dev_root_workers)) {
@@ -501,12 +455,11 @@ cast_batch <- function(species_list,
 
   names(results) <- sp_names
 
-  # Collect metrics across species
+  # Collect metrics
   metrics_rows <- list()
   for (sp in sp_names) {
     r <- results[[sp]]
     if (is.null(r)) next
-
     if (!is.null(r$cv) && !is.null(r$cv$fold_metrics) &&
         nrow(r$cv$fold_metrics) > 0) {
       fm <- r$cv$fold_metrics
@@ -549,18 +502,6 @@ cast_batch <- function(species_list,
 }
 
 
-#' Plot Multi-Species Model Performance Comparison
-#'
-#' Generates boxplots with jittered points comparing model performance
-#' metrics across species. Uses a clean black-and-white style with
-#' grayscale fill.
-#'
-#' @param x A `cast_batch` object.
-#' @param metrics Character vector. Metrics to show. Default
-#'   `c("auc", "tss", "cbi")`.
-#' @param ... Ignored.
-#'
-#' @return A `ggplot` object (faceted by metric).
 #' @export
 plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   check_suggested("ggplot2", "for plotting")
@@ -578,16 +519,13 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   long_rows <- list()
   for (mc in present_metrics) {
     long_rows[[mc]] <- data.frame(
-      species = sm$species,
-      model   = sm$model,
-      metric  = toupper(mc),
-      value   = sm[[mc]],
+      species = sm$species, model = sm$model,
+      metric = toupper(mc), value = sm[[mc]],
       stringsAsFactors = FALSE
     )
   }
   long <- do.call(rbind, long_rows)
   long <- long[!is.na(long$value), ]
-
   long$metric <- factor(long$metric, levels = toupper(present_metrics))
   long$model  <- factor(long$model)
 

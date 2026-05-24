@@ -25,7 +25,6 @@
 #'   \item{`env_data.file`}{Optional CSV with shared environmental data
 #'     for spatial HSS prediction.}
 #'   \item{`models`}{Character vector forwarded to [cast_batch()].}
-#'   \item{`backend`}{`"r"` (default, pure-R) or `"torch"` for CI-MLP.}
 #'   \item{`cast_batch_args`}{Map of any other named arg accepted by
 #'     [cast_batch()].}
 #' }
@@ -100,7 +99,6 @@ cast_run_from_config <- function(config_path, ...) {
   # cast_batch args
   ba <- cfg$cast_batch_args %||% list()
   if (!is.null(cfg$models))   ba$models   <- cfg$models
-  if (!is.null(cfg$backend))  ba$backend  <- cfg$backend
   ba$species_list <- species_list
   ba$env_data     <- env_data
   ba$output_dir   <- output_dir

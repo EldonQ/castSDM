@@ -7,7 +7,7 @@
 cast_cate(
   data,
   variables = NULL,
-  ate = NULL,
+  dag = NULL,
   screen = NULL,
   response = "presence",
   top_n = 3L,
@@ -22,12 +22,13 @@ cast_cate(
 optionally \code{lon}, \code{lat} coordinates.}
 
 \item{variables}{Character vector of treatment variables to estimate CATE
-for. Default \code{NULL} uses top significant variables from ATE.}
+for. Default \code{NULL} uses top variables from the screen (by role priority:
+parents first).}
 
-\item{ate}{A \link{cast_ate} object (used to select top variables if
-\code{variables} is \code{NULL}). Default \code{NULL}.}
+\item{dag}{A \link{cast_dag} object (used for DAG-guided confounder
+selection). Default \code{NULL}.}
 
-\item{screen}{A \link{cast_screen} object (used to select top variables if
+\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}} (used to select top variables if
 \code{variables} is \code{NULL}). Default \code{NULL}.}
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
@@ -38,14 +39,14 @@ Default \code{3}.}
 \item{n_trees}{Integer. Number of causal forest trees. Default \code{1000}.}
 
 \item{predict_data}{Optional \code{data.frame} for out-of-sample CATE
-prediction. If \code{NULL}, predicts on the training data. Default \code{NULL}.}
+prediction. Default \code{NULL}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_cate} object containing a \code{effects} data.frame with
+A \code{cast_cate} object containing an \code{effects} data.frame with
 columns: \code{lon}, \code{lat}, \code{variable}, \code{cate}.
 }
 \description{
@@ -54,19 +55,14 @@ Average Treatment Effects at each spatial location. Reveals how
 environmental impacts on species presence vary across geographic space.
 }
 \details{
-For each treatment variable, a causal forest partitions the feature space
-to estimate location-specific effects:
-
-\deqn{\tau(x) = E[Y(1) - Y(0) | X = x]}
-
-This reveals spatial heterogeneity in how environmental drivers affect
-species presence -- e.g., "temperature sensitivity is stronger at range
-margins."
+When a DAG is provided, confounders for each treatment variable are
+identified as the remaining Markov Blanket variables (DAG-guided).
+Without a DAG, all other selected variables are used as confounders.
 }
 \references{
 Athey, S., Tibshirani, J., & Wager, S. (2019). Generalized random
 forests. \emph{The Annals of Statistics}, 47(2), 1148-1178.
 }
 \seealso{
-\code{\link[grf:causal_forest]{grf::causal_forest()}}, \code{\link[=cast_ate]{cast_ate()}}
+\code{\link[grf:causal_forest]{grf::causal_forest()}}, \code{\link[=cast_select]{cast_select()}}
 }

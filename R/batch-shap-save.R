@@ -90,21 +90,19 @@
   )
 }
 
-.cast_shap_save_panel_2x3 <- function(sh_xgb, sh_rf, sh_cast, topn, fig_dir, fig_dpi) {
+.cast_shap_save_panel_2x2 <- function(sh_xgb, sh_rf, topn, fig_dir, fig_dpi) {
   if (!requireNamespace("patchwork", quietly = TRUE)) {
     return(invisible(NULL))
   }
   p11 <- .cast_shap_panel_plot(sh_xgb, "interaction_network", topn, "XGBoost - network")
   p12 <- .cast_shap_panel_plot(sh_rf, "interaction_network", topn, "RF - network")
-  p13 <- .cast_shap_panel_plot(sh_cast, "interaction_network", topn, "CAST - network")
   p21 <- .cast_shap_panel_plot(sh_xgb, "waterfall", topn, "XGBoost - waterfall")
   p22 <- .cast_shap_panel_plot(sh_rf, "waterfall", topn, "RF - waterfall")
-  p23 <- .cast_shap_panel_plot(sh_cast, "waterfall", topn, "CAST - waterfall")
-  comb <- patchwork::wrap_plots(p11, p12, p13, p21, p22, p23, nrow = 2L, ncol = 3L)
+  comb <- patchwork::wrap_plots(p11, p12, p21, p22, nrow = 2L, ncol = 2L)
   tryCatch(
     ggplot2::ggsave(
-      file.path(fig_dir, "shap_panel_2x3.png"),
-      comb, width = 21, height = 12, dpi = fig_dpi,
+      file.path(fig_dir, "shap_panel_2x2.png"),
+      comb, width = 18, height = 12, dpi = fig_dpi,
       bg = "transparent", limitsize = FALSE
     ),
     error = function(e) NULL
@@ -112,10 +110,10 @@
   invisible(NULL)
 }
 
-#' Save SHAP figures for one species (XGB / RF / CAST + 2x3 panel)
+#' Save SHAP figures for one species (XGB / RF + 2x2 panel)
 #'
 #' Writes `shap_*_interaction_network.png`, `shap_*_waterfall.png`, and
-#' `shap_panel_2x3.png` (patchwork: row1 = networks, row2 = waterfalls).
+#' `shap_panel_2x2.png` (patchwork: row1 = networks, row2 = waterfalls).
 #' Used by [cast_batch()] when `do_shap = TRUE`; can be called manually after
 #' reading `cast_result.rds` if you replay [cast_prepare()] with the same
 #' `train_fraction` and `seed` as the original batch.
@@ -146,7 +144,6 @@ save_cast_batch_shap_outputs <- function(train_df,
 
   sh_xgb <- NULL
   sh_rf <- NULL
-  sh_cast <- NULL
 
   if (requireNamespace("xgboost", quietly = TRUE)) {
     sh_xgb <- tryCatch(
@@ -190,27 +187,6 @@ save_cast_batch_shap_outputs <- function(train_df,
     .cast_shap_one_pair(sh_rf, "shap_rf", topn, fig_dir, fig_dpi)
   }
 
-  torch_ok <- requireNamespace("torch", quietly = TRUE) &&
-    tryCatch(torch::torch_is_installed(), error = function(e) FALSE)
-  if (requireNamespace("fastshap", quietly = TRUE) && isTRUE(torch_ok) &&
-      "cast" %in% names(fit$models) && !is.null(fit$models$cast$model)) {
-    sh_cast <- tryCatch(
-      cast_shap_fit(
-        fit = fit,
-        which = "cast",
-        data = train_df,
-        response = cfg$response,
-        test_fraction = cfg$shap_test_fraction,
-        seed = seed_i,
-        fastshap_nsim = cfg$shap_fastshap_nsim,
-        max_explain_rows = cfg$shap_max_explain_rows,
-        verbose = FALSE
-      ),
-      error = function(e) NULL
-    )
-    .cast_shap_one_pair(sh_cast, "shap_cast", topn, fig_dir, fig_dpi)
-  }
-
-  .cast_shap_save_panel_2x3(sh_xgb, sh_rf, sh_cast, topn, fig_dir, fig_dpi)
+  .cast_shap_save_panel_2x2(sh_xgb, sh_rf, topn, fig_dir, fig_dpi)
   invisible(NULL)
 }

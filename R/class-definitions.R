@@ -8,14 +8,18 @@
 #' @param boot_R Integer. Number of bootstrap replicates used.
 #' @param strength_threshold Numeric. Edge strength threshold applied.
 #' @param direction_threshold Numeric. Direction consistency threshold applied.
-#' @param score Character. Scoring criterion used (e.g., `"bic-g"`).
+#' @param score Character. Scoring criterion used (e.g., `"bic-cg"`).
+#' @param structure_method Character. Structure learning method used.
+#' @param response_node Character or `NULL`. Name of the response node if
+#'   included in DAG learning.
 #'
 #' @return A `cast_dag` object.
 #' @keywords internal
 #' @export
 new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
-                         direction_threshold, score = "bic-g",
-                         structure_method = "bootstrap_hc") {
+                         direction_threshold, score = "bic-cg",
+                         structure_method = "pc",
+                         response_node = NULL) {
   structure(
     list(
       edges = edges,
@@ -24,50 +28,31 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
       strength_threshold = strength_threshold,
       direction_threshold = direction_threshold,
       score = score,
-      structure_method = structure_method
+      structure_method = structure_method,
+      response_node = response_node
     ),
     class = "cast_dag"
-  )
-}
-
-#' Create a cast_ate Object
-#'
-#' @param estimates A `data.frame` with columns: `variable`, `coef`, `se`,
-#'   `p_value`, `significant`.
-#' @param K Integer. Number of cross-fitting folds used.
-#' @param alpha Numeric. Significance level used.
-#'
-#' @return A `cast_ate` object.
-#' @keywords internal
-#' @export
-new_cast_ate <- function(estimates, K, alpha = 0.05, p_adjust = "fdr") {
-  structure(
-    list(
-      estimates = estimates,
-      K = K,
-      alpha = alpha,
-      p_adjust = p_adjust
-    ),
-    class = "cast_ate"
   )
 }
 
 #' Create a cast_screen Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable composite scores.
-#' @param weights Named numeric vector of adaptive weights (`w_dag`, `w_ate`,
-#'   `w_imp`).
+#' @param scores A `data.frame` with per-variable scores (RF importance and
+#'   DAG Markov Blanket membership).
+#' @param roles A `data.frame` with columns `variable` and `role` indicating
+#'   each variable's causal role: `"parent"`, `"child"`, `"co_parent"`, or
+#'   `"predictive"`.
 #'
 #' @return A `cast_screen` object.
 #' @keywords internal
 #' @export
-new_cast_screen <- function(selected, scores, weights) {
+new_cast_screen <- function(selected, scores, roles) {
   structure(
     list(
       selected = selected,
       scores = scores,
-      weights = weights
+      roles = roles
     ),
     class = "cast_screen"
   )
@@ -91,18 +76,17 @@ new_cast_roles <- function(roles) {
 #' Create a cast_fit Object
 #'
 #' @param models Named list of fitted model objects.
-#' @param cast_vars Character vector of variables used by CAST model.
+#' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List with `means` and `sds` used for standardization.
 #' @param dag A `cast_dag` object (or `NULL`).
-#' @param ate A `cast_ate` object (or `NULL`).
 #' @param screen A `cast_screen` object (or `NULL`).
 #'
 #' @return A `cast_fit` object.
 #' @keywords internal
 #' @export
 new_cast_fit <- function(models, cast_vars, env_vars, scaling,
-                         dag = NULL, ate = NULL, screen = NULL) {
+                         dag = NULL, screen = NULL) {
   structure(
     list(
       models = models,
@@ -110,7 +94,6 @@ new_cast_fit <- function(models, cast_vars, env_vars, scaling,
       env_vars = env_vars,
       scaling = scaling,
       dag = dag,
-      ate = ate,
       screen = screen
     ),
     class = "cast_fit"
@@ -207,40 +190,37 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' Container for the full pipeline output.
 #'
 #' @param dag A `cast_dag` object.
-#' @param ate A `cast_ate` object.
 #' @param screen A `cast_screen` object.
 #' @param roles A `cast_roles` object.
 #' @param fit A `cast_fit` object.
 #' @param eval A `cast_eval` object (hold-out evaluation).
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
+#' @param ensemble A `cast_ensemble` object (or `NULL`).
 #' @param cate A `cast_cate` object (or `NULL`).
-#' @param shap A named list of `cast_shap` objects (or `NULL`). Keys are
-#'   model names such as `"xgb"`, `"rf"`, `"cast"`.
-#' @param backdoor A `data.frame` from [cast_backdoor()] (or `NULL`).
+#' @param shap A named list of `cast_shap` objects (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
 #' @keywords internal
 #' @export
-new_cast_result <- function(dag, ate, screen, roles, fit, eval,
+new_cast_result <- function(dag, screen, roles, fit, eval,
                             cv = NULL, predict = NULL,
+                            ensemble = NULL,
                             cate = NULL, shap = NULL,
-                            backdoor = NULL,
                             call = NULL) {
   structure(
     list(
       dag = dag,
-      ate = ate,
       screen = screen,
       roles = roles,
       fit = fit,
       eval = eval,
       cv = cv,
       predict = predict,
+      ensemble = ensemble,
       cate = cate,
       shap = shap,
-      backdoor = backdoor,
       call = call
     ),
     class = "cast_result"
@@ -290,5 +270,55 @@ new_cast_batch <- function(species_metrics, species, models,
       output_dir = output_dir
     ),
     class = "cast_batch"
+  )
+}
+
+#' Create a cast_ensemble Object
+#'
+#' @param predictions A `data.frame` with columns `lon`, `lat`, `hss_ensemble`
+#'   and optionally `binary_ensemble`.
+#' @param weights Named numeric vector of per-model weights.
+#' @param method Character. Ensemble method used (`"weighted"`, `"best"`,
+#'   `"equal"`).
+#' @param threshold Numeric. Binary classification threshold.
+#' @param model_scores Named numeric vector of per-model composite scores.
+#'
+#' @return A `cast_ensemble` object.
+#' @keywords internal
+#' @export
+new_cast_ensemble <- function(predictions, weights, method,
+                              threshold, model_scores) {
+  structure(
+    list(
+      predictions = predictions,
+      weights = weights,
+      method = method,
+      threshold = threshold,
+      model_scores = model_scores
+    ),
+    class = "cast_ensemble"
+  )
+}
+
+#' Create a cast_project Object
+#'
+#' @param current A `cast_ensemble` object for the current climate.
+#' @param future A named list of `cast_ensemble` objects for future scenarios.
+#' @param changes A named list of `data.frame`s with columns `lon`, `lat`,
+#'   `change` (`"gain"`, `"loss"`, `"stable_present"`, `"stable_absent"`).
+#' @param stats A `data.frame` with summary statistics per scenario.
+#'
+#' @return A `cast_project` object.
+#' @keywords internal
+#' @export
+new_cast_project <- function(current, future, changes, stats) {
+  structure(
+    list(
+      current = current,
+      future = future,
+      changes = changes,
+      stats = stats
+    ),
+    class = "cast_project"
   )
 }

@@ -1,7 +1,7 @@
 #' Generate HTML Summary Report
 #'
-#' Creates an HTML report summarizing the CAST pipeline results, including
-#' DAG visualization, ATE estimates, variable screening, model evaluation,
+#' Creates an HTML report summarizing the castSDM pipeline results,
+#' including DAG visualization, variable selection, model evaluation,
 #' and optional SHAP explanations. Uses the rmarkdown package to render
 #' a self-contained HTML document.
 #'
@@ -53,7 +53,7 @@ cast_report <- function(result,
   output_dir <- dirname(output_file)
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-  if (verbose) cli::cli_inform("Rendering CAST report to {.file {output_file}}...")
+  if (verbose) cli::cli_inform("Rendering castSDM report to {.file {output_file}}...")
 
   rmarkdown::render(
     input = rmd_tmp,
@@ -80,7 +80,7 @@ cast_report <- function(result,
 #' @noRd
 .cast_report_rmd_content <- function(species = "Species") {
   paste0('---
-title: "CAST Pipeline Report: ', species, '"
+title: "castSDM Pipeline Report: ', species, '"
 output:
   html_document:
     toc: true
@@ -109,25 +109,7 @@ if (!is.null(result$dag)) {
 }
 ```
 
-## 2. Average Treatment Effects (ATE)
-
-```{r ate-plot}
-if (!is.null(result$ate)) {
-  plot(result$ate, var_labels = var_labels)
-}
-```
-
-```{r ate-table}
-if (!is.null(result$ate)) {
-  est <- result$ate$estimates
-  est$coef <- round(est$coef, 4)
-  est$se <- round(est$se, 4)
-  est$p_value <- format.pval(est$p_value, digits = 3)
-  knitr::kable(est, caption = "ATE Estimates")
-}
-```
-
-## 3. Variable Screening
+## 2. Variable Selection
 
 ```{r screen-plot}
 if (!is.null(result$screen)) {
@@ -135,7 +117,13 @@ if (!is.null(result$screen)) {
 }
 ```
 
-## 4. Model Evaluation
+```{r roles-table}
+if (!is.null(result$screen) && !is.null(result$screen$roles)) {
+  knitr::kable(result$screen$roles, caption = "Causal Roles (Markov Blanket)")
+}
+```
+
+## 3. Model Evaluation
 
 ```{r eval-plot}
 if (!is.null(result$eval)) {
@@ -149,15 +137,23 @@ if (!is.null(result$cv)) {
 }
 ```
 
-## 5. Prediction Maps
+## 4. Prediction Maps
 
 ```{r pred-plot, fig.height=8}
 if (!is.null(result$predict)) {
-  plot(result$predict, species = params$species)
+  for (mdl in result$predict$models) {
+    print(plot(result$predict, model = mdl))
+  }
 }
 ```
 
-## 6. SHAP Explanations
+```{r ensemble-plot, fig.height=8}
+if (!is.null(result$ensemble)) {
+  plot(result$ensemble)
+}
+```
+
+## 5. SHAP Explanations
 
 ```{r shap-section, results="asis"}
 if (!is.null(result$shap)) {

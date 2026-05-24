@@ -31,13 +31,12 @@ same convention as \code{\link[=cast_fit]{cast_fit()}} for traditional models; (
 \code{screen} is set, \code{intersect(get_env_vars(), screen$selected)}; (3) else
 \code{\link[=get_env_vars]{get_env_vars()}}.}
 
-\item{screen}{Optional \link{cast_screen}; used only when \code{dag} is \code{NULL} and
-\code{env_vars} is \code{NULL} (legacy screening of numeric env names).}
+\item{screen}{Optional \code{cast_screen} object; used only when \code{dag} is \code{NULL} and
+\code{env_vars} is \code{NULL}.}
 
 \item{dag}{Optional \link{cast_dag}; when supplied with \code{env_vars = NULL},
-fixes SHAP inputs to \strong{DAG nodes} so the XGBoost surrogate uses the \strong{same
-raw environmental columns} as \code{cast_fit(..., models = "rf", ...)} (not
-\code{cast_features()} interaction columns).}
+fixes SHAP inputs to \strong{DAG nodes} so the XGBoost surrogate uses the
+\strong{same raw environmental columns} as \code{cast_fit()}.}
 
 \item{nrounds}{Maximum boosting rounds. Default \code{400}.}
 
@@ -70,5 +69,5 @@ reproduce the \strong{Impact intensity} network and \strong{Impact direction} wa
 not the same as column means across rows).
 }
 \seealso{
-\code{\link[=plot.cast_shap]{plot.cast_shap()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_screen]{cast_screen()}}
+\code{\link[=plot.cast_shap]{plot.cast_shap()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_select]{cast_select()}}
 }

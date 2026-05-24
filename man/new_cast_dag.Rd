@@ -10,8 +10,9 @@ new_cast_dag(
   boot_R,
   strength_threshold,
   direction_threshold,
-  score = "bic-g",
-  structure_method = "bootstrap_hc"
+  score = "bic-cg",
+  structure_method = "pc",
+  response_node = NULL
 )
 }
 \arguments{
@@ -26,7 +27,12 @@ new_cast_dag(
 
 \item{direction_threshold}{Numeric. Direction consistency threshold applied.}
 
-\item{score}{Character. Scoring criterion used (e.g., \code{"bic-g"}).}
+\item{score}{Character. Scoring criterion used (e.g., \code{"bic-cg"}).}
+
+\item{structure_method}{Character. Structure learning method used.}
+
+\item{response_node}{Character or \code{NULL}. Name of the response node if
+included in DAG learning.}
 }
 \value{
 A \code{cast_dag} object.

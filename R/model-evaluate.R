@@ -1,7 +1,7 @@
 #' Evaluate Fitted Models
 #'
-#' Computes AUC (Area Under ROC Curve) and TSS (True Skill Statistic) for
-#' fitted models on test data.
+#' Computes AUC (Area Under ROC Curve), TSS (True Skill Statistic), and
+#' CBI (Continuous Boyce Index) for fitted models on test data.
 #'
 #' @param fit A [cast_fit] object.
 #' @param test_data A `data.frame` with `presence` column and the same
@@ -14,7 +14,7 @@
 #' - **AUC**: Area Under the Receiver Operating Characteristic curve,
 #'   measuring discrimination ability. Computed via [pROC::roc()].
 #' - **TSS**: True Skill Statistic = Sensitivity + Specificity - 1.
-#'   Threshold-independent measure of predictive skill.
+#' - **CBI**: Continuous Boyce Index, measuring predicted–expected ratio.
 #'
 #' @seealso [cast_fit()], [cast_predict()]
 #'
@@ -24,15 +24,12 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
 
   Y_test <- test_data[[response]]
   env_vars <- fit$env_vars
-  scaling <- fit$scaling
 
-  # Standardize test data using training parameters
   X_test_raw <- as.data.frame(test_data[, env_vars, drop = FALSE])
+  for (col in names(X_test_raw)) {
+    X_test_raw[[col]] <- as.numeric(X_test_raw[[col]])
+  }
   X_test_raw[is.na(X_test_raw)] <- 0
-  X_test_sc <- as.data.frame(
-    scale(X_test_raw, center = scaling$means, scale = scaling$sds)
-  )
-  X_test_sc[is.na(X_test_sc)] <- 0
 
   results <- list()
 
@@ -40,10 +37,7 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
     mdl_info <- fit$models[[mdl_name]]
 
     preds <- tryCatch(
-      predict_single_model(
-        mdl_info, X_test_raw, X_test_sc,
-        fit$screen, fit$dag, fit$ate
-      ),
+      predict_single_model(mdl_info, X_test_raw),
       error = function(e) rep(NA_real_, nrow(test_data))
     )
 
@@ -69,45 +63,12 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
 #'
 #' @param mdl_info Model info list from cast_fit.
 #' @param X_raw Raw (unscaled) test data.
-#' @param X_sc Scaled test data.
-#' @param screen cast_screen object.
-#' @param dag cast_dag object.
-#' @param ate cast_ate object.
 #' @return Numeric vector of predictions.
 #' @keywords internal
 #' @noRd
-predict_single_model <- function(mdl_info, X_raw, X_sc,
-                                 screen, dag, ate) {
+predict_single_model <- function(mdl_info, X_raw) {
   if (is.null(mdl_info$model)) return(rep(NA_real_, nrow(X_raw)))
 
-  type <- mdl_info$type %||% "traditional"
-
-  if (type == "nn" || type == "nn_r") {
-    feat_type <- mdl_info$feature_type
-    if (!is.null(feat_type) && feat_type != "mlp") {
-      feat <- cast_features(X_sc, screen, dag, ate, model_type = feat_type)
-      X_pred <- feat$features
-    } else {
-      X_pred <- X_sc
-    }
-    if (type == "nn_r") {
-      return(cast_mlp_predict(mdl_info$model, X_pred))
-    }
-    # Legacy torch backend
-    model <- mdl_info$model
-    model$eval()
-    torch::with_no_grad({
-      xt <- torch::torch_tensor(
-        as.matrix(X_pred), dtype = torch::torch_float()
-      )
-      pred <- as.numeric(
-        torch::torch_sigmoid(model(xt))$squeeze()$cpu()
-      )
-    })
-    return(pred)
-  }
-
-  # Traditional models
   nm <- mdl_info$name
   if (nm == "rf") {
     return(stats::predict(mdl_info$model, data = X_raw)$predictions[, "1"])

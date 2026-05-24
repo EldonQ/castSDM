@@ -72,14 +72,23 @@ get_env_vars <- function(data, response = "presence",
 }
 
 
-#' Check if torch is Available
+#' Compute AUC via Wilcoxon-Mann-Whitney Estimator
 #'
-#' @return Logical.
+#' A lightweight AUC computation that does not require pROC. Used
+#' internally by [cast_esm()] for bivariate model weighting.
+#'
+#' @param y Binary integer vector (0/1).
+#' @param pred Numeric vector of predicted probabilities.
+#' @return Scalar AUC in \[0, 1\].
 #' @keywords internal
 #' @noRd
-has_torch <- function() {
-  requireNamespace("torch", quietly = TRUE) &&
-    torch::torch_is_installed()
+compute_auc <- function(y, pred) {
+  ok <- !is.na(y) & !is.na(pred)
+  y <- y[ok]; pred <- pred[ok]
+  n1 <- sum(y == 1L); n0 <- sum(y == 0L)
+  if (n1 == 0L || n0 == 0L) return(NA_real_)
+  r <- rank(pred)
+  (sum(r[y == 1L]) - n1 * (n1 + 1) / 2) / (n1 * n0)
 }
 
 

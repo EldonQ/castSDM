@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_dag}
 \alias{plot.cast_dag}
-\title{Plot a CAST DAG as a Network Graph}
+\title{Plot a castSDM DAG as a Network Graph}
 \usage{
 \method{plot}{cast_dag}(x, roles = NULL, screen = NULL, var_labels = NULL, species = NULL, ...)
 }
@@ -11,7 +11,7 @@
 
 \item{roles}{Optional \link{cast_roles} object for node coloring.}
 
-\item{screen}{Optional \link{cast_screen} object to mark selected variables.}
+\item{screen}{Optional \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}} to mark selected variables.}
 
 \item{var_labels}{Optional named character vector mapping variable names
 to display labels (e.g., \code{c(bio02 = "Diurnal Temp Range")}).}
@@ -26,7 +26,7 @@ A \code{ggplot} object.
 }
 \description{
 Visualizes the learned causal DAG using ggraph. Nodes are colored by
-causal role, sized by degree, and edges weighted by bootstrap strength.
-Follows the single-species showcase style (Fig 2) with edge alpha mapped
-to actual bootstrap strength.
+causal role (parent/child/co_parent/predictive), sized by degree, and
+edges weighted by bootstrap strength. The response node (presence) is
+highlighted when present.
 }
