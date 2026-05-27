@@ -11,7 +11,7 @@
   )
   if (!is.null(p_net)) {
     tryCatch(
-      ggplot2::ggsave(
+      cast_safe_ggsave(
         file.path(fig_dir, paste0(stem, "_interaction_network.png")),
         p_net, width = 13, height = 10, dpi = fig_dpi,
         bg = "transparent", limitsize = FALSE
@@ -36,7 +36,7 @@
   )
   if (!is.null(p_wf)) {
     tryCatch(
-      ggplot2::ggsave(
+      cast_safe_ggsave(
         file.path(fig_dir, paste0(stem, "_waterfall.png")),
         p_wf, width = 10, height = 6, dpi = fig_dpi,
         bg = "transparent", limitsize = FALSE
@@ -52,7 +52,8 @@
     ggplot2::theme_void() +
     ggplot2::annotate(
       "text", x = 0.5, y = 0.5, label = subtitle,
-      size = 3.2, color = "grey45"
+      size = 3.2, color = "grey45",
+      family = getOption("castSDM.font_family", "Arial")
     ) +
     ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))
 }
@@ -100,7 +101,7 @@
   p22 <- .cast_shap_panel_plot(sh_rf, "waterfall", topn, "RF - waterfall")
   comb <- patchwork::wrap_plots(p11, p12, p21, p22, nrow = 2L, ncol = 2L)
   tryCatch(
-    ggplot2::ggsave(
+    cast_safe_ggsave(
       file.path(fig_dir, "shap_panel_2x2.png"),
       comb, width = 18, height = 12, dpi = fig_dpi,
       bg = "transparent", limitsize = FALSE

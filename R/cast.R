@@ -17,7 +17,7 @@
 #' @param n_bootstrap Integer. Number of bootstrap replicates for DAG when
 #'   `dag_structure_method = "bootstrap_hc"`. Default `100`.
 #' @param dag_structure_method Character passed to [cast_dag()] as
-#'   `structure_method`. Default `"pc"`.
+#'   `structure_method`. Default `"mb_first"`.
 #' @param dag_include_response Logical. Include response in DAG learning for
 #'   Markov Blanket extraction. Default `TRUE`.
 #' @param dag_pc_alpha Significance level for PC.
@@ -66,7 +66,7 @@ cast <- function(species_data,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
                  n_bootstrap = 100L,
-                 dag_structure_method = "pc",
+                 dag_structure_method = "mb_first",
                  dag_include_response = TRUE,
                  dag_pc_alpha = 0.05,
                  dag_pc_test = NULL,

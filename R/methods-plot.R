@@ -31,6 +31,7 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
         ggplot2::theme_void() +
         ggplot2::annotate("text", x = 0.5, y = 0.5,
                           label = "No edges in DAG", size = 5,
+                          family = getOption("castSDM.font_family", "Arial"),
                           fontface = "italic", color = "grey50")
     )
   }
@@ -132,7 +133,9 @@ plot.cast_dag <- function(x, roles = NULL, screen = NULL,
     ) +
     ggraph::geom_node_text(
       ggplot2::aes(label = .data$label),
-      repel = TRUE, size = 3.2, fontface = "bold", max.overlaps = 20
+      repel = TRUE, size = 3.2,
+      family = getOption("castSDM.font_family", "Arial"),
+      fontface = "bold", max.overlaps = 20
     ) +
     ggplot2::scale_color_manual(values = role_colors, name = "Causal\nRole") +
     ggplot2::scale_size_continuous(range = c(3, 9), name = "Degree") +
@@ -187,8 +190,15 @@ plot.cast_screen <- function(x, var_labels = NULL, ...) {
     scr$role <- ifelse(scr$is_selected, "selected", "not selected")
   }
 
-  # Sort by importance (RF)
-  imp_col <- if ("rf_importance" %in% names(scr)) "rf_importance" else "score_total"
+  # Sort by importance (new cast_select uses `importance`; keep legacy fallbacks)
+  imp_candidates <- c("importance", "rf_importance", "score_total", "imp_norm")
+  imp_col <- imp_candidates[imp_candidates %in% names(scr)][1]
+  if (is.na(imp_col) || !length(imp_col)) {
+    scr$importance_plot <- as.numeric(scr$is_selected)
+    imp_col <- "importance_plot"
+  }
+  scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
+  scr[[imp_col]][!is.finite(scr[[imp_col]])] <- 0
   scr <- scr[order(-scr[[imp_col]]), ]
 
   # Labels
@@ -230,7 +240,8 @@ plot.cast_screen <- function(x, var_labels = NULL, ...) {
     ggplot2::labs(
       title = "Variable Selection (MB + RF Importance)",
       subtitle = sub_txt,
-      x = "RF Permutation Importance", y = ""
+      x = if (identical(imp_col, "importance_plot")) "Selection indicator" else "RF Permutation Importance",
+      y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
@@ -302,8 +313,12 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     ) +
     ggplot2::labs(title = title) +
     ggplot2::coord_sf(expand = FALSE) +
-    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
       panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -556,7 +571,9 @@ plot.cast_eval <- function(x,
     ggplot2::geom_col(width = 0.65, alpha = 0.9) +
     ggplot2::geom_text(
       ggplot2::aes(label = sprintf("%.3f", .data$value)),
-      vjust = -0.4, size = 2.8, fontface = "bold"
+      vjust = -0.4, size = 2.8,
+      family = getOption("castSDM.font_family", "Arial"),
+      fontface = "bold"
     ) +
     ggplot2::facet_wrap(~ metric, scales = "free_y", nrow = 2) +
     ggplot2::scale_fill_manual(values = model_colors, guide = "none") +
@@ -753,8 +770,12 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
       subtitle = sprintf("Threshold = %.3f", x$threshold)
     ) +
     ggplot2::coord_sf(expand = FALSE) +
-    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -893,7 +914,10 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 #' @keywords internal
 #' @noRd
 theme_cast <- function(base_size = 11) {
-  ggplot2::theme_minimal(base_size = base_size, base_family = "sans") +
+  ggplot2::theme_minimal(
+    base_size = base_size,
+    base_family = getOption("castSDM.font_family", "Arial")
+  ) +
     ggplot2::theme(
       panel.grid.minor = ggplot2::element_blank(),
       axis.title = ggplot2::element_text(face = "bold"),

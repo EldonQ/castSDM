@@ -50,6 +50,25 @@ cast_backdoor <- function(dag, outcome = "presence", verbose = TRUE) {
   }
   check_suggested("dagitty", "for backdoor criterion analysis")
 
+  if (isTRUE(dag$metadata$dense_mb)) {
+    nodes <- setdiff(dag$nodes, outcome)
+    out <- data.frame(
+      variable = nodes,
+      identifiable = NA,
+      adjustment_set = NA_character_,
+      n_paths = NA_integer_,
+      note = "not evaluated: dense MB fallback graph is for screening, not backdoor identification",
+      stringsAsFactors = FALSE
+    )
+    if (verbose) {
+      cli::cli_warn(c(
+        "Backdoor check skipped: DAG is a dense-MB response-focused screening graph.",
+        "i" = "Use an expert-constrained full DAG or a small, stable variable subset before interpreting backdoor adjustment sets."
+      ))
+    }
+    return(out)
+  }
+
   edges <- dag$edges
   nodes <- dag$nodes
 

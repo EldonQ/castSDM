@@ -1,0 +1,28 @@
+\name{cast_default_config}
+\alias{cast_default_config}
+\title{Build castSDM Default Configuration}
+\usage{
+cast_default_config(
+  profile = c("single", "batch", "disdat", "fish", "debug"),
+  overrides = list()
+)
+}
+\arguments{
+\item{profile}{Character. One of \code{"single"}, \code{"batch"},
+\code{"disdat"}, \code{"fish"}, or \code{"debug"}.}
+
+\item{overrides}{Optional named list merged on top of the defaults.}
+}
+\value{
+A named list of workflow defaults.
+}
+\description{
+Returns a named list of workflow defaults that scripts can override with
+dataset-specific choices. This keeps common DAG, selection, fitting, CV,
+CATE, and SHAP parameters aligned across examples without forcing every
+dataset into the same run plan.
+}
+\seealso{
+\code{\link[=cast_merge_config]{cast_merge_config}},
+\code{\link[=cast_run_from_config]{cast_run_from_config}}
+}

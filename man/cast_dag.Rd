@@ -22,6 +22,8 @@ cast_dag(
   pc_test = NULL,
   mb_method = c("fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"),
   mb_alpha = 0.05,
+  mb_pc_max_nodes = 15L,
+  mb_dense_action = c("star", "pc"),
   bidag_algorithm = c("order", "orderIter"),
   bidag_iterations = NULL,
   blacklist = NULL,
@@ -99,6 +101,15 @@ discovery (only used when \code{structure_method = "mb_first"}).  One of
 (only used when \code{structure_method = "mb_first"}).  Default \code{0.05}.
 This may differ from \code{pc_alpha} if you want a more liberal (larger)
 threshold in the MB screening phase.}
+
+\item{mb_pc_max_nodes}{Integer. Maximum number of local nodes for Stage 2
+PC when \code{structure_method = "mb_first"}. If the discovered MB plus
+response exceeds this value and \code{mb_dense_action = "star"}, local PC is
+skipped. Default \code{15}.}
+
+\item{mb_dense_action}{Character. Action when MB discovery is dense.
+Default \code{"star"} returns a response-focused MB graph instead of running
+local PC; \code{"pc"} forces local PC.}
 
 \item{bidag_algorithm}{Passed to \code{BiDAG::learnBN()}: \code{"order"} or
 \code{"orderIter"}. Default \code{"order"}.}

@@ -16,7 +16,7 @@ cast_batch(
   verbose = TRUE,
   fit_verbose = FALSE,
   dag_R = 100L,
-  dag_structure_method = "pc",
+  dag_structure_method = "mb_first",
   dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
@@ -99,7 +99,7 @@ cast_batch(
 
 \item{dag_R}{Integer. Bootstrap replicates. Default \code{100}.}
 
-\item{dag_structure_method}{Character. Default \code{"pc"}.}
+\item{dag_structure_method}{Character. Default \code{"mb_first"}.}
 
 \item{dag_include_response}{Logical. Default \code{TRUE}.}
 

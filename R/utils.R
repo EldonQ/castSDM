@@ -233,3 +233,91 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
     )
   }
 }
+
+
+#' Configure Plot Fonts
+#'
+#' Sets the plotting font used by castSDM figures. The package default is
+#' \code{"Arial"}; on Windows the family is registered with
+#' [grDevices::windowsFont()] when available. Use [cast_safe_ggsave()] for
+#' export so PNG/PDF devices handle fonts consistently.
+#'
+#' @param family Character. Font family passed to ggplot2. Default
+#'   \code{"Arial"}.
+#'
+#' @return Invisibly returns \code{family}.
+#' @export
+cast_set_plot_defaults <- function(family = "Arial") {
+  if (.Platform$OS.type == "windows" && identical(tolower(family), "arial")) {
+    tryCatch(
+      grDevices::windowsFonts(Arial = grDevices::windowsFont("Arial")),
+      error = function(e) NULL
+    )
+  }
+  options(castSDM.font_family = family)
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    ggplot2::theme_set(
+      ggplot2::theme_get() +
+        ggplot2::theme(text = ggplot2::element_text(family = family))
+    )
+  }
+  invisible(family)
+}
+
+
+#' Safely Save a ggplot Object
+#'
+#' Wrapper around [ggplot2::ggsave()] that applies castSDM's configured
+#' plotting font and chooses conservative graphics devices. PNG output uses
+#' \pkg{ragg} when available and otherwise falls back to base PNG. PDF output
+#' uses Cairo when available and otherwise base PDF with an explicit family.
+#'
+#' @param filename Output filename.
+#' @param plot Plot object.
+#' @param ... Additional arguments passed to [ggplot2::ggsave()].
+#'
+#' @return Invisibly returns \code{filename}.
+#' @export
+cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
+  check_suggested("ggplot2", "for plot export")
+  family <- getOption("castSDM.font_family", "Arial")
+  if (.Platform$OS.type == "windows" && identical(tolower(family), "arial")) {
+    tryCatch(
+      grDevices::windowsFonts(Arial = grDevices::windowsFont("Arial")),
+      error = function(e) NULL
+    )
+  }
+  if (inherits(plot, c("gg", "ggplot"))) {
+    plot <- plot + ggplot2::theme(text = ggplot2::element_text(family = family))
+  } else if (inherits(plot, "patchwork")) {
+    plot <- plot & ggplot2::theme(text = ggplot2::element_text(family = family))
+  }
+
+  ext <- tolower(tools::file_ext(filename))
+  device <- NULL
+  extra <- list(...)
+  if (identical(ext, "png")) {
+    device <- if (requireNamespace("ragg", quietly = TRUE)) {
+      ragg::agg_png
+    } else {
+      "png"
+    }
+  } else if (identical(ext, "pdf")) {
+    device <- if (isTRUE(capabilities("cairo"))) {
+      grDevices::cairo_pdf
+    } else {
+      grDevices::pdf
+    }
+    if (is.null(extra$family)) {
+      extra$family <- family
+    }
+  }
+
+  args <- c(
+    list(filename = filename, plot = plot),
+    if (!is.null(device)) list(device = device) else list(),
+    extra
+  )
+  do.call(ggplot2::ggsave, args)
+  invisible(filename)
+}

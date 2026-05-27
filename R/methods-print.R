@@ -11,6 +11,9 @@ print.cast_dag <- function(x, ...) {
     "Method: {sm}",
     "Nodes: {n_nodes}",
     "Edges: {n_edges} (strength >= {x$strength_threshold})",
+    if (isTRUE(x$metadata$dense_mb)) {
+      "Dense MB fallback: response-focused screening graph"
+    } else NULL,
     if (!is.null(resp)) "Response node: {resp}" else NULL,
     if (isTRUE(!is.na(x$boot_R))) "Bootstrap replicates: {x$boot_R}" else
       "Bootstrap replicates: n/a (not used for this method)",

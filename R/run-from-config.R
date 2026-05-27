@@ -127,7 +127,9 @@ cast_run_from_config <- function(config_path, ...) {
   cli::cli_inform("Resume     : {resume && any_done}")
 
   if (resume && any_done) {
-    do.call(cast_batch_resume, c(list(output_dir = output_dir), ba))
+    resume_args <- ba
+    resume_args$output_dir <- NULL
+    do.call(cast_batch_resume, c(list(output_dir = output_dir), resume_args))
   } else {
     do.call(cast_batch, ba)
   }

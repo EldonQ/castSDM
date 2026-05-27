@@ -56,7 +56,7 @@
 #' @param verbose Logical. Default `TRUE`.
 #' @param fit_verbose Logical. Default `FALSE`.
 #' @param dag_R Integer. Bootstrap replicates. Default `100`.
-#' @param dag_structure_method Character. Default `"pc"`.
+#' @param dag_structure_method Character. Default `"mb_first"`.
 #' @param dag_include_response Logical. Default `TRUE`.
 #' @param dag_pc_alpha Numeric. Default `0.05`.
 #' @param dag_pc_test Character or `NULL`. Default `NULL`.
@@ -117,7 +117,7 @@ cast_batch <- function(species_list,
                        fit_verbose = FALSE,
                        # ── DAG ──
                        dag_R                  = 100L,
-                       dag_structure_method   = "pc",
+                       dag_structure_method   = "mb_first",
                        dag_include_response   = TRUE,
                        dag_pc_alpha           = 0.05,
                        dag_pc_test            = NULL,
@@ -277,6 +277,15 @@ cast_batch <- function(species_list,
           max_rows = max(dag_max_rows * 4L, dag_max_rows),
           seed = seed
         )
+      if (identical(dag_structure_method, "mb_first") &&
+          isTRUE(dag_include_response) &&
+          !response %in% names(dag_data)) {
+        cli::cli_abort(c(
+          "{.code learn_shared_dag = TRUE} is incompatible with response-focused {.code structure_method = \"mb_first\"} when shared data has no response column.",
+          "i" = "For robust species-specific Markov Blanket selection, set {.code learn_shared_dag = FALSE}.",
+          "i" = "Use shared DAGs only for predictor-only environmental structure, e.g. {.code dag_include_response = FALSE} with {.code structure_method = \"pc\"} or {.code \"bootstrap_hc\"}."
+        ))
+      }
       if (verbose) {
         cli::cli_inform(
           "Learning shared DAG once: {length(dag_vars)} env vars, {nrow(dag_data)} rows."
@@ -562,7 +571,10 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
       subtitle = sprintf("%d species | Spatial CV", length(x$species)),
       x = "", y = "Score"
     ) +
-    ggplot2::theme_minimal(base_size = 11, base_family = "sans") +
+    ggplot2::theme_minimal(
+      base_size = 11,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
       panel.grid.minor   = ggplot2::element_blank(),
       panel.grid.major.x = ggplot2::element_blank(),

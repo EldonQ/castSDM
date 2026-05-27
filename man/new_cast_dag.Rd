@@ -12,7 +12,8 @@ new_cast_dag(
   direction_threshold,
   score = "bic-cg",
   structure_method = "pc",
-  response_node = NULL
+  response_node = NULL,
+  metadata = list()
 )
 }
 \arguments{

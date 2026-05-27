@@ -158,7 +158,7 @@ pearson_r <- function(p1, p2) {
 #' @export
 plot.cast_consistency <- function(x,
                                   species = NULL,
-                                  font_family = "Arial",
+                                  font_family = getOption("castSDM.font_family", "Arial"),
                                   use_bold = TRUE,
                                   font_base = 14L,
                                   font_main_title = 24L,

@@ -10,7 +10,7 @@ cast(
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
   n_bootstrap = 100L,
-  dag_structure_method = "pc",
+  dag_structure_method = "mb_first",
   dag_include_response = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
@@ -58,7 +58,7 @@ the same environmental columns as \code{species_data}.}
 \code{dag_structure_method = "bootstrap_hc"}. Default \code{100}.}
 
 \item{dag_structure_method}{Character passed to \code{\link[=cast_dag]{cast_dag()}} as
-\code{structure_method}. Default \code{"pc"}.}
+\code{structure_method}. Default \code{"mb_first"}.}
 
 \item{dag_include_response}{Logical. Include response in DAG learning for
 Markov Blanket extraction. Default \code{TRUE}.}

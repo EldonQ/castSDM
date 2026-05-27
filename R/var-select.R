@@ -109,56 +109,74 @@ cast_select <- function(dag,
 
   # --- Selection logic -----------------------------------------------------
   min_keep <- max(min_vars, ceiling(length(env_vars) * min_fraction))
+  select_by_importance <- function(scores, min_keep) {
+    scores <- scores[order(-scores$importance), ]
+    imp_sorted <- scores$importance
+
+    if (length(imp_sorted) <= min_keep) {
+      return(scores$variable)
+    }
+
+    gaps <- imp_sorted[-length(imp_sorted)] - imp_sorted[-1L]
+    valid_idx <- which(seq_along(gaps) >= min_keep &
+                         seq_along(gaps) < length(imp_sorted))
+    if (length(valid_idx) == 0) {
+      scores$variable[seq_len(min_keep)]
+    } else {
+      cut_at <- valid_idx[which.max(gaps[valid_idx])]
+      scores$variable[seq_len(cut_at)]
+    }
+  }
+  mb_selective <- TRUE
 
   if (!is.null(mb) && length(mb$all) > 0) {
     # -- Fusion: MB vars auto-selected + importance-gated non-MB vars --
     mb_vars <- intersect(mb$all, env_vars)
-    mb_importance <- scores_df$importance[scores_df$variable %in% mb_vars]
-    imp_threshold <- if (length(mb_importance) > 0) {
-      stats::median(mb_importance)
+    mb_dense <- length(mb_vars) >= ceiling(0.8 * length(env_vars))
+
+    if (isTRUE(mb_dense)) {
+      if (verbose) {
+        cli::cli_warn(c(
+          "Dense Markov Blanket: {length(mb_vars)}/{length(env_vars)} predictors are in MB.",
+          "i" = "Treating MB membership as non-selective and falling back to RF importance screening."
+        ))
+      }
+      mb_selective <- FALSE
+      selected <- select_by_importance(scores_df, min_keep)
     } else {
-      0
-    }
+      mb_importance <- scores_df$importance[scores_df$variable %in% mb_vars]
+      imp_threshold <- if (length(mb_importance) > 0) {
+        stats::median(mb_importance)
+      } else {
+        0
+      }
 
-    # Non-MB vars that pass the threshold
-    non_mb <- scores_df[!scores_df$in_mb, , drop = FALSE]
-    extra_vars <- non_mb$variable[non_mb$importance > imp_threshold]
+      # Non-MB vars that pass the threshold
+      non_mb <- scores_df[!scores_df$in_mb, , drop = FALSE]
+      extra_vars <- non_mb$variable[non_mb$importance > imp_threshold]
 
-    selected <- unique(c(mb_vars, extra_vars))
+      selected <- unique(c(mb_vars, extra_vars))
 
-    # Enforce minimum
-    if (length(selected) < min_keep) {
-      remaining <- setdiff(env_vars, selected)
-      rem_imp <- scores_df$importance[match(remaining, scores_df$variable)]
-      top_rem <- remaining[order(-rem_imp)][seq_len(
-        min(min_keep - length(selected), length(remaining))
-      )]
-      selected <- unique(c(selected, top_rem))
+      # Enforce minimum
+      if (length(selected) < min_keep) {
+        remaining <- setdiff(env_vars, selected)
+        rem_imp <- scores_df$importance[match(remaining, scores_df$variable)]
+        top_rem <- remaining[order(-rem_imp)][seq_len(
+          min(min_keep - length(selected), length(remaining))
+        )]
+        selected <- unique(c(selected, top_rem))
+      }
     }
   } else {
     # -- Fallback: pure RF importance with score-gap heuristic --
-    scores_df <- scores_df[order(-scores_df$importance), ]
-    imp_sorted <- scores_df$importance
-
-    if (length(imp_sorted) <= min_keep) {
-      selected <- scores_df$variable
-    } else {
-      gaps <- imp_sorted[-length(imp_sorted)] - imp_sorted[-1L]
-      valid_idx <- which(seq_along(gaps) >= min_keep &
-                         seq_along(gaps) < length(imp_sorted))
-      if (length(valid_idx) == 0) {
-        selected <- scores_df$variable[seq_len(min_keep)]
-      } else {
-        cut_at <- valid_idx[which.max(gaps[valid_idx])]
-        selected <- scores_df$variable[seq_len(cut_at)]
-      }
-    }
+    selected <- select_by_importance(scores_df, min_keep)
   }
 
   # --- Assign causal roles -------------------------------------------------
   roles_df <- data.frame(
     variable = selected,
     role = vapply(selected, function(v) {
+      if (!isTRUE(mb_selective)) return("predictive")
       if (v %in% (mb$parents %||% character())) return("parent")
       if (v %in% (mb$children %||% character())) return("child")
       if (v %in% (mb$co_parents %||% character())) return("co_parent")

@@ -76,6 +76,13 @@
 #'   (only used when `structure_method = "mb_first"`).  Default `0.05`.
 #'   This may differ from `pc_alpha` if you want a more liberal (larger)
 #'   threshold in the MB screening phase.
+#' @param mb_pc_max_nodes Integer. Maximum number of local nodes for Stage 2
+#'   PC when `structure_method = "mb_first"`. If the discovered MB plus
+#'   response exceeds this value and `mb_dense_action = "star"`, local PC is
+#'   skipped. Default `15`.
+#' @param mb_dense_action Character. Action when MB discovery is dense.
+#'   Default `"star"` returns a response-focused MB graph instead of running
+#'   local PC; `"pc"` forces local PC.
 #' @param bidag_algorithm Passed to \code{BiDAG::learnBN()}: `"order"` or
 #'   `"orderIter"`. Default `"order"`.
 #' @param bidag_iterations Optional integer MCMC iterations for BiDAG.
@@ -130,6 +137,8 @@ cast_dag <- function(data,
                        "fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"
                      ),
                      mb_alpha = 0.05,
+                     mb_pc_max_nodes = 15L,
+                     mb_dense_action = c("star", "pc"),
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
                      blacklist = NULL,
@@ -137,6 +146,7 @@ cast_dag <- function(data,
   structure_method <- match.arg(structure_method)
   bidag_algorithm <- match.arg(bidag_algorithm)
   mb_method <- match.arg(mb_method)
+  mb_dense_action <- match.arg(mb_dense_action)
 
   # mb_first requires response in the DAG
 
@@ -252,6 +262,7 @@ cast_dag <- function(data,
     whitelist <- whitelist[, c("from", "to"), drop = FALSE]
   }
 
+  dag_metadata <- list()
   env_edges <- switch(structure_method,
     pc = .dag_pc_edges(
       dag_df, alpha = pc_alpha, test = pc_test,
@@ -268,6 +279,8 @@ cast_dag <- function(data,
     mb_first = .dag_mb_first(
       dag_df, response = response_node, mb_method = mb_method,
       mb_alpha = mb_alpha, pc_alpha = pc_alpha, test = pc_test,
+      mb_pc_max_nodes = mb_pc_max_nodes,
+      dense_action = mb_dense_action,
       seed = seed, verbose = verbose,
       blacklist = blacklist, whitelist = whitelist
     ),
@@ -280,6 +293,13 @@ cast_dag <- function(data,
     ),
     cli::cli_abort("Unknown {.arg structure_method}.")
   )
+
+  if (structure_method == "mb_first" && isTRUE(attr(env_edges, "dense_mb"))) {
+    dag_metadata$dense_mb <- TRUE
+    dag_metadata$graph_role <- "response_focused_screening"
+    dag_metadata$mb_size <- attr(env_edges, "mb_size")
+    dag_metadata$mb_total <- attr(env_edges, "mb_total")
+  }
 
   boot_R_out <- if (structure_method == "bootstrap_hc") R else NA_integer_
   score_out <- if (structure_method == "bootstrap_hc") {
@@ -304,7 +324,8 @@ cast_dag <- function(data,
     direction_threshold = direction_threshold,
     score = score_out,
     structure_method = structure_method,
-    response_node = response_node
+    response_node = response_node,
+    metadata = dag_metadata
   )
 }
 
@@ -462,7 +483,8 @@ extract_markov_blanket <- function(dag, node) {
 #' @keywords internal
 #' @noRd
 .dag_mb_first <- function(dag_df, response, mb_method, mb_alpha,
-                          pc_alpha, test, seed, verbose,
+                          pc_alpha, test, mb_pc_max_nodes, dense_action,
+                          seed, verbose,
                           blacklist = NULL, whitelist = NULL) {
   check_suggested("bnlearn", "for Markov Blanket discovery")
   if (!is.null(seed)) set.seed(seed)
@@ -518,6 +540,23 @@ extract_markov_blanket <- function(dag, node) {
   local_vars <- unique(c(mb_vars, response))
   local_df <- dag_df[, local_vars, drop = FALSE]
 
+  if (identical(dense_action, "star") &&
+      length(local_vars) > as.integer(mb_pc_max_nodes)) {
+    if (verbose) {
+      cli::cli_warn(c(
+        "Dense MB: {length(mb_vars)}/{ncol(dag_df) - 1L} predictors selected; skipping local PC on {length(local_vars)} nodes.",
+        "i" = "Returning a response-focused MB graph instead. Increase {.arg mb_pc_max_nodes} or set {.arg mb_dense_action = \"pc\"} to force local PC."
+      ))
+    }
+    return(.dag_mb_star_edges(
+      mb_vars = mb_vars,
+      response = response,
+      total_vars = ncol(dag_df) - 1L,
+      blacklist = blacklist,
+      whitelist = whitelist
+    ))
+  }
+
   if (verbose) {
     cli::cli_inform(
       "Stage 2: Local DAG (PC) on {length(local_vars)} nodes..."
@@ -533,6 +572,55 @@ extract_markov_blanket <- function(dag, node) {
     seed = seed, verbose = FALSE,
     blacklist = local_bl, whitelist = local_wl
   )
+}
+
+
+#' @keywords internal
+#' @noRd
+.dag_mb_star_edges <- function(mb_vars, response,
+                               total_vars = length(mb_vars),
+                               blacklist = NULL, whitelist = NULL) {
+  mb_vars <- unique(setdiff(as.character(mb_vars), response))
+  if (length(mb_vars) == 0L) {
+    out <- data.frame(
+      from = character(), to = character(),
+      strength = numeric(), direction = numeric(),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    out <- data.frame(
+      from = mb_vars,
+      to = response,
+      strength = 1,
+      direction = 1,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (!is.null(blacklist) && nrow(blacklist) > 0L && nrow(out) > 0L) {
+    bad <- paste(blacklist$from, blacklist$to, sep = "->")
+    out <- out[!paste(out$from, out$to, sep = "->") %in% bad, , drop = FALSE]
+  }
+
+  if (!is.null(whitelist) && nrow(whitelist) > 0L) {
+    wl <- whitelist[
+      whitelist$from %in% c(mb_vars, response) &
+        whitelist$to %in% c(mb_vars, response),
+      c("from", "to"),
+      drop = FALSE
+    ]
+    if (nrow(wl) > 0L) {
+      wl$strength <- 1
+      wl$direction <- 1
+      out <- unique(rbind(out, wl))
+    }
+  }
+
+  rownames(out) <- NULL
+  attr(out, "dense_mb") <- TRUE
+  attr(out, "mb_size") <- length(mb_vars)
+  attr(out, "mb_total") <- total_vars
+  out
 }
 
 

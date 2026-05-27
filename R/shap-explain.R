@@ -369,6 +369,7 @@ plot.cast_shap <- function(x,
       ),
       inherit.aes = TRUE,
       size = 4.2,
+      family = getOption("castSDM.font_family", "Arial"),
       fontface = "bold"
     ) +
     ggplot2::scale_fill_gradientn(
@@ -397,7 +398,7 @@ plot.cast_shap <- function(x,
   if (!is.null(seg) && nrow(seg) > 0) {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Importance\nLow \u2500\u2500\u25b6 High\nVimp",
+        title = "Importance\nLow -> High\nVimp",
         barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
@@ -406,7 +407,7 @@ plot.cast_shap <- function(x,
         order = 1L
       ),
       colour = ggplot2::guide_colorbar(
-        title = "Interaction Intensity\nWeak \u2500\u2500\u25b6 Strong\nVint",
+        title = "Interaction Intensity\nWeak -> Strong\nVint",
         barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
@@ -418,7 +419,7 @@ plot.cast_shap <- function(x,
   } else {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_colorbar(
-        title = "Importance\nLow \u2500\u2500\u25b6 High\nVimp",
+        title = "Importance\nLow -> High\nVimp",
         barwidth = ggplot2::unit(5.0, "cm"),
         barheight = ggplot2::unit(0.4, "cm"),
         title.position = "top",
@@ -429,9 +430,12 @@ plot.cast_shap <- function(x,
   }
 
   p <- p +
-    ggplot2::theme_void(base_size = 11, base_family = "Arial") +
+    ggplot2::theme_void(
+      base_size = 11,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = "Arial"),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
       plot.title = ggplot2::element_text(
         face = "bold", hjust = 0, size = 12
       ),
@@ -556,7 +560,7 @@ plot.cast_shap <- function(x,
   eng <- x$engine %||% "xgboost"
   if (identical(eng, "xgboost")) {
     sub_txt <- sprintf(
-      "XGBoost margin (log-odds); %s | P(presence): %.4f \u2192 %.4f",
+      "XGBoost margin (log-odds); %s | P(presence): %.4f -> %.4f",
       row_lab,
       stats::plogis(base),
       stats::plogis(final_margin)
@@ -622,6 +626,7 @@ plot.cast_shap <- function(x,
       ),
       size = 2.8,
       color = "#1a1a1a",
+      family = getOption("castSDM.font_family", "Arial"),
       inherit.aes = TRUE
     ) +
     ggplot2::scale_fill_manual(
@@ -660,6 +665,7 @@ plot.cast_shap <- function(x,
       vjust = 1.3,
       size = 3.3,
       color = "gray20",
+      family = getOption("castSDM.font_family", "Arial"),
       angle = 90
     )
 
@@ -675,6 +681,7 @@ plot.cast_shap <- function(x,
       vjust = -0.3,
       size = 3.3,
       color = "gray20",
+      family = getOption("castSDM.font_family", "Arial"),
       angle = 90
     )
 
@@ -686,9 +693,12 @@ plot.cast_shap <- function(x,
       x = NULL
     ) +
     ggplot2::coord_cartesian(clip = "off") +
-    ggplot2::theme_classic(base_size = 11, base_family = "Arial") +
+    ggplot2::theme_classic(
+      base_size = 11,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = "Arial"),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
       # Outer box frame
       panel.border = ggplot2::element_rect(
         colour = "black", fill = NA, linewidth = 0.6

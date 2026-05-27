@@ -128,6 +128,9 @@ if (!is.na(pkg_root)) {
   Sys.unsetenv("CASTSDM_ROOT")
   library(castSDM)
 }
+if (exists("cast_set_plot_defaults", mode = "function")) {
+  cast_set_plot_defaults("Arial")
+}
 
 for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table", "pkgload")) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -138,10 +141,23 @@ for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table", "p
 # ==============================================================================
 # CONFIG — centralised settings (aligned with v0.3.0 API)
 # ==============================================================================
-CONFIG <- list(
+CONFIG <- cast_merge_config(cast_default_config("batch"), list(
   # --- multi-species only ---
+  plot_font_family  = "Arial",
   only_shap_posthoc  = FALSE,
   only_replot_spatial_heatmap = FALSE,
+  run_future_projection = TRUE,
+  future_download_cmip6 = TRUE,
+  future_gcms = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
+                  "MRI-ESM2-0", "IPSL-CM6A-LR"),
+  future_ssps = c("245", "585"),
+  future_periods = c("2041-2060", "2061-2080"),
+  future_var = "bioc",
+  future_res = 2.5,
+  future_ensemble = TRUE,
+  future_cache_dir = file.path("castSDM_multi_species", "cmip6_cache"),
+  future_envs_path = NULL,
+  future_save_dir = NULL,
   spatial_heatmap_res_deg      = 0.06,
   spatial_heatmap_interp_method = "nearest",
   spatial_heatmap_display_res   = 0.02,
@@ -165,17 +181,17 @@ CONFIG <- list(
   prepare_env_vars       = NULL,
   prepare_verbose        = FALSE,
 
-  # -- cast_dag (v0.3.0: PC default, presence as node) --
+  # -- cast_dag (v0.3.0: response-focused MB, presence as node) --
   dag_env_vars            = NULL,
   dag_R                   = 100L,
-  learn_shared_dag        = TRUE,
+  learn_shared_dag        = FALSE,
   dag_algorithm           = "hc",
   dag_score               = NULL,   # auto: bic-cg for mixed data
   dag_strength_threshold  = 0.7,
   dag_direction_threshold = 0.6,
   dag_max_rows            = 8000L,
   dag_verbose             = FALSE,
-  dag_structure_method    = "pc",    # pc | bootstrap_hc | mb_first | bidag_bge
+  dag_structure_method    = "mb_first", # pc | bootstrap_hc | mb_first | bidag_bge
   dag_include_response    = TRUE,    # v0.3.0: presence as DAG node
   dag_pc_alpha            = 0.05,
   dag_pc_test             = NULL,    # auto: mi-cg for mixed data
@@ -239,7 +255,11 @@ CONFIG <- list(
   shap_plot_top_n       = 15L,
   shap_fastshap_nsim    = 40L,
   shap_max_explain_rows = 50L
-)
+))
+
+if (exists("cast_set_plot_defaults", mode = "function")) {
+  cast_set_plot_defaults(CONFIG$plot_font_family)
+}
 
 cat("============================================================\n")
 cat("castSDM v0.3.0 multi-species batch\n")
@@ -544,9 +564,11 @@ batch_args <- list(
 
 if (do_resume) {
   cat("[Resume mode] Skipping species with existing cast_result.rds...\n")
+  resume_args <- batch_args
+  resume_args$output_dir <- NULL
   batch_result <- do.call(cast_batch_resume, c(
     list(output_dir = CONFIG$output_dir),
-    batch_args
+    resume_args
   ))
 } else {
   batch_result <- do.call(cast_batch, batch_args)
@@ -569,13 +591,107 @@ if (!is.null(batch_result) && !is.null(batch_result$species_metrics) &&
     nrow(batch_result$species_metrics) > 0) {
   cat("\n[Plot] Multi-species model performance comparison...\n")
   p_compare <- plot(batch_result, metrics = c("auc", "tss", "cbi"))
-  ggplot2::ggsave(
-    file.path(fig_dir, "multi_species_comparison.png"),
-    p_compare,
-    width = 14, height = 6, dpi = CONFIG$fig_dpi,
-    bg = "white", limitsize = FALSE
-  )
+  if (exists("cast_safe_ggsave", mode = "function")) {
+    cast_safe_ggsave(
+      file.path(fig_dir, "multi_species_comparison.png"),
+      p_compare,
+      width = 14, height = 6, dpi = CONFIG$fig_dpi,
+      bg = "white", limitsize = FALSE
+    )
+  } else {
+    ggplot2::ggsave(
+      file.path(fig_dir, "multi_species_comparison.png"),
+      p_compare,
+      width = 14, height = 6, dpi = CONFIG$fig_dpi,
+      bg = "white", limitsize = FALSE
+    )
+  }
   cat("  Saved: multi_species_comparison.png\n")
+}
+
+if (isTRUE(CONFIG$run_future_projection)) {
+  cat("\n[Future] Multi-species projection...\n")
+  if (!is.null(CONFIG$future_envs_path) && nzchar(CONFIG$future_envs_path)) {
+    future_envs <- cast_load_future_envs(CONFIG$future_envs_path)
+  } else if (isTRUE(CONFIG$future_download_cmip6) &&
+             !is.null(env_grid) &&
+             all(c("lon", "lat") %in% names(env_grid)) &&
+             any(grepl("^bio\\d{2}$", names(env_grid)))) {
+    cmip6_data <- cast_download_cmip6(
+      gcms     = CONFIG$future_gcms,
+      ssps     = CONFIG$future_ssps,
+      periods  = CONFIG$future_periods,
+      var      = CONFIG$future_var,
+      res      = CONFIG$future_res,
+      ensemble = CONFIG$future_ensemble,
+      path     = CONFIG$future_cache_dir,
+      verbose  = TRUE
+    )
+    future_envs <- cast_prepare_future_env(
+      rasters     = cmip6_data,
+      coords      = env_grid[, c("lon", "lat")],
+      static_vars = env_grid,
+      save_dir    = CONFIG$future_save_dir %||% file.path(CONFIG$output_dir, "future_envs"),
+      verbose     = TRUE
+    )
+  } else {
+    warning("Future projection skipped: set CONFIG$future_envs_path or enable CMIP6 with bio01-bio19 current grid columns.")
+    future_envs <- NULL
+  }
+
+  if (is.null(future_envs)) {
+    invisible(NULL)
+  } else {
+    future_results <- if (!is.null(batch_result) && !is.null(batch_result$results) &&
+                          length(batch_result$results)) {
+      batch_result$results
+    } else {
+      rds_paths <- file.path(CONFIG$output_dir, names(species_list), "cast_result.rds")
+      names(rds_paths) <- names(species_list)
+      loaded <- lapply(rds_paths[file.exists(rds_paths)], readRDS)
+      names(loaded) <- names(rds_paths)[file.exists(rds_paths)]
+      loaded
+    }
+    if (!length(future_results)) {
+      warning("Future projection skipped: no in-memory or saved cast_result.rds species results found.")
+    } else {
+    future_root <- CONFIG$future_save_dir %||% file.path(CONFIG$output_dir, "future_projection")
+    dir.create(future_root, recursive = TRUE, showWarnings = FALSE)
+    for (sp in names(future_results)) {
+      r <- future_results[[sp]]
+      if (is.null(r) || is.null(r$fit) || is.null(r$cv) || is.null(r$split)) next
+      env_vars <- r$split$env_vars %||% get_env_vars(species_list[[sp]], response = CONFIG$response)
+      current_env <- env_grid[, unique(c("lon", "lat", env_vars)), drop = FALSE]
+      future_envs_use <- tryCatch(
+        lapply(future_envs, function(x) {
+          need <- unique(c("lon", "lat", env_vars))
+          miss <- setdiff(need, names(x))
+          if (length(miss)) stop("missing columns: ", paste(miss, collapse = ", "))
+          x[, need, drop = FALSE]
+        }),
+        error = function(e) {
+          warning(sprintf("%s future projection skipped: %s", sp, conditionMessage(e)))
+          NULL
+        }
+      )
+      if (is.null(future_envs_use)) next
+      tryCatch(
+        cast_save_future_projection(
+          fit = r$fit,
+          cv = r$cv,
+          current_env = current_env,
+          future_envs = future_envs_use,
+          save_dir = file.path(future_root, sp),
+          basemap = CONFIG$plot_basemap,
+          fig_dpi = CONFIG$fig_dpi,
+          method = "weighted",
+          prefix = paste0(sp, "_future")
+        ),
+        error = function(e) warning(sprintf("%s future projection failed: %s", sp, conditionMessage(e)))
+      )
+    }
+    }
+  }
 }
 
 res_log <- file.path(CONFIG$output_dir, "resource_log.csv")

@@ -25,7 +25,7 @@
   save_fig <- function(p, fname, w = 10, h = 7) {
     if (is.null(p)) return(invisible(NULL))
     tryCatch(
-      ggplot2::ggsave(
+      cast_safe_ggsave(
         file.path(fig_dir, fname), p,
         width = w, height = h, dpi = fig_dpi,
         bg = "transparent", limitsize = FALSE
@@ -256,7 +256,7 @@
         plot(
           cons_result,
           species = sp_name,
-          font_family = "sans",
+          font_family = getOption("castSDM.font_family", "Arial"),
           use_bold = TRUE,
           font_base = 11L,
           font_main_title = 14L,

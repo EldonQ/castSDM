@@ -19,7 +19,8 @@
 new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
                          direction_threshold, score = "bic-cg",
                          structure_method = "pc",
-                         response_node = NULL) {
+                         response_node = NULL,
+                         metadata = list()) {
   structure(
     list(
       edges = edges,
@@ -29,7 +30,8 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
       direction_threshold = direction_threshold,
       score = score,
       structure_method = structure_method,
-      response_node = response_node
+      response_node = response_node,
+      metadata = metadata %||% list()
     ),
     class = "cast_dag"
   )
