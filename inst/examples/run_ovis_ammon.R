@@ -14,7 +14,7 @@
 #   library(castSDM)
 #   source(system.file("examples/run_Ovis_ammon.R", package = "castSDM"))
 #
-# DAG 四种 structure_method 全量自检默认开启 (见 RUN_DAG_SELFTEST_ALL_METHODS)。
+# DAG selftest 默认关闭 (设 RUN_DAG_SELFTEST_ALL_METHODS <- TRUE 开启)。
 # 依赖: 建议一次安装
 #   install.packages(c("bnlearn", "BiDAG", "ranger"))
 # 说明: bidag_bge 需 BiDAG。仅想跑主流程、不做 DAG 四法自检可设
@@ -115,6 +115,9 @@ if (!is.na(pkg_root)) {
   Sys.unsetenv("CASTSDM_ROOT")
   library(castSDM)
 }
+if (exists("cast_set_plot_defaults", mode = "function")) {
+  cast_set_plot_defaults("Arial")
+}
 
 # 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
 OVIS_FIG_DIR <- file.path(getwd(), "cast_Ovis_ammon_figures")
@@ -139,15 +142,27 @@ ovis_save_plot <- function(plot_obj, filename, width, height) {
     plot_obj <- plot_obj & .transparent_theme
   }
   fp <- file.path(OVIS_FIG_DIR, filename)
-  ggplot2::ggsave(
-    filename = fp,
-    plot = plot_obj,
-    width = width,
-    height = height,
-    dpi = OVIS_FIG_DPI,
-    bg = "transparent",
-    limitsize = FALSE
-  )
+  if (exists("cast_safe_ggsave", mode = "function")) {
+    cast_safe_ggsave(
+      filename = fp,
+      plot = plot_obj,
+      width = width,
+      height = height,
+      dpi = OVIS_FIG_DPI,
+      bg = "transparent",
+      limitsize = FALSE
+    )
+  } else {
+    ggplot2::ggsave(
+      filename = fp,
+      plot = plot_obj,
+      width = width,
+      height = height,
+      dpi = OVIS_FIG_DPI,
+      bg = "transparent",
+      limitsize = FALSE
+    )
+  }
   message("Saved figure: ", normalizePath(fp, winslash = "/", mustWork = FALSE))
   invisible(fp)
 }
@@ -279,6 +294,8 @@ var_labels <- NULL
 CONFIG <- list(
   response          = "presence",
   seed              = 42L,
+  plot_font_family  = "Arial",
+  plot_preview      = FALSE,
   # cast_prepare
   prepare_train_fraction = 0.7,
   prepare_env_vars       = NULL,
@@ -293,7 +310,7 @@ CONFIG <- list(
   dag_direction_threshold = 0.6,
   dag_max_rows            = 8000L,
   dag_verbose             = TRUE,
-  dag_structure_method    = "pc",
+  dag_structure_method    = "mb_first",
   dag_pc_alpha            = 0.05,
   dag_pc_test             = NULL,
   dag_bidag_algorithm     = "order",
@@ -381,6 +398,17 @@ CONFIG <- list(
   shap_max_explain_rows   = 50L,
   # cast_backdoor
   do_backdoor             = TRUE,
+  # future climate projection (off by default because it downloads CMIP6 data)
+  run_future_projection   = TRUE,
+  future_gcms             = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
+                              "MRI-ESM2-0", "IPSL-CM6A-LR"),
+  future_ssps             = c("245", "585"),
+  future_periods          = c("2041-2060", "2061-2080"),
+  future_var              = "bioc",
+  future_res              = 2.5,
+  future_ensemble         = TRUE,
+  future_cache_dir        = file.path(OVIS_FIG_DIR, "cmip6_cache"),
+  future_save_dir         = file.path(OVIS_FIG_DIR, "future_projection"),
   # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
@@ -390,8 +418,12 @@ CONFIG <- list(
   only_run_shap_plots           = FALSE
 )
 
+if (exists("cast_set_plot_defaults", mode = "function")) {
+  cast_set_plot_defaults(CONFIG$plot_font_family)
+}
+
 # 是否对三种 cast_dag structure_method 逐一做「DAG → select → roles」闭环自检
-RUN_DAG_SELFTEST_ALL_METHODS <- TRUE
+RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 
 # DAG 实际生效参数（运行后会按 active env vars 过滤更新）
 dag_env_vars_use <- CONFIG$dag_env_vars
@@ -797,7 +829,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       type = "interaction_network",
       top_n = CONFIG$shap_plot_top_n
     )
-    print(p_net)
+    if (isTRUE(CONFIG$plot_preview)) print(p_net)
     ovis_save_plot(
       p_net,
       paste0(stem, "_interaction_network.png"),
@@ -816,7 +848,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
       top_n = CONFIG$shap_plot_top_n,
       waterfall_row = wi
     )
-    print(p_wf)
+    if (isTRUE(CONFIG$plot_preview)) print(p_wf)
     ovis_save_plot(
       p_wf,
       paste0(stem, "_waterfall.png"),
@@ -845,32 +877,59 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     } else {
       bd$variable
     }
-    bd$status <- ifelse(bd$identifiable, "\u2713 Identifiable", "\u2717 Not identifiable")
-    p_bd <- ggplot2::ggplot(bd, ggplot2::aes(
-      x = stats::reorder(.data$variable, .data$n_paths),
-      y = .data$n_paths,
-      fill = .data$identifiable
-    )) +
-      ggplot2::geom_col(width = 0.6) +
-      ggplot2::geom_text(
-        ggplot2::aes(label = .data$status),
-        hjust = -0.1, size = 3
-      ) +
-      ggplot2::scale_fill_manual(
-        values = c("TRUE" = "#4DBBD5", "FALSE" = "#E64B35"),
-        guide = "none"
-      ) +
-      ggplot2::coord_flip(clip = "off") +
-      ggplot2::labs(
-        title = "Backdoor Criterion Check",
-        subtitle = sprintf(
-          "%d/%d variables identifiable (DAG-implied)",
-          sum(bd$identifiable), nrow(bd)
-        ),
-        x = NULL, y = "Number of backdoor paths"
-      ) +
-      ggplot2::theme_minimal(base_size = 11) +
-      ggplot2::theme(plot.margin = ggplot2::margin(5, 40, 5, 5))
+    if (all(is.na(bd$identifiable))) {
+      msg <- unique(stats::na.omit(bd$note))
+      if (!length(msg)) {
+        msg <- "Backdoor check was not evaluated for this DAG."
+      }
+      p_bd <- ggplot2::ggplot() +
+        ggplot2::annotate(
+          "text", x = 0, y = 0,
+          label = paste(strwrap(msg[1], width = 82), collapse = "\n"),
+          hjust = 0, vjust = 0.5, size = 4,
+          family = getOption("castSDM.font_family", "Arial")
+        ) +
+        ggplot2::xlim(0, 1) +
+        ggplot2::ylim(-0.5, 0.5) +
+        ggplot2::labs(
+          title = "Backdoor Criterion Check",
+          subtitle = "Skipped: screening graph is not a causal identification DAG"
+        ) +
+        ggplot2::theme_void(base_family = getOption("castSDM.font_family", "Arial")) +
+        ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
+    } else {
+      bd <- bd[!is.na(bd$identifiable), , drop = FALSE]
+      bd$status <- ifelse(bd$identifiable, "Identifiable", "Not identifiable")
+      p_bd <- ggplot2::ggplot(bd, ggplot2::aes(
+        x = stats::reorder(.data$variable, .data$n_paths),
+        y = .data$n_paths,
+        fill = .data$identifiable
+      )) +
+        ggplot2::geom_col(width = 0.6) +
+        ggplot2::geom_text(
+          ggplot2::aes(label = .data$status),
+          hjust = -0.1, size = 3,
+          family = getOption("castSDM.font_family", "Arial")
+        ) +
+        ggplot2::scale_fill_manual(
+          values = c("TRUE" = "#4DBBD5", "FALSE" = "#E64B35"),
+          guide = "none"
+        ) +
+        ggplot2::coord_flip(clip = "off") +
+        ggplot2::labs(
+          title = "Backdoor Criterion Check",
+          subtitle = sprintf(
+            "%d/%d variables identifiable (DAG-implied)",
+            sum(bd$identifiable, na.rm = TRUE), nrow(bd)
+          ),
+          x = NULL, y = "Number of backdoor paths"
+        ) +
+        ggplot2::theme_minimal(
+          base_size = 11,
+          base_family = getOption("castSDM.font_family", "Arial")
+        ) +
+        ggplot2::theme(plot.margin = ggplot2::margin(5, 40, 5, 5))
+    }
     print(p_bd)
     ovis_save_plot(p_bd, "ovis_backdoor.png", width = 9, height = 7)
   }
@@ -1086,30 +1145,29 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 # 方式 B-1 (可选): 未来气候情景投射
 # ══════════════════════════════════════════════════════════════════════════════
 # 需要: geodata (CMIP6下载), cast_prepare_future_env, cast_project, cast_cv
-# 将 RUN_FUTURE_PROJECTION 改为 TRUE 再运行本段。
-RUN_FUTURE_PROJECTION <- FALSE
+# 将 CONFIG$run_future_projection 改为 TRUE 再运行本段。
 
-if (isTRUE(RUN_FUTURE_PROJECTION)) {
+if (isTRUE(CONFIG$run_future_projection)) {
   message("\n══ Future Climate Projection ══\n")
 
   # (1) 下载 CMIP6 数据 (首次运行会下载, 之后复用缓存)
   cmip6_data <- cast_download_cmip6(
-    gcms     = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
-                 "MRI-ESM2-0", "IPSL-CM6A-LR"),
-    ssps     = c("245", "585"),
-    periods  = c("2041-2060", "2061-2080"),
-    var      = "bioc",
-    res      = 2.5,
-    ensemble = TRUE,
-    path     = file.path(OVIS_FIG_DIR, "cmip6_cache"),
+    gcms     = CONFIG$future_gcms,
+    ssps     = CONFIG$future_ssps,
+    periods  = CONFIG$future_periods,
+    var      = CONFIG$future_var,
+    res      = CONFIG$future_res,
+    ensemble = CONFIG$future_ensemble,
+    path     = CONFIG$future_cache_dir,
     verbose  = TRUE
   )
 
   # (2) 在 china_env_grid 的 lon/lat 上提取未来环境变量
   future_envs <- cast_prepare_future_env(
     rasters     = cmip6_data,
-    grid        = china_env_grid,
-    current_env = china_env_grid,
+    coords      = china_env_grid[, c("lon", "lat")],
+    static_vars = china_env_grid,
+    save_dir    = CONFIG$future_save_dir,
     verbose     = TRUE
   )
 
@@ -1130,22 +1188,18 @@ if (isTRUE(RUN_FUTURE_PROJECTION)) {
   }
 
   # (4) 未来投射: 当前 vs 未来 + 范围变化统计
-  proj <- cast_project(
+  proj <- cast_save_future_projection(
     fit         = fit_full,
     cv          = cv_ovis,
     current_env = china_env_grid,
     future_envs = future_envs,
     method      = "weighted",
-    save_dir    = file.path(OVIS_FIG_DIR, "future_projection")
+    save_dir    = CONFIG$future_save_dir,
+    basemap     = "china",
+    fig_dpi     = OVIS_FIG_DPI,
+    prefix      = "ovis_future"
   )
   print(proj)
-
-  # (5) 绘图
-  if (requireNamespace("ggplot2", quietly = TRUE)) {
-    p_proj <- plot(proj, basemap = "china")
-    print(p_proj)
-    ovis_save_plot(p_proj, "ovis_future_projection.png", width = 14, height = 10)
-  }
 
   message("Future climate projection complete.\n")
 }
@@ -1196,69 +1250,6 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
   }
 }
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 方式 C (可选): 将三种 DAG 网络图落盘 (依赖已通过上面自检)
-# ══════════════════════════════════════════════════════════════════════════════
-# 与「全算法自检」重复时可关；需要对比图时改为 TRUE。
-RUN_DAG_METHOD_SHOWCASE <- TRUE
-
-if (isTRUE(RUN_DAG_METHOD_SHOWCASE) && requireNamespace("ggplot2", quietly = TRUE)) {
-  methods <- c("bootstrap_hc", "pc", "bidag_bge", "mb_first")
-  for (sm in methods) {
-    dm <- tryCatch(
-      cast_dag(
-        data = split$train,
-        response = CONFIG$response,
-        env_vars = dag_env_vars_use,
-        include_response = TRUE,
-        R = CONFIG$dag_R,
-        algorithm = CONFIG$dag_algorithm,
-        score = CONFIG$dag_score,
-        strength_threshold = CONFIG$dag_strength_threshold,
-        direction_threshold = CONFIG$dag_direction_threshold,
-        max_rows = CONFIG$dag_max_rows,
-        seed = CONFIG$seed,
-        verbose = FALSE,
-        structure_method = sm,
-        pc_alpha = CONFIG$dag_pc_alpha,
-        pc_test = CONFIG$dag_pc_test,
-        bidag_algorithm = CONFIG$dag_bidag_algorithm,
-        bidag_iterations = CONFIG$dag_bidag_iterations,
-        mb_method = CONFIG$dag_mb_method,
-        mb_alpha  = CONFIG$dag_mb_alpha,
-        blacklist = dag_blacklist_use,
-        whitelist = dag_whitelist_use
-      ),
-      error = function(e) {
-        message("cast_dag (", sm, ") 出图跳过: ", conditionMessage(e))
-        NULL
-      }
-    )
-    if (is.null(dm)) next
-    smc <- cast_select(
-      dag = dm,
-      data = split$train,
-      response = CONFIG$response,
-      num_trees = 300L,
-      seed = CONFIG$seed,
-      verbose = FALSE
-    )
-    rm <- cast_roles(screen = smc, dag = dm)
-    p <- plot(
-      dm,
-      roles = rm,
-      screen = smc,
-      var_labels = var_labels,
-      species = "Ovis_ammon"
-    )
-    ovis_save_plot(p, paste0("ovis_dag_showcase_", sm, ".png"), 12, 9)
-  }
-  message(
-    "DAG showcase figures saved under: ",
-    normalizePath(OVIS_FIG_DIR, winslash = "/", mustWork = FALSE)
-  )
-}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 空间 HSS / CATE 仅热图重绘（lon/lat 规则网格 + nearest 插值，对齐 fig7 Python 的
