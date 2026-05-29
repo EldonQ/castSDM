@@ -3,7 +3,7 @@
 #' One-step pipeline that executes the entire workflow: data splitting,
 #' DAG learning (with response node), DAG-guided variable selection via
 #' Markov Blanket + RF importance, model fitting, spatial cross-validation,
-#' evaluation, and ensemble prediction.
+#' evaluation, ensemble prediction, and optionally CATE estimation.
 #'
 #' @param species_data A `data.frame` with columns: `lon`, `lat`, `presence`
 #'   (0/1), and environmental variables.
@@ -42,6 +42,9 @@
 #' @param do_ensemble Logical. Generate ensemble prediction. Default `TRUE`.
 #' @param ensemble_method Character. Ensemble method: `"weighted"`,
 #'   `"best"`, `"equal"`. Default `"weighted"`.
+#' @param do_cate Logical. Estimate spatial CATE via causal forests.
+#'   Default `FALSE`. Requires package `grf`.
+#' @param cate_top_n Integer. Top variables for CATE. Default `3`.
 #' @param blacklist,whitelist DAG edge constraints. Default `NULL`.
 #' @param seed Integer or `NULL`. Random seed.
 #' @param verbose Logical. Print progress. Default `TRUE`.
@@ -50,7 +53,7 @@
 #'   Use [print()], [summary()], and [plot()] for inspection.
 #'
 #' @seealso [cast_dag()], [cast_select()], [cast_fit()], [cast_ensemble()],
-#'   [cast_predict()]
+#'   [cast_predict()], [cast_cate()]
 #'
 #' @export
 cast <- function(species_data,
@@ -76,6 +79,8 @@ cast <- function(species_data,
                  do_predict = NULL,
                  do_ensemble = TRUE,
                  ensemble_method = "weighted",
+                 do_cate = FALSE,
+                 cate_top_n = 3L,
                  blacklist = NULL,
                  whitelist = NULL,
                  seed = NULL,
@@ -189,11 +194,32 @@ cast <- function(species_data,
 
   if (verbose) cli::cli_h1("Pipeline Complete")
 
+  # === Step 8: CATE (optional) ===
+  cate_result <- NULL
+  if (do_cate) {
+    if (verbose) cli::cli_h2("Step 8: CATE Estimation")
+    pred_for_cate <- if (!is.null(env_data)) env_data else NULL
+    cate_result <- tryCatch(
+      cast_cate(
+        train_data,
+        dag = dag, screen = screen,
+        top_n = cate_top_n,
+        predict_data = pred_for_cate,
+        seed = seed, verbose = verbose
+      ),
+      error = function(e) {
+        cli::cli_warn("CATE failed: {e$message}")
+        NULL
+      }
+    )
+  }
+
   new_cast_result(
     dag = dag, screen = screen,
     fit = fit, eval = eval_result,
     cv = cv_result,
     predict = pred_result,
-    ensemble = ensemble_result
+    ensemble = ensemble_result,
+    cate = cate_result
   )
 }

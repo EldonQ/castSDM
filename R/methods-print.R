@@ -126,6 +126,18 @@ print.cast_project <- function(x, ...) {
 }
 
 #' @export
+print.cast_cate <- function(x, ...) {
+  n_sites <- length(unique(paste(x$effects$lon, x$effects$lat)))
+  cli::cli_h1("castSDM Spatial CATE")
+  cli::cli_ul(c(
+    "Sites: {n_sites}",
+    "Variables: {.val {x$variables}}",
+    "Causal forest trees: {x$n_trees}"
+  ))
+  invisible(x)
+}
+
+#' @export
 print.cast_result <- function(x, ...) {
   cli::cli_h1("castSDM Pipeline Result")
   cli::cli_ul(c(
@@ -133,7 +145,8 @@ print.cast_result <- function(x, ...) {
     "Selected: {length(x$screen$selected)} variables",
     "Models: {.val {names(x$fit$models)}}",
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",
-    "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}"
+    "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}",
+    "CATE: {if (!is.null(x$cate)) 'Yes' else 'No'}"
   ))
   invisible(x)
 }

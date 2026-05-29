@@ -151,6 +151,27 @@ new_cast_predict <- function(predictions, models) {
   )
 }
 
+#' Create a cast_cate Object
+#'
+#' @param effects A `data.frame` with columns: `lon`, `lat`, `variable`,
+#'   `cate`.
+#' @param variables Character vector of variables for which CATE was estimated.
+#' @param n_trees Integer. Number of causal forest trees used.
+#'
+#' @return A `cast_cate` object.
+#' @keywords internal
+#' @export
+new_cast_cate <- function(effects, variables, n_trees = 1000L) {
+  structure(
+    list(
+      effects = effects,
+      variables = variables,
+      n_trees = n_trees
+    ),
+    class = "cast_cate"
+  )
+}
+
 #' Create a cast_result Object
 #'
 #' Container for the full pipeline output.
@@ -162,6 +183,7 @@ new_cast_predict <- function(predictions, models) {
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
+#' @param cate A `cast_cate` object (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
@@ -170,6 +192,7 @@ new_cast_predict <- function(predictions, models) {
 new_cast_result <- function(dag, screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
+                            cate = NULL,
                             call = NULL) {
   structure(
     list(
@@ -180,6 +203,7 @@ new_cast_result <- function(dag, screen, fit, eval,
       cv = cv,
       predict = predict,
       ensemble = ensemble,
+      cate = cate,
       call = call
     ),
     class = "cast_result"

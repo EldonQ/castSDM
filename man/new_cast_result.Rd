@@ -12,6 +12,7 @@ new_cast_result(
   cv = NULL,
   predict = NULL,
   ensemble = NULL,
+  cate = NULL,
   call = NULL
 )
 }
@@ -29,6 +30,8 @@ new_cast_result(
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
 \item{ensemble}{A \code{cast_ensemble} object (or \code{NULL}).}
+
+\item{cate}{A \code{cast_cate} object (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

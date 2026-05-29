@@ -148,6 +148,28 @@
       }
     }
 
+    # ── CATE (optional) ──────────────────────────────────────────────
+    cate_result <- NULL
+    if (isTRUE(cfg$do_cate)) {
+      cate_result <- cast_run_step(paste0("cate", shared_suffix), output_dir, sp_name,
+        tryCatch({
+          check_suggested("grf", "for CATE")
+          pred_for_cate <- if (!is.null(env_data)) env_data else NULL
+          cast_cate(
+            split$train,
+            dag = dag, screen = screen,
+            variables = cfg$cate_variables,
+            response = cfg$response,
+            predict_data = pred_for_cate,
+            top_n = cfg$cate_top_n,
+            n_trees = cfg$cate_n_trees,
+            seed = seed_i,
+            verbose = cfg$cate_verbose
+          )
+        }, error = function(e) NULL)
+      )
+    }
+
     # ── Save diagnostic plots ────────────────────────────────────────
     check_suggested("ggplot2", "for plotting")
 
@@ -207,11 +229,47 @@
       save_fig(p, sprintf("HSS_%s.png", best_model), w = 14, h = 8)
     }
 
+    # CATE spatial maps (optional)
+    if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
+      for (cv in cate_result$variables) {
+        p <- tryCatch({
+          pm <- cfg$cate_hss_model
+          if (!is.null(pm) && !is.null(pred_result) &&
+              pm %in% pred_result$models) {
+            plot(
+              cate_result,
+              variable = cv,
+              species = sp_name,
+              basemap = bm,
+              var_labels = vl,
+              point_size = cfg$cate_point_size %||% 0.45,
+              legend_position = "bottom",
+              hss_predict = pred_result,
+              hss_model = pm,
+              hss_threshold = cfg$cate_hss_threshold %||% 0.1
+            )
+          } else {
+            plot(
+              cate_result,
+              variable = cv,
+              species = sp_name,
+              basemap = bm,
+              var_labels = vl,
+              point_size = cfg$cate_point_size %||% 0.45,
+              legend_position = "bottom"
+            )
+          }
+        }, error = function(e) NULL)
+        save_fig(p, sprintf("CATE_%s.png", cv), w = 14, h = 8)
+      }
+    }
+
     # ── Save RDS ──────────────────────────────────────────────────────
     sp_result <- list(
       dag = dag, screen = screen,
       fit = fit, eval = eval_result, cv = cv_result,
-      predict = pred_result, ensemble = ensemble_result
+      predict = pred_result, ensemble = ensemble_result,
+      cate = cate_result
     )
     saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
 

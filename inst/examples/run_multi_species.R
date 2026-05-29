@@ -225,6 +225,16 @@ CONFIG <- cast_merge_config(cast_default_config("batch"), list(
   cv_parallel      = TRUE,
   cv_verbose       = FALSE,
 
+  # -- cast_cate (optional; requires grf) --
+  do_cate          = FALSE,
+  cate_variables   = NULL,
+  cate_top_n       = 3L,
+  cate_n_trees     = 300L,
+  cate_verbose     = FALSE,
+  cate_point_size  = 0.45,
+  cate_hss_model   = "rf",
+  cate_hss_threshold = 0.1,
+
   var_labels          = NULL
 ))
 
@@ -357,7 +367,7 @@ if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
     fig_dir <- file.path(CONFIG$output_dir, sp, "figures")
     cast_spatial_replot_hss_cate_heatmaps(
       pred            = res$predict,
-      cate            = NULL,
+      cate            = res$cate,
       fig_dir         = fig_dir,
       fig_dpi         = CONFIG$fig_dpi,
       var_labels      = CONFIG$var_labels,
@@ -456,6 +466,14 @@ batch_args <- list(
   cv_verbose          = CONFIG$cv_verbose,
   predict_models      = CONFIG$predict_models,
   plot_basemap        = CONFIG$plot_basemap,
+  do_cate             = CONFIG$do_cate,
+  cate_top_n          = CONFIG$cate_top_n,
+  cate_n_trees        = CONFIG$cate_n_trees,
+  cate_variables      = CONFIG$cate_variables,
+  cate_verbose        = CONFIG$cate_verbose,
+  cate_point_size     = CONFIG$cate_point_size,
+  cate_hss_model      = CONFIG$cate_hss_model,
+  cate_hss_threshold  = CONFIG$cate_hss_threshold,
   eval_response       = eval_resp,
   var_labels          = CONFIG$var_labels,
   rf_ntree         = CONFIG$fit_rf_ntree,

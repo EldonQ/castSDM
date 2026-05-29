@@ -344,6 +344,188 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 }
 
 
+#' Plot Spatial CATE Map
+#'
+#' Displays spatially varying Conditional Average Treatment Effects on a
+#' geographic map with a diverging color scale (blue = negative, white =
+#' zero, red = positive effect on species presence).
+#'
+#' @param x A `cast_cate` object.
+#' @param variable Character. Which treatment variable to plot. Default is
+#'   the first variable. Use `x$variables` to see available options.
+#' @param species Character. Optional species name for the title.
+#' @param basemap Character. Basemap type: `"world"`, `"china"`, or `"none"`.
+#' @param var_labels Optional named character vector mapping variable names
+#'   to display labels.
+#' @param point_size Numeric. Point size. Default `0.5`.
+#' @param legend_position Character. `"bottom"` (horizontal colorbar) or
+#'   `"right"`. Default `"bottom"`.
+#' @param hss_predict Optional [cast_predict] object. When provided together
+#'   with `hss_model`, CATE values are set to `NA` wherever the chosen model's
+#'   habitat suitability (`HSS_<model>`) is below `hss_threshold` (spatial
+#'   masking by suitability).
+#' @param hss_model Character. Which model's HSS column to use for masking.
+#'   Default `"rf"`.
+#' @param hss_threshold Numeric in `[0, 1]`. Default `0.1`.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_cate <- function(x, variable = NULL, species = NULL,
+                           basemap = "world", var_labels = NULL,
+                           point_size = 0.5,
+                           legend_position = "bottom",
+                           hss_predict = NULL,
+                           hss_model = "rf",
+                           hss_threshold = 0.1,
+                           ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  variable <- variable %||% x$variables[1]
+  df <- x$effects[x$effects$variable == variable, ]
+
+  if (nrow(df) == 0) {
+    cli::cli_abort(c(
+      "Variable {.val {variable}} not found in CATE effects.",
+      i = "Available variables: {.val {x$variables}}."
+    ))
+  }
+
+  if (!all(c("lon", "lat") %in% names(df))) {
+    cli::cli_abort("CATE effects must contain lon/lat for spatial plotting.")
+  }
+
+  if (!is.null(hss_predict)) {
+    df <- .cate_mask_by_hss(df, hss_predict, hss_model, hss_threshold)
+  }
+
+  # Display label for variable
+  var_display <- if (!is.null(var_labels) &&
+                     variable %in% names(var_labels)) {
+    var_labels[variable]
+  } else {
+    variable
+  }
+
+  # Symmetric limits at 98th percentile
+  finite_cate <- df$cate[is.finite(df$cate)]
+  if (length(finite_cate) == 0) {
+    cli::cli_warn("No finite CATE values after masking for {.val {variable}}. Returning empty plot.")
+    return(ggplot2::ggplot() + ggplot2::theme_void() +
+             ggplot2::labs(title = paste("CATE:", variable, "(no data after HSS mask)")))
+  }
+  cate_lim <- as.numeric(stats::quantile(abs(finite_cate), 0.98, na.rm = TRUE))
+  if (!is.finite(cate_lim) || cate_lim < 1e-10) {
+    cate_lim <- max(abs(finite_cate), na.rm = TRUE)
+  }
+  if (!is.finite(cate_lim) || cate_lim < 1e-10) cate_lim <- 0.05
+
+  # Title
+  sp_display <- if (!is.null(species)) {
+    gsub("_", " ", species)
+  } else {
+    NULL
+  }
+  main_title <- sprintf("Spatial CATE: %s", var_display)
+
+  n_vis <- sum(!is.na(df$cate))
+  sub_parts <- sprintf(
+    "Causal forest (%d trees) | n = %d cells displayed",
+    x$n_trees, n_vis
+  )
+  if (!is.null(hss_predict)) {
+    sub_parts <- paste0(
+      sub_parts,
+      sprintf(" | HSS_%s >= %.2f", hss_model, hss_threshold)
+    )
+  }
+  if (!is.null(sp_display)) {
+    sub_parts <- paste0(sp_display, " | ", sub_parts)
+  }
+
+  font_family <- getOption("castSDM.font_family", "Arial")
+  p <- ggplot2::ggplot()
+
+  # Basemap
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+
+  # CATE points with diverging RdBu scale
+  .squish <- function(x, range) pmin(pmax(x, range[1]), range[2])
+  p <- p +
+    ggplot2::geom_point(
+      data = df,
+      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$cate),
+      size = point_size, alpha = 0.85, na.rm = TRUE
+    ) +
+    ggplot2::scale_color_gradient2(
+      low = "#2166AC", mid = "white", high = "#B2182B",
+      midpoint = 0,
+      limits = c(-cate_lim, cate_lim),
+      oob = .squish,
+      name = "CATE"
+    ) +
+    ggplot2::labs(title = main_title, subtitle = sub_parts) +
+    ggplot2::coord_sf(expand = FALSE) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = font_family
+    ) +
+    ggplot2::theme(
+      text = ggplot2::element_text(family = font_family),
+      plot.title = ggplot2::element_text(
+        face = "bold", hjust = 0.5, size = 14
+      ),
+      plot.subtitle = ggplot2::element_text(
+        hjust = 0.5, color = "grey40", size = 9, face = "italic"
+      ),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = legend_position
+    )
+
+  # Legend styling based on position
+  if (legend_position == "bottom") {
+    p <- p + ggplot2::guides(
+      color = ggplot2::guide_colorbar(
+        barwidth = ggplot2::unit(8, "cm"),
+        barheight = ggplot2::unit(0.4, "cm"),
+        title.position = "top", title.hjust = 0.5
+      )
+    )
+  } else {
+    p <- p + ggplot2::guides(
+      color = ggplot2::guide_colorbar(
+        barwidth = ggplot2::unit(0.5, "cm"),
+        barheight = ggplot2::unit(4, "cm")
+      )
+    )
+  }
+
+  # China dashline overlay
+  if (basemap == "china") {
+    dash_sf <- load_basemap("dashline")
+    if (!is.null(dash_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = dash_sf, fill = NA, color = "#bdc3c7", linewidth = 0.3
+      )
+    }
+  }
+
+  p
+}
+
+
 #' Plot Evaluation Metrics Comparison
 #'
 #' Multi-panel bar chart comparing AUC, TSS, and CBI across fitted models.
@@ -709,6 +891,31 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 # ========================================================================
 # Internal helpers
 # ========================================================================
+
+#' Mask CATE rows by HSS threshold (match lon/lat to cast_predict grid)
+#' @keywords internal
+#' @noRd
+.cate_mask_by_hss <- function(df, hss_predict, hss_model, hss_threshold) {
+  if (!inherits(hss_predict, "cast_predict")) {
+    cli::cli_abort("{.arg hss_predict} must be a {.cls cast_predict} object.")
+  }
+  pred <- hss_predict$predictions
+  hss_col <- paste0("HSS_", hss_model)
+  if (!hss_col %in% names(pred)) {
+    cli::cli_abort(c(
+      "Model {.val {hss_model}} not found for HSS masking.",
+      i = "Available: {.val {hss_predict$models}}."
+    ))
+  }
+  key_df <- paste0(signif(df$lon, 8), "_", signif(df$lat, 8))
+  key_pr <- paste0(signif(pred$lon, 8), "_", signif(pred$lat, 8))
+  mi <- match(key_df, key_pr)
+  hss_vals <- pred[[hss_col]][mi]
+  low <- is.na(hss_vals) | (as.numeric(hss_vals) < hss_threshold)
+  df$cate[low] <- NA_real_
+  df
+}
+
 
 #' castSDM Publication Theme
 #' @keywords internal

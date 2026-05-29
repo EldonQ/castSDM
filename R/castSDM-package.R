@@ -24,9 +24,11 @@
 #'    ([cast_predict_tiled()]) spatial habitat suitability mapping
 #' 7. **Ensemble**: Performance-weighted, best-model, or equal-weight
 #'    ensemble prediction ([cast_ensemble()])
-#' 8. **Future Projection**: Range change analysis under climate scenarios
+#' 8. **CATE** (optional): Spatially heterogeneous treatment effects via
+#'    causal forests ([cast_cate()], requires `grf`)
+#' 9. **Future Projection**: Range change analysis under climate scenarios
 #'    ([cast_project()])
-#' 9. **Batch Workflows**: Multi-species runs with checkpoint/resume
+#' 10. **Batch Workflows**: Multi-species runs with checkpoint/resume
 #'    ([cast_batch()], [cast_batch_resume()]), YAML-driven config
 #'    ([cast_run_from_config()]), and worker budget allocation
 #'    ([cast_worker_budget()])

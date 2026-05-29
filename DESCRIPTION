@@ -43,6 +43,7 @@ Suggests:
     gbm,
     ggplot2,
     ggraph,
+    grf,
     igraph,
     knitr,
     maxnet,

@@ -74,6 +74,11 @@
 #' @param do_cv Logical. Default `TRUE`.
 #' @param cv_k Integer. Default `5`.
 #' @param cv_block_method Character. Default `"grid"`.
+#' @param do_cate Logical. Estimate spatial CATE. Default `FALSE`.
+#' @param cate_top_n Integer. Default `3`.
+#' @param cate_n_trees Integer. Default `1000`.
+#' @param cate_hss_model,cate_hss_threshold CATE masking. Defaults `"rf"`,
+#'   `0.1`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
 #' @param dag_env_vars,dag_verbose Passed to [cast_dag()].
@@ -82,6 +87,8 @@
 #' @param cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose CV controls.
 #' @param predict_models Passed to [cast_predict()].
 #' @param plot_basemap Character. Default `"world"`.
+#' @param cate_variables,cate_verbose Passed to [cast_cate()].
+#' @param cate_point_size Numeric. Default `0.45`.
 #' @param eval_response Character or `NULL`.
 #' @param var_labels Named character vector or `NULL`.
 #' @param dev_package_root Character or `NULL`.
@@ -92,7 +99,7 @@
 #'
 #' @return A `cast_batch` object.
 #' @seealso [cast()], [cast_fit()], [cast_dag()], [cast_select()],
-#'   [cast_cv()]
+#'   [cast_cv()], [cast_cate()]
 #' @export
 cast_batch <- function(species_list,
                        env_data    = NULL,
@@ -127,6 +134,12 @@ cast_batch <- function(species_list,
                        do_cv           = TRUE,
                        cv_k            = 5L,
                        cv_block_method = "grid",
+                       # ── CATE ──
+                       do_cate      = FALSE,
+                       cate_top_n   = 3L,
+                       cate_n_trees = 1000L,
+                       cate_hss_model = "rf",
+                       cate_hss_threshold = 0.1,
                        response = "presence",
                        prepare_env_vars = NULL,
                        prepare_verbose = FALSE,
@@ -140,6 +153,9 @@ cast_batch <- function(species_list,
                        cv_verbose = FALSE,
                        predict_models = NULL,
                        plot_basemap = "world",
+                       cate_variables = NULL,
+                       cate_verbose = FALSE,
+                       cate_point_size = 0.45,
                        eval_response = NULL,
                        var_labels = NULL,
                        dev_package_root = NULL,
@@ -324,6 +340,13 @@ cast_batch <- function(species_list,
     cv_verbose = cv_verbose,
     predict_models = predict_models,
     plot_basemap = plot_basemap,
+    do_cate = do_cate, cate_top_n = cate_top_n,
+    cate_n_trees = cate_n_trees,
+    cate_variables = cate_variables,
+    cate_verbose = cate_verbose,
+    cate_point_size = cate_point_size,
+    cate_hss_model = cate_hss_model,
+    cate_hss_threshold = cate_hss_threshold,
     var_labels = var_labels,
     fit_verbose = fit_verbose,
     shared_dag = shared_dag

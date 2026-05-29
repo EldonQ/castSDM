@@ -35,6 +35,11 @@ cast_batch(
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
+  do_cate = FALSE,
+  cate_top_n = 3L,
+  cate_n_trees = 1000L,
+  cate_hss_model = "rf",
+  cate_hss_threshold = 0.1,
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
@@ -48,6 +53,9 @@ cast_batch(
   cv_verbose = FALSE,
   predict_models = NULL,
   plot_basemap = "world",
+  cate_variables = NULL,
+  cate_verbose = FALSE,
+  cate_point_size = 0.45,
   eval_response = NULL,
   var_labels = NULL,
   dev_package_root = NULL,
@@ -116,6 +124,15 @@ cast_batch(
 
 \item{cv_block_method}{Character. Default \code{"grid"}.}
 
+\item{do_cate}{Logical. Estimate spatial CATE. Default \code{FALSE}.}
+
+\item{cate_top_n}{Integer. Default \code{3}.}
+
+\item{cate_n_trees}{Integer. Default \code{1000}.}
+
+\item{cate_hss_model, cate_hss_threshold}{CATE masking. Defaults \code{"rf"},
+\code{0.1}.}
+
 \item{response}{Character. Default \code{"presence"}.}
 
 \item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}}.}
@@ -131,6 +148,10 @@ cast_batch(
 \item{predict_models}{Passed to \code{\link[=cast_predict]{cast_predict()}}.}
 
 \item{plot_basemap}{Character. Default \code{"world"}.}
+
+\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}.}
+
+\item{cate_point_size}{Numeric. Default \code{0.45}.}
 
 \item{eval_response}{Character or \code{NULL}.}
 
@@ -156,5 +177,5 @@ saved to separate subdirectories per species.
 }
 \seealso{
 \code{\link[=cast]{cast()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}},
-\code{\link[=cast_cv]{cast_cv()}}
+\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
 }

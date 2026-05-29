@@ -369,6 +369,15 @@ CONFIG <- list(
   cv_parallel      = TRUE,
   cv_verbose       = TRUE,
   run_spatial_cv   = FALSE,
+  # cast_cate (optional; requires grf)
+  do_cate             = TRUE,
+  cate_variable_mode  = "screen_all",
+  cate_variables      = NULL,
+  cate_top_n          = 8L,
+  cate_n_trees        = 300L,
+  cate_verbose        = FALSE,
+  cate_hss_model      = "rf",
+  cate_hss_threshold  = 0.1,
   # future climate projection (off by default because it downloads CMIP6 data)
   run_future_projection   = TRUE,
   future_gcms             = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
@@ -733,6 +742,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     saveRDS(
       list(
         pred         = pred,
+        cate         = cate,
         var_labels   = var_labels,
         config_flags = list(species = "Ovis_ammon")
       ),
@@ -753,7 +763,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     tryCatch(
       cast_spatial_replot_hss_cate_heatmaps(
         pred            = pred,
-        cate            = NULL,
+        cate            = cate,
         fig_dir         = OVIS_FIG_DIR,
         fig_dpi         = OVIS_FIG_DPI,
         var_labels      = var_labels,
@@ -770,6 +780,63 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     )
   } else {
     message("Skip terra heatmap replot: missing helpers or packages (terra/sf).")
+  }
+
+  # ── 空间 CATE（可选；需 grf）─────────────────────────────────────
+  cate <- NULL
+  if (isTRUE(CONFIG$do_cate) && requireNamespace("grf", quietly = TRUE)) {
+    cate_hss_model <- CONFIG$cate_hss_model
+    if (!cate_hss_model %in% pred$models) {
+      cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+    } else {
+      hss_vals <- pred$predictions[[paste0("HSS_", cate_hss_model)]]
+      if (all(is.na(hss_vals))) {
+        cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
+      }
+    }
+
+    cate_mode <- as.character(CONFIG$cate_variable_mode)
+    cate_variables_use <- NULL
+    if (identical(cate_mode, "screen_top_n")) {
+      cate_variables_use <- screen$selected[seq_len(min(CONFIG$cate_top_n, length(screen$selected)))]
+    } else if (identical(cate_mode, "screen_all")) {
+      cate_variables_use <- screen$selected
+    } else if (identical(cate_mode, "env_all")) {
+      cate_variables_use <- split$env_vars
+    } else if (identical(cate_mode, "manual")) {
+      cate_variables_use <- CONFIG$cate_variables
+    }
+
+    cate <- cast_cate(
+      data           = split$train,
+      variables      = cate_variables_use,
+      dag            = dag,
+      screen         = screen,
+      response       = CONFIG$response,
+      top_n          = CONFIG$cate_top_n,
+      n_trees        = CONFIG$cate_n_trees,
+      predict_data   = china_env_grid,
+      seed           = CONFIG$seed,
+      verbose        = CONFIG$cate_verbose
+    )
+    if (!is.null(cate)) {
+      for (v in cate$variables) {
+        pc <- plot(
+          cate,
+          variable         = v,
+          species          = "Ovis_ammon",
+          basemap          = "china",
+          var_labels       = var_labels,
+          point_size       = 0.45,
+          legend_position  = "bottom",
+          hss_predict      = pred,
+          hss_model        = cate_hss_model,
+          hss_threshold    = CONFIG$cate_hss_threshold
+        )
+        print(pc)
+        ovis_save_plot(pc, sprintf("ovis_cate_%s.png", v), width = 10, height = 7)
+      }
+    }
   }
 }
 
@@ -923,7 +990,7 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
   cf <- z$config_flags
   cast_spatial_replot_hss_cate_heatmaps(
     pred            = z$pred,
-    cate            = NULL,
+    cate            = z$cate,
     fig_dir         = OVIS_FIG_DIR,
     fig_dpi         = OVIS_FIG_DPI,
     var_labels      = z$var_labels,
