@@ -38,16 +38,6 @@ print.cast_screen <- function(x, ...) {
 }
 
 #' @export
-print.cast_roles <- function(x, ...) {
-  role_counts <- table(x$roles$role)
-  cli::cli_h1("castSDM Causal Roles")
-  for (r in names(role_counts)) {
-    cli::cli_li("{r}: {role_counts[r]}")
-  }
-  invisible(x)
-}
-
-#' @export
 print.cast_fit <- function(x, ...) {
   model_names <- names(x$models)
   cli::cli_h1("castSDM Model Fit")
@@ -136,67 +126,15 @@ print.cast_project <- function(x, ...) {
 }
 
 #' @export
-print.cast_cate <- function(x, ...) {
-  n_sites <- length(unique(paste(x$effects$lon, x$effects$lat)))
-  cli::cli_h1("castSDM Spatial CATE")
-  cli::cli_ul(c(
-    "Sites: {n_sites}",
-    "Variables: {.val {x$variables}}",
-    "Causal forest trees: {x$n_trees}"
-  ))
-  invisible(x)
-}
-
-#' @export
-print.cast_shap <- function(x, ...) {
-  cli::cli_h1("castSDM SHAP Explanation")
-  cli::cli_ul(c(
-    "Engine: {.val {x$engine}}",
-    "Method: {.val {x$method}}",
-    "Features: {x$n_features}",
-    "Feature space: {.val {x$feature_space}}",
-    "SHAP scale: {.val {x$shap_scale}}",
-    "Hold-out rows: {nrow(x$shap)}",
-    "Base score: {round(x$base_score, 4)}",
-    "Expected value: {round(x$expected_value, 4)}"
-  ))
-  invisible(x)
-}
-
-#' @export
 print.cast_result <- function(x, ...) {
   cli::cli_h1("castSDM Pipeline Result")
-  shap_txt <- if (!is.null(x$shap)) {
-    paste(names(Filter(Negate(is.null), x$shap)), collapse = ", ")
-  } else {
-    "No"
-  }
   cli::cli_ul(c(
     "DAG: {nrow(x$dag$edges)} edges",
     "Selected: {length(x$screen$selected)} variables",
     "Models: {.val {names(x$fit$models)}}",
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",
-    "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}",
-    "CATE: {if (!is.null(x$cate)) 'Yes' else 'No'}",
-    "SHAP: {shap_txt}"
+    "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}"
   ))
-  invisible(x)
-}
-
-#' @export
-print.cast_consistency <- function(x, ...) {
-  n_models <- length(x$models)
-  n_pairs  <- nrow(x$metrics)
-  cli::cli_h1("castSDM Inter-model Consistency")
-  cli::cli_ul(c(
-    "Models compared: {.val {x$models}}",
-    "Pairwise comparisons: {n_pairs}"
-  ))
-  if (n_pairs > 0) {
-    cli::cli_text("  Cosine sim:  mean={round(mean(x$metrics$cosine_sim, na.rm=TRUE), 4)}")
-    cli::cli_text("  Warren's I:  mean={round(mean(x$metrics$warrens_I, na.rm=TRUE), 4)}")
-    cli::cli_text("  Pearson r:   mean={round(mean(x$metrics$pearson_r, na.rm=TRUE), 4)}")
-  }
   invisible(x)
 }
 

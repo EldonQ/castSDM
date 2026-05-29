@@ -35,11 +35,6 @@ cast_batch(
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
-  do_cate = TRUE,
-  cate_top_n = 3L,
-  cate_n_trees = 1000L,
-  cate_hss_model = "rf",
-  cate_hss_threshold = 0.1,
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
@@ -53,22 +48,8 @@ cast_batch(
   cv_verbose = FALSE,
   predict_models = NULL,
   plot_basemap = "world",
-  cate_variables = NULL,
-  cate_verbose = FALSE,
-  cate_point_size = 0.45,
   eval_response = NULL,
   var_labels = NULL,
-  do_shap = FALSE,
-  shap_nrounds = 200L,
-  shap_max_depth = 6L,
-  shap_eta = 0.05,
-  shap_subsample = 0.8,
-  shap_colsample_bytree = 0.8,
-  shap_test_fraction = 0.2,
-  shap_verbose = FALSE,
-  shap_plot_top_n = 15L,
-  shap_fastshap_nsim = 40L,
-  shap_max_explain_rows = 50L,
   dev_package_root = NULL,
   learn_shared_dag = FALSE,
   shared_dag = NULL,
@@ -135,15 +116,6 @@ cast_batch(
 
 \item{cv_block_method}{Character. Default \code{"grid"}.}
 
-\item{do_cate}{Logical. Default \code{TRUE}.}
-
-\item{cate_top_n}{Integer. Default \code{3}.}
-
-\item{cate_n_trees}{Integer. Default \code{1000}.}
-
-\item{cate_hss_model, cate_hss_threshold}{CATE masking. Defaults \code{"rf"},
-\code{0.1}.}
-
 \item{response}{Character. Default \code{"presence"}.}
 
 \item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}}.}
@@ -160,21 +132,9 @@ cast_batch(
 
 \item{plot_basemap}{Character. Default \code{"world"}.}
 
-\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}.}
-
-\item{cate_point_size}{Numeric. Default \code{0.45}.}
-
 \item{eval_response}{Character or \code{NULL}.}
 
 \item{var_labels}{Named character vector or \code{NULL}.}
-
-\item{do_shap}{Logical. Default \code{FALSE}.}
-
-\item{shap_nrounds, shap_max_depth, shap_eta, shap_subsample, shap_colsample_bytree, shap_test_fraction, shap_verbose}{SHAP controls.}
-
-\item{shap_plot_top_n}{Integer. Default \code{15}.}
-
-\item{shap_fastshap_nsim, shap_max_explain_rows}{SHAP controls.}
 
 \item{dev_package_root}{Character or \code{NULL}.}
 
@@ -196,5 +156,5 @@ saved to separate subdirectories per species.
 }
 \seealso{
 \code{\link[=cast]{cast()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}},
-\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_cv]{cast_cv()}}
 }

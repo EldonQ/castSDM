@@ -60,21 +60,6 @@ new_cast_screen <- function(selected, scores, roles) {
   )
 }
 
-#' Create a cast_roles Object
-#'
-#' @param roles A `data.frame` with columns: `variable`, `role`, `in_degree`,
-#'   `out_degree`, `role_score`.
-#'
-#' @return A `cast_roles` object.
-#' @keywords internal
-#' @export
-new_cast_roles <- function(roles) {
-  structure(
-    list(roles = roles),
-    class = "cast_roles"
-  )
-}
-
 #' Create a cast_fit Object
 #'
 #' @param models Named list of fitted model objects.
@@ -166,86 +151,38 @@ new_cast_predict <- function(predictions, models) {
   )
 }
 
-#' Create a cast_cate Object
-#'
-#' @param effects A `data.frame` with columns: `lon`, `lat`, `variable`,
-#'   `cate`.
-#' @param variables Character vector of variables for which CATE was estimated.
-#' @param n_trees Integer. Number of causal forest trees used.
-#'
-#' @return A `cast_cate` object.
-#' @keywords internal
-#' @export
-new_cast_cate <- function(effects, variables, n_trees = 1000L) {
-  structure(
-    list(
-      effects = effects,
-      variables = variables,
-      n_trees = n_trees
-    ),
-    class = "cast_cate"
-  )
-}
-
 #' Create a cast_result Object
 #'
 #' Container for the full pipeline output.
 #'
 #' @param dag A `cast_dag` object.
 #' @param screen A `cast_screen` object.
-#' @param roles A `cast_roles` object.
 #' @param fit A `cast_fit` object.
 #' @param eval A `cast_eval` object (hold-out evaluation).
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
-#' @param cate A `cast_cate` object (or `NULL`).
-#' @param shap A named list of `cast_shap` objects (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
 #' @keywords internal
 #' @export
-new_cast_result <- function(dag, screen, roles, fit, eval,
+new_cast_result <- function(dag, screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
-                            cate = NULL, shap = NULL,
                             call = NULL) {
   structure(
     list(
       dag = dag,
       screen = screen,
-      roles = roles,
       fit = fit,
       eval = eval,
       cv = cv,
       predict = predict,
       ensemble = ensemble,
-      cate = cate,
-      shap = shap,
       call = call
     ),
     class = "cast_result"
-  )
-}
-
-#' Create a cast_consistency Object
-#'
-#' @param metrics A `data.frame` with pairwise consistency metrics.
-#'   Columns: `model_a`, `model_b`, `cosine_sim`, `warrens_I`,
-#'   `pearson_r`, `pearson_p`.
-#' @param models Character vector of models compared.
-#'
-#' @return A `cast_consistency` object.
-#' @keywords internal
-#' @export
-new_cast_consistency <- function(metrics, models) {
-  structure(
-    list(
-      metrics = metrics,
-      models = models
-    ),
-    class = "cast_consistency"
   )
 }
 

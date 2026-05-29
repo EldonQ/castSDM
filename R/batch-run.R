@@ -74,11 +74,6 @@
 #' @param do_cv Logical. Default `TRUE`.
 #' @param cv_k Integer. Default `5`.
 #' @param cv_block_method Character. Default `"grid"`.
-#' @param do_cate Logical. Default `TRUE`.
-#' @param cate_top_n Integer. Default `3`.
-#' @param cate_n_trees Integer. Default `1000`.
-#' @param cate_hss_model,cate_hss_threshold CATE masking. Defaults `"rf"`,
-#'   `0.1`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
 #' @param dag_env_vars,dag_verbose Passed to [cast_dag()].
@@ -87,14 +82,8 @@
 #' @param cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose CV controls.
 #' @param predict_models Passed to [cast_predict()].
 #' @param plot_basemap Character. Default `"world"`.
-#' @param cate_variables,cate_verbose Passed to [cast_cate()].
-#' @param cate_point_size Numeric. Default `0.45`.
 #' @param eval_response Character or `NULL`.
 #' @param var_labels Named character vector or `NULL`.
-#' @param do_shap Logical. Default `FALSE`.
-#' @param shap_nrounds,shap_max_depth,shap_eta,shap_subsample,shap_colsample_bytree,shap_test_fraction,shap_verbose SHAP controls.
-#' @param shap_plot_top_n Integer. Default `15`.
-#' @param shap_fastshap_nsim,shap_max_explain_rows SHAP controls.
 #' @param dev_package_root Character or `NULL`.
 #' @param learn_shared_dag Logical. Default `FALSE`.
 #' @param shared_dag Optional precomputed [cast_dag].
@@ -103,7 +92,7 @@
 #'
 #' @return A `cast_batch` object.
 #' @seealso [cast()], [cast_fit()], [cast_dag()], [cast_select()],
-#'   [cast_cv()], [cast_cate()]
+#'   [cast_cv()]
 #' @export
 cast_batch <- function(species_list,
                        env_data    = NULL,
@@ -138,12 +127,6 @@ cast_batch <- function(species_list,
                        do_cv           = TRUE,
                        cv_k            = 5L,
                        cv_block_method = "grid",
-                       # ── CATE ──
-                       do_cate      = TRUE,
-                       cate_top_n   = 3L,
-                       cate_n_trees = 1000L,
-                       cate_hss_model = "rf",
-                       cate_hss_threshold = 0.1,
                        response = "presence",
                        prepare_env_vars = NULL,
                        prepare_verbose = FALSE,
@@ -157,22 +140,8 @@ cast_batch <- function(species_list,
                        cv_verbose = FALSE,
                        predict_models = NULL,
                        plot_basemap = "world",
-                       cate_variables = NULL,
-                       cate_verbose = FALSE,
-                       cate_point_size = 0.45,
                        eval_response = NULL,
                        var_labels = NULL,
-                       do_shap = FALSE,
-                       shap_nrounds = 200L,
-                       shap_max_depth = 6L,
-                       shap_eta = 0.05,
-                       shap_subsample = 0.8,
-                       shap_colsample_bytree = 0.8,
-                       shap_test_fraction = 0.2,
-                       shap_verbose = FALSE,
-                       shap_plot_top_n = 15L,
-                       shap_fastshap_nsim = 40L,
-                       shap_max_explain_rows = 50L,
                        dev_package_root = NULL,
                        learn_shared_dag = FALSE,
                        shared_dag = NULL,
@@ -355,25 +324,7 @@ cast_batch <- function(species_list,
     cv_verbose = cv_verbose,
     predict_models = predict_models,
     plot_basemap = plot_basemap,
-    do_cate = do_cate, cate_top_n = cate_top_n,
-    cate_n_trees = cate_n_trees,
-    cate_variables = cate_variables,
-    cate_verbose = cate_verbose,
-    cate_point_size = cate_point_size,
-    cate_hss_model = cate_hss_model,
-    cate_hss_threshold = cate_hss_threshold,
     var_labels = var_labels,
-    do_shap = do_shap,
-    shap_nrounds = shap_nrounds,
-    shap_max_depth = shap_max_depth,
-    shap_eta = shap_eta,
-    shap_subsample = shap_subsample,
-    shap_colsample_bytree = shap_colsample_bytree,
-    shap_test_fraction = shap_test_fraction,
-    shap_verbose = shap_verbose,
-    shap_plot_top_n = shap_plot_top_n,
-    shap_fastshap_nsim = shap_fastshap_nsim,
-    shap_max_explain_rows = shap_max_explain_rows,
     fit_verbose = fit_verbose,
     shared_dag = shared_dag
   )

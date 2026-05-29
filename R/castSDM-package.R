@@ -16,27 +16,20 @@
 #'    with presence as a node ([cast_dag()])
 #' 3. **Variable Selection**: Markov Blanket extraction + RF importance
 #'    fusion ([cast_select()])
-#' 4. **Causal Role Assignment**: Parent/child/co-parent/predictive
-#'    classification ([cast_roles()])
-#' 5. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
+#' 4. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
-#' 6. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),
+#' 5. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),
 #'    spatial block cross-validation ([cast_cv()])
-#' 7. **Prediction**: In-memory ([cast_predict()]) or tile-based
+#' 6. **Prediction**: In-memory ([cast_predict()]) or tile-based
 #'    ([cast_predict_tiled()]) spatial habitat suitability mapping
-#' 8. **Ensemble**: Performance-weighted, best-model, or equal-weight
+#' 7. **Ensemble**: Performance-weighted, best-model, or equal-weight
 #'    ensemble prediction ([cast_ensemble()])
-#' 9. **Future Projection**: Range change analysis under climate scenarios
-#'     ([cast_project()]), with CMIP6 data download helpers
-#'     ([cast_download_cmip6()], [cast_prepare_future_env()])
-#' 10. **CATE Estimation**: Spatially heterogeneous treatment effects with
-#'     DAG-guided confounders ([cast_cate()])
-#' 11. **SHAP Explanations**: XGBoost surrogate TreeSHAP and RF fastshap
-#'     ([cast_shap_xgb()], [cast_shap_fit()])
-#' 12. **Batch Workflows**: Multi-species runs with checkpoint/resume
-#'     ([cast_batch()], [cast_batch_resume()]), YAML-driven config
-#'     ([cast_run_from_config()]), and worker budget allocation
-#'     ([cast_worker_budget()])
+#' 8. **Future Projection**: Range change analysis under climate scenarios
+#'    ([cast_project()])
+#' 9. **Batch Workflows**: Multi-species runs with checkpoint/resume
+#'    ([cast_batch()], [cast_batch_resume()]), YAML-driven config
+#'    ([cast_run_from_config()]), and worker budget allocation
+#'    ([cast_worker_budget()])
 #'
 #' @section Quick Start:
 #' ```

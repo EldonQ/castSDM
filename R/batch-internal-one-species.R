@@ -86,8 +86,6 @@
       )
     )
 
-    roles <- cast_roles(screen, dag)
-
     fit_call_args <- utils::modifyList(
       list(
         data = split$train,
@@ -130,6 +128,7 @@
     }
 
     pred_result <- NULL
+    ensemble_result <- NULL
     if (!is.null(env_data)) {
       pred_result <- cast_run_step(paste0("predict", shared_suffix), output_dir, sp_name,
         tryCatch(
@@ -137,60 +136,43 @@
           error = function(e) NULL
         )
       )
-    }
 
-    cate_result <- NULL
-    if (cfg$do_cate) {
-      cate_result <- cast_run_step(paste0("cate", shared_suffix), output_dir, sp_name,
-        tryCatch({
-          check_suggested("grf", "for CATE")
-          pred_for_cate <- if (!is.null(env_data)) env_data else NULL
-          cast_cate(
-            split$train,
-            dag = dag, screen = screen,
-            variables = cfg$cate_variables,
-            response = cfg$response,
-            predict_data = pred_for_cate,
-            top_n = cfg$cate_top_n,
-            n_trees = cfg$cate_n_trees,
-            seed = seed_i,
-            verbose = cfg$cate_verbose
+      # Ensemble prediction
+      if (!is.null(pred_result) && !is.null(cv_result)) {
+        ensemble_result <- cast_run_step(paste0("ensemble", shared_suffix), output_dir, sp_name,
+          tryCatch(
+            cast_ensemble(fit, cv_result, env_data, method = "weighted"),
+            error = function(e) NULL
           )
-        }, error = function(e) NULL)
-      )
+        )
+      }
     }
 
-    cons_result <- NULL
-    if (!is.null(pred_result) && length(pred_result$models) >= 2) {
-      cons_result <- cast_run_step(paste0("consistency", shared_suffix), output_dir, sp_name,
-        tryCatch(cast_consistency(pred_result), error = function(e) NULL)
-      )
-    }
-
-    # ── Save ALL plots ────────────────────────────────────────────────
+    # ── Save diagnostic plots ────────────────────────────────────────
     check_suggested("ggplot2", "for plotting")
 
     vl <- cfg$var_labels
     bm <- cfg$plot_basemap
 
+    # DAG structure plot
     if (requireNamespace("ggraph", quietly = TRUE) &&
         requireNamespace("igraph", quietly = TRUE)) {
       p <- tryCatch(
-        plot(
-          dag, roles = roles, screen = screen,
-          species = sp_name, var_labels = vl
-        ),
+        plot(dag, screen = screen, species = sp_name, var_labels = vl),
         error = function(e) NULL
       )
       save_fig(p, "causal_dag.png", w = 14, h = 10)
     }
 
+    # Variable selection plot
     p <- tryCatch(plot(screen, var_labels = vl), error = function(e) NULL)
     save_fig(p, "variable_selection.png", w = 10, h = 7)
 
+    # Model evaluation plot
     p <- tryCatch(plot(eval_result), error = function(e) NULL)
     save_fig(p, "model_evaluation.png", w = 10, h = 6)
 
+    # Spatial CV map
     if (!is.null(cv_result)) {
       p <- tryCatch(
         plot(
@@ -202,94 +184,34 @@
       save_fig(p, "spatial_cv_map.png", w = 14, h = 8)
     }
 
-    if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
-      for (mdl in pred_result$models) {
-        p <- tryCatch(
-          plot(
-            pred_result, model = mdl, basemap = bm,
-            title = sprintf("%s HSS (%s)",
-                            gsub("_", " ", sp_name), mdl)
-          ),
-          error = function(e) NULL
-        )
-        save_fig(p, sprintf("HSS_%s.png", mdl), w = 14, h = 8)
-      }
-    }
-
-    if (!is.null(cate_result) && requireNamespace("sf", quietly = TRUE)) {
-      for (cv in cate_result$variables) {
-        p <- tryCatch({
-          pm <- cfg$cate_hss_model
-          if (!is.null(pm) && !is.null(pred_result) &&
-              pm %in% pred_result$models) {
-            plot(
-              cate_result,
-              variable = cv,
-              species = sp_name,
-              basemap = bm,
-              var_labels = vl,
-              point_size = cfg$cate_point_size,
-              legend_position = "bottom",
-              hss_predict = pred_result,
-              hss_model = pm,
-              hss_threshold = cfg$cate_hss_threshold
-            )
-          } else {
-            plot(
-              cate_result,
-              variable = cv,
-              species = sp_name,
-              basemap = bm,
-              var_labels = vl,
-              point_size = cfg$cate_point_size,
-              legend_position = "bottom"
-            )
-          }
-        }, error = function(e) NULL)
-        save_fig(p, sprintf("CATE_%s.png", cv), w = 14, h = 8)
-      }
-    }
-
-    if (!is.null(cons_result) &&
-        requireNamespace("patchwork", quietly = TRUE)) {
+    # Ensemble HSS map (single final output, not per-algorithm)
+    if (!is.null(ensemble_result) && requireNamespace("sf", quietly = TRUE)) {
       p <- tryCatch(
         plot(
-          cons_result,
-          species = sp_name,
-          font_family = getOption("castSDM.font_family", "Arial"),
-          use_bold = TRUE,
-          font_base = 11L,
-          font_main_title = 14L,
-          font_panel_title = 11L,
-          font_axis = 8L,
-          font_cell_value = 3.5,
-          value_decimals = 3L,
-          tile_linewidth = 0.5,
-          text_white_above = 0.7
+          ensemble_result, basemap = bm,
+          title = sprintf("%s Ensemble HSS", gsub("_", " ", sp_name))
         ),
         error = function(e) NULL
       )
-      save_fig(p, "model_consistency.png", w = 16, h = 5.5)
+      save_fig(p, "ensemble_HSS.png", w = 14, h = 8)
+    } else if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
+      # Fallback: best single model if ensemble not available
+      best_model <- pred_result$models[1]
+      p <- tryCatch(
+        plot(
+          pred_result, model = best_model, basemap = bm,
+          title = sprintf("%s HSS (%s)", gsub("_", " ", sp_name), best_model)
+        ),
+        error = function(e) NULL
+      )
+      save_fig(p, sprintf("HSS_%s.png", best_model), w = 14, h = 8)
     }
-
-    # ── SHAP (optional; pairs + 2x3 panel) ────────────────────────────
-    save_cast_batch_shap_outputs(
-      train_df = split$train,
-      fit = fit,
-      dag = dag,
-      screen = screen,
-      cfg = cfg,
-      fig_dir = fig_dir,
-      fig_dpi = fig_dpi,
-      seed_i = seed_i
-    )
 
     # ── Save RDS ──────────────────────────────────────────────────────
     sp_result <- list(
-      dag = dag, screen = screen, roles = roles,
+      dag = dag, screen = screen,
       fit = fit, eval = eval_result, cv = cv_result,
-      predict = pred_result, cate = cate_result,
-      consistency = cons_result
+      predict = pred_result, ensemble = ensemble_result
     )
     saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
 

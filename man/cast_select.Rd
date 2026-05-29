@@ -74,5 +74,5 @@ with a score-gap heuristic; all selected variables receive the
 \code{"predictive"} role.
 }
 \seealso{
-\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_roles]{cast_roles()}}, \code{\link[=cast_fit]{cast_fit()}}
+\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_fit]{cast_fit()}}
 }

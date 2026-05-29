@@ -14,14 +14,13 @@ Authors@R: c(
   )
 Description: Integrates causal DAG-guided variable selection with species
     distribution modeling. Learns species-specific causal structures via
-    Directed Acyclic Graphs (DAG) using PC or bootstrap Hill-Climbing
-    algorithms, then selects ecologically relevant predictors through
-    Markov Blanket extraction and RF importance screening. Fits an
-    ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM)
-    with performance-weighted or best-model ensemble prediction. Supports
-    future climate projection, spatially heterogeneous Conditional Average
-    Treatment Effect (CATE) estimation via causal forests, and SHAP-based
-    model explanations.
+    Directed Acyclic Graphs (DAG) using PC, two-stage MB-First (IAMB + local
+    PC), or bootstrap Hill-Climbing algorithms, then selects ecologically
+    relevant predictors through Markov Blanket extraction and RF importance
+    screening. Fits an ensemble of standard SDM algorithms (Random Forest,
+    BRT, MaxEnt, GAM) with performance-weighted ensemble prediction.
+    Supports future climate projection via CMIP6 data and spatial
+    cross-validation.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
 BugReports: https://github.com/EldonQ/castSDM/issues
@@ -34,21 +33,16 @@ Depends:
     R (>= 4.1.0)
 Imports:
     cli,
-    grid,
-    scales
+    grid
 Suggests:
     BiDAG,
     bnlearn,
     car,
-    dagitty,
-    fastshap,
     future,
     future.apply,
     gbm,
-    geodata,
     ggplot2,
     ggraph,
-    grf,
     igraph,
     knitr,
     maxnet,
@@ -58,13 +52,13 @@ Suggests:
     pkgload,
     pcalg,
     pROC,
+    ragg,
     ranger,
     rmarkdown,
     sf,
     terra,
     testthat (>= 3.0.0),
     viridisLite,
-    xgboost,
     yaml
 Config/testthat/edition: 3
 VignetteBuilder: knitr

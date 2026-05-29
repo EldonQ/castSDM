@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Integrates causal DAG-guided variable selection with species distribution modeling. Learns species-specific causal structures via Directed Acyclic Graphs (DAG) using PC or bootstrap Hill-Climbing algorithms, then selects ecologically relevant predictors through Markov Blanket extraction and RF importance screening. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted or best-model ensemble prediction. Supports future climate projection, spatially heterogeneous Conditional Average Treatment Effect (CATE) estimation via causal forests, and SHAP-based model explanations.
+Integrates causal DAG-guided variable selection with species distribution modeling. Learns species-specific causal structures via Directed Acyclic Graphs (DAG) using PC, two-stage MB-First (IAMB + local PC), or bootstrap Hill-Climbing algorithms, then selects ecologically relevant predictors through Markov Blanket extraction and RF importance screening. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
 }
 \seealso{
 Useful links:

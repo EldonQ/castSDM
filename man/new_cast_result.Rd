@@ -7,14 +7,11 @@
 new_cast_result(
   dag,
   screen,
-  roles,
   fit,
   eval,
   cv = NULL,
   predict = NULL,
   ensemble = NULL,
-  cate = NULL,
-  shap = NULL,
   call = NULL
 )
 }
@@ -22,8 +19,6 @@ new_cast_result(
 \item{dag}{A \code{cast_dag} object.}
 
 \item{screen}{A \code{cast_screen} object.}
-
-\item{roles}{A \code{cast_roles} object.}
 
 \item{fit}{A \code{cast_fit} object.}
 
@@ -34,10 +29,6 @@ new_cast_result(
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
 \item{ensemble}{A \code{cast_ensemble} object (or \code{NULL}).}
-
-\item{cate}{A \code{cast_cate} object (or \code{NULL}).}
-
-\item{shap}{A named list of \code{cast_shap} objects (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

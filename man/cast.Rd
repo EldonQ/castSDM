@@ -28,13 +28,6 @@ cast(
   do_predict = NULL,
   do_ensemble = TRUE,
   ensemble_method = "weighted",
-  do_cate = FALSE,
-  cate_top_n = 3L,
-  do_shap = FALSE,
-  shap_nrounds = 400L,
-  shap_test_fraction = 0.2,
-  shap_fastshap_nsim = 60L,
-  shap_max_explain_rows = 80L,
   blacklist = NULL,
   whitelist = NULL,
   seed = NULL,
@@ -101,20 +94,6 @@ if \code{env_data} is provided.}
 \item{ensemble_method}{Character. Ensemble method: \code{"weighted"},
 \code{"best"}, \code{"equal"}. Default \code{"weighted"}.}
 
-\item{do_cate}{Logical. Estimate spatial CATE. Default \code{FALSE}.}
-
-\item{cate_top_n}{Integer. Top variables for CATE. Default \code{3}.}
-
-\item{do_shap}{Logical. Compute SHAP explanations. Default \code{FALSE}.}
-
-\item{shap_nrounds}{Integer. XGBoost boosting rounds. Default \code{400}.}
-
-\item{shap_test_fraction}{Numeric. SHAP hold-out fraction. Default \code{0.2}.}
-
-\item{shap_fastshap_nsim}{Integer. SHAP MC reps. Default \code{60}.}
-
-\item{shap_max_explain_rows}{Integer. SHAP explained rows cap. Default \code{80}.}
-
 \item{blacklist, whitelist}{DAG edge constraints. Default \code{NULL}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed.}
@@ -128,11 +107,10 @@ Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, and \code{
 \description{
 One-step pipeline that executes the entire workflow: data splitting,
 DAG learning (with response node), DAG-guided variable selection via
-Markov Blanket + RF importance, causal role assignment, model fitting,
-spatial cross-validation, evaluation, ensemble prediction, and optionally
-CATE estimation and SHAP explanations.
+Markov Blanket + RF importance, model fitting, spatial cross-validation,
+evaluation, and ensemble prediction.
 }
 \seealso{
 \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_ensemble]{cast_ensemble()}},
-\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_predict]{cast_predict()}}
 }

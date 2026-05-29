@@ -44,7 +44,7 @@
 #' with a score-gap heuristic; all selected variables receive the
 #' `"predictive"` role.
 #'
-#' @seealso [cast_dag()], [cast_roles()], [cast_fit()]
+#' @seealso [cast_dag()], [cast_fit()]
 #'
 #' @export
 cast_select <- function(dag,

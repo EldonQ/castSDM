@@ -7,9 +7,8 @@
 #
 # v0.3.0 pipeline per species:
 #   cast_prepare -> cast_dag (PC/MB-First, presence as node) -> cast_select (MB + RF)
-#   -> cast_roles -> cast_fit (RF/BRT/MaxEnt/GAM) -> cast_evaluate
-#   -> cast_cv -> cast_predict -> cast_ensemble -> (optional) cast_cate
-#   -> (optional) SHAP
+#   -> cast_fit (RF/BRT/MaxEnt/GAM) -> cast_evaluate
+#   -> cast_cv -> cast_predict -> cast_ensemble
 #
 # Features:
 #   - cast_worker_budget(): auto-allocate species x intra parallelism
@@ -21,9 +20,7 @@
 #
 # Multi-species additions:
 #   - Species-level parallelism (PSOCK via future::multisession)
-#   - SHAP: do_shap=TRUE writes shap_xgb/rf figures + shap_panel_2x2.png
-#   - Post-hoc SHAP only: CONFIG$only_shap_posthoc <- TRUE
-#   - Spatial HSS/CATE heatmap replot: CONFIG$only_replot_spatial_heatmap <- TRUE
+#   - Spatial HSS heatmap replot: CONFIG$only_replot_spatial_heatmap <- TRUE
 #   - Top-level <output_dir>/figures/multi_species_comparison.png
 #
 # Running in RStudio:
@@ -36,9 +33,8 @@
 #   source(system.file("examples/run_multi_species.R", package = "castSDM"))
 #
 # Dependencies: future / future.apply / ggplot2 / patchwork / pkgload
-#   DAG: bnlearn (required), BiDAG / dagitty / pcalg (optional)
+#   DAG: bnlearn (required), BiDAG / pcalg (optional)
 #   Models: ranger, gbm, maxnet, mgcv
-#   SHAP: xgboost, fastshap
 # ==============================================================================
 
 .cast_find_package_root <- function(max_up = 8L) {
@@ -144,10 +140,8 @@ for (pkg in c("ggplot2", "future", "future.apply", "patchwork", "data.table", "p
 CONFIG <- cast_merge_config(cast_default_config("batch"), list(
   # --- multi-species only ---
   plot_font_family  = "Arial",
-  only_shap_posthoc  = FALSE,
   only_replot_spatial_heatmap = FALSE,
   run_future_projection = TRUE,
-  future_download_cmip6 = TRUE,
   future_gcms = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
                   "MRI-ESM2-0", "IPSL-CM6A-LR"),
   future_ssps = c("245", "585"),
@@ -231,30 +225,7 @@ CONFIG <- cast_merge_config(cast_default_config("batch"), list(
   cv_parallel      = TRUE,
   cv_verbose       = FALSE,
 
-  # -- cast_cate (DAG-guided confounders) --
-  do_cate          = TRUE,
-  cate_variables   = NULL,
-  cate_top_n       = 3L,
-  cate_n_trees     = 300L,
-  cate_verbose     = FALSE,
-  cate_point_size  = 0.45,
-  cate_hss_model      = "rf",       # v0.3.0: "cast" removed
-  cate_hss_threshold  = 0.1,
-
-  var_labels          = NULL,
-
-  # -- SHAP --
-  do_shap             = TRUE,
-  shap_nrounds          = 200L,
-  shap_max_depth        = 6L,
-  shap_eta              = 0.05,
-  shap_subsample        = 0.8,
-  shap_colsample_bytree = 0.8,
-  shap_test_fraction    = 0.2,
-  shap_verbose          = FALSE,
-  shap_plot_top_n       = 15L,
-  shap_fastshap_nsim    = 40L,
-  shap_max_explain_rows = 50L
+  var_labels          = NULL
 ))
 
 if (exists("cast_set_plot_defaults", mode = "function")) {
@@ -375,7 +346,7 @@ if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
   }
   sys.source(hlp, envir = .GlobalEnv)
   spn <- names(species_list)
-  cat("\n[only_replot_spatial_heatmap] Re-saving HSS/CATE heatmaps...\n")
+  cat("\n[only_replot_spatial_heatmap] Re-saving HSS heatmaps...\n")
   for (sp in spn) {
     rds <- file.path(CONFIG$output_dir, sp, "cast_result.rds")
     if (!file.exists(rds)) {
@@ -386,7 +357,7 @@ if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
     fig_dir <- file.path(CONFIG$output_dir, sp, "figures")
     cast_spatial_replot_hss_cate_heatmaps(
       pred            = res$predict,
-      cate            = res$cate,
+      cate            = NULL,
       fig_dir         = fig_dir,
       fig_dpi         = CONFIG$fig_dpi,
       var_labels      = CONFIG$var_labels,
@@ -394,63 +365,12 @@ if (isTRUE(CONFIG$only_replot_spatial_heatmap)) {
       res_deg         = CONFIG$spatial_heatmap_res_deg,
       interp_method   = CONFIG$spatial_heatmap_interp_method,
       display_res_deg = CONFIG$spatial_heatmap_display_res,
-      hss_model       = CONFIG$cate_hss_model,
-      hss_threshold   = CONFIG$cate_hss_threshold,
       species_label   = sp,
       ovis_style      = FALSE
     )
     cat("  ", sp, "\n", sep = "")
   }
   cat("\nSpatial heatmap replot complete.\n\n")
-} else if (isTRUE(CONFIG$only_shap_posthoc)) {
-  future::plan(future::sequential)
-  cfg_shap <- list(
-    do_shap               = TRUE,
-    response              = CONFIG$response,
-    shap_nrounds          = CONFIG$shap_nrounds,
-    shap_max_depth        = CONFIG$shap_max_depth,
-    shap_eta              = CONFIG$shap_eta,
-    shap_subsample        = CONFIG$shap_subsample,
-    shap_colsample_bytree = CONFIG$shap_colsample_bytree,
-    shap_test_fraction    = CONFIG$shap_test_fraction,
-    shap_verbose          = CONFIG$shap_verbose,
-    shap_plot_top_n       = CONFIG$shap_plot_top_n,
-    shap_fastshap_nsim    = CONFIG$shap_fastshap_nsim,
-    shap_max_explain_rows = CONFIG$shap_max_explain_rows
-  )
-  spn <- names(species_list)
-  cat("\n[only_shap_posthoc] Writing SHAP figures...\n")
-  for (i in seq_along(spn)) {
-    sp <- spn[i]
-    rds <- file.path(CONFIG$output_dir, sp, "cast_result.rds")
-    if (!file.exists(rds)) {
-      warning("Skip ", sp, ": missing ", rds)
-      next
-    }
-    res <- readRDS(rds)
-    sp_data <- species_list[[sp]]
-    seed_i <- if (!is.null(CONFIG$seed)) CONFIG$seed + i else NULL
-    split <- cast_prepare(
-      sp_data,
-      train_fraction = CONFIG$prepare_train_fraction,
-      seed = seed_i,
-      env_vars = CONFIG$prepare_env_vars,
-      verbose = FALSE
-    )
-    fig_dir <- file.path(CONFIG$output_dir, sp, "figures")
-    castSDM::save_cast_batch_shap_outputs(
-      train_df = split$train,
-      fit = res$fit,
-      dag = res$dag,
-      screen = res$screen,
-      cfg = cfg_shap,
-      fig_dir = fig_dir,
-      fig_dpi = CONFIG$fig_dpi,
-      seed_i = seed_i
-    )
-    cat("  ", sp, ": SHAP written -> ", fig_dir, "\n", sep = "")
-  }
-  cat("\nPost-hoc SHAP complete (also see shap_panel_2x2.png per species).\n\n")
 } else {
 
 # ==============================================================================
@@ -534,29 +454,10 @@ batch_args <- list(
   cv_brt_n_trees      = CONFIG$cv_brt_n_trees,
   cv_parallel         = CONFIG$cv_parallel,
   cv_verbose          = CONFIG$cv_verbose,
-  do_cate             = CONFIG$do_cate,
-  cate_top_n          = CONFIG$cate_top_n,
-  cate_n_trees        = CONFIG$cate_n_trees,
-  cate_variables      = CONFIG$cate_variables,
-  cate_verbose        = CONFIG$cate_verbose,
-  cate_point_size     = CONFIG$cate_point_size,
-  cate_hss_model      = CONFIG$cate_hss_model,
-  cate_hss_threshold  = CONFIG$cate_hss_threshold,
   predict_models      = CONFIG$predict_models,
   plot_basemap        = CONFIG$plot_basemap,
   eval_response       = eval_resp,
   var_labels          = CONFIG$var_labels,
-  do_shap             = CONFIG$do_shap,
-  shap_nrounds          = CONFIG$shap_nrounds,
-  shap_max_depth        = CONFIG$shap_max_depth,
-  shap_eta              = CONFIG$shap_eta,
-  shap_subsample        = CONFIG$shap_subsample,
-  shap_colsample_bytree = CONFIG$shap_colsample_bytree,
-  shap_test_fraction    = CONFIG$shap_test_fraction,
-  shap_verbose          = CONFIG$shap_verbose,
-  shap_plot_top_n       = CONFIG$shap_plot_top_n,
-  shap_fastshap_nsim    = CONFIG$shap_fastshap_nsim,
-  shap_max_explain_rows = CONFIG$shap_max_explain_rows,
   rf_ntree         = CONFIG$fit_rf_ntree,
   brt_n_trees      = CONFIG$fit_brt_n_trees,
   brt_depth         = CONFIG$fit_brt_depth
@@ -613,11 +514,18 @@ if (isTRUE(CONFIG$run_future_projection)) {
   cat("\n[Future] Multi-species projection...\n")
   if (!is.null(CONFIG$future_envs_path) && nzchar(CONFIG$future_envs_path)) {
     future_envs <- cast_load_future_envs(CONFIG$future_envs_path)
-  } else if (isTRUE(CONFIG$future_download_cmip6) &&
-             !is.null(env_grid) &&
+  } else if (!is.null(env_grid) &&
              all(c("lon", "lat") %in% names(env_grid)) &&
              any(grepl("^bio\\d{2}$", names(env_grid)))) {
-    cmip6_data <- cast_download_cmip6(
+    # Source standalone CMIP6 utility (moved out of castSDM in v0.3.0)
+    cmip6_util <- file.path(dirname(dirname(pkg_root)), "utils", "download_cmip6.R")
+    if (!file.exists(cmip6_util)) cmip6_util <- "E:/Package/utils/download_cmip6.R"
+    if (!file.exists(cmip6_util)) {
+      warning("Future projection skipped: CMIP6 utility not found at ", cmip6_util)
+      future_envs <- NULL
+    } else {
+    source(cmip6_util)
+    cmip6_data <- download_cmip6(
       gcms     = CONFIG$future_gcms,
       ssps     = CONFIG$future_ssps,
       periods  = CONFIG$future_periods,
@@ -627,13 +535,14 @@ if (isTRUE(CONFIG$run_future_projection)) {
       path     = CONFIG$future_cache_dir,
       verbose  = TRUE
     )
-    future_envs <- cast_prepare_future_env(
+    future_envs <- prepare_future_env(
       rasters     = cmip6_data,
       coords      = env_grid[, c("lon", "lat")],
       static_vars = env_grid,
       save_dir    = CONFIG$future_save_dir %||% file.path(CONFIG$output_dir, "future_envs"),
       verbose     = TRUE
     )
+    }
   } else {
     warning("Future projection skipped: set CONFIG$future_envs_path or enable CMIP6 with bio01-bio19 current grid columns.")
     future_envs <- NULL

@@ -48,9 +48,6 @@ cast_batch_args:
   do_cv: true
   cv_k: 5
   cv_block_method: grid
-  do_cate: true
-  cate_top_n: 3
-  cate_n_trees: 1000
   dag_R: 100
   dag_structure_method: mb_first  # pc | bootstrap_hc | mb_first | bidag_bge
   # dag_mb_method: fast.iamb     # MB discovery (mb_first only): fast.iamb | iamb | inter.iamb | gs
@@ -59,4 +56,3 @@ cast_batch_args:
   dag_direction_threshold: 0.6
   select_min_vars: 5
   select_min_fraction: 0.3
-  do_shap: false

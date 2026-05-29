@@ -1,7 +1,7 @@
 # ==============================================================================
 # castSDM 端到端测试：盘羊 (Ovis ammon)
 #
-# 空间 HSS / CATE：包内 plot.cast_predict / plot.cast_cate 对任意 lon/lat 格点
+# 空间 HSS：包内 plot.cast_predict 对任意 lon/lat 格点
 # 均用 geom_point 绘制（Eco-ISEA3H 只是你的数据形态，非特例）。文末「空间热图
 # 重绘」用 terra 栅格化 + focal 得到类 fig7_spatial_prediction_maps.py 的连续热图。
 #
@@ -122,7 +122,6 @@ if (exists("cast_set_plot_defaults", mode = "function")) {
 # 出图统一落盘：当前工作目录下子文件夹，600 dpi（需 ggplot2::ggsave）
 OVIS_FIG_DIR <- file.path(getwd(), "cast_Ovis_ammon_figures")
 OVIS_FIG_DPI <- 1200L
-OVIS_SHAP_CACHE <- file.path(OVIS_FIG_DIR, "Ovis_shap_cache.rds")
 dir.create(OVIS_FIG_DIR, recursive = TRUE, showWarnings = FALSE)
 
 ovis_save_plot <- function(plot_obj, filename, width, height) {
@@ -287,9 +286,8 @@ var_labels <- NULL
 #   install.packages(c("bnlearn", "BiDAG"))
 # ==============================================================================
 
-# ── 集中配置: 与 cast_prepare / cast_dag / cast_select / cast_roles / cast_fit /
-#    cast_evaluate / cast_predict / cast_cv / cast_cate / cast_shap_xgb /
-#    cast_shap_fit（需 fastshap）等
+# ── 集中配置: 与 cast_prepare / cast_dag / cast_select / cast_fit /
+#    cast_evaluate / cast_predict / cast_cv 等
 #    的形参一一对应, 便于对照帮助文档调参 ───────────────────────────────────
 CONFIG <- list(
   response          = "presence",
@@ -362,7 +360,7 @@ CONFIG <- list(
   eval_response = "presence",
   # cast_predict
   predict_models = NULL,
-  # cast_cv (可选 Step 6b)
+  # cast_cv (可选 Step 4b)
   cv_k             = 5L,
   cv_models        = c("rf", "maxent", "brt"),
   cv_block_method  = "grid",
@@ -371,33 +369,6 @@ CONFIG <- list(
   cv_parallel      = TRUE,
   cv_verbose       = TRUE,
   run_spatial_cv   = FALSE,
-  # cast_cate
-  # CATE 变量可选策略：
-  #   "screen_top_n"= 固定画 screen$selected 前 cate_top_n 个（按筛选顺序）
-  #   "screen_all"  = 画全部 screen$selected
-  #   "env_all"     = 画全部 split$env_vars
-  #   "manual"      = 使用 cate_variables 显式给定变量向量
-  cate_variable_mode = "screen_all",
-  cate_variables     = NULL,
-  cate_top_n         = 8L,
-  cate_n_trees       = 300L,
-  cate_verbose       = FALSE,
-  cate_hss_model     = "rf",  # HSS 遮罩模型 (rf/maxent/brt/gam)
-  cate_hss_threshold = 0.1,   # HSS < 阈值的网格 CATE 设为 NA（不显示）
-  # cast_shap_xgb
-  shap_nrounds          = 200L,
-  shap_max_depth        = 6L,
-  shap_eta              = 0.05,
-  shap_subsample        = 0.8,
-  shap_colsample_bytree = 0.8,
-  shap_test_fraction    = 0.2,
-  shap_verbose          = FALSE,
-  shap_plot_top_n       = 15L,
-  # cast_shap_fit（RF，依赖 fastshap；MC 次数越大越稳但更慢）
-  shap_fastshap_nsim      = 40L,
-  shap_max_explain_rows   = 50L,
-  # cast_backdoor
-  do_backdoor             = TRUE,
   # future climate projection (off by default because it downloads CMIP6 data)
   run_future_projection   = TRUE,
   future_gcms             = c("ACCESS-CM2", "CMCC-ESM2", "MIROC6",
@@ -409,20 +380,18 @@ CONFIG <- list(
   future_ensemble         = TRUE,
   future_cache_dir        = file.path(OVIS_FIG_DIR, "cmip6_cache"),
   future_save_dir         = file.path(OVIS_FIG_DIR, "future_projection"),
-  # 仅重绘 HSS/CATE 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
+  # 仅重绘 HSS 热图（需 ovis_spatial_replot_cache.rds；见文末「空间热图重绘」）
   only_replot_spatial_heatmap = FALSE,
   spatial_heatmap_res_deg      = 0.06,
   spatial_heatmap_interp_method = "nearest",
-  spatial_heatmap_display_res   = 0.02,
-  # 若为 TRUE：跳过全流程，仅基于 ovis_shap_cache.rds 重新输出 SHAP 图。
-  only_run_shap_plots           = FALSE
+  spatial_heatmap_display_res   = 0.02
 )
 
 if (exists("cast_set_plot_defaults", mode = "function")) {
   cast_set_plot_defaults(CONFIG$plot_font_family)
 }
 
-# 是否对三种 cast_dag structure_method 逐一做「DAG → select → roles」闭环自检
+# 是否对三种 cast_dag structure_method 逐一做「DAG → select」闭环自检
 RUN_DAG_SELFTEST_ALL_METHODS <- FALSE
 
 # DAG 实际生效参数（运行后会按 active env vars 过滤更新）
@@ -526,7 +495,6 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
       }
     )
 
-    roles <- cast_roles(screen = screen, dag = dag)
     if (length(screen$selected) < 1L) {
       stop("cast_select 未保留任何变量 (", sm, ")", call. = FALSE)
     }
@@ -534,8 +502,7 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
     message(
       "✔ DAG 闭环自检: ", sm,
       " | edges=", nrow(dag$edges),
-      " | selected=", length(screen$selected),
-      " | roles=", nrow(roles$roles)
+      " | selected=", length(screen$selected)
     )
   }
 
@@ -547,70 +514,6 @@ ovis_dag_selftest_all <- function(train_df, cfg) {
 # ══════════════════════════════════════════════════════════════════════════════
 # 方式 A: 模块化逐步运行 (推荐初次使用, 便于理解每一步)
 # ══════════════════════════════════════════════════════════════════════════════
-
-if (isTRUE(CONFIG$only_run_shap_plots)) {
-  if (!file.exists(OVIS_SHAP_CACHE)) {
-    stop(
-      "Missing SHAP cache file:\n  ", OVIS_SHAP_CACHE,
-      "\nRun this script once with CONFIG$only_run_shap_plots <- FALSE ",
-      "to generate the cache, then re-run with TRUE.",
-      call. = FALSE
-    )
-  }
-
-  shap_cache <- readRDS(OVIS_SHAP_CACHE)
-  required_fields <- c("train_df", "fit", "dag", "screen")
-  missing_fields <- required_fields[!vapply(
-    required_fields,
-    function(nm) !is.null(shap_cache[[nm]]),
-    logical(1)
-  )]
-  if (length(missing_fields) > 0L) {
-    stop(
-      "Invalid SHAP cache (missing fields): ",
-      paste(missing_fields, collapse = ", "),
-      call. = FALSE
-    )
-  }
-
-  shap_response <- if (!is.null(shap_cache$response) &&
-                       nzchar(as.character(shap_cache$response))) {
-    as.character(shap_cache$response)
-  } else {
-    CONFIG$response
-  }
-
-  shap_cfg <- list(
-    do_shap = TRUE,
-    response = shap_response,
-    shap_nrounds = CONFIG$shap_nrounds,
-    shap_max_depth = CONFIG$shap_max_depth,
-    shap_eta = CONFIG$shap_eta,
-    shap_subsample = CONFIG$shap_subsample,
-    shap_colsample_bytree = CONFIG$shap_colsample_bytree,
-    shap_test_fraction = CONFIG$shap_test_fraction,
-    shap_verbose = CONFIG$shap_verbose,
-    shap_plot_top_n = CONFIG$shap_plot_top_n,
-    shap_fastshap_nsim = CONFIG$shap_fastshap_nsim,
-    shap_max_explain_rows = CONFIG$shap_max_explain_rows
-  )
-
-  save_cast_batch_shap_outputs(
-    train_df = shap_cache$train_df,
-    fit = shap_cache$fit,
-    dag = shap_cache$dag,
-    screen = shap_cache$screen,
-    cfg = shap_cfg,
-    fig_dir = OVIS_FIG_DIR,
-    fig_dpi = OVIS_FIG_DPI,
-    seed_i = CONFIG$seed
-  )
-
-  message(
-    "SHAP-only mode finished. Figures saved under: ",
-    normalizePath(OVIS_FIG_DIR, winslash = "/", mustWork = FALSE)
-  )
-} else {
 
 # ── Step 1: 数据准备 ─────────────────────────────────────────────────────────
 split <- cast_prepare(
@@ -662,7 +565,7 @@ message(sprintf(
   if (is.null(dag_whitelist_use)) 0L else nrow(dag_whitelist_use)
 ))
 
-# ── DAG 三种算法 + select/roles 最小闭环自检 (默认必须全部通过) ─────────
+# ── DAG 三种算法 + select 最小闭环自检 (默认必须全部通过) ─────────
 if (isTRUE(RUN_DAG_SELFTEST_ALL_METHODS)) {
   cfg_for_selftest <- CONFIG
   cfg_for_selftest$dag_env_vars <- dag_env_vars_use
@@ -712,18 +615,7 @@ dag <- cast_dag(
 )
 print(dag)
 
-# ── Step 3: 后门准则检查 ─────────────────────────────────────────────────────
-if (isTRUE(CONFIG$do_backdoor) &&
-    requireNamespace("dagitty", quietly = TRUE)) {
-  backdoor <- cast_backdoor(
-    dag     = dag,
-    outcome = CONFIG$response,
-    verbose = TRUE
-  )
-  print(backdoor)
-}
-
-# ── Step 4: 自适应变量筛选 ───────────────────────────────────────────────────
+# ── Step 3: 自适应变量筛选 ───────────────────────────────────────────────────
 screen <- cast_select(
   dag            = dag,
   data           = split$train,
@@ -736,11 +628,7 @@ screen <- cast_select(
 )
 print(screen)
 
-# ── Step 5: 因果角色分配 ─────────────────────────────────────────────────────
-roles <- cast_roles(screen = screen, dag = dag)
-print(roles)
-
-# ── Step 6: 模型训练 ─────────────────────────────────────────────────────────
+# ── Step 4: 模型训练 ─────────────────────────────────────────────────────────
 fit_full <- cast_fit(
   data               = split$train,
   screen             = screen,
@@ -754,24 +642,7 @@ fit_full <- cast_fit(
   verbose            = CONFIG$fit_verbose
 )
 
-tryCatch(
-  saveRDS(
-    list(
-      train_df = split$train,
-      fit = fit_full,
-      dag = dag,
-      screen = screen,
-      response = CONFIG$response,
-      seed = CONFIG$seed
-    ),
-    OVIS_SHAP_CACHE
-  ),
-  error = function(e) {
-    warning("SHAP cache save failed: ", conditionMessage(e))
-  }
-)
-
-# ── Step 6b (可选): 空间交叉验证 ────────────────────────────────────────────
+# ── Step 4b (可选): 空间交叉验证 ────────────────────────────────────────────
 if (isTRUE(CONFIG$run_spatial_cv)) {
   cv_ovis <- cast_cv(
     data         = Ovis_ammon,
@@ -801,7 +672,7 @@ if (isTRUE(CONFIG$run_spatial_cv)) {
   }
 }
 
-# ── Step 7: 模型评估 ─────────────────────────────────────────────────────────
+# ── Step 5: 模型评估 ─────────────────────────────────────────────────────────
 eval_result <- cast_evaluate(
   fit       = fit_full,
   test_data = split$test,
@@ -809,7 +680,7 @@ eval_result <- cast_evaluate(
 )
 print(eval_result)
 
-# ── Step 8: 空间预测 ─────────────────────────────────────────────────────────
+# ── Step 6: 空间预测 ─────────────────────────────────────────────────────────
 pred <- cast_predict(
   fit      = fit_full,
   new_data = china_env_grid,
@@ -817,122 +688,20 @@ pred <- cast_predict(
 )
 print(pred)
 
-# ── Step 9: 绘图 ─────────────────────────────────────────────────────────────
+# ── Step 7: 绘图 ─────────────────────────────────────────────────────────────
 # 以下绘图需要 ggplot2, ggraph, igraph, sf 等
-# install.packages(c("ggplot2", "ggraph", "igraph", "sf", "patchwork", "fastshap"))
+# install.packages(c("ggplot2", "ggraph", "igraph", "sf", "patchwork"))
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
-  # SHAP：网络图 + 瀑布图各保存一张（stem 为文件名前缀）
-  ovis_shap_save_pair <- function(sh_obj, stem) {
-    p_net <- plot(
-      sh_obj,
-      type = "interaction_network",
-      top_n = CONFIG$shap_plot_top_n
-    )
-    if (isTRUE(CONFIG$plot_preview)) print(p_net)
-    ovis_save_plot(
-      p_net,
-      paste0(stem, "_interaction_network.png"),
-      width = 13,
-      height = 10
-    )
-    bv <- sh_obj$bias_shap
-    if (is.null(bv) || length(bv) != nrow(sh_obj$shap)) {
-      bv <- rep(as.numeric(sh_obj$base_score)[1], nrow(sh_obj$shap))
-    }
-    marg <- bv + rowSums(as.matrix(sh_obj$shap))
-    wi <- which.min(abs(marg - stats::median(marg)))[1L]
-    p_wf <- plot(
-      sh_obj,
-      type = "waterfall",
-      top_n = CONFIG$shap_plot_top_n,
-      waterfall_row = wi
-    )
-    if (isTRUE(CONFIG$plot_preview)) print(p_wf)
-    ovis_save_plot(
-      p_wf,
-      paste0(stem, "_waterfall.png"),
-      width = 10,
-      height = 6
-    )
-  }
-
   # DAG 网络图
   p_dag <- plot(
     dag,
-    roles = roles,
     screen = screen,
     var_labels = var_labels,
     species = "Ovis_ammon"
   )
   print(p_dag)
   ovis_save_plot(p_dag, "ovis_dag.png", width = 12, height = 9)
-
-  # Backdoor 识别性检验表格图
-  if (isTRUE(CONFIG$do_backdoor) && exists("backdoor") &&
-      is.data.frame(backdoor) && nrow(backdoor) > 0) {
-    bd <- backdoor
-    bd$variable <- if (!is.null(var_labels)) {
-      ifelse(bd$variable %in% names(var_labels), var_labels[bd$variable], bd$variable)
-    } else {
-      bd$variable
-    }
-    if (all(is.na(bd$identifiable))) {
-      msg <- unique(stats::na.omit(bd$note))
-      if (!length(msg)) {
-        msg <- "Backdoor check was not evaluated for this DAG."
-      }
-      p_bd <- ggplot2::ggplot() +
-        ggplot2::annotate(
-          "text", x = 0, y = 0,
-          label = paste(strwrap(msg[1], width = 82), collapse = "\n"),
-          hjust = 0, vjust = 0.5, size = 4,
-          family = getOption("castSDM.font_family", "Arial")
-        ) +
-        ggplot2::xlim(0, 1) +
-        ggplot2::ylim(-0.5, 0.5) +
-        ggplot2::labs(
-          title = "Backdoor Criterion Check",
-          subtitle = "Skipped: screening graph is not a causal identification DAG"
-        ) +
-        ggplot2::theme_void(base_family = getOption("castSDM.font_family", "Arial")) +
-        ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
-    } else {
-      bd <- bd[!is.na(bd$identifiable), , drop = FALSE]
-      bd$status <- ifelse(bd$identifiable, "Identifiable", "Not identifiable")
-      p_bd <- ggplot2::ggplot(bd, ggplot2::aes(
-        x = stats::reorder(.data$variable, .data$n_paths),
-        y = .data$n_paths,
-        fill = .data$identifiable
-      )) +
-        ggplot2::geom_col(width = 0.6) +
-        ggplot2::geom_text(
-          ggplot2::aes(label = .data$status),
-          hjust = -0.1, size = 3,
-          family = getOption("castSDM.font_family", "Arial")
-        ) +
-        ggplot2::scale_fill_manual(
-          values = c("TRUE" = "#4DBBD5", "FALSE" = "#E64B35"),
-          guide = "none"
-        ) +
-        ggplot2::coord_flip(clip = "off") +
-        ggplot2::labs(
-          title = "Backdoor Criterion Check",
-          subtitle = sprintf(
-            "%d/%d variables identifiable (DAG-implied)",
-            sum(bd$identifiable, na.rm = TRUE), nrow(bd)
-          ),
-          x = NULL, y = "Number of backdoor paths"
-        ) +
-        ggplot2::theme_minimal(
-          base_size = 11,
-          base_family = getOption("castSDM.font_family", "Arial")
-        ) +
-        ggplot2::theme(plot.margin = ggplot2::margin(5, 40, 5, 5))
-    }
-    print(p_bd)
-    ovis_save_plot(p_bd, "ovis_backdoor.png", width = 9, height = 7)
-  }
 
   # 筛选分数分解图
   p_screen <- plot(screen, var_labels = var_labels)
@@ -958,146 +727,14 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     }
   }
 
-  # 模型间空间一致性热力图 (需要 >= 2 个模型)
-  if (length(pred$models) >= 2 &&
-      requireNamespace("patchwork", quietly = TRUE)) {
-    consistency <- cast_consistency(pred)
-    print(consistency)
-    p_cons <- plot(
-      consistency,
-      species = "Ovis_ammon"
-    )
-    print(p_cons)
-    ovis_save_plot(p_cons, "ovis_consistency.png", width = 16, height = 5.5)
-  }
-
-  # 空间 CATE + 按 HSS 截断出图 (需 grf)
-  if (requireNamespace("grf", quietly = TRUE)) {
-    cate_hss_model <- CONFIG$cate_hss_model
-    if (!cate_hss_model %in% pred$models) {
-      cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
-    } else {
-      hss_vals <- pred$predictions[[paste0("HSS_", cate_hss_model)]]
-      if (all(is.na(hss_vals))) {
-        cate_hss_model <- if ("rf" %in% pred$models) "rf" else pred$models[1]
-      }
-    }
-
-    cate_mode <- as.character(CONFIG$cate_variable_mode)
-    cate_variables_use <- NULL
-    if (identical(cate_mode, "screen_top_n")) {
-      cate_variables_use <- screen$selected[seq_len(min(CONFIG$cate_top_n, length(screen$selected)))]
-    } else if (identical(cate_mode, "screen_all")) {
-      cate_variables_use <- screen$selected
-    } else if (identical(cate_mode, "env_all")) {
-      cate_variables_use <- split$env_vars
-    } else if (identical(cate_mode, "manual")) {
-      cate_variables_use <- CONFIG$cate_variables
-    }
-
-    cate <- cast_cate(
-      data           = split$train,
-      variables      = cate_variables_use,
-      dag            = dag,
-      screen         = screen,
-      response       = CONFIG$response,
-      top_n          = CONFIG$cate_top_n,
-      n_trees        = CONFIG$cate_n_trees,
-      predict_data   = china_env_grid,
-      seed           = CONFIG$seed,
-      verbose        = CONFIG$cate_verbose
-    )
-    if (!is.null(cate)) {
-      for (v in cate$variables) {
-        pc <- plot(
-          cate,
-          variable         = v,
-          species          = "Ovis_ammon",
-          basemap          = "china",
-          var_labels       = var_labels,
-          point_size       = 0.45,
-          legend_position  = "bottom",
-          hss_predict      = pred,
-          hss_model        = cate_hss_model,
-          hss_threshold    = CONFIG$cate_hss_threshold
-        )
-        print(pc)
-        ovis_save_plot(
-          pc,
-          sprintf("ovis_cate_%s.png", v),
-          width = 10,
-          height = 7
-        )
-      }
-    }
-  }
-
-  # ── SHAP 两种路径（变量个数与含义不同，勿混读一张图）────────────────────────
-  # 1) XGBoost：单独训练的 surrogate，TreeSHAP；自 dag 传入后与 RF 共用 **dag$nodes**
-  #    原始环境列。瀑布图纵轴为 **logit**。
-  # 2) RF：cast_fit 里的 ranger，fastshap，**原始环境列**，概率尺度。
-  # XGBoost（TreeSHAP）
-  if (requireNamespace("xgboost", quietly = TRUE)) {
-    sh_xgb <- cast_shap_xgb(
-      data               = split$train,
-      response           = CONFIG$response,
-      env_vars           = NULL,
-      screen             = screen,
-      dag                = dag,
-      nrounds            = CONFIG$shap_nrounds,
-      max_depth          = CONFIG$shap_max_depth,
-      eta                = CONFIG$shap_eta,
-      subsample          = CONFIG$shap_subsample,
-      colsample_bytree   = CONFIG$shap_colsample_bytree,
-      test_fraction      = CONFIG$shap_test_fraction,
-      seed               = CONFIG$seed,
-      verbose            = CONFIG$shap_verbose
-    )
-    ovis_shap_save_pair(sh_xgb, "ovis_shap_xgb")
-    # cast_shap_write_csv(sh_xgb, file.path(OVIS_FIG_DIR, "shap_export_xgb"))
-  }
-
-  # RF（fastshap + 已拟合 ranger，概率尺度）
-  if (requireNamespace("fastshap", quietly = TRUE) &&
-      requireNamespace("ranger", quietly = TRUE) &&
-      "rf" %in% names(fit_full$models) &&
-      !is.null(fit_full$models$rf$model)) {
-    sh_rf <- tryCatch(
-      cast_shap_fit(
-        fit                  = fit_full,
-        which                = "rf",
-        data                 = split$train,
-        response             = CONFIG$response,
-        test_fraction        = CONFIG$shap_test_fraction,
-        seed                 = CONFIG$seed,
-        fastshap_nsim        = CONFIG$shap_fastshap_nsim,
-        max_explain_rows     = CONFIG$shap_max_explain_rows,
-        verbose              = FALSE
-      ),
-      error = function(e) {
-        message("cast_shap_fit(rf) 跳过: ", conditionMessage(e))
-        NULL
-      }
-    )
-    if (!is.null(sh_rf)) {
-      ovis_shap_save_pair(sh_rf, "ovis_shap_rf")
-    }
-  }
-
-  # 供「仅重绘空间热图」：castSDM 原生 plot.cast_predict / plot.cast_cate 用 geom_point
-  # 画 Eco-ISEA3H 格点；此处缓存 pred/cate 供 terra 栅格热图后处理（见文末）。
-  cate_hss_model_final <- if (exists("cate_hss_model")) cate_hss_model else "rf"
+  # 供「仅重绘空间热图」：castSDM 原生 plot.cast_predict 用 geom_point
+  # 画 Eco-ISEA3H 格点；此处缓存 pred 供 terra 栅格热图后处理（见文末）。
   tryCatch(
     saveRDS(
       list(
         pred         = pred,
-        cate         = if (exists("cate")) cate else NULL,
         var_labels   = var_labels,
-        config_flags = list(
-          cate_hss_model     = cate_hss_model_final,
-          cate_hss_threshold = CONFIG$cate_hss_threshold,
-          species            = "Ovis_ammon"
-        )
+        config_flags = list(species = "Ovis_ammon")
       ),
       file.path(OVIS_FIG_DIR, "ovis_spatial_replot_cache.rds")
     ),
@@ -1106,17 +743,17 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     }
   )
 
-  # ── 插值渲染：用 terra 栅格热图覆盖 geom_point 的 HSS / CATE 图 ──────────
+  # ── 插值渲染：用 terra 栅格热图覆盖 geom_point 的 HSS 图 ──────────
   hlp_path <- .cast_find_spatial_heatmap_helpers(pkg_root)
   if (!is.na(hlp_path) && nzchar(hlp_path) &&
       requireNamespace("terra", quietly = TRUE) &&
       requireNamespace("sf", quietly = TRUE)) {
-    message("── 正在用 terra 插值生成出版级 HSS / CATE 热图 ──")
+    message("── 正在用 terra 插值生成出版级 HSS 热图 ──")
     sys.source(hlp_path, envir = environment())
     tryCatch(
       cast_spatial_replot_hss_cate_heatmaps(
         pred            = pred,
-        cate            = if (exists("cate")) cate else NULL,
+        cate            = NULL,
         fig_dir         = OVIS_FIG_DIR,
         fig_dpi         = OVIS_FIG_DPI,
         var_labels      = var_labels,
@@ -1124,8 +761,6 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
         res_deg         = CONFIG$spatial_heatmap_res_deg,
         interp_method   = CONFIG$spatial_heatmap_interp_method,
         display_res_deg = CONFIG$spatial_heatmap_display_res,
-        hss_model       = cate_hss_model_final,
-        hss_threshold   = CONFIG$cate_hss_threshold,
         species_label   = "Ovis_ammon",
         ovis_style      = TRUE
       ),
@@ -1144,14 +779,21 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 # ══════════════════════════════════════════════════════════════════════════════
 # 方式 B-1 (可选): 未来气候情景投射
 # ══════════════════════════════════════════════════════════════════════════════
-# 需要: geodata (CMIP6下载), cast_prepare_future_env, cast_project, cast_cv
+# 需要: geodata (CMIP6下载), download_cmip6.R 独立工具, cast_project, cast_cv
 # 将 CONFIG$run_future_projection 改为 TRUE 再运行本段。
 
 if (isTRUE(CONFIG$run_future_projection)) {
   message("\n══ Future Climate Projection ══\n")
 
+  # Source standalone CMIP6 utility
+  cmip6_util <- file.path(dirname(dirname(dirname(pkg_root))), "utils", "download_cmip6.R")
+  if (!file.exists(cmip6_util)) {
+    cmip6_util <- "E:/Package/utils/download_cmip6.R"
+  }
+  source(cmip6_util)
+
   # (1) 下载 CMIP6 数据 (首次运行会下载, 之后复用缓存)
-  cmip6_data <- cast_download_cmip6(
+  cmip6_data <- download_cmip6(
     gcms     = CONFIG$future_gcms,
     ssps     = CONFIG$future_ssps,
     periods  = CONFIG$future_periods,
@@ -1163,7 +805,7 @@ if (isTRUE(CONFIG$run_future_projection)) {
   )
 
   # (2) 在 china_env_grid 的 lon/lat 上提取未来环境变量
-  future_envs <- cast_prepare_future_env(
+  future_envs <- prepare_future_env(
     rasters     = cmip6_data,
     coords      = china_env_grid[, c("lon", "lat")],
     static_vars = china_env_grid,
@@ -1234,11 +876,8 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
     cv_k                     = CONFIG$cv_k,
     cv_block_method          = CONFIG$cv_block_method,
     do_predict               = NULL,
-    do_cate                  = TRUE,
-    cate_top_n               = 3L,
     blacklist                = dag_blacklist_use,
     whitelist                = dag_whitelist_use,
-    do_backdoor              = CONFIG$do_backdoor,
     seed                     = CONFIG$seed,
     verbose                  = TRUE
   )
@@ -1252,12 +891,12 @@ if (isTRUE(RUN_CAST_PIPELINE)) {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 空间 HSS / CATE 仅热图重绘（lon/lat 规则网格 + nearest 插值，对齐 fig7 Python 的
-# griddata + pcolormesh 思路；并按中国边界 shap 做遮罩）
+# 空间 HSS 仅热图重绘（lon/lat 规则网格 + nearest 插值，对齐 fig7 Python 的
+# griddata + pcolormesh 思路；并按中国边界做遮罩）
 # ══════════════════════════════════════════════════════════════════════════════
 # 将 CONFIG$only_replot_spatial_heatmap 设为 TRUE 后，选中本段到结尾运行（或 source
-# 全脚本）。需要 ovis_spatial_replot_cache.rds（全量跑 Step 9 后自动写入 OVIS_FIG_DIR）。
-# 会覆盖 ovis_predict_*_china.png、ovis_cate_*.png。
+# 全脚本）。需要 ovis_spatial_replot_cache.rds（全量跑 Step 7 后自动写入 OVIS_FIG_DIR）。
+# 会覆盖 ovis_predict_*_china.png。
 
 if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
   hlp <- .cast_find_spatial_heatmap_helpers(pkg_root)
@@ -1275,7 +914,7 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
   if (!file.exists(cache)) {
     stop(
       "Missing cache file:\n  ", cache,
-      "\nRun the full script once (Step 9 writes this file), then set ",
+      "\nRun the full script once (Step 7 writes this file), then set ",
       "CONFIG$only_replot_spatial_heatmap <- TRUE and re-run this block.",
       call. = FALSE
     )
@@ -1284,7 +923,7 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
   cf <- z$config_flags
   cast_spatial_replot_hss_cate_heatmaps(
     pred            = z$pred,
-    cate            = z$cate,
+    cate            = NULL,
     fig_dir         = OVIS_FIG_DIR,
     fig_dpi         = OVIS_FIG_DPI,
     var_labels      = z$var_labels,
@@ -1292,12 +931,8 @@ if (isTRUE(CONFIG[["only_replot_spatial_heatmap"]])) {
     res_deg         = CONFIG$spatial_heatmap_res_deg,
     interp_method   = CONFIG$spatial_heatmap_interp_method,
     display_res_deg = CONFIG$spatial_heatmap_display_res,
-    hss_model       = if (!is.null(cf) && !is.null(cf$cate_hss_model)) cf$cate_hss_model else CONFIG$cate_hss_model,
-    hss_threshold   = if (!is.null(cf) && !is.null(cf$cate_hss_threshold)) cf$cate_hss_threshold else CONFIG$cate_hss_threshold,
     species_label   = if (!is.null(cf) && !is.null(cf$species)) cf$species else "Ovis_ammon",
     ovis_style      = TRUE
   )
-  message("Spatial heatmap replot finished (ovis_predict_* / ovis_cate_*).")
-}
-
+  message("Spatial heatmap replot finished (ovis_predict_*).")
 }
