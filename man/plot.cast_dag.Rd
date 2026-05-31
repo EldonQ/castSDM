@@ -9,7 +9,7 @@
 \arguments{
 \item{x}{A \code{cast_dag} object.}
 
-\item{screen}{Optional \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}} to mark
+\item{screen}{Optional \code{cast_select} object from \code{\link[=cast_select]{cast_select()}} to mark
 selected variables and color nodes by MB role.}
 
 \item{var_labels}{Optional named character vector mapping variable names
@@ -26,7 +26,7 @@ A \code{ggplot} object.
 \description{
 Visualizes the learned causal DAG using ggraph. Nodes are colored by
 Markov Blanket role (parent/child/co_parent/predictive) when a
-\code{cast_screen} object is provided, sized by degree, and edges weighted
+\code{cast_select} object is provided, sized by degree, and edges weighted
 by bootstrap strength. The response node (presence) is highlighted
 when present.
 }

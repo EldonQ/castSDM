@@ -17,7 +17,7 @@ new_cast_fit(models, cast_vars, env_vars, scaling, dag = NULL, screen = NULL)
 
 \item{dag}{A \code{cast_dag} object (or \code{NULL}).}
 
-\item{screen}{A \code{cast_screen} object (or \code{NULL}).}
+\item{screen}{A \code{cast_select} object (or \code{NULL}).}
 }
 \value{
 A \code{cast_fit} object.

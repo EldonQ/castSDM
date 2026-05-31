@@ -30,7 +30,7 @@
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #'
-#' @return A `cast_screen` object with components:
+#' @return A `cast_select` object with components:
 #' \describe{
 #'   \item{selected}{Character vector of selected variable names.}
 #'   \item{scores}{A `data.frame` with per-variable scores and metadata.}
@@ -207,7 +207,7 @@ cast_select <- function(dag,
     )
   }
 
-  new_cast_screen(
+  new_cast_select(
     selected = selected,
     scores = scores_df,
     roles = roles_df

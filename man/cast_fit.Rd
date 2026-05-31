@@ -20,7 +20,7 @@ cast_fit(
 \arguments{
 \item{data}{A \code{data.frame} with \code{presence} column and predictor variables.}
 
-\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
+\item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
 
 \item{dag}{A \link{cast_dag} object, or \code{NULL}.}
 
@@ -48,7 +48,7 @@ Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
 Generalised Additive Models (GAM).
 }
 \details{
-Variable selection is driven by the \code{cast_screen} object from
+Variable selection is driven by the \code{cast_select} object from
 \code{\link[=cast_select]{cast_select()}}. If no screen is provided, all environmental variables
 from the DAG (or data) are used.
 \subsection{Supported Models}{

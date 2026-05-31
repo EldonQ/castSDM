@@ -19,7 +19,7 @@ new_cast_result(
 \arguments{
 \item{dag}{A \code{cast_dag} object.}
 
-\item{screen}{A \code{cast_screen} object.}
+\item{screen}{A \code{cast_select} object.}
 
 \item{fit}{A \code{cast_fit} object.}
 

@@ -28,7 +28,7 @@ parents first).}
 \item{dag}{A \link{cast_dag} object (used for DAG-guided confounder
 selection). Default \code{NULL}.}
 
-\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}} (used to select top variables if
+\item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}} (used to select top variables if
 \code{variables} is \code{NULL}). Default \code{NULL}.}
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}

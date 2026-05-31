@@ -23,7 +23,7 @@ print.cast_dag <- function(x, ...) {
 }
 
 #' @export
-print.cast_screen <- function(x, ...) {
+print.cast_select <- function(x, ...) {
   n_selected <- length(x$selected)
   cli::cli_h1("castSDM Variable Selection")
   cli::cli_ul(c(

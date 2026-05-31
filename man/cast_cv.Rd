@@ -23,7 +23,7 @@ cast_cv(
 \item{data}{A \code{data.frame} with \code{lon}, \code{lat}, \code{presence} columns and
 environmental variables.}
 
-\item{screen}{A \code{cast_screen} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
+\item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
 
 \item{dag}{A \link{cast_dag} object, or \code{NULL}.}
 

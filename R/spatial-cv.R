@@ -7,7 +7,7 @@
 #'
 #' @param data A `data.frame` with `lon`, `lat`, `presence` columns and
 #'   environmental variables.
-#' @param screen A `cast_screen` object from [cast_select()], or `NULL`.
+#' @param screen A `cast_select` object from [cast_select()], or `NULL`.
 #' @param dag A [cast_dag] object, or `NULL`.
 #' @param k Integer. Number of spatial folds. Default `5`.
 #' @param models Character vector. Models to cross-validate: `"rf"`, `"brt"`,

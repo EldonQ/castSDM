@@ -4,12 +4,12 @@
 #'
 #' Visualizes the learned causal DAG using ggraph. Nodes are colored by
 #' Markov Blanket role (parent/child/co_parent/predictive) when a
-#' `cast_screen` object is provided, sized by degree, and edges weighted
+#' `cast_select` object is provided, sized by degree, and edges weighted
 #' by bootstrap strength. The response node (presence) is highlighted
 #' when present.
 #'
 #' @param x A `cast_dag` object.
-#' @param screen Optional `cast_screen` object from [cast_select()] to mark
+#' @param screen Optional `cast_select` object from [cast_select()] to mark
 #'   selected variables and color nodes by MB role.
 #' @param var_labels Optional named character vector mapping variable names
 #'   to display labels (e.g., `c(bio02 = "Diurnal Temp Range")`).
@@ -170,13 +170,13 @@ plot.cast_dag <- function(x, screen = NULL,
 #' Bar chart showing MB membership (in_mb flag) and RF permutation importance
 #' for each variable. Selected variables are highlighted; roles are color-coded.
 #'
-#' @param x A `cast_screen` object (from [cast_select()]).
+#' @param x A `cast_select` object (from [cast_select()]).
 #' @param var_labels Optional named character vector for display labels.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_screen <- function(x, var_labels = NULL, ...) {
+plot.cast_select <- function(x, var_labels = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
 
   scr <- x$scores
@@ -728,7 +728,7 @@ plot.cast_result <- function(x, var_labels = NULL, ...) {
 
   p_dag <- plot.cast_dag(x$dag, screen = x$screen,
                          var_labels = var_labels)
-  p_scr <- plot.cast_screen(x$screen, var_labels = var_labels)
+  p_scr <- plot.cast_select(x$screen, var_labels = var_labels)
 
   combined <- p_dag | p_scr
   combined + patchwork::plot_layout(widths = c(1.2, 1))

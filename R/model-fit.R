@@ -4,12 +4,12 @@
 #' Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
 #' Generalised Additive Models (GAM).
 #'
-#' Variable selection is driven by the `cast_screen` object from
+#' Variable selection is driven by the `cast_select` object from
 #' [cast_select()]. If no screen is provided, all environmental variables
 #' from the DAG (or data) are used.
 #'
 #' @param data A `data.frame` with `presence` column and predictor variables.
-#' @param screen A `cast_screen` object from [cast_select()], or `NULL`.
+#' @param screen A `cast_select` object from [cast_select()], or `NULL`.
 #' @param dag A [cast_dag] object, or `NULL`.
 #' @param models Character vector. Models to fit: `"rf"`, `"maxent"`, `"brt"`,
 #'   `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.

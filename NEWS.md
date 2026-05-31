@@ -29,7 +29,7 @@ prediction.
 * **`cast_select()`**: DAG-guided variable selection using Markov Blanket
   extraction + RF permutation importance. MB variables are auto-selected;
   non-MB variables must exceed the median MB importance. Returns a
-  `cast_screen` object with `$selected`, `$scores`, and `$roles`
+  `cast_select` object with `$selected`, `$scores`, and `$roles`
   (parent/child/co_parent/predictive).
 * **`cast_ensemble()`**: Performance-weighted, best-model, or equal-weight
   ensemble prediction from CV metrics.

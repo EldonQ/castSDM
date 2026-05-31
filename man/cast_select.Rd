@@ -38,7 +38,7 @@ variables to retain. Default \code{0.3}.}
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_screen} object with components:
+A \code{cast_select} object with components:
 \describe{
 \item{selected}{Character vector of selected variable names.}
 \item{scores}{A \code{data.frame} with per-variable scores and metadata.}

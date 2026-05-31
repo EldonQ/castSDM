@@ -37,7 +37,7 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
   )
 }
 
-#' Create a cast_screen Object
+#' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
 #' @param scores A `data.frame` with per-variable scores (RF importance and
@@ -46,17 +46,17 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
 #'   each variable's causal role: `"parent"`, `"child"`, `"co_parent"`, or
 #'   `"predictive"`.
 #'
-#' @return A `cast_screen` object.
+#' @return A `cast_select` object.
 #' @keywords internal
 #' @export
-new_cast_screen <- function(selected, scores, roles) {
+new_cast_select <- function(selected, scores, roles) {
   structure(
     list(
       selected = selected,
       scores = scores,
       roles = roles
     ),
-    class = "cast_screen"
+    class = "cast_select"
   )
 }
 
@@ -67,7 +67,7 @@ new_cast_screen <- function(selected, scores, roles) {
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List with `means` and `sds` used for standardization.
 #' @param dag A `cast_dag` object (or `NULL`).
-#' @param screen A `cast_screen` object (or `NULL`).
+#' @param screen A `cast_select` object (or `NULL`).
 #'
 #' @return A `cast_fit` object.
 #' @keywords internal
@@ -177,7 +177,7 @@ new_cast_cate <- function(effects, variables, n_trees = 1000L) {
 #' Container for the full pipeline output.
 #'
 #' @param dag A `cast_dag` object.
-#' @param screen A `cast_screen` object.
+#' @param screen A `cast_select` object.
 #' @param fit A `cast_fit` object.
 #' @param eval A `cast_eval` object (hold-out evaluation).
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.

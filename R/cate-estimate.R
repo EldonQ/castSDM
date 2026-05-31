@@ -15,7 +15,7 @@
 #'   parents first).
 #' @param dag A [cast_dag] object (used for DAG-guided confounder
 #'   selection). Default `NULL`.
-#' @param screen A `cast_screen` object from [cast_select()] (used to select top variables if
+#' @param screen A `cast_select` object from [cast_select()] (used to select top variables if
 #'   `variables` is `NULL`). Default `NULL`.
 #' @param response Character. Response column name. Default `"presence"`.
 #' @param top_n Integer. Number of top variables if `variables` is `NULL`.
