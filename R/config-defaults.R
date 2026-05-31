@@ -1,9 +1,8 @@
 #' Build castSDM Default Configuration
 #'
 #' Returns a named list of workflow defaults that scripts can override with
-#' dataset-specific choices. This keeps common DAG, selection, fitting, CV,
-#' CATE, and SHAP parameters aligned across examples without forcing every
-#' dataset into the same run plan.
+#' dataset-specific choices. Only parameters accepted by [cast_batch()]
+#' (and its internal pipeline functions) are included.
 #'
 #' @param profile Character. One of `"single"`, `"batch"`, `"disdat"`,
 #'   `"fish"`, or `"debug"`.
@@ -26,6 +25,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     parallel = TRUE,
     resume = TRUE,
 
+    # ── DAG ──
     dag_env_vars = NULL,
     dag_R = 100L,
     dag_structure_method = "mb_first",
@@ -41,18 +41,20 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     dag_max_rows = 8000L,
     dag_verbose = FALSE,
     learn_shared_dag = FALSE,
-    do_backdoor = TRUE,
 
+    # ── Variable Selection ──
     select_min_vars = 5L,
     select_min_fraction = 0.3,
     select_num_trees = 300L,
     select_verbose = FALSE,
 
+    # ── Model Fitting ──
     fit_rf_ntree = 300L,
     fit_brt_n_trees = 500L,
     fit_brt_depth = 5L,
     fit_verbose = FALSE,
 
+    # ── Cross-Validation ──
     do_cv = TRUE,
     cv_k = 5L,
     cv_block_method = "grid",
@@ -60,7 +62,8 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cv_parallel = FALSE,
     cv_verbose = FALSE,
 
-    do_cate = TRUE,
+    # ── CATE (optional; requires grf) ──
+    do_cate = FALSE,
     cate_top_n = 3L,
     cate_n_trees = 1000L,
     cate_variables = NULL,
@@ -68,30 +71,9 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cate_hss_model = "rf",
     cate_hss_threshold = 0.1,
 
-    do_shap = FALSE,
-    shap_nrounds = 200L,
-    shap_max_depth = 6L,
-    shap_eta = 0.05,
-    shap_subsample = 0.8,
-    shap_colsample_bytree = 0.8,
-    shap_test_fraction = 0.2,
-    shap_plot_top_n = 15L,
-    shap_fastshap_nsim = 40L,
-    shap_max_explain_rows = 50L,
-
+    # ── Prediction / Ensemble ──
     do_predict = TRUE,
-    do_ensemble = TRUE,
-    do_spatial_heatmap = FALSE,
-    run_future_projection = FALSE,
-    future_download_cmip6 = FALSE,
-    future_gcms = NULL,
-    future_ssps = NULL,
-    future_periods = NULL,
-    future_var = NULL,
-    future_res = NULL,
-    future_ensemble = TRUE,
-    future_cache_dir = NULL,
-    future_save_dir = NULL
+    do_ensemble = TRUE
   )
 
   if (identical(profile, "batch")) {
@@ -102,7 +84,6 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cfg$output_dir <- "castSDM_disdat"
     cfg$models <- c("rf", "gam", "maxent", "brt")
     cfg$fig_dpi <- 300L
-    cfg$do_shap <- TRUE
     cfg$cate_n_trees <- 500L
     cfg$learn_shared_dag <- FALSE
   } else if (identical(profile, "fish")) {
@@ -119,7 +100,6 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cfg$fit_brt_n_trees <- 150L
     cfg$do_cv <- FALSE
     cfg$do_cate <- FALSE
-    cfg$do_shap <- FALSE
     cfg$parallel <- FALSE
   }
 

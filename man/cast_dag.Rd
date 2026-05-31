@@ -8,6 +8,7 @@ cast_dag(
   data,
   response = "presence",
   env_vars = NULL,
+  structure_method = c("mb_first", "pc", "bootstrap_hc", "bidag_bge"),
   include_response = TRUE,
   R = 100L,
   algorithm = "hc",
@@ -17,7 +18,6 @@ cast_dag(
   max_rows = 8000L,
   seed = NULL,
   verbose = TRUE,
-  structure_method = c("pc", "bootstrap_hc", "mb_first", "bidag_bge"),
   pc_alpha = 0.05,
   pc_test = NULL,
   mb_method = c("fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"),
@@ -40,6 +40,22 @@ environmental variables.}
 \item{env_vars}{Character vector or \code{NULL}. Environmental variable names
 to include in DAG learning. When \code{NULL} (default), all numeric columns
 in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
+
+\item{structure_method}{Character. One of \code{"mb_first"} (default),
+\code{"pc"}, \code{"bootstrap_hc"}, \code{"bidag_bge"}.
+
+The \code{"mb_first"} method uses a \strong{two-stage} approach that is
+dramatically faster than \code{"pc"} for high-dimensional data (p > 20):
+\itemize{
+\item \strong{Stage 1} — Direct Markov Blanket discovery via IAMB-family
+algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
+\item \strong{Stage 2} — Full DAG learning via PC, restricted to the MB
+subset plus the response node.  Because |MB| is typically 5–15,
+this is near-instantaneous.
+}
+
+Under the Faithfulness assumption the two-stage result is
+theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).}
 
 \item{include_response}{Logical. Include the \code{response} column as a node
 in DAG learning so that its Markov Blanket can be extracted. Default
@@ -66,22 +82,6 @@ HC only). Default \code{0.6}.}
 \item{seed}{Integer or \code{NULL}. Random seed. Default \code{NULL}.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
-
-\item{structure_method}{Character. One of \code{"pc"} (default),
-\code{"bootstrap_hc"}, \code{"mb_first"}, \code{"bidag_bge"}.
-
-The \code{"mb_first"} method uses a \strong{two-stage} approach that is
-dramatically faster than \code{"pc"} for high-dimensional data (p > 20):
-\itemize{
-\item \strong{Stage 1} — Direct Markov Blanket discovery via IAMB-family
-algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
-\item \strong{Stage 2} — Full DAG learning via PC, restricted to the MB
-subset plus the response node.  Because |MB| is typically 5–15,
-this is near-instantaneous.
-}
-
-Under the Faithfulness assumption the two-stage result is
-theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).}
 
 \item{pc_alpha}{Significance level for constraint-based PC. Default \code{0.05}.
 Used when \code{structure_method} is \code{"pc"} or \code{"mb_first"} (Stage 2).}
@@ -148,7 +148,7 @@ continuous data, so the response is kept as numeric 0/1 (an acceptable
 approximation).
 }
 
-The default method is \code{"pc"} (fast, constraint-based).
+The default method is \code{"mb_first"} (two-stage: fast MB discovery + local PC).
 }
 \references{
 Scutari, M. (2010). Learning Bayesian Networks with the bnlearn R Package.

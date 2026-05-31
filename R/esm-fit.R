@@ -5,10 +5,8 @@
 #' (GLM or GAM) for each pair of selected predictors and combines them via
 #' AUC-weighted averaging on a held-out validation split.
 #'
-#' Designed as the recommended fallback when BRT would over-fit
-#' on rare species (typically `n_pres < presence_threshold`). Complementary
-#' to [cast_fit()] — see [cast_batch()]'s `auto_esm` argument for automatic
-#' selection.
+#' Designed as the recommended fallback when standard SDMs would over-fit
+#' on rare species (typically `n_pres < 30`). Complementary to [cast_fit()].
 #'
 #' @param data A `data.frame` with `presence` column and predictor columns.
 #' @param vars Character vector of candidate predictor names. If `NULL`,

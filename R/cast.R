@@ -45,6 +45,10 @@
 #' @param do_cate Logical. Estimate spatial CATE via causal forests.
 #'   Default `FALSE`. Requires package `grf`.
 #' @param cate_top_n Integer. Top variables for CATE. Default `3`.
+#' @param cate_n_trees Integer. Number of causal forest trees. Default
+#'   `1000`.
+#' @param cate_variables Character vector or `NULL`. Specific variables
+#'   for CATE estimation. Default `NULL` (auto-select top variables).
 #' @param blacklist,whitelist DAG edge constraints. Default `NULL`.
 #' @param seed Integer or `NULL`. Random seed.
 #' @param verbose Logical. Print progress. Default `TRUE`.
@@ -81,6 +85,8 @@ cast <- function(species_data,
                  ensemble_method = "weighted",
                  do_cate = FALSE,
                  cate_top_n = 3L,
+                 cate_n_trees = 1000L,
+                 cate_variables = NULL,
                  blacklist = NULL,
                  whitelist = NULL,
                  seed = NULL,
@@ -192,8 +198,6 @@ cast <- function(species_data,
     }
   }
 
-  if (verbose) cli::cli_h1("Pipeline Complete")
-
   # === Step 8: CATE (optional) ===
   cate_result <- NULL
   if (do_cate) {
@@ -203,7 +207,9 @@ cast <- function(species_data,
       cast_cate(
         train_data,
         dag = dag, screen = screen,
+        variables = cate_variables,
         top_n = cate_top_n,
+        n_trees = cate_n_trees,
         predict_data = pred_for_cate,
         seed = seed, verbose = verbose
       ),
@@ -213,6 +219,8 @@ cast <- function(species_data,
       }
     )
   }
+
+  if (verbose) cli::cli_h1("Pipeline Complete")
 
   new_cast_result(
     dag = dag, screen = screen,

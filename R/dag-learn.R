@@ -18,7 +18,7 @@
 #'   continuous data, so the response is kept as numeric 0/1 (an acceptable
 #'   approximation).
 #'
-#' The default method is `"pc"` (fast, constraint-based).
+#' The default method is `"mb_first"` (two-stage: fast MB discovery + local PC).
 #'
 #' @param data A `data.frame` containing the `presence` column and
 #'   environmental variables.
@@ -47,8 +47,8 @@
 #' @param max_rows Integer. Maximum rows; subsample if exceeded. Default `8000`.
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
-#' @param structure_method Character. One of `"pc"` (default),
-#'   `"bootstrap_hc"`, `"mb_first"`, `"bidag_bge"`.
+#' @param structure_method Character. One of `"mb_first"` (default),
+#'   `"pc"`, `"bootstrap_hc"`, `"bidag_bge"`.
 #'
 #'   The `"mb_first"` method uses a **two-stage** approach that is
 #'   dramatically faster than `"pc"` for high-dimensional data (p > 20):
@@ -119,6 +119,9 @@
 cast_dag <- function(data,
                      response = "presence",
                      env_vars = NULL,
+                     structure_method = c(
+                       "mb_first", "pc", "bootstrap_hc", "bidag_bge"
+                     ),
                      include_response = TRUE,
                      R = 100L,
                      algorithm = "hc",
@@ -128,9 +131,6 @@ cast_dag <- function(data,
                      max_rows = 8000L,
                      seed = NULL,
                      verbose = TRUE,
-                     structure_method = c(
-                       "pc", "bootstrap_hc", "mb_first", "bidag_bge"
-                     ),
                      pc_alpha = 0.05,
                      pc_test = NULL,
                      mb_method = c(

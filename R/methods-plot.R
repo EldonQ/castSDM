@@ -865,8 +865,12 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
       }
     ) +
     ggplot2::coord_sf(expand = FALSE) +
-    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
     ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),

@@ -30,6 +30,8 @@ cast(
   ensemble_method = "weighted",
   do_cate = FALSE,
   cate_top_n = 3L,
+  cate_n_trees = 1000L,
+  cate_variables = NULL,
   blacklist = NULL,
   whitelist = NULL,
   seed = NULL,
@@ -100,6 +102,12 @@ if \code{env_data} is provided.}
 Default \code{FALSE}. Requires package \code{grf}.}
 
 \item{cate_top_n}{Integer. Top variables for CATE. Default \code{3}.}
+
+\item{cate_n_trees}{Integer. Number of causal forest trees. Default
+\code{1000}.}
+
+\item{cate_variables}{Character vector or \code{NULL}. Specific variables
+for CATE estimation. Default \code{NULL} (auto-select top variables).}
 
 \item{blacklist, whitelist}{DAG edge constraints. Default \code{NULL}.}
 

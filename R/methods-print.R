@@ -113,7 +113,7 @@ print.cast_project <- function(x, ...) {
   cli::cli_h1("castSDM Future Projection")
   cli::cli_ul(c(
     "Scenarios: {n_scenarios} ({.val {names(x$future)}})",
-    "Current range cells: {sum(x$current$binary == 1, na.rm = TRUE)}"
+    "Current range cells: {sum(x$current$predictions$binary_ensemble == 1, na.rm = TRUE)}"
   ))
   if (!is.null(x$stats) && nrow(x$stats) > 0) {
     cli::cli_h2("Range change summary")

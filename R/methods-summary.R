@@ -2,18 +2,19 @@
 
 #' @export
 summary.cast_dag <- function(object, ...) {
-  cat("castSDM DAG Summary\n")
-  cat("===================\n")
-  cat("Nodes:", length(object$nodes), "\n")
-  cat("Edges:", nrow(object$edges), "\n")
-  if (!is.null(object$response_node))
-    cat("Response node:", object$response_node, "\n")
-  cat("Structure method:", object$structure_method %||% "pc", "\n")
-  cat("Bootstrap R:", object$boot_R, "\n")
-  cat("Strength threshold:", object$strength_threshold, "\n")
-  cat("Direction threshold:", object$direction_threshold, "\n")
+  cli::cli_h1("castSDM DAG Summary")
+  cli::cli_ul(c(
+    "Nodes: {length(object$nodes)}",
+    "Edges: {nrow(object$edges)}",
+    if (!is.null(object$response_node))
+      "Response node: {object$response_node}" else NULL,
+    "Structure method: {object$structure_method %||% 'pc'}",
+    "Bootstrap R: {object$boot_R}",
+    "Strength threshold: {object$strength_threshold}",
+    "Direction threshold: {object$direction_threshold}"
+  ))
   if (nrow(object$edges) > 0) {
-    cat("\nTop edges by strength:\n")
+    cli::cli_h2("Top edges by strength")
     top <- object$edges[order(-object$edges$strength), ]
     print(utils::head(top, 10))
   }
@@ -22,42 +23,43 @@ summary.cast_dag <- function(object, ...) {
 
 #' @export
 summary.cast_eval <- function(object, ...) {
-  cat("castSDM Model Evaluation Summary\n")
-  cat("================================\n")
+  cli::cli_h1("castSDM Model Evaluation Summary")
   print(object$metrics)
   if (nrow(object$metrics) > 1) {
     best_auc <- object$metrics[which.max(object$metrics$auc_mean), ]
-    cat("\nBest AUC:", best_auc$model, "=", round(best_auc$auc_mean, 4), "\n")
+    cli::cli_inform("Best AUC: {best_auc$model} = {round(best_auc$auc_mean, 4)}")
   }
   invisible(object)
 }
 
 #' @export
 summary.cast_result <- function(object, ...) {
-  cat("castSDM Pipeline Result Summary\n")
-  cat("===============================\n\n")
-  cat("-- DAG --\n")
-  cat("  Nodes:", length(object$dag$nodes),
-      "| Edges:", nrow(object$dag$edges), "\n")
-  if (!is.null(object$dag$response_node))
-    cat("  Response node:", object$dag$response_node, "\n")
-  cat("\n")
-  cat("-- Variable Selection --\n")
-  cat("  Selected:", length(object$screen$selected), "variables\n")
-  cat("  ", paste(object$screen$selected, collapse = ", "), "\n")
+  cli::cli_h1("castSDM Pipeline Result Summary")
+  cli::cli_h2("DAG")
+  cli::cli_ul(c(
+    "Nodes: {length(object$dag$nodes)} | Edges: {nrow(object$dag$edges)}",
+    if (!is.null(object$dag$response_node))
+      "Response node: {object$dag$response_node}" else NULL
+  ))
+  cli::cli_h2("Variable Selection")
+  cli::cli_ul(c(
+    "Selected: {length(object$screen$selected)} variables",
+    "{paste(object$screen$selected, collapse = ', ')}"
+  ))
   if (!is.null(object$screen$roles) && nrow(object$screen$roles) > 0) {
     role_tbl <- table(object$screen$roles$role)
-    cat("  Roles:", paste(names(role_tbl), role_tbl, sep = "=", collapse = ", "), "\n")
+    cli::cli_text("Roles: {paste(names(role_tbl), role_tbl, sep = '=', collapse = ', ')}")
   }
-  cat("\n")
-  cat("-- Models --\n")
+  cli::cli_h2("Models")
   if (!is.null(object$eval)) {
     print(object$eval$metrics)
   }
   if (!is.null(object$ensemble)) {
-    cat("\n-- Ensemble --\n")
-    cat("  Method:", object$ensemble$method, "\n")
-    cat("  Threshold:", round(object$ensemble$threshold, 3), "\n")
+    cli::cli_h2("Ensemble")
+    cli::cli_ul(c(
+      "Method: {object$ensemble$method}",
+      "Threshold: {round(object$ensemble$threshold, 3)}"
+    ))
   }
   invisible(object)
 }
