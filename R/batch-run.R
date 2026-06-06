@@ -58,6 +58,8 @@
 #' @param dag_R Integer. Bootstrap replicates. Default `100`.
 #' @param dag_structure_method Character. Default `"mb_first"`.
 #' @param dag_include_response Logical. Default `TRUE`.
+#' @param dag_response_as_sink Logical. If `TRUE` (default), forbids response
+#'   to environmental predictor edges.
 #' @param dag_pc_alpha Numeric. Default `0.05`.
 #' @param dag_pc_test Character or `NULL`. Default `NULL`.
 #' @param dag_mb_method Character. MB discovery algorithm. Default `"fast.iamb"`.
@@ -95,6 +97,13 @@
 #' @param learn_shared_dag Logical. Default `FALSE`.
 #' @param shared_dag Optional precomputed [cast_dag].
 #' @param shared_dag_data Optional `data.frame`.
+#' @param raster_stack Optional `terra::SpatRaster` for raster-based
+#'   ensemble prediction via [cast_ensemble_raster()]. Default `NULL`.
+#' @param future_rasters Optional named list of `terra::SpatRaster` stacks
+#'   for future projection via [cast_project_raster()]. Default `NULL`.
+#' @param raster_mask Optional `terra::SpatRaster` prediction mask.
+#' @param raster_compression Character. GeoTIFF compression. Default `"LZW"`.
+#' @param overwrite_rasters Logical. Default `FALSE`.
 #' @param ... Additional arguments forwarded to [cast_fit()].
 #'
 #' @return A `cast_batch` object.
@@ -115,6 +124,7 @@ cast_batch <- function(species_list,
                        dag_R                  = 100L,
                        dag_structure_method   = "mb_first",
                        dag_include_response   = TRUE,
+                       dag_response_as_sink    = TRUE,
                        dag_pc_alpha           = 0.05,
                        dag_pc_test            = NULL,
                        dag_mb_method          = "fast.iamb",
@@ -162,6 +172,11 @@ cast_batch <- function(species_list,
                        learn_shared_dag = FALSE,
                        shared_dag = NULL,
                        shared_dag_data = NULL,
+                       raster_stack = NULL,
+                       future_rasters = NULL,
+                       raster_mask = NULL,
+                       raster_compression = "LZW",
+                       overwrite_rasters = FALSE,
                        ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
@@ -281,6 +296,7 @@ cast_batch <- function(species_list,
           dag_data,
           response = response,
           include_response = dag_include_response,
+          response_as_sink = dag_response_as_sink,
           env_vars = dag_vars,
           R = dag_R,
           algorithm = dag_algorithm,
@@ -313,6 +329,7 @@ cast_batch <- function(species_list,
     prepare_verbose = prepare_verbose,
     train_fraction = train_fraction,
     dag_include_response = dag_include_response,
+    dag_response_as_sink = dag_response_as_sink,
     dag_env_vars = dag_env_vars,
     dag_verbose = dag_verbose,
     dag_R = dag_R,
@@ -349,7 +366,13 @@ cast_batch <- function(species_list,
     cate_hss_threshold = cate_hss_threshold,
     var_labels = var_labels,
     fit_verbose = fit_verbose,
-    shared_dag = shared_dag
+    shared_dag = shared_dag,
+    # ── Raster projection (new) ──
+    raster_stack = raster_stack,
+    future_rasters = future_rasters,
+    raster_mask = raster_mask,
+    raster_compression = raster_compression,
+    overwrite_rasters = overwrite_rasters
   )
 
   if (parallel && !is.null(dev_root_workers)) {

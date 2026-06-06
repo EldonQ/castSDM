@@ -19,6 +19,8 @@
 #'   `structure_method`. Default `"mb_first"`.
 #' @param dag_include_response Logical. Include response in DAG learning for
 #'   Markov Blanket extraction. Default `TRUE`.
+#' @param dag_response_as_sink Logical. If `TRUE` (default), forbids
+#'   `presence -> environmental predictor` edges during DAG learning.
 #' @param dag_pc_alpha Significance level for PC.
 #' @param dag_pc_test Conditional-independence test for [cast_dag()].
 #'   Default `NULL` (auto-selects `"mi-cg"` for mixed data).
@@ -67,6 +69,7 @@ cast <- function(species_data,
                  n_bootstrap = 100L,
                  dag_structure_method = "mb_first",
                  dag_include_response = TRUE,
+                 dag_response_as_sink = TRUE,
                  dag_pc_alpha = 0.05,
                  dag_pc_test = NULL,
                  dag_mb_method = "fast.iamb",
@@ -113,6 +116,7 @@ cast <- function(species_data,
   dag <- cast_dag(
     train_data,
     include_response = dag_include_response,
+    response_as_sink = dag_response_as_sink,
     R = n_bootstrap,
     strength_threshold = strength_threshold,
     direction_threshold = direction_threshold,

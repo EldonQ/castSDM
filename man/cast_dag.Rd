@@ -10,6 +10,7 @@ cast_dag(
   env_vars = NULL,
   structure_method = c("mb_first", "pc", "bootstrap_hc", "bidag_bge"),
   include_response = TRUE,
+  response_as_sink = TRUE,
   R = 100L,
   algorithm = "hc",
   score = NULL,
@@ -60,6 +61,11 @@ theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).}
 \item{include_response}{Logical. Include the \code{response} column as a node
 in DAG learning so that its Markov Blanket can be extracted. Default
 \code{TRUE}.}
+
+\item{response_as_sink}{Logical. If \code{TRUE} (default), forbids directed
+edges from the response node to environmental predictors. This encodes
+the SDM assumption that environmental variables may explain occurrence,
+but occurrence does not cause static environmental predictors.}
 
 \item{R}{Integer. Number of bootstrap replicates for \code{structure_method = "bootstrap_hc"}. Ignored otherwise (stored as \code{NA} for documentation).}
 

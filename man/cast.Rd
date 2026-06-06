@@ -12,6 +12,7 @@ cast(
   n_bootstrap = 100L,
   dag_structure_method = "mb_first",
   dag_include_response = TRUE,
+  dag_response_as_sink = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
   dag_mb_method = "fast.iamb",
@@ -59,6 +60,9 @@ the same environmental columns as \code{species_data}.}
 
 \item{dag_include_response}{Logical. Include response in DAG learning for
 Markov Blanket extraction. Default \code{TRUE}.}
+
+\item{dag_response_as_sink}{Logical. If \code{TRUE} (default), forbids
+\verb{presence -> environmental predictor} edges during DAG learning.}
 
 \item{dag_pc_alpha}{Significance level for PC.}
 

@@ -18,6 +18,7 @@ cast_batch(
   dag_R = 100L,
   dag_structure_method = "mb_first",
   dag_include_response = TRUE,
+  dag_response_as_sink = TRUE,
   dag_pc_alpha = 0.05,
   dag_pc_test = NULL,
   dag_mb_method = "fast.iamb",
@@ -62,6 +63,11 @@ cast_batch(
   learn_shared_dag = FALSE,
   shared_dag = NULL,
   shared_dag_data = NULL,
+  raster_stack = NULL,
+  future_rasters = NULL,
+  raster_mask = NULL,
+  raster_compression = "LZW",
+  overwrite_rasters = FALSE,
   ...
 )
 }
@@ -91,6 +97,9 @@ cast_batch(
 \item{dag_structure_method}{Character. Default \code{"mb_first"}.}
 
 \item{dag_include_response}{Logical. Default \code{TRUE}.}
+
+\item{dag_response_as_sink}{Logical. If \code{TRUE} (default), forbids response
+to environmental predictor edges.}
 
 \item{dag_pc_alpha}{Numeric. Default \code{0.05}.}
 
@@ -164,6 +173,18 @@ cast_batch(
 \item{shared_dag}{Optional precomputed \link{cast_dag}.}
 
 \item{shared_dag_data}{Optional \code{data.frame}.}
+
+\item{raster_stack}{Optional \code{terra::SpatRaster} for raster-based
+ensemble prediction via \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}. Default \code{NULL}.}
+
+\item{future_rasters}{Optional named list of \code{terra::SpatRaster} stacks
+for future projection via \code{\link[=cast_project_raster]{cast_project_raster()}}. Default \code{NULL}.}
+
+\item{raster_mask}{Optional \code{terra::SpatRaster} prediction mask.}
+
+\item{raster_compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
+
+\item{overwrite_rasters}{Logical. Default \code{FALSE}.}
 
 \item{...}{Additional arguments forwarded to \code{\link[=cast_fit]{cast_fit()}}.}
 }

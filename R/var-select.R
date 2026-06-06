@@ -10,11 +10,13 @@
 #' Non-MB variables are added only if their RF importance exceeds the
 #' median importance of the MB variables.
 #'
-#' Each selected variable is assigned a **causal role**:
-#' - `"parent"`: direct cause of the response in the DAG.
-#' - `"child"`: direct effect of the response.
-#' - `"co_parent"`: shares a child with the response (spouse in MB).
-#' - `"predictive"`: not in the MB but has high RF importance.
+#' Each selected variable is assigned a **screening role**:
+#' - `"mb_direct"`: adjacent to the response in the response-focused MB graph.
+#' - `"mb_associated"`: retained through non-adjacent Markov Blanket structure
+#'   in an unconstrained local graph.
+#' - `"importance_added"`: outside the MB but retained by RF importance.
+#' - `"importance_screened"`: retained by RF importance when the MB is dense
+#'   or otherwise non-selective.
 #'
 #' @param dag A [cast_dag] object, ideally learned with
 #'   `include_response = TRUE`.
@@ -42,7 +44,7 @@
 #' (`include_response = FALSE`), the Markov Blanket cannot be computed.
 #' In that case, variable selection falls back to pure RF importance
 #' with a score-gap heuristic; all selected variables receive the
-#' `"predictive"` role.
+#' `"importance_screened"` role.
 #'
 #' @seealso [cast_dag()], [cast_fit()]
 #'
@@ -68,9 +70,18 @@ cast_select <- function(dag,
   mb <- NULL
   if (!is.null(response_node)) {
     mb <- extract_markov_blanket(dag, response_node)
+    stage1_mb <- dag$metadata$mb_vars_stage1 %||% character()
+    if (length(stage1_mb) > 0) {
+      mb$all <- unique(intersect(stage1_mb, env_vars))
+      if (isTRUE(dag$metadata$response_as_sink)) {
+        mb$parents <- mb$all
+        mb$children <- character()
+        mb$co_parents <- character()
+      }
+    }
     if (verbose && length(mb$all) > 0) {
       cli::cli_inform(
-        "Markov Blanket of {.val {response_node}}: {length(mb$all)} variables ({length(mb$parents)} parents, {length(mb$children)} children, {length(mb$co_parents)} co-parents)."
+        "Markov Blanket of {.val {response_node}}: {length(mb$all)} variables ({length(mb$parents)} direct MB, {length(mb$children) + length(mb$co_parents)} associated MB)."
       )
     }
   }
@@ -98,9 +109,9 @@ cast_select <- function(dag,
   # Mark MB membership
   scores_df$in_mb <- scores_df$variable %in% (mb$all %||% character())
   scores_df$mb_role <- vapply(scores_df$variable, function(v) {
-    if (v %in% (mb$parents %||% character())) return("parent")
-    if (v %in% (mb$children %||% character())) return("child")
-    if (v %in% (mb$co_parents %||% character())) return("co_parent")
+    if (v %in% (mb$parents %||% character())) return("mb_direct")
+    if (v %in% (mb$children %||% character())) return("mb_associated")
+    if (v %in% (mb$co_parents %||% character())) return("mb_associated")
     "none"
   }, character(1))
 
@@ -172,21 +183,30 @@ cast_select <- function(dag,
     selected <- select_by_importance(scores_df, min_keep)
   }
 
-  # --- Assign causal roles -------------------------------------------------
+  # --- Assign screening roles ----------------------------------------------
   roles_df <- data.frame(
     variable = selected,
     role = vapply(selected, function(v) {
-      if (!isTRUE(mb_selective)) return("predictive")
-      if (v %in% (mb$parents %||% character())) return("parent")
-      if (v %in% (mb$children %||% character())) return("child")
-      if (v %in% (mb$co_parents %||% character())) return("co_parent")
-      "predictive"
+      if (!isTRUE(mb_selective)) return("importance_screened")
+      if (v %in% (mb$parents %||% character())) return("mb_direct")
+      if (v %in% (mb$children %||% character())) return("mb_associated")
+      if (v %in% (mb$co_parents %||% character())) return("mb_associated")
+      "importance_added"
     }, character(1)),
     stringsAsFactors = FALSE
   )
 
   # Sort: MB roles first, then by importance
-  role_order <- c(parent = 1, child = 2, co_parent = 3, predictive = 4)
+  role_order <- c(
+    mb_direct = 1,
+    mb_associated = 2,
+    importance_added = 3,
+    importance_screened = 4,
+    parent = 1,
+    child = 2,
+    co_parent = 2,
+    predictive = 3
+  )
   roles_df$role_rank <- role_order[roles_df$role]
   roles_df$imp_val <- scores_df$importance[match(roles_df$variable,
                                                   scores_df$variable)]
@@ -200,10 +220,10 @@ cast_select <- function(dag,
   rownames(scores_df) <- NULL
 
   if (verbose) {
-    n_mb <- sum(roles_df$role != "predictive")
-    n_pred <- sum(roles_df$role == "predictive")
+    n_mb <- sum(roles_df$role %in% c("mb_direct", "mb_associated"))
+    n_pred <- sum(roles_df$role %in% c("importance_added", "importance_screened"))
     cli::cli_inform(
-      "Selection: {length(selected)}/{length(env_vars)} variables ({n_mb} from MB, {n_pred} predictive)."
+      "Selection: {length(selected)}/{length(env_vars)} variables ({n_mb} from MB, {n_pred} importance-screened)."
     )
   }
 

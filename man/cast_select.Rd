@@ -59,19 +59,21 @@ All MB variables are automatically selected.
 Non-MB variables are added only if their RF importance exceeds the
 median importance of the MB variables.
 
-Each selected variable is assigned a \strong{causal role}:
+Each selected variable is assigned a \strong{screening role}:
 \itemize{
-\item \code{"parent"}: direct cause of the response in the DAG.
-\item \code{"child"}: direct effect of the response.
-\item \code{"co_parent"}: shares a child with the response (spouse in MB).
-\item \code{"predictive"}: not in the MB but has high RF importance.
+\item \code{"mb_direct"}: adjacent to the response in the response-focused MB graph.
+\item \code{"mb_associated"}: retained through non-adjacent Markov Blanket structure
+in an unconstrained local graph.
+\item \code{"importance_added"}: outside the MB but retained by RF importance.
+\item \code{"importance_screened"}: retained by RF importance when the MB is dense
+or otherwise non-selective.
 }
 
 When the DAG was learned without the response node
 (\code{include_response = FALSE}), the Markov Blanket cannot be computed.
 In that case, variable selection falls back to pure RF importance
 with a score-gap heuristic; all selected variables receive the
-\code{"predictive"} role.
+\code{"importance_screened"} role.
 }
 \seealso{
 \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_fit]{cast_fit()}}

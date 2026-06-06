@@ -43,8 +43,8 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
 #' @param scores A `data.frame` with per-variable scores (RF importance and
 #'   DAG Markov Blanket membership).
 #' @param roles A `data.frame` with columns `variable` and `role` indicating
-#'   each variable's causal role: `"parent"`, `"child"`, `"co_parent"`, or
-#'   `"predictive"`.
+#'   each variable's response-focused screening role: `"mb_direct"`,
+#'   `"mb_associated"`, `"importance_added"`, or `"importance_screened"`.
 #'
 #' @return A `cast_select` object.
 #' @keywords internal

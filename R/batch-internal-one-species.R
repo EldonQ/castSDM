@@ -54,6 +54,7 @@
           split$train,
           response = cfg$response,
           include_response = cfg$dag_include_response %||% TRUE,
+          response_as_sink = cfg$dag_response_as_sink %||% TRUE,
           env_vars = cfg$dag_env_vars,
           R = cfg$dag_R,
           algorithm = cfg$dag_algorithm,
@@ -144,6 +145,51 @@
             cast_ensemble(fit, cv_result, env_data, method = "weighted"),
             error = function(e) NULL
           )
+        )
+      }
+    }
+
+    # ── Raster Ensemble & Future Projection (optional) ──────────
+    raster_result <- NULL
+    if (!is.null(cfg$raster_stack) && !is.null(cv_result) &&
+        requireNamespace("terra", quietly = TRUE)) {
+      raster_dir <- file.path(sp_dir, "rasters")
+      raster_result <- tryCatch(
+        cast_ensemble_raster(
+          fit, cv_result, cfg$raster_stack,
+          output_dir = raster_dir,
+          method = "weighted",
+          models = cfg$predict_models,
+          mask = cfg$raster_mask,
+          prefix = "current",
+          overwrite = cfg$overwrite_rasters %||% FALSE,
+          compression = cfg$raster_compression %||% "LZW",
+          verbose = FALSE
+        ),
+        error = function(e) {
+          warning(sprintf("Raster ensemble for '%s' failed: %s", sp_name, e$message))
+          NULL
+        }
+      )
+
+      # Future projections
+      if (!is.null(raster_result) && !is.null(cfg$future_rasters)) {
+        tryCatch(
+          cast_project_raster(
+            fit, cv_result,
+            current_raster = cfg$raster_stack,
+            future_rasters = cfg$future_rasters,
+            output_dir = sp_dir,
+            method = "weighted",
+            models = cfg$predict_models,
+            mask = cfg$raster_mask,
+            overwrite = cfg$overwrite_rasters %||% FALSE,
+            compression = cfg$raster_compression %||% "LZW",
+            verbose = FALSE
+          ),
+          error = function(e) {
+            warning(sprintf("Future projection for '%s' failed: %s", sp_name, e$message))
+          }
         )
       }
     }

@@ -252,3 +252,252 @@ cast_project <- function(fit, cv, current_env, future_envs,
     cli::cli_warn("Failed to save GeoTIFF {.path {path}}: {e$message}")
   })
 }
+
+
+#' Raster-Based Future Climate Projection
+#'
+#' Projects species distribution under multiple future climate scenarios
+#' using raster inputs and the ensemble model. Generates HSS rasters,
+#' binary rasters, change-class rasters, and summary statistics for each
+#' scenario. This is the raster-native equivalent of [cast_project()].
+#'
+#' @param fit A [cast_fit] object.
+#' @param cv A [cast_cv] object for computing ensemble weights and
+#'   thresholds.
+#' @param current_raster A `terra::SpatRaster` stack of current
+#'   environmental variables (layer names must match `fit$env_vars`).
+#' @param future_rasters A named list of `terra::SpatRaster` stacks,
+#'   each for a future scenario (e.g., `list(ssp126_2050 = rast1, ...)`).
+#' @param output_dir Character. Output directory for all rasters and CSV.
+#' @param method Character. Ensemble method. Default `"weighted"`.
+#' @param threshold_method Character. Threshold method. Default `"maxTSS"`.
+#' @param models Character vector or `NULL`. Models to use.
+#' @param mask A `terra::SpatRaster` or `NULL`. Prediction mask.
+#' @param overwrite Logical. Overwrite existing outputs. Default `FALSE`.
+#' @param compression Character. GeoTIFF compression. Default `"LZW"`.
+#' @param verbose Logical. Default `TRUE`.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{current}{List with `hss_path`, `binary_path`, etc.}
+#'   \item{future}{Named list of per-scenario results.}
+#'   \item{stats}{A `data.frame` with per-scenario statistics.}
+#'   \item{output_dir}{The output directory path.}
+#' }
+#'
+#' @details
+#' For each scenario, a change-class raster is computed:
+#' - `1` = gain (absent now, present in future)
+#' - `-1` = loss (present now, absent in future)
+#' - `2` = stable present
+#' - `0` = stable absent
+#'
+#' Centroid shift is computed as the HSS-weighted great-circle distance.
+#'
+#' @seealso [cast_ensemble_raster()], [cast_project()]
+#'
+#' @export
+cast_project_raster <- function(fit, cv,
+                                current_raster,
+                                future_rasters,
+                                output_dir,
+                                method = c("weighted", "best", "equal"),
+                                threshold_method = "maxTSS",
+                                models = NULL,
+                                mask = NULL,
+                                overwrite = FALSE,
+                                compression = "LZW",
+                                verbose = TRUE) {
+  check_suggested("terra", "for raster projection")
+  method <- match.arg(method)
+
+  if (!is.list(future_rasters) || length(future_rasters) == 0) {
+    cli::cli_abort("{.arg future_rasters} must be a non-empty named list of SpatRasters.")
+  }
+  if (is.null(names(future_rasters)) || any(names(future_rasters) == "")) {
+    cli::cli_abort("All elements of {.arg future_rasters} must be named.")
+  }
+
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  raster_dir <- file.path(output_dir, "rasters")
+  table_dir <- file.path(output_dir, "tables")
+  dir.create(raster_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # ---- Current prediction -----------------------------------------------------
+  if (verbose) cli::cli_h2("Current prediction")
+
+  current_result <- cast_ensemble_raster(
+    fit, cv, current_raster,
+    output_dir = raster_dir,
+    method = method,
+    threshold_method = threshold_method,
+    models = models,
+    mask = mask,
+    prefix = "current",
+    overwrite = overwrite,
+    compression = compression,
+    verbose = verbose
+  )
+
+  # Read current binary for change computation
+  cur_bin <- terra::rast(current_result$binary_path)
+  cur_hss <- terra::rast(current_result$hss_path)
+
+  # Compute current centroid once
+  cur_centroid <- .weighted_centroid_raster(cur_hss, cur_bin)
+
+  # ---- Future predictions -----------------------------------------------------
+  future_results <- list()
+  stats_rows <- list()
+
+  for (scen in names(future_rasters)) {
+    if (verbose) cli::cli_h2("Future: {scen}")
+
+    fut_raster <- future_rasters[[scen]]
+    if (is.character(fut_raster)) fut_raster <- terra::rast(fut_raster)
+
+    fut_result <- cast_ensemble_raster(
+      fit, cv, fut_raster,
+      output_dir = raster_dir,
+      method = method,
+      threshold_method = threshold_method,
+      models = models,
+      mask = mask,
+      prefix = scen,
+      overwrite = overwrite,
+      compression = compression,
+      verbose = verbose
+    )
+    future_results[[scen]] <- fut_result
+
+    # ---- Change map -----------------------------------------------------------
+    change_path <- file.path(raster_dir, paste0(scen, "_change_class.tif"))
+
+    if (!overwrite && file.exists(change_path)) {
+      if (verbose) cli::cli_inform("Change raster exists; skipping.")
+    } else {
+      fut_bin <- terra::rast(fut_result$binary_path)
+      fut_hss <- terra::rast(fut_result$hss_path)
+
+      # Change class: gain=1, loss=-1, stable_present=2, stable_absent=0
+      change_r <- terra::lapp(
+        c(cur_bin, fut_bin),
+        fun = function(cur, fut) {
+          out <- rep(NA_integer_, length(cur))
+          valid <- !is.na(cur) & !is.na(fut)
+          out[valid & cur == 0 & fut == 1] <- 1L    # gain
+          out[valid & cur == 1 & fut == 0] <- -1L   # loss
+          out[valid & cur == 1 & fut == 1] <- 2L    # stable_present
+          out[valid & cur == 0 & fut == 0] <- 0L    # stable_absent
+          out
+        }
+      )
+      names(change_r) <- "change_class"
+      terra::writeRaster(change_r, change_path, overwrite = TRUE,
+                         gdal = c(paste0("COMPRESS=", compression)),
+                         wopt = list(datatype = "INT2S"))
+
+      # ---- Statistics ---------------------------------------------------------
+      change_vals <- terra::values(change_r, mat = FALSE)
+      change_vals <- change_vals[!is.na(change_vals)]
+
+      n_gain   <- sum(change_vals == 1L)
+      n_loss   <- sum(change_vals == -1L)
+      n_stable <- sum(change_vals == 2L)
+      n_absent <- sum(change_vals == 0L)
+      total_present_now <- n_loss + n_stable
+
+      pct_change <- if (total_present_now > 0) {
+        100 * (n_gain - n_loss) / total_present_now
+      } else {
+        NA_real_
+      }
+
+      # Future centroid
+      fut_centroid <- .weighted_centroid_raster(fut_hss, fut_bin)
+
+      # Centroid shift
+      shift_km <- tryCatch(
+        .haversine_km(
+          cur_centroid$lat, cur_centroid$lon,
+          fut_centroid$lat, fut_centroid$lon
+        ),
+        error = function(e) NA_real_
+      )
+
+      stats_rows[[scen]] <- data.frame(
+        scenario          = scen,
+        n_gain            = n_gain,
+        n_loss            = n_loss,
+        n_stable_present  = n_stable,
+        n_stable_absent   = n_absent,
+        pct_change        = round(pct_change, 2),
+        current_centroid_lon = round(cur_centroid$lon, 4),
+        current_centroid_lat = round(cur_centroid$lat, 4),
+        future_centroid_lon  = round(fut_centroid$lon, 4),
+        future_centroid_lat  = round(fut_centroid$lat, 4),
+        centroid_shift_km = round(shift_km, 1),
+        stringsAsFactors  = FALSE
+      )
+
+      if (verbose) {
+        cli::cli_inform(c(
+          " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
+          " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
+        ))
+      }
+    }
+  }
+
+  # ---- Save projection statistics ---------------------------------------------
+  if (length(stats_rows) > 0) {
+    stats_df <- do.call(rbind, stats_rows)
+    rownames(stats_df) <- NULL
+    utils::write.csv(
+      stats_df,
+      file.path(table_dir, "projection_stats.csv"),
+      row.names = FALSE
+    )
+    if (verbose) {
+      cli::cli_inform("v" = "Projection stats saved to {.path {file.path(table_dir, 'projection_stats.csv')}}")
+    }
+  } else {
+    stats_df <- data.frame()
+  }
+
+  invisible(list(
+    current    = current_result,
+    future     = future_results,
+    stats      = stats_df,
+    output_dir = output_dir
+  ))
+}
+
+
+#' Compute HSS-weighted centroid from rasters
+#' @keywords internal
+#' @noRd
+.weighted_centroid_raster <- function(hss_raster, binary_raster) {
+  # Extract values
+  hss_vals <- terra::values(hss_raster, mat = FALSE)
+  bin_vals <- terra::values(binary_raster, mat = FALSE)
+
+  # Cells where species is present
+  present <- which(!is.na(bin_vals) & bin_vals == 1)
+
+  if (length(present) == 0) {
+    return(list(lon = NA_real_, lat = NA_real_))
+  }
+
+  xy <- terra::xyFromCell(hss_raster, present)
+  w <- hss_vals[present]
+  w[is.na(w)] <- 0
+
+  if (sum(w) == 0) w <- rep(1, length(w))
+
+  list(
+    lon = stats::weighted.mean(xy[, 1], w),
+    lat = stats::weighted.mean(xy[, 2], w)
+  )
+}

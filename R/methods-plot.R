@@ -3,10 +3,10 @@
 #' Plot a castSDM DAG as a Network Graph
 #'
 #' Visualizes the learned causal DAG using ggraph. Nodes are colored by
-#' Markov Blanket role (parent/child/co_parent/predictive) when a
-#' `cast_select` object is provided, sized by degree, and edges weighted
-#' by bootstrap strength. The response node (presence) is highlighted
-#' when present.
+#' response-focused screening role (`mb_direct`, `mb_associated`,
+#' `importance_added`, or `importance_screened`) when a `cast_select` object
+#' is provided, sized by degree, and edges weighted by bootstrap strength.
+#' The response node (presence) is highlighted when present.
 #'
 #' @param x A `cast_dag` object.
 #' @param screen Optional `cast_select` object from [cast_select()] to mark
@@ -50,7 +50,7 @@ plot.cast_dag <- function(x, screen = NULL,
   igraph::E(g)$edge_strength <- edges$strength
   igraph::V(g)$deg <- igraph::degree(g, mode = "all")
 
-  # Causal roles from screen (MB-based: parent/child/co_parent/predictive)
+  # Screening roles from screen (MB + importance fusion)
   if (!is.null(screen) && !is.null(screen$roles) && nrow(screen$roles) > 0) {
     rmap <- stats::setNames(screen$roles$role, screen$roles$variable)
     igraph::V(g)$role <- ifelse(
@@ -87,9 +87,16 @@ plot.cast_dag <- function(x, screen = NULL,
   igraph::V(g)$label <- vapply(node_names, label_fn, character(1))
 
   role_colors <- c(
-    parent = "#2C3E50", child = "#E67E22",
-    co_parent = "#8E44AD", predictive = "#27AE60",
-    Response = "#C0392B", Unscreened = "grey75"
+    mb_direct = "#2C3E50",
+    mb_associated = "#8E44AD",
+    importance_added = "#27AE60",
+    importance_screened = "#4DBBD5",
+    parent = "#2C3E50",
+    child = "#8E44AD",
+    co_parent = "#8E44AD",
+    predictive = "#4DBBD5",
+    Response = "#C0392B",
+    Unscreened = "grey75"
   )
 
   # Title and subtitle
@@ -138,7 +145,7 @@ plot.cast_dag <- function(x, screen = NULL,
       family = getOption("castSDM.font_family", "Arial"),
       fontface = "bold", max.overlaps = 20
     ) +
-    ggplot2::scale_color_manual(values = role_colors, name = "Causal\nRole") +
+    ggplot2::scale_color_manual(values = role_colors, name = "Screening\nRole") +
     ggplot2::scale_size_continuous(range = c(3, 9), name = "Degree") +
     ggplot2::scale_shape_manual(
       values = c(Selected = 16, Dropped = 1), name = "Selection"
@@ -214,9 +221,16 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
   scr$display <- factor(scr$display, levels = rev(scr$display))
 
   role_colors <- c(
-    parent = "#2C3E50", child = "#E67E22",
-    co_parent = "#8E44AD", predictive = "#27AE60",
-    selected = "#3498DB", `not selected` = "grey70"
+    mb_direct = "#2C3E50",
+    mb_associated = "#8E44AD",
+    importance_added = "#27AE60",
+    importance_screened = "#4DBBD5",
+    parent = "#2C3E50",
+    child = "#8E44AD",
+    co_parent = "#8E44AD",
+    predictive = "#4DBBD5",
+    selected = "#3498DB",
+    `not selected` = "grey70"
   )
 
   n_sel <- sum(scr$is_selected)
@@ -239,7 +253,7 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
       values = c("TRUE" = 0.95, "FALSE" = 0.35), guide = "none"
     ) +
     ggplot2::labs(
-      title = "Variable Selection (MB + RF Importance)",
+      title = "Variable Selection (Markov Blanket + RF Importance)",
       subtitle = sub_txt,
       x = if (identical(imp_col, "importance_plot")) "Selection indicator" else "RF Permutation Importance",
       y = ""

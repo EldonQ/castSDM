@@ -30,6 +30,10 @@
 #' @param include_response Logical. Include the `response` column as a node
 #'   in DAG learning so that its Markov Blanket can be extracted. Default
 #'   `TRUE`.
+#' @param response_as_sink Logical. If `TRUE` (default), forbids directed
+#'   edges from the response node to environmental predictors. This encodes
+#'   the SDM assumption that environmental variables may explain occurrence,
+#'   but occurrence does not cause static environmental predictors.
 #' @param R Integer. Number of bootstrap replicates for `structure_method =
 #'   "bootstrap_hc"`. Ignored otherwise (stored as `NA` for documentation).
 #' @param algorithm Character. **Only used** when `structure_method =
@@ -123,6 +127,7 @@ cast_dag <- function(data,
                        "mb_first", "pc", "bootstrap_hc", "bidag_bge"
                      ),
                      include_response = TRUE,
+                     response_as_sink = TRUE,
                      R = 100L,
                      algorithm = "hc",
                      score = NULL,
@@ -197,6 +202,21 @@ cast_dag <- function(data,
   env_vars <- env_vars %||% get_env_vars(data, response = response)
   if (length(env_vars) < 3) {
     cli::cli_abort("Need at least 3 environmental variables for DAG learning.")
+  }
+
+  if (isTRUE(include_response) && isTRUE(response_as_sink) &&
+      response %in% names(data)) {
+    sink_blacklist <- data.frame(
+      from = response,
+      to = env_vars,
+      stringsAsFactors = FALSE
+    )
+    blacklist <- if (is.null(blacklist)) {
+      sink_blacklist
+    } else {
+      unique(rbind(blacklist[, c("from", "to"), drop = FALSE],
+                   sink_blacklist))
+    }
   }
 
   # --- Build DAG data frame ------------------------------------------------
@@ -299,6 +319,10 @@ cast_dag <- function(data,
     dag_metadata$graph_role <- "response_focused_screening"
     dag_metadata$mb_size <- attr(env_edges, "mb_size")
     dag_metadata$mb_total <- attr(env_edges, "mb_total")
+  }
+  if (structure_method == "mb_first") {
+    dag_metadata$mb_vars_stage1 <- attr(env_edges, "mb_vars_stage1")
+    dag_metadata$response_as_sink <- isTRUE(response_as_sink)
   }
 
   boot_R_out <- if (structure_method == "bootstrap_hc") R else NA_integer_
@@ -529,11 +553,13 @@ extract_markov_blanket <- function(dag, node) {
         "MB discovery returned empty set; falling back to full PC on all {ncol(dag_df)} nodes."
       )
     }
-    return(.dag_pc_edges(
+    out <- .dag_pc_edges(
       dag_df, alpha = pc_alpha, test = test,
       seed = seed, verbose = verbose,
       blacklist = blacklist, whitelist = whitelist
-    ))
+    )
+    attr(out, "mb_vars_stage1") <- character()
+    return(out)
   }
 
   # --- Stage 2: Local DAG on MB subset --------------------------------------
@@ -548,13 +574,15 @@ extract_markov_blanket <- function(dag, node) {
         "i" = "Returning a response-focused MB graph instead. Increase {.arg mb_pc_max_nodes} or set {.arg mb_dense_action = \"pc\"} to force local PC."
       ))
     }
-    return(.dag_mb_star_edges(
+    out <- .dag_mb_star_edges(
       mb_vars = mb_vars,
       response = response,
       total_vars = ncol(dag_df) - 1L,
       blacklist = blacklist,
       whitelist = whitelist
-    ))
+    )
+    attr(out, "mb_vars_stage1") <- mb_vars
+    return(out)
   }
 
   if (verbose) {
@@ -567,11 +595,13 @@ extract_markov_blanket <- function(dag, node) {
   local_bl <- .filter_edge_list(blacklist, local_vars)
   local_wl <- .filter_edge_list(whitelist, local_vars)
 
-  .dag_pc_edges(
+  out <- .dag_pc_edges(
     local_df, alpha = pc_alpha, test = test,
     seed = seed, verbose = FALSE,
     blacklist = local_bl, whitelist = local_wl
   )
+  attr(out, "mb_vars_stage1") <- mb_vars
+  out
 }
 
 

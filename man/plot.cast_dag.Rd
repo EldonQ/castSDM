@@ -25,8 +25,8 @@ A \code{ggplot} object.
 }
 \description{
 Visualizes the learned causal DAG using ggraph. Nodes are colored by
-Markov Blanket role (parent/child/co_parent/predictive) when a
-\code{cast_select} object is provided, sized by degree, and edges weighted
-by bootstrap strength. The response node (presence) is highlighted
-when present.
+response-focused screening role (\code{mb_direct}, \code{mb_associated},
+\code{importance_added}, or \code{importance_screened}) when a \code{cast_select} object
+is provided, sized by degree, and edges weighted by bootstrap strength.
+The response node (presence) is highlighted when present.
 }

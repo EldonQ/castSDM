@@ -11,8 +11,8 @@
 #' @param data A `data.frame` with `presence`, environmental variables, and
 #'   optionally `lon`, `lat` coordinates.
 #' @param variables Character vector of treatment variables to estimate CATE
-#'   for. Default `NULL` uses top variables from the screen (by role priority:
-#'   parents first).
+#'   for. Default `NULL` uses top variables from the screen (by screening-role
+#'   priority: direct Markov Blanket variables first).
 #' @param dag A [cast_dag] object (used for DAG-guided confounder
 #'   selection). Default `NULL`.
 #' @param screen A `cast_select` object from [cast_select()] (used to select top variables if
@@ -57,10 +57,15 @@ cast_cate <- function(data,
   # Determine which variables to estimate CATE for
   if (is.null(variables)) {
     if (!is.null(screen) && !is.null(screen$roles)) {
-      # Prioritise parents > children > co_parents > predictive
-      role_priority <- c("parent", "child", "co_parent", "predictive")
+      role_priority <- c(
+        "mb_direct", "parent",
+        "mb_associated", "child", "co_parent",
+        "importance_added", "predictive",
+        "importance_screened"
+      )
       roles_df <- screen$roles
       roles_df$priority <- match(roles_df$role, role_priority)
+      roles_df$priority[is.na(roles_df$priority)] <- length(role_priority) + 1L
       roles_df <- roles_df[order(roles_df$priority), ]
       cate_vars <- roles_df$variable[seq_len(
         min(top_n, nrow(roles_df))

@@ -30,6 +30,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     dag_R = 100L,
     dag_structure_method = "mb_first",
     dag_include_response = TRUE,
+    dag_response_as_sink = TRUE,
     dag_pc_alpha = 0.05,
     dag_pc_test = NULL,
     dag_mb_method = "fast.iamb",
@@ -73,7 +74,26 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
 
     # ── Prediction / Ensemble ──
     do_predict = TRUE,
-    do_ensemble = TRUE
+    do_ensemble = TRUE,
+
+    # ── Study Area ──
+    study_area_method = "buffer",
+    study_area_buffer_km = 300,
+    study_area_min_cells = 1000L,
+
+    # ── Background Points ──
+    bg_strategy = "random",
+    bg_adaptive = TRUE,
+    bg_ratio = 2,
+    bg_min = 500L,
+    bg_max = 20000L,
+    bg_cell_thin = TRUE,
+    bg_exclude_presence = TRUE,
+
+    # ── Raster Prediction ──
+    predict_raster = FALSE,
+    raster_compression = "LZW",
+    overwrite_rasters = FALSE
   )
 
   if (identical(profile, "batch")) {

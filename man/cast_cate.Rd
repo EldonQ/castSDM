@@ -22,8 +22,8 @@ cast_cate(
 optionally \code{lon}, \code{lat} coordinates.}
 
 \item{variables}{Character vector of treatment variables to estimate CATE
-for. Default \code{NULL} uses top variables from the screen (by role priority:
-parents first).}
+for. Default \code{NULL} uses top variables from the screen (by screening-role
+priority: direct Markov Blanket variables first).}
 
 \item{dag}{A \link{cast_dag} object (used for DAG-guided confounder
 selection). Default \code{NULL}.}

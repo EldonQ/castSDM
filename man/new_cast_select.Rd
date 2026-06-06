@@ -13,8 +13,8 @@ new_cast_select(selected, scores, roles)
 DAG Markov Blanket membership).}
 
 \item{roles}{A \code{data.frame} with columns \code{variable} and \code{role} indicating
-each variable's causal role: \code{"parent"}, \code{"child"}, \code{"co_parent"}, or
-\code{"predictive"}.}
+each variable's response-focused screening role: \code{"mb_direct"},
+\code{"mb_associated"}, \code{"importance_added"}, or \code{"importance_screened"}.}
 }
 \value{
 A \code{cast_select} object.
