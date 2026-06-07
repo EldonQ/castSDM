@@ -14,7 +14,7 @@
 #' - **AUC**: Area Under the Receiver Operating Characteristic curve,
 #'   measuring discrimination ability. Computed via [pROC::roc()].
 #' - **TSS**: True Skill Statistic = Sensitivity + Specificity - 1.
-#' - **CBI**: Continuous Boyce Index, measuring predicted–expected ratio.
+#' - **CBI**: Continuous Boyce Index, measuring predicted-expected ratio.
 #'
 #' @seealso [cast_fit()], [cast_predict()]
 #'

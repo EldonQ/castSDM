@@ -91,7 +91,7 @@ cast_cate <- function(data,
   # Extract Markov Blanket for DAG-guided confounder selection
   mb <- NULL
   if (!is.null(dag) && !is.null(dag$response_node)) {
-    mb <- extract_markov_blanket(dag, dag$response_node)
+    mb <- response_markov_blanket(dag, dag$response_node, env_vars)
   }
 
   # Prediction data

@@ -36,7 +36,7 @@ all.}
 \code{future_lapply()} is used to evaluate tiles in parallel.}
 
 \item{overwrite}{Logical. Overwrite existing output rasters. Default
-\code{FALSE} — existing files trigger a \code{cli_inform()} and skip.}
+\code{FALSE} - existing files trigger a \code{cli_inform()} and skip.}
 
 \item{compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
 

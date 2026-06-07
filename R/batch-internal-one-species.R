@@ -130,7 +130,7 @@
 
     pred_result <- NULL
     ensemble_result <- NULL
-    if (!is.null(env_data)) {
+    if (isTRUE(cfg$do_predict) && !is.null(env_data)) {
       pred_result <- cast_run_step(paste0("predict", shared_suffix), output_dir, sp_name,
         tryCatch(
           cast_predict(fit, env_data, models = cfg$predict_models),
@@ -139,17 +139,17 @@
       )
 
       # Ensemble prediction
-      if (!is.null(pred_result) && !is.null(cv_result)) {
+      if (isTRUE(cfg$do_ensemble) && !is.null(pred_result) && !is.null(cv_result)) {
         ensemble_result <- cast_run_step(paste0("ensemble", shared_suffix), output_dir, sp_name,
           tryCatch(
-            cast_ensemble(fit, cv_result, env_data, method = "weighted"),
+            cast_ensemble(fit, cv_result, env_data, method = cfg$ensemble_method %||% "weighted"),
             error = function(e) NULL
           )
         )
       }
     }
 
-    # ── Raster Ensemble & Future Projection (optional) ──────────
+    # -- Raster Ensemble & Future Projection (optional) ----------
     raster_result <- NULL
     if (!is.null(cfg$raster_stack) && !is.null(cv_result) &&
         requireNamespace("terra", quietly = TRUE)) {
@@ -194,7 +194,7 @@
       }
     }
 
-    # ── CATE (optional) ──────────────────────────────────────────────
+    # -- CATE (optional) ----------------------------------------------
     cate_result <- NULL
     if (isTRUE(cfg$do_cate)) {
       cate_result <- cast_run_step(paste0("cate", shared_suffix), output_dir, sp_name,
@@ -216,7 +216,7 @@
       )
     }
 
-    # ── Save diagnostic plots ────────────────────────────────────────
+    # -- Save diagnostic plots ----------------------------------------
     check_suggested("ggplot2", "for plotting")
 
     vl <- cfg$var_labels
@@ -310,8 +310,9 @@
       }
     }
 
-    # ── Save RDS ──────────────────────────────────────────────────────
+    # -- Save RDS ------------------------------------------------------
     sp_result <- list(
+      split = split,
       dag = dag, screen = screen,
       fit = fit, eval = eval_result, cv = cv_result,
       predict = pred_result, ensemble = ensemble_result,

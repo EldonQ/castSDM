@@ -57,14 +57,15 @@
 #'   The `"mb_first"` method uses a **two-stage** approach that is
 #'   dramatically faster than `"pc"` for high-dimensional data (p > 20):
 #'
-#'   * **Stage 1** — Direct Markov Blanket discovery via IAMB-family
-#'     algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
-#'   * **Stage 2** — Full DAG learning via PC, restricted to the MB
-#'     subset plus the response node.  Because |MB| is typically 5–15,
+#'   * **Stage 1** - Direct Markov Blanket discovery via IAMB-family
+#'     algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 x p).
+#'   * **Stage 2** - Full DAG learning via PC, restricted to the MB
+#'     subset plus the response node.  Because |MB| is typically 5-15,
 #'     this is near-instantaneous.
 #'
-#'   Under the Faithfulness assumption the two-stage result is
-#'   theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).
+#'   Under standard Markov Blanket and faithfulness assumptions, the two-stage
+#'   result targets the response-relevant local structure while avoiding a
+#'   full high-dimensional graph search (Pellet & Elisseeff 2008).
 #' @param pc_alpha Significance level for constraint-based PC. Default `0.05`.
 #'   Used when `structure_method` is `"pc"` or `"mb_first"` (Stage 2).
 #' @param pc_test Conditional-independence test passed as `test` to
@@ -359,8 +360,8 @@ cast_dag <- function(data,
 #' Extract Markov Blanket of a Node from a cast_dag
 #'
 #' `MB(Y) = parents(Y) U children(Y) U parents_of_children(Y)`.
-#' This is the minimal sufficient set of variables for predicting Y given
-#' the DAG structure.
+#' Under standard Markov Blanket assumptions, this is the local set targeted
+#' for response-focused variable screening.
 #'
 #' @param dag A `cast_dag` object.
 #' @param node Character. Target node name (typically the response).
@@ -399,6 +400,33 @@ extract_markov_blanket <- function(dag, node) {
     co_parents = co_parents,
     all = unique(c(parents, children, co_parents))
   )
+}
+
+
+#' Response-Focused Markov Blanket Variables
+#'
+#' Internal helper used by variable screening and CATE so both stages use the
+#' same MB definition. For `mb_first` DAGs, Stage 1 MB membership is preferred
+#' because it is the screening target even when local PC edge orientation is
+#' sparse or unstable.
+#'
+#' @keywords internal
+#' @noRd
+response_markov_blanket <- function(dag, response_node, env_vars = NULL) {
+  mb <- extract_markov_blanket(dag, response_node)
+  env_vars <- env_vars %||% setdiff(dag$nodes, c(response_node, "lon", "lat"))
+  stage1_mb <- dag$metadata$mb_vars_stage1 %||% character()
+
+  if (length(stage1_mb) > 0) {
+    mb$all <- unique(intersect(stage1_mb, env_vars))
+    if (isTRUE(dag$metadata$response_as_sink)) {
+      mb$parents <- mb$all
+      mb$children <- character()
+      mb$co_parents <- character()
+    }
+  }
+
+  mb
 }
 
 
@@ -497,12 +525,13 @@ extract_markov_blanket <- function(dag, node) {
 #' Two-Stage MB-Guided Structure Learning
 #'
 #' Stage 1: Uses [bnlearn::learn.mb()] (IAMB-family) to discover the
-#' Markov Blanket of the response — complexity O(|MB|^2 x p).
+#' Markov Blanket of the response - complexity O(|MB|^2 x p).
 #' Stage 2: Runs [bnlearn::pc.stable()] on the MB subset + response to
-#' recover edge directions — near-instantaneous for typical |MB| ~ 5-15.
+#' recover edge directions - near-instantaneous for typical |MB| ~ 5-15.
 #'
-#' Under the Faithfulness assumption this recovers the same MB as full-DAG
-#' PC (Pellet & Elisseeff 2008, JMLR).
+#' Under standard Markov Blanket and faithfulness assumptions this targets the
+#' same response-relevant local structure as full-DAG PC while avoiding a full
+#' high-dimensional graph search (Pellet & Elisseeff 2008, JMLR).
 #'
 #' @keywords internal
 #' @noRd
@@ -546,7 +575,7 @@ extract_markov_blanket <- function(dag, node) {
     )
   }
 
-  # --- Fallback: empty MB → full PC -----------------------------------------
+  # --- Fallback: empty MB -> full PC -----------------------------------------
   if (length(mb_vars) == 0L) {
     if (verbose) {
       cli::cli_warn(

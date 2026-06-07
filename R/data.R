@@ -101,7 +101,7 @@
 "china_env_grid"
 
 
-# ── Bundled species datasets ─────────────────────────────────────────────────
+# -- Bundled species datasets -------------------------------------------------
 # All 32 species share the same ISEA3H Res9 grid and column structure as
 # Ovis_ammon (3648 rows, 59 columns). Each is documented with a single
 # roxygen block below.

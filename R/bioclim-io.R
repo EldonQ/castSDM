@@ -55,7 +55,7 @@ cast_load_bioclim <- function(bioclim_root,
                               metadata_csv = NULL,
                               verbose     = TRUE) {
 
-  # ── Validate inputs ──
+  # -- Validate inputs --
   if (!dir.exists(bioclim_root)) {
     cli::cli_abort("Bioclim root directory not found: {.path {bioclim_root}}")
   }
@@ -64,7 +64,7 @@ cast_load_bioclim <- function(bioclim_root,
     cli::cli_abort("{.arg scenario} is required for future period (e.g., 'ssp126').")
   }
 
-  # ── Try metadata CSV mode first ──
+  # -- Try metadata CSV mode first --
   if (is.null(metadata_csv)) {
     metadata_csv <- file.path(bioclim_root, "CHNECO26_datalayers_details_bioclim.csv")
   }
@@ -84,7 +84,7 @@ cast_load_bioclim <- function(bioclim_root,
     )
   }
 
-  # ── Load as SpatRaster stack ──
+  # -- Load as SpatRaster stack --
   if (!requireNamespace("terra", quietly = TRUE)) {
     cli::cli_abort("Package {.pkg terra} is required for raster loading.")
   }

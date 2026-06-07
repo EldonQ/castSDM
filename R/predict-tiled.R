@@ -27,7 +27,7 @@
 #' @param budget A [cast_worker_budget] (optional). When supplied,
 #'   `future_lapply()` is used to evaluate tiles in parallel.
 #' @param overwrite Logical. Overwrite existing output rasters. Default
-#'   `FALSE` — existing files trigger a `cli_inform()` and skip.
+#'   `FALSE` - existing files trigger a `cli_inform()` and skip.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
 #' @param verbose Logical. Default `TRUE`.
 #'

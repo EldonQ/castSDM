@@ -26,7 +26,7 @@ CBI (Continuous Boyce Index) for fitted models on test data.
 \item \strong{AUC}: Area Under the Receiver Operating Characteristic curve,
 measuring discrimination ability. Computed via \code{\link[pROC:roc]{pROC::roc()}}.
 \item \strong{TSS}: True Skill Statistic = Sensitivity + Specificity - 1.
-\item \strong{CBI}: Continuous Boyce Index, measuring predicted–expected ratio.
+\item \strong{CBI}: Continuous Boyce Index, measuring predicted-expected ratio.
 }
 }
 \seealso{

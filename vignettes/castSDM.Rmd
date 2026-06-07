@@ -16,71 +16,101 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-**castSDM** (Causal-Aware Species Distribution Modeling) integrates
-causal DAG learning with species distribution modeling to produce
-ecologically interpretable and transferable predictions.
+**castSDM** (Causal-Aware Species Distribution Modeling) combines
+response-focused Markov Blanket screening with standard SDM models. Its main
+use is not to prove ecological causality from observational data, but to make
+variable screening more explicit, sparse, and reproducible.
 
-Unlike traditional SDMs that capture correlations, castSDM:
+The active workflow:
 
-1. Discovers causal structure among environmental variables via DAGs
-2. Uses the Markov Blanket for principled variable selection
-3. Assigns causal roles (parent, child, co-parent) to selected variables
-4. Trains multi-algorithm ensembles (RF, BRT, MaxEnt, GAM) for prediction
-5. Projects habitat suitability under future climate scenarios
+1. Learns a response-focused DAG or MB screening graph.
+2. Forbids `presence -> environmental predictor` edges by default.
+3. Selects variables with Markov Blanket membership plus RF importance.
+4. Reports screening roles:
+   `mb_direct`, `mb_associated`, `importance_added`, and
+   `importance_screened`.
+5. Fits RF, BRT, MaxEnt, and GAM models and evaluates spatial transferability.
+6. Optionally estimates CATE surfaces for selected variables.
 
 ## Quick Start
 
 ```{r example, eval = FALSE}
 library(castSDM)
 
-# One-step pipeline
 result <- cast(
   species_data = my_species_df,
   env_data = my_env_grid,
-  models = c("rf", "brt", "maxent", "gam")
+  models = c("rf", "brt", "maxent", "gam"),
+  dag_structure_method = "mb_first",
+  dag_response_as_sink = TRUE
 )
 
 summary(result)
 plot(result)
+result$screen$roles
 ```
 
 ## Step-by-Step Usage
 
-For more control, use individual pipeline functions:
-
 ```{r stepwise, eval = FALSE}
-# 1. VIF screening
+# 1. Optional VIF screening
 clean <- cast_vif(env_data, threshold = 10)
 
-# 2. DAG learning (with presence as a node)
-dag <- cast_dag(train_data, R = 100)
+# 2. DAG / MB screening graph
+dag <- cast_dag(
+  train_data,
+  structure_method = "mb_first",
+  include_response = TRUE,
+  response_as_sink = TRUE
+)
 
-# 3. Variable selection (Markov Blanket + RF importance)
+# 3. Variable screening
 screen <- cast_select(dag, train_data)
+screen$selected
+screen$roles
 
-# 4. Causal role assignment
-roles <- cast_roles(screen, dag)
+# 4. Model fitting
+fit <- cast_fit(
+  train_data,
+  screen = screen,
+  dag = dag,
+  models = c("rf", "brt", "maxent", "gam")
+)
 
-# 5. Model fitting
-fit <- cast_fit(train_data, screen = screen, dag = dag,
-                models = c("rf", "brt", "maxent", "gam"))
+# 5. Spatial cross-validation
+cv <- cast_cv(
+  train_data,
+  screen = screen,
+  dag = dag,
+  models = c("rf", "brt")
+)
 
-# 6. Spatial cross-validation
-cv <- cast_cv(train_data, screen = screen, dag = dag,
-              models = c("rf", "brt"))
-
-# 7. Evaluation on holdout
+# 6. Hold-out evaluation
 eval <- cast_evaluate(fit, test_data)
 
-# 8. Spatial prediction
+# 7. Spatial prediction and ensemble
 pred <- cast_predict(fit, env_grid)
+ens <- cast_ensemble(fit, cv, env_grid, method = "weighted")
 
-# 9. Ensemble prediction
-ens <- cast_ensemble(fit, cv, env_grid)
-
-# 10. Future projection (optional)
+# 8. Future projection
 proj <- cast_project(fit, cv, current_env, future_envs)
 
-# 11. CATE estimation (optional)
+# 9. Optional CATE estimation
 cate <- cast_cate(train_data, screen = screen, dag = dag, top_n = 3)
 ```
+
+## Interpreting Screening Roles
+
+`cast_select()` returns a `cast_select` object. The selected variables are in
+`screen$selected`, and their screening roles are in `screen$roles`.
+
+The roles mean:
+
+- `mb_direct`: adjacent to the response in the response-focused MB graph.
+- `mb_associated`: retained through broader MB structure.
+- `importance_added`: outside the MB but retained by RF importance.
+- `importance_screened`: retained by RF importance when MB membership is dense
+  or otherwise non-selective.
+
+These roles describe the screening path for each variable. They should not be
+read as confirmed ecological mechanisms.

@@ -56,7 +56,7 @@ cast_esm <- function(data,
   if (length(vars) < 2L)
     cli::cli_abort("ESM requires at least 2 predictors; got {length(vars)}.")
 
-  # Defend against combinatorial explosion — keep top_k by univariate AUC.
+  # Defend against combinatorial explosion - keep top_k by univariate AUC.
   if (length(vars) > top_k) {
     if (verbose) cli::cli_inform(
       "ESM: ranking {length(vars)} predictors and keeping top {top_k} by univariate AUC."

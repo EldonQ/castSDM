@@ -2,9 +2,10 @@
 #'
 #' Selects predictor variables by fusing two signals:
 #'
-#' 1. **Markov Blanket (MB)** of the response node extracted from a causal
-#'    DAG — theoretically the minimal sufficient feature set.
-#' 2. **RF permutation importance** — data-driven predictive relevance.
+#' 1. **Markov Blanket (MB)** of the response node extracted from a
+#'    response-focused DAG or MB graph - a compact local screening set under
+#'    standard Markov Blanket assumptions.
+#' 2. **RF permutation importance** - data-driven predictive relevance.
 #'
 #' All MB variables are automatically selected.
 #' Non-MB variables are added only if their RF importance exceeds the
@@ -69,16 +70,7 @@ cast_select <- function(dag,
   # --- Extract Markov Blanket (if response was in DAG) ---------------------
   mb <- NULL
   if (!is.null(response_node)) {
-    mb <- extract_markov_blanket(dag, response_node)
-    stage1_mb <- dag$metadata$mb_vars_stage1 %||% character()
-    if (length(stage1_mb) > 0) {
-      mb$all <- unique(intersect(stage1_mb, env_vars))
-      if (isTRUE(dag$metadata$response_as_sink)) {
-        mb$parents <- mb$all
-        mb$children <- character()
-        mb$co_parents <- character()
-      }
-    }
+    mb <- response_markov_blanket(dag, response_node, env_vars)
     if (verbose && length(mb$all) > 0) {
       cli::cli_inform(
         "Markov Blanket of {.val {response_node}}: {length(mb$all)} variables ({length(mb$parents)} direct MB, {length(mb$children) + length(mb$co_parents)} associated MB)."

@@ -95,7 +95,7 @@ cast_study_area <- function(occurrences,
     # Convex hull + buffer
     hull <- sf::st_convex_hull(sf::st_union(occ_sf))
 
-    # Buffer in meters (convert km → m)
+    # Buffer in meters (convert km -> m)
     buffer_m <- buffer_km * 1000
     if (sf::st_is_longlat(occ_sf)) {
       # For geographic CRS, project to equal-area for accurate buffering
@@ -221,7 +221,7 @@ print.cast_study_area <- function(x, ...) {
   # Create mask: 1 where inside polygon AND raster is non-NA, NA elsewhere
   ref_layer <- raster_template[[1]]
   mask_r <- terra::mask(ref_layer, poly_v)
-  mask_r <- terra::classify(mask_r, cbind(-Inf, Inf, 1))  # all non-NA → 1
+  mask_r <- terra::classify(mask_r, cbind(-Inf, Inf, 1))  # all non-NA -> 1
   mask_r
 }
 

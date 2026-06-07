@@ -8,7 +8,7 @@
 #' `<output_dir>/resource_log.csv`.
 #'
 #' Lazy semantics: `expr` is only evaluated when no cache hit exists. This
-#' is what makes the wrapper non-invasive — wrapping `cast_run_step("dag",
+#' is what makes the wrapper non-invasive - wrapping `cast_run_step("dag",
 #' ..., cast_dag(...))` does not call `cast_dag()` if its output is on disk.
 #'
 #' @param step_name Character. Step identifier (filename-safe).

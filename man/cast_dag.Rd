@@ -48,15 +48,16 @@ in \code{data} excluding \code{response}, \code{lon}, and \code{lat} are used.}
 The \code{"mb_first"} method uses a \strong{two-stage} approach that is
 dramatically faster than \code{"pc"} for high-dimensional data (p > 20):
 \itemize{
-\item \strong{Stage 1} — Direct Markov Blanket discovery via IAMB-family
-algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 × p).
-\item \strong{Stage 2} — Full DAG learning via PC, restricted to the MB
-subset plus the response node.  Because |MB| is typically 5–15,
+\item \strong{Stage 1} - Direct Markov Blanket discovery via IAMB-family
+algorithms (\code{bnlearn::learn.mb()}).  Complexity: O(|MB|^2 x p).
+\item \strong{Stage 2} - Full DAG learning via PC, restricted to the MB
+subset plus the response node.  Because |MB| is typically 5-15,
 this is near-instantaneous.
 }
 
-Under the Faithfulness assumption the two-stage result is
-theoretically equivalent to full-graph PC (Pellet & Elisseeff 2008).}
+Under standard Markov Blanket and faithfulness assumptions, the two-stage
+result targets the response-relevant local structure while avoiding a
+full high-dimensional graph search (Pellet & Elisseeff 2008).}
 
 \item{include_response}{Logical. Include the \code{response} column as a node
 in DAG learning so that its Markov Blanket can be extracted. Default

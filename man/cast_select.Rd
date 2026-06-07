@@ -50,9 +50,10 @@ Selects predictor variables by fusing two signals:
 }
 \details{
 \enumerate{
-\item \strong{Markov Blanket (MB)} of the response node extracted from a causal
-DAG — theoretically the minimal sufficient feature set.
-\item \strong{RF permutation importance} — data-driven predictive relevance.
+\item \strong{Markov Blanket (MB)} of the response node extracted from a
+response-focused DAG or MB graph - a compact local screening set under
+standard Markov Blanket assumptions.
+\item \strong{RF permutation importance} - data-driven predictive relevance.
 }
 
 All MB variables are automatically selected.

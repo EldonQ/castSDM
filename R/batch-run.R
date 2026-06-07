@@ -81,6 +81,13 @@
 #' @param cate_n_trees Integer. Default `1000`.
 #' @param cate_hss_model,cate_hss_threshold CATE masking. Defaults `"rf"`,
 #'   `0.1`.
+#' @param do_predict Logical. Generate spatial predictions when `env_data` is
+#'   provided. Default `TRUE`.
+#' @param do_ensemble Logical. Generate ensemble predictions when CV and
+#'   predictions are available. Default `TRUE`.
+#' @param ensemble_method Character. Ensemble method passed to
+#'   [cast_ensemble()]. One of `"weighted"`, `"best"`, or `"equal"`.
+#'   Default `"weighted"`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
 #' @param dag_env_vars,dag_verbose Passed to [cast_dag()].
@@ -120,7 +127,7 @@ cast_batch <- function(species_list,
                        seed        = NULL,
                        verbose     = TRUE,
                        fit_verbose = FALSE,
-                       # ── DAG ──
+                       # -- DAG --
                        dag_R                  = 100L,
                        dag_structure_method   = "mb_first",
                        dag_include_response   = TRUE,
@@ -136,20 +143,23 @@ cast_batch <- function(species_list,
                        dag_strength_threshold = 0.7,
                        dag_direction_threshold = 0.6,
                        dag_max_rows           = 8000L,
-                       # ── Selection ──
+                       # -- Selection --
                        select_min_vars     = 5L,
                        select_min_fraction = 0.3,
                        select_num_trees    = 300L,
-                       # ── CV ──
+                       # -- CV --
                        do_cv           = TRUE,
                        cv_k            = 5L,
                        cv_block_method = "grid",
-                       # ── CATE ──
+                       # -- CATE --
                        do_cate      = FALSE,
                        cate_top_n   = 3L,
                        cate_n_trees = 1000L,
                        cate_hss_model = "rf",
                        cate_hss_threshold = 0.1,
+                       do_predict = TRUE,
+                       do_ensemble = TRUE,
+                       ensemble_method = "weighted",
                        response = "presence",
                        prepare_env_vars = NULL,
                        prepare_verbose = FALSE,
@@ -356,6 +366,9 @@ cast_batch <- function(species_list,
     cv_parallel = cv_parallel,
     cv_verbose = cv_verbose,
     predict_models = predict_models,
+    do_predict = do_predict,
+    do_ensemble = do_ensemble,
+    ensemble_method = ensemble_method,
     plot_basemap = plot_basemap,
     do_cate = do_cate, cate_top_n = cate_top_n,
     cate_n_trees = cate_n_trees,
@@ -367,7 +380,7 @@ cast_batch <- function(species_list,
     var_labels = var_labels,
     fit_verbose = fit_verbose,
     shared_dag = shared_dag,
-    # ── Raster projection (new) ──
+    # -- Raster projection (new) --
     raster_stack = raster_stack,
     future_rasters = future_rasters,
     raster_mask = raster_mask,

@@ -41,6 +41,9 @@ cast_batch(
   cate_n_trees = 1000L,
   cate_hss_model = "rf",
   cate_hss_threshold = 0.1,
+  do_predict = TRUE,
+  do_ensemble = TRUE,
+  ensemble_method = "weighted",
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
@@ -141,6 +144,16 @@ to environmental predictor edges.}
 
 \item{cate_hss_model, cate_hss_threshold}{CATE masking. Defaults \code{"rf"},
 \code{0.1}.}
+
+\item{do_predict}{Logical. Generate spatial predictions when \code{env_data} is
+provided. Default \code{TRUE}.}
+
+\item{do_ensemble}{Logical. Generate ensemble predictions when CV and
+predictions are available. Default \code{TRUE}.}
+
+\item{ensemble_method}{Character. Ensemble method passed to
+\code{\link[=cast_ensemble]{cast_ensemble()}}. One of \code{"weighted"}, \code{"best"}, or \code{"equal"}.
+Default \code{"weighted"}.}
 
 \item{response}{Character. Default \code{"presence"}.}
 

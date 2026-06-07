@@ -25,7 +25,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     parallel = TRUE,
     resume = TRUE,
 
-    # ── DAG ──
+    # -- DAG --
     dag_env_vars = NULL,
     dag_R = 100L,
     dag_structure_method = "mb_first",
@@ -43,19 +43,19 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     dag_verbose = FALSE,
     learn_shared_dag = FALSE,
 
-    # ── Variable Selection ──
+    # -- Variable Selection --
     select_min_vars = 5L,
     select_min_fraction = 0.3,
     select_num_trees = 300L,
     select_verbose = FALSE,
 
-    # ── Model Fitting ──
+    # -- Model Fitting --
     fit_rf_ntree = 300L,
     fit_brt_n_trees = 500L,
     fit_brt_depth = 5L,
     fit_verbose = FALSE,
 
-    # ── Cross-Validation ──
+    # -- Cross-Validation --
     do_cv = TRUE,
     cv_k = 5L,
     cv_block_method = "grid",
@@ -63,7 +63,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cv_parallel = FALSE,
     cv_verbose = FALSE,
 
-    # ── CATE (optional; requires grf) ──
+    # -- CATE (optional; requires grf) --
     do_cate = FALSE,
     cate_top_n = 3L,
     cate_n_trees = 1000L,
@@ -72,16 +72,17 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cate_hss_model = "rf",
     cate_hss_threshold = 0.1,
 
-    # ── Prediction / Ensemble ──
+    # -- Prediction / Ensemble --
     do_predict = TRUE,
     do_ensemble = TRUE,
+    ensemble_method = "weighted",
 
-    # ── Study Area ──
+    # -- Study Area --
     study_area_method = "buffer",
     study_area_buffer_km = 300,
     study_area_min_cells = 1000L,
 
-    # ── Background Points ──
+    # -- Background Points --
     bg_strategy = "random",
     bg_adaptive = TRUE,
     bg_ratio = 2,
@@ -90,7 +91,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     bg_cell_thin = TRUE,
     bg_exclude_presence = TRUE,
 
-    # ── Raster Prediction ──
+    # -- Raster Prediction --
     predict_raster = FALSE,
     raster_compression = "LZW",
     overwrite_rasters = FALSE
