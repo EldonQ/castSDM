@@ -38,6 +38,22 @@ print.cast_select <- function(x, ...) {
 }
 
 #' @export
+print.cast_refute <- function(x, ...) {
+  cli::cli_h1("castSDM Screen Refutation")
+  if (!is.null(x$settings)) {
+    cli::cli_ul(c(
+      "Repetitions: {x$settings$reps %||% NA_integer_}",
+      "Permuted-response mean overlap: {round(x$settings$permuted_response_mean_overlap %||% NA_real_, 3)}",
+      "Random common-cause hit rate: {round(x$settings$random_common_cause_hit_rate %||% NA_real_, 3)}"
+    ))
+  }
+  if (!is.null(x$summary) && nrow(x$summary) > 0) {
+    print(x$summary)
+  }
+  invisible(x)
+}
+
+#' @export
 print.cast_fit <- function(x, ...) {
   model_names <- names(x$models)
   cli::cli_h1("castSDM Model Fit")

@@ -60,6 +60,26 @@ new_cast_select <- function(selected, scores, roles) {
   )
 }
 
+#' Create a cast_refute Object
+#'
+#' @param tests A `data.frame` with refutation diagnostics.
+#' @param summary A `data.frame` with per-variable stability diagnostics.
+#' @param settings A list of settings used by the refutation routine.
+#'
+#' @return A `cast_refute` object.
+#' @keywords internal
+#' @export
+new_cast_refute <- function(tests, summary, settings = list()) {
+  structure(
+    list(
+      tests = tests,
+      summary = summary,
+      settings = settings %||% list()
+    ),
+    class = "cast_refute"
+  )
+}
+
 #' Create a cast_fit Object
 #'
 #' @param models Named list of fitted model objects.
@@ -193,6 +213,7 @@ new_cast_result <- function(dag, screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
                             cate = NULL,
+                            refute = NULL,
                             call = NULL) {
   structure(
     list(
@@ -204,6 +225,7 @@ new_cast_result <- function(dag, screen, fit, eval,
       predict = predict,
       ensemble = ensemble,
       cate = cate,
+      refute = refute,
       call = call
     ),
     class = "cast_result"

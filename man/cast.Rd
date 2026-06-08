@@ -23,6 +23,10 @@ cast(
   direction_threshold = 0.6,
   select_min_vars = 5L,
   select_min_fraction = 0.3,
+  select_stability_reps = 0L,
+  select_stability_threshold = 0.6,
+  do_refute = TRUE,
+  refute_reps = 20L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
@@ -86,6 +90,17 @@ Default \code{0.05}.}
 
 \item{select_min_fraction}{Numeric. Minimum fraction of variables. Default
 \code{0.3}.}
+
+\item{select_stability_reps}{Integer. Bootstrap repetitions for selection
+stability. Default \code{0}.}
+
+\item{select_stability_threshold}{Numeric. Stability frequency threshold.
+Default \code{0.6}.}
+
+\item{do_refute}{Logical. Run lightweight screen refutation diagnostics.
+Default \code{TRUE}.}
+
+\item{refute_reps}{Integer. Number of refutation repetitions.}
 
 \item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 

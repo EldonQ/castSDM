@@ -32,6 +32,10 @@
 #'   variables to retain. Default `0.3`.
 #' @param seed Integer or `NULL`. Random seed. Default `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
+#' @param stability_reps Integer. Bootstrap repetitions for lightweight
+#'   selection stability diagnostics. Default `0` disables this extra step.
+#' @param stability_threshold Numeric in `[0, 1]`. Minimum bootstrap selection
+#'   frequency used when a Markov Blanket is dense or non-selective.
 #'
 #' @return A `cast_select` object with components:
 #' \describe{
@@ -57,7 +61,9 @@ cast_select <- function(dag,
                         min_vars = 5L,
                         min_fraction = 0.3,
                         seed = NULL,
-                        verbose = TRUE) {
+                        verbose = TRUE,
+                        stability_reps = 0L,
+                        stability_threshold = 0.6) {
   check_suggested("ranger", "for RF importance")
 
   # --- Determine candidate env vars (exclude response, lon, lat) -----------
@@ -130,6 +136,45 @@ cast_select <- function(dag,
       scores$variable[seq_len(cut_at)]
     }
   }
+
+  estimate_stability <- function(X, Y, scores, reps, min_keep) {
+    reps <- as.integer(reps)
+    if (reps <= 0L) return(rep(NA_real_, nrow(scores)))
+    counts <- stats::setNames(rep(0L, nrow(scores)), scores$variable)
+    trees <- max(50L, min(150L, as.integer(ceiling(num_trees / 3))))
+    n <- nrow(X)
+    for (ii in seq_len(reps)) {
+      if (!is.null(seed)) set.seed(seed + 1000L + ii)
+      idx <- sample.int(n, size = n, replace = TRUE)
+      imp <- tryCatch(
+        ranger::ranger(
+          y ~ .,
+          data = cbind(y = as.factor(Y[idx]), X[idx, , drop = FALSE]),
+          num.trees = trees,
+          importance = "permutation",
+          verbose = FALSE
+        )$variable.importance,
+        error = function(e) NULL
+      )
+      if (is.null(imp)) next
+      rep_scores <- scores
+      rep_scores$importance <- imp[rep_scores$variable]
+      rep_scores$importance[is.na(rep_scores$importance)] <- 0
+      keep <- select_by_importance(rep_scores, min_keep)
+      counts[keep] <- counts[keep] + 1L
+    }
+    as.numeric(counts[scores$variable]) / reps
+  }
+
+  scores_df$selection_frequency <- estimate_stability(
+    X, Y, scores_df, stability_reps, min_keep
+  )
+  scores_df$stable <- ifelse(
+    is.na(scores_df$selection_frequency),
+    NA,
+    scores_df$selection_frequency >= stability_threshold
+  )
+
   mb_selective <- TRUE
 
   if (!is.null(mb) && length(mb$all) > 0) {
@@ -145,7 +190,18 @@ cast_select <- function(dag,
         ))
       }
       mb_selective <- FALSE
-      selected <- select_by_importance(scores_df, min_keep)
+      if (stability_reps > 0L && any(scores_df$stable %in% TRUE)) {
+        selected <- scores_df$variable[scores_df$stable %in% TRUE]
+        if (length(selected) < min_keep) {
+          remaining <- setdiff(scores_df$variable[order(-scores_df$importance)], selected)
+          selected <- unique(c(
+            selected,
+            remaining[seq_len(min(min_keep - length(selected), length(remaining)))]
+          ))
+        }
+      } else {
+        selected <- select_by_importance(scores_df, min_keep)
+      }
     } else {
       mb_importance <- scores_df$importance[scores_df$variable %in% mb_vars]
       imp_threshold <- if (length(mb_importance) > 0) {
@@ -172,7 +228,18 @@ cast_select <- function(dag,
     }
   } else {
     # -- Fallback: pure RF importance with score-gap heuristic --
-    selected <- select_by_importance(scores_df, min_keep)
+    if (stability_reps > 0L && any(scores_df$stable %in% TRUE)) {
+      selected <- scores_df$variable[scores_df$stable %in% TRUE]
+      if (length(selected) < min_keep) {
+        remaining <- setdiff(scores_df$variable[order(-scores_df$importance)], selected)
+        selected <- unique(c(
+          selected,
+          remaining[seq_len(min(min_keep - length(selected), length(remaining)))]
+        ))
+      }
+    } else {
+      selected <- select_by_importance(scores_df, min_keep)
+    }
   }
 
   # --- Assign screening roles ----------------------------------------------
@@ -187,6 +254,29 @@ cast_select <- function(dag,
     }, character(1)),
     stringsAsFactors = FALSE
   )
+  roles_df$selection_frequency <- scores_df$selection_frequency[
+    match(roles_df$variable, scores_df$variable)
+  ]
+  roles_df$causal_role <- vapply(seq_len(nrow(roles_df)), function(i) {
+    v <- roles_df$variable[i]
+    legacy <- roles_df$role[i]
+    stable <- roles_df$selection_frequency[i]
+    stable_ok <- is.na(stable) || stable >= stability_threshold
+    if (legacy == "mb_direct" && stable_ok) return("causal_core")
+    if (legacy == "mb_associated" && stable_ok) return("causal_adjuster")
+    if (!isTRUE(mb_selective) && v %in% (mb$all %||% character()) && stable_ok) {
+      return("causal_core")
+    }
+    if (legacy %in% c("importance_added", "importance_screened")) {
+      return("predictive_rescue")
+    }
+    "unstable_rejected"
+  }, character(1))
+
+  scores_df$causal_role <- roles_df$causal_role[
+    match(scores_df$variable, roles_df$variable)
+  ]
+  scores_df$causal_role[is.na(scores_df$causal_role)] <- "unstable_rejected"
 
   # Sort: MB roles first, then by importance
   role_order <- c(
@@ -217,6 +307,11 @@ cast_select <- function(dag,
     cli::cli_inform(
       "Selection: {length(selected)}/{length(env_vars)} variables ({n_mb} from MB, {n_pred} importance-screened)."
     )
+    if (stability_reps > 0L) {
+      cli::cli_inform(
+        "Stability: {sum(scores_df$stable %in% TRUE)} variables above frequency >= {stability_threshold} across {stability_reps} bootstraps."
+      )
+    }
   }
 
   new_cast_select(

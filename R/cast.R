@@ -35,6 +35,13 @@
 #' @param select_min_vars Integer. Minimum retained variables. Default `5`.
 #' @param select_min_fraction Numeric. Minimum fraction of variables. Default
 #'   `0.3`.
+#' @param select_stability_reps Integer. Bootstrap repetitions for selection
+#'   stability. Default `0`.
+#' @param select_stability_threshold Numeric. Stability frequency threshold.
+#'   Default `0.6`.
+#' @param do_refute Logical. Run lightweight screen refutation diagnostics.
+#'   Default `TRUE`.
+#' @param refute_reps Integer. Number of refutation repetitions.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
@@ -80,6 +87,10 @@ cast <- function(species_data,
                  direction_threshold = 0.6,
                  select_min_vars = 5L,
                  select_min_fraction = 0.3,
+                 select_stability_reps = 0L,
+                 select_stability_threshold = 0.6,
+                 do_refute = TRUE,
+                 refute_reps = 20L,
                  do_cv = TRUE,
                  cv_k = 5L,
                  cv_block_method = "grid",
@@ -139,8 +150,27 @@ cast <- function(species_data,
     dag, train_data,
     min_vars = select_min_vars,
     min_fraction = select_min_fraction,
+    stability_reps = select_stability_reps,
+    stability_threshold = select_stability_threshold,
     seed = seed, verbose = verbose
   )
+
+  refute_result <- NULL
+  if (isTRUE(do_refute)) {
+    if (verbose) cli::cli_h2("Step 3b: Screen Refutation")
+    refute_result <- tryCatch(
+      cast_refute_screen(
+        dag, screen, train_data,
+        reps = refute_reps,
+        seed = seed,
+        verbose = verbose
+      ),
+      error = function(e) {
+        cli::cli_warn("Screen refutation failed: {e$message}")
+        NULL
+      }
+    )
+  }
 
   # === Step 4: Model Fitting ===
   if (verbose) cli::cli_h2("Step 4: Model Fitting")
@@ -232,6 +262,7 @@ cast <- function(species_data,
     cv = cv_result,
     predict = pred_result,
     ensemble = ensemble_result,
-    cate = cate_result
+    cate = cate_result,
+    refute = refute_result
   )
 }

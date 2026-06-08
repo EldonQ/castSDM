@@ -13,6 +13,7 @@ new_cast_result(
   predict = NULL,
   ensemble = NULL,
   cate = NULL,
+  refute = NULL,
   call = NULL
 )
 }

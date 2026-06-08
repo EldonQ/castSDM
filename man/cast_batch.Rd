@@ -33,6 +33,11 @@ cast_batch(
   select_min_vars = 5L,
   select_min_fraction = 0.3,
   select_num_trees = 300L,
+  select_stability_reps = 0L,
+  select_stability_threshold = 0.6,
+  do_refute = TRUE,
+  refute_reps = 10L,
+  refute_num_trees = 80L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
@@ -129,6 +134,19 @@ to environmental predictor edges.}
 \item{select_min_fraction}{Numeric. Default \code{0.3}.}
 
 \item{select_num_trees}{Integer. Default \code{300}.}
+
+\item{select_stability_reps}{Integer. Bootstrap repetitions for lightweight
+selection stability diagnostics. Default \code{0}.}
+
+\item{select_stability_threshold}{Numeric. Stability frequency threshold.
+Default \code{0.6}.}
+
+\item{do_refute}{Logical. Run screen refutation diagnostics. Default \code{TRUE}.}
+
+\item{refute_reps}{Integer. Refutation repetitions. Default \code{10}.}
+
+\item{refute_num_trees}{Integer. Trees used by refutation RF screens.
+Default \code{80}.}
 
 \item{do_cv}{Logical. Default \code{TRUE}.}
 

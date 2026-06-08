@@ -41,7 +41,7 @@ plot.cast_dag <- function(x, screen = NULL,
     edges[, c("from", "to"), drop = FALSE],
     directed = TRUE,
     vertices = data.frame(
-      name = unique(c(edges$from, edges$to)),
+      name = unique(c(x$nodes, edges$from, edges$to)),
       stringsAsFactors = FALSE
     )
   )
@@ -52,7 +52,8 @@ plot.cast_dag <- function(x, screen = NULL,
 
   # Screening roles from screen (MB + importance fusion)
   if (!is.null(screen) && !is.null(screen$roles) && nrow(screen$roles) > 0) {
-    rmap <- stats::setNames(screen$roles$role, screen$roles$variable)
+    role_field <- if ("causal_role" %in% names(screen$roles)) "causal_role" else "role"
+    rmap <- stats::setNames(screen$roles[[role_field]], screen$roles$variable)
     igraph::V(g)$role <- ifelse(
       node_names %in% names(rmap), rmap[node_names], "Unscreened"
     )
@@ -87,6 +88,10 @@ plot.cast_dag <- function(x, screen = NULL,
   igraph::V(g)$label <- vapply(node_names, label_fn, character(1))
 
   role_colors <- c(
+    causal_core = "#B2182B",
+    causal_adjuster = "#2166AC",
+    predictive_rescue = "#27AE60",
+    unstable_rejected = "#999999",
     mb_direct = "#2C3E50",
     mb_associated = "#8E44AD",
     importance_added = "#27AE60",
@@ -109,9 +114,9 @@ plot.cast_dag <- function(x, screen = NULL,
 
   if (!is.null(species)) {
     sp_display <- gsub("_", " ", species)
-    main_title <- sprintf("Causal DAG -- %s", sp_display)
+    main_title <- sprintf("Response-focused screening graph -- %s", sp_display)
   } else {
-    main_title <- "Causal DAG"
+    main_title <- "Response-focused screening graph"
   }
 
   sm <- x$structure_method %||% "pc"
@@ -191,12 +196,15 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
 
   # Merge role info
   if (!is.null(x$roles) && nrow(x$roles) > 0) {
-    scr <- merge(scr, x$roles[, c("variable", "role"), drop = FALSE],
+    role_cols <- intersect(c("variable", "role", "causal_role"), names(x$roles))
+    scr <- merge(scr, x$roles[, role_cols, drop = FALSE],
                  by = "variable", all.x = TRUE)
     scr$role[is.na(scr$role)] <- "not selected"
   } else {
     scr$role <- ifelse(scr$is_selected, "selected", "not selected")
   }
+  if (!"causal_role" %in% names(scr)) scr$causal_role <- scr$role
+  scr$causal_role[is.na(scr$causal_role)] <- "not selected"
 
   # Sort by importance (new cast_select uses `importance`; keep legacy fallbacks)
   imp_candidates <- c("importance", "rf_importance", "score_total", "imp_norm")
@@ -221,6 +229,10 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
   scr$display <- factor(scr$display, levels = rev(scr$display))
 
   role_colors <- c(
+    causal_core = "#B2182B",
+    causal_adjuster = "#2166AC",
+    predictive_rescue = "#27AE60",
+    unstable_rejected = "#999999",
     mb_direct = "#2C3E50",
     mb_associated = "#8E44AD",
     importance_added = "#27AE60",
@@ -245,15 +257,15 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
 
   p <- ggplot2::ggplot(scr, ggplot2::aes(
     x = .data[[imp_col]], y = .data$display,
-    fill = .data$role, alpha = .data$is_selected
+    fill = .data$causal_role, alpha = .data$is_selected
   )) +
     ggplot2::geom_col(width = 0.7) +
-    ggplot2::scale_fill_manual(values = role_colors, name = "Role") +
+    ggplot2::scale_fill_manual(values = role_colors, name = "Screening role") +
     ggplot2::scale_alpha_manual(
       values = c("TRUE" = 0.95, "FALSE" = 0.35), guide = "none"
     ) +
     ggplot2::labs(
-      title = "Variable Selection (Markov Blanket + RF Importance)",
+      title = "Response-focused variable screening",
       subtitle = sub_txt,
       x = if (identical(imp_col, "importance_plot")) "Selection indicator" else "RF Permutation Importance",
       y = ""

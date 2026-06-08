@@ -82,10 +82,29 @@
         min_vars = cfg$select_min_vars %||% 5L,
         min_fraction = cfg$select_min_fraction %||% 0.3,
         num_trees = cfg$select_num_trees %||% 300L,
+        stability_reps = cfg$select_stability_reps %||% 0L,
+        stability_threshold = cfg$select_stability_threshold %||% 0.6,
         seed = seed_i,
         verbose = cfg$select_verbose %||% FALSE
       )
     )
+
+    refute_result <- NULL
+    if (isTRUE(cfg$do_refute)) {
+      refute_result <- cast_run_step(paste0("refute", shared_suffix), output_dir, sp_name,
+        tryCatch(
+          cast_refute_screen(
+            dag, screen, split$train,
+            response = cfg$response,
+            reps = cfg$refute_reps %||% 10L,
+            num_trees = cfg$refute_num_trees %||% 80L,
+            seed = seed_i,
+            verbose = cfg$select_verbose %||% FALSE
+          ),
+          error = function(e) NULL
+        )
+      )
+    }
 
     fit_call_args <- utils::modifyList(
       list(
@@ -316,7 +335,8 @@
       dag = dag, screen = screen,
       fit = fit, eval = eval_result, cv = cv_result,
       predict = pred_result, ensemble = ensemble_result,
-      cate = cate_result
+      cate = cate_result,
+      refute = refute_result
     )
     saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
 

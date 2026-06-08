@@ -57,6 +57,11 @@ cast_batch_args:
   dag_direction_threshold: 0.6
   select_min_vars: 5
   select_min_fraction: 0.3
+  select_stability_reps: 0       # set 10-30 for stability-audited screening
+  select_stability_threshold: 0.6
+  do_refute: true
+  refute_reps: 20
+  refute_num_trees: 100
   do_predict: true
   do_ensemble: true
   ensemble_method: weighted       # weighted | best | equal

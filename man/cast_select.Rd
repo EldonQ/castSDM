@@ -12,7 +12,9 @@ cast_select(
   min_vars = 5L,
   min_fraction = 0.3,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  stability_reps = 0L,
+  stability_threshold = 0.6
 )
 }
 \arguments{
@@ -36,6 +38,12 @@ variables to retain. Default \code{0.3}.}
 \item{seed}{Integer or \code{NULL}. Random seed. Default \code{NULL}.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
+
+\item{stability_reps}{Integer. Bootstrap repetitions for lightweight
+selection stability diagnostics. Default \code{0} disables this extra step.}
+
+\item{stability_threshold}{Numeric in \verb{[0, 1]}. Minimum bootstrap selection
+frequency used when a Markov Blanket is dense or non-selective.}
 }
 \value{
 A \code{cast_select} object with components:

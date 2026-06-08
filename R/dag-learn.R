@@ -629,6 +629,23 @@ response_markov_blanket <- function(dag, response_node, env_vars = NULL) {
     seed = seed, verbose = FALSE,
     blacklist = local_bl, whitelist = local_wl
   )
+
+  if (!any(out$from == response | out$to == response)) {
+    if (verbose) {
+      cli::cli_warn(c(
+        "Local PC did not retain any edge adjacent to the response node.",
+        "i" = "Returning a response-focused screening graph from Stage-1 MB membership instead."
+      ))
+    }
+    out <- .dag_mb_star_edges(
+      mb_vars = mb_vars,
+      response = response,
+      total_vars = ncol(dag_df) - 1L,
+      blacklist = blacklist,
+      whitelist = whitelist
+    )
+  }
+
   attr(out, "mb_vars_stage1") <- mb_vars
   out
 }

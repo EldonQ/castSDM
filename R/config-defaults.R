@@ -47,7 +47,14 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     select_min_vars = 5L,
     select_min_fraction = 0.3,
     select_num_trees = 300L,
+    select_stability_reps = 0L,
+    select_stability_threshold = 0.6,
     select_verbose = FALSE,
+
+    # -- Screen Refutation --
+    do_refute = TRUE,
+    refute_reps = 20L,
+    refute_num_trees = 100L,
 
     # -- Model Fitting --
     fit_rf_ntree = 300L,
