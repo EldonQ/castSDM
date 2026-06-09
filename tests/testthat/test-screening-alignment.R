@@ -177,3 +177,25 @@ test_that("cast_batch exposes prediction and ensemble controls", {
   f <- names(formals(cast_batch))
   expect_true(all(c("do_predict", "do_ensemble", "ensemble_method") %in% f))
 })
+
+test_that("plot.cast_batch handles more than ten species", {
+  skip_if_not_installed("ggplot2")
+  sm <- expand.grid(
+    species = paste0("sp", seq_len(20)),
+    model = c("rf", "brt"),
+    fold = seq_len(2),
+    stringsAsFactors = FALSE
+  )
+  sm$auc <- stats::runif(nrow(sm), 0.6, 0.9)
+  sm$tss <- stats::runif(nrow(sm), 0.2, 0.7)
+  sm$cbi <- stats::runif(nrow(sm), 0.4, 0.9)
+  batch <- new_cast_batch(
+    species_metrics = sm,
+    species = unique(sm$species),
+    models = c("rf", "brt"),
+    results = NULL
+  )
+  p <- plot(batch)
+  expect_s3_class(p, "ggplot")
+  expect_silent(ggplot2::ggplot_build(p))
+})

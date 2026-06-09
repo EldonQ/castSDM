@@ -585,15 +585,12 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
       color = "black", linewidth = 0.4
     ) +
     ggplot2::geom_jitter(
-      ggplot2::aes(shape = .data$species),
-      width = 0.15, size = 1.8, alpha = 0.7, color = "black"
+      ggplot2::aes(group = .data$species),
+      width = 0.15, size = 1.5, alpha = 0.55, color = "black",
+      shape = 16
     ) +
     ggplot2::facet_wrap(~ metric, scales = "free_y", nrow = 1) +
     ggplot2::scale_fill_manual(values = gray_fills, guide = "none") +
-    ggplot2::scale_shape_manual(
-      values = c(16, 17, 15, 18, 8, 3, 4, 1, 2, 0),
-      name = "Species"
-    ) +
     ggplot2::labs(
       title    = "Multi-species Model Performance Comparison",
       subtitle = sprintf("%d species | Spatial CV", length(x$species)),

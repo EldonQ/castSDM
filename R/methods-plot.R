@@ -131,6 +131,138 @@ plot.cast_dag <- function(x, screen = NULL,
     nrow(edges), dag_density, boot_txt, sm
   )
 
+  is_response_star <- !is.null(resp_node) &&
+    nrow(edges) > 0L &&
+    all(edges$to == resp_node) &&
+    !any(edges$from == resp_node)
+
+  if (is_response_star) {
+    predictor_nodes <- unique(edges$from)
+    node_df <- data.frame(
+      variable = predictor_nodes,
+      label = vapply(predictor_nodes, label_fn, character(1)),
+      role = igraph::V(g)$role[match(predictor_nodes, node_names)],
+      selected = igraph::V(g)$selected[match(predictor_nodes, node_names)],
+      stringsAsFactors = FALSE
+    )
+    if (!is.null(screen) && !is.null(screen$scores) &&
+        "variable" %in% names(screen$scores)) {
+      sc <- screen$scores
+      imp_col <- intersect(c("importance", "imp_norm", "score_total"), names(sc))[1]
+      if (!is.na(imp_col)) {
+        node_df$importance <- sc[[imp_col]][match(node_df$variable, sc$variable)]
+      }
+      if ("selection_frequency" %in% names(sc)) {
+        node_df$selection_frequency <- sc$selection_frequency[
+          match(node_df$variable, sc$variable)
+        ]
+      }
+    }
+    if (!"importance" %in% names(node_df)) node_df$importance <- 1
+    node_df$importance[!is.finite(node_df$importance)] <- 0
+    if (!"selection_frequency" %in% names(node_df)) node_df$selection_frequency <- NA_real_
+
+    role_rank <- c(
+      causal_core = 1, causal_adjuster = 2, predictive_rescue = 3,
+      mb_direct = 1, mb_associated = 2, importance_added = 3,
+      importance_screened = 4, unstable_rejected = 5, Unscreened = 6
+    )
+    node_df$role_rank <- role_rank[node_df$role]
+    node_df$role_rank[is.na(node_df$role_rank)] <- 99
+    node_df <- node_df[order(node_df$role_rank, -node_df$importance, node_df$variable), ]
+    node_df$y <- rev(seq_len(nrow(node_df)))
+    node_df$x <- 0
+    node_df$point_size <- 3.2
+    if (diff(range(node_df$importance, na.rm = TRUE)) > 0) {
+      node_df$point_size <- 2.8 + 3.2 *
+        (node_df$importance - min(node_df$importance, na.rm = TRUE)) /
+        diff(range(node_df$importance, na.rm = TRUE))
+    }
+    node_df$freq_label <- ifelse(
+      is.na(node_df$selection_frequency),
+      "",
+      sprintf("  %.0f%%", 100 * node_df$selection_frequency)
+    )
+    edge_df <- data.frame(
+      x = 0.08,
+      xend = 0.82,
+      y = node_df$y,
+      yend = mean(node_df$y),
+      strength = edges$strength[match(node_df$variable, edges$from)],
+      stringsAsFactors = FALSE
+    )
+    response_df <- data.frame(
+      x = 0.92,
+      y = mean(node_df$y),
+      label = label_fn(resp_node),
+      role = "Response",
+      stringsAsFactors = FALSE
+    )
+
+    return(ggplot2::ggplot() +
+      ggplot2::geom_segment(
+        data = edge_df,
+        ggplot2::aes(x = .data$x, y = .data$y,
+                     xend = .data$xend, yend = .data$yend,
+                     linewidth = .data$strength),
+        arrow = grid::arrow(length = grid::unit(2.2, "mm"), type = "closed"),
+        colour = "grey55", alpha = 0.85, lineend = "round"
+      ) +
+      ggplot2::geom_point(
+        data = node_df,
+        ggplot2::aes(x = .data$x, y = .data$y, colour = .data$role,
+                     size = .data$point_size, shape = .data$selected),
+        alpha = 0.95
+      ) +
+      ggplot2::geom_text(
+        data = node_df,
+        ggplot2::aes(x = .data$x - 0.025, y = .data$y,
+                     label = paste0(.data$label, .data$freq_label)),
+        hjust = 1, size = 3.1,
+        family = getOption("castSDM.font_family", "Arial"),
+        fontface = "bold"
+      ) +
+      ggplot2::geom_point(
+        data = response_df,
+        ggplot2::aes(x = .data$x, y = .data$y, colour = .data$role),
+        size = 7, shape = 21, fill = "white", stroke = 1.1
+      ) +
+      ggplot2::geom_text(
+        data = response_df,
+        ggplot2::aes(x = .data$x, y = .data$y, label = .data$label),
+        size = 3.3, fontface = "bold",
+        family = getOption("castSDM.font_family", "Arial")
+      ) +
+      ggplot2::scale_colour_manual(values = role_colors, name = "Screening\nrole") +
+      ggplot2::scale_shape_manual(values = c(Selected = 16, Dropped = 1),
+                                  name = "Selection") +
+      ggplot2::scale_size_identity(guide = "none") +
+      ggplot2::scale_linewidth_continuous(range = c(0.25, 0.9), guide = "none") +
+      ggplot2::coord_cartesian(xlim = c(-0.34, 1.05), clip = "off") +
+      ggplot2::labs(
+        title = main_title,
+        subtitle = paste0(
+          sub_title,
+          " | directed screen: predictor -> presence",
+          if (any(!is.na(node_df$selection_frequency))) " | labels show stability" else ""
+        )
+      ) +
+      ggplot2::theme_void(base_size = 10) +
+      ggplot2::theme(
+        plot.title = ggplot2::element_text(face = "bold", hjust = 0, size = 11),
+        plot.subtitle = ggplot2::element_text(hjust = 0, color = "grey40", size = 8.5),
+        plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+        legend.text = ggplot2::element_text(size = 7),
+        legend.title = ggplot2::element_text(size = 8, face = "bold"),
+        legend.position = "right",
+        plot.margin = ggplot2::margin(5.5, 20, 5.5, 45)
+      )
+    )
+  }
+
   set.seed(42)
   p <- ggraph::ggraph(g, layout = "fr") +
     ggraph::geom_edge_arc(
