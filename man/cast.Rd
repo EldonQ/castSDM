@@ -22,9 +22,12 @@ cast(
   strength_threshold = 0.7,
   direction_threshold = 0.6,
   select_min_vars = 5L,
-  select_min_fraction = 0.3,
+  select_min_fraction = 0,
   select_stability_reps = 0L,
   select_stability_threshold = 0.6,
+  select_method = "invariant_screen",
+  select_max_vars = NULL,
+  select_cor_threshold = 0.8,
   do_refute = TRUE,
   refute_reps = 20L,
   do_cv = TRUE,
@@ -88,14 +91,24 @@ Default \code{0.05}.}
 
 \item{select_min_vars}{Integer. Minimum retained variables. Default \code{5}.}
 
-\item{select_min_fraction}{Numeric. Minimum fraction of variables. Default
-\code{0.3}.}
+\item{select_min_fraction}{Numeric. Minimum fraction of variables for the
+legacy \code{"mb_rf"} selector. Default \code{0}.}
 
 \item{select_stability_reps}{Integer. Bootstrap repetitions for selection
 stability. Default \code{0}.}
 
 \item{select_stability_threshold}{Numeric. Stability frequency threshold.
 Default \code{0.6}.}
+
+\item{select_method}{Character. Variable screening method passed to
+\code{\link[=cast_select]{cast_select()}}. Default \code{"invariant_screen"}.}
+
+\item{select_max_vars}{Optional integer safety ceiling for variables
+retained by the invariant screen. Default \code{NULL} uses adaptive selection
+without a fixed cap.}
+
+\item{select_cor_threshold}{Numeric. Absolute correlation threshold for
+redundant-proxy control. Default \code{0.8}.}
 
 \item{do_refute}{Logical. Run lightweight screen refutation diagnostics.
 Default \code{TRUE}.}
@@ -140,8 +153,8 @@ Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, and \code{
 }
 \description{
 One-step pipeline that executes the entire workflow: data splitting,
-DAG learning (with response node), DAG-guided variable selection via
-Markov Blanket + RF importance, model fitting, spatial cross-validation,
+DAG learning (with response node), causal-aware invariant variable
+screening, model fitting, spatial cross-validation,
 evaluation, ensemble prediction, and optionally CATE estimation.
 }
 \seealso{

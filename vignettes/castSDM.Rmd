@@ -17,18 +17,19 @@ knitr::opts_chunk$set(
 ## Introduction
 
 **castSDM** (Causal-Aware Species Distribution Modeling) combines
-response-focused Markov Blanket screening with standard SDM models. Its main
+spatially invariant causal screening with standard SDM models. Its main
 use is not to prove ecological causality from observational data, but to make
-variable screening more explicit, sparse, and reproducible.
+variable screening more explicit, sparse, transferable, and reproducible.
 
 The active workflow:
 
 1. Learns a response-focused DAG or MB screening graph.
 2. Forbids `presence -> environmental predictor` edges by default.
-3. Selects variables with Markov Blanket membership plus RF importance.
+3. Selects variables with RF importance, bootstrap stability, spatial-block
+   effect consistency, and correlation-cluster redundancy control.
 4. Reports screening roles:
-   `mb_direct`, `mb_associated`, `importance_added`, and
-   `importance_screened`.
+   `invariant_driver`, `stable_predictive`, `predictive_rescue`, and
+   `redundant_proxy`.
 5. Fits RF, BRT, MaxEnt, and GAM models and evaluates spatial transferability.
 6. Optionally estimates CATE surfaces for selected variables.
 
@@ -106,11 +107,13 @@ cate <- cast_cate(train_data, screen = screen, dag = dag, top_n = 3)
 
 The roles mean:
 
-- `mb_direct`: adjacent to the response in the response-focused MB graph.
-- `mb_associated`: retained through broader MB structure.
-- `importance_added`: outside the MB but retained by RF importance.
-- `importance_screened`: retained by RF importance when MB membership is dense
-  or otherwise non-selective.
+- `invariant_driver`: selected because it is predictive, direction-consistent,
+  and spatially stable.
+- `stable_predictive`: selected because it is predictive and stable, with
+  weaker effect-direction evidence.
+- `predictive_rescue`: retained to preserve model performance.
+- `redundant_proxy`: rejected because a higher-scoring correlated variable was
+  already selected.
 
 These roles describe the screening path for each variable. They should not be
 read as confirmed ecological mechanisms.

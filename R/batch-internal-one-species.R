@@ -75,15 +75,19 @@
       )
     }
 
-    screen <- cast_run_step(paste0("select", shared_suffix), output_dir, sp_name,
+    select_suffix <- paste0("_", cfg$select_method %||% "invariant_screen", shared_suffix)
+    screen <- cast_run_step(paste0("select", select_suffix), output_dir, sp_name,
       cast_select(
         dag, split$train,
         response = cfg$response,
+        method = cfg$select_method %||% "invariant_screen",
         min_vars = cfg$select_min_vars %||% 5L,
-        min_fraction = cfg$select_min_fraction %||% 0.3,
+        min_fraction = cfg$select_min_fraction %||% 0,
         num_trees = cfg$select_num_trees %||% 300L,
         stability_reps = cfg$select_stability_reps %||% 0L,
         stability_threshold = cfg$select_stability_threshold %||% 0.6,
+        max_vars = cfg$select_max_vars,
+        cor_threshold = cfg$select_cor_threshold %||% 0.8,
         seed = seed_i,
         verbose = cfg$select_verbose %||% FALSE
       )
@@ -91,7 +95,7 @@
 
     refute_result <- NULL
     if (isTRUE(cfg$do_refute)) {
-      refute_result <- cast_run_step(paste0("refute", shared_suffix), output_dir, sp_name,
+      refute_result <- cast_run_step(paste0("refute", select_suffix), output_dir, sp_name,
         tryCatch(
           cast_refute_screen(
             dag, screen, split$train,
@@ -118,17 +122,17 @@
       ),
       fit_args
     )
-    fit <- cast_run_step(paste0("fit", shared_suffix), output_dir, sp_name,
+    fit <- cast_run_step(paste0("fit", select_suffix), output_dir, sp_name,
       do.call(cast_fit, fit_call_args)
     )
 
-    eval_result <- cast_run_step(paste0("eval", shared_suffix), output_dir, sp_name,
+    eval_result <- cast_run_step(paste0("eval", select_suffix), output_dir, sp_name,
       cast_evaluate(fit, split$test, response = cfg$eval_response)
     )
 
     cv_result <- NULL
     if (cfg$do_cv) {
-      cv_result <- cast_run_step(paste0("cv", shared_suffix), output_dir, sp_name,
+      cv_result <- cast_run_step(paste0("cv", select_suffix), output_dir, sp_name,
         tryCatch(
           cast_cv(
             sp_data,

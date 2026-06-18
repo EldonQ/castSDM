@@ -71,12 +71,20 @@
 #' @param dag_direction_threshold Numeric. Default `0.6`.
 #' @param dag_max_rows Integer. Default `8000`.
 #' @param select_min_vars Integer. Default `5`.
-#' @param select_min_fraction Numeric. Default `0.3`.
+#' @param select_min_fraction Numeric. Minimum fraction for legacy
+#'   `"mb_rf"` screening. Default `0`.
 #' @param select_num_trees Integer. Default `300`.
 #' @param select_stability_reps Integer. Bootstrap repetitions for lightweight
 #'   selection stability diagnostics. Default `0`.
 #' @param select_stability_threshold Numeric. Stability frequency threshold.
 #'   Default `0.6`.
+#' @param select_method Character. Variable screening method passed to
+#'   [cast_select()]. Default `"invariant_screen"`.
+#' @param select_max_vars Optional integer safety ceiling for variables
+#'   retained by the invariant screen. Default `NULL` uses adaptive selection
+#'   without a fixed cap.
+#' @param select_cor_threshold Numeric. Redundant-proxy correlation threshold.
+#'   Default `0.8`.
 #' @param do_refute Logical. Run screen refutation diagnostics. Default `TRUE`.
 #' @param refute_reps Integer. Refutation repetitions. Default `10`.
 #' @param refute_num_trees Integer. Trees used by refutation RF screens.
@@ -153,10 +161,13 @@ cast_batch <- function(species_list,
                        dag_max_rows           = 8000L,
                        # -- Selection --
                        select_min_vars     = 5L,
-                       select_min_fraction = 0.3,
+                       select_min_fraction = 0,
                        select_num_trees    = 300L,
                        select_stability_reps = 0L,
                        select_stability_threshold = 0.6,
+                       select_method = "invariant_screen",
+                       select_max_vars = NULL,
+                       select_cor_threshold = 0.8,
                        do_refute = TRUE,
                        refute_reps = 10L,
                        refute_num_trees = 80L,
@@ -373,6 +384,9 @@ cast_batch <- function(species_list,
     select_num_trees = select_num_trees,
     select_stability_reps = select_stability_reps,
     select_stability_threshold = select_stability_threshold,
+    select_method = select_method,
+    select_max_vars = select_max_vars,
+    select_cor_threshold = select_cor_threshold,
     select_verbose = select_verbose,
     do_refute = do_refute,
     refute_reps = refute_reps,

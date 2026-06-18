@@ -4,8 +4,9 @@
 #' @section Overview:
 #' The \pkg{castSDM} package provides a complete pipeline for causal-aware
 #' species distribution modeling. The core innovation is **response-focused
-#' variable screening via Markov Blanket** - an auditable approach to selecting
-#' ecologically relevant predictors.
+#' invariant variable screening** - a fast, auditable approach that prioritizes
+#' predictors with stable effects across spatial/environmental blocks while
+#' controlling redundant proxies.
 #'
 #' **Pipeline steps:**
 #'
@@ -14,8 +15,9 @@
 #' 2. **Screening Graph Learning**: DAG/MB graph discovery via PC algorithm,
 #'    two-stage MB-First (IAMB + local PC), or bootstrap Hill-Climbing,
 #'    with presence as a node ([cast_dag()])
-#' 3. **Variable Selection**: Markov Blanket extraction + RF importance
-#'    fusion ([cast_select()])
+#' 3. **Variable Selection**: invariant screening with RF importance,
+#'    bootstrap stability, effect-direction consistency, and correlation
+#'    redundancy control ([cast_select()])
 #' 4. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
 #' 5. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),

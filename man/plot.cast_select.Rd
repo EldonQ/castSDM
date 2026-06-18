@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_select}
 \alias{plot.cast_select}
-\title{Plot Variable Selection (Markov Blanket + RF Importance)}
+\title{Plot Variable Selection}
 \usage{
 \method{plot}{cast_select}(x, var_labels = NULL, ...)
 }

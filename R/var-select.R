@@ -1,23 +1,201 @@
-#' DAG-Guided Variable Selection via Markov Blanket + RF Importance
+# Internal helpers for invariant causal screening.
+
+#' @keywords internal
+#' @noRd
+fast_auc01 <- function(y, score) {
+  y <- as.integer(y)
+  ok <- is.finite(score) & !is.na(y)
+  y <- y[ok]
+  score <- score[ok]
+  n1 <- sum(y == 1L)
+  n0 <- sum(y == 0L)
+  if (n1 == 0L || n0 == 0L) return(NA_real_)
+  r <- rank(score, ties.method = "average")
+  (sum(r[y == 1L]) - n1 * (n1 + 1) / 2) / (n1 * n0)
+}
+
+#' @keywords internal
+#' @noRd
+make_invariance_blocks <- function(data, block_var = NULL, n_blocks = 5L) {
+  if (!is.null(block_var) && block_var %in% names(data)) {
+    return(as.factor(data[[block_var]]))
+  }
+  if (all(c("lon", "lat") %in% names(data))) {
+    n_blocks <- max(2L, as.integer(n_blocks))
+    nx <- max(2L, ceiling(sqrt(n_blocks)))
+    ny <- max(2L, ceiling(n_blocks / nx))
+    xq <- unique(stats::quantile(data$lon, probs = seq(0, 1, length.out = nx + 1),
+                                 na.rm = TRUE, type = 8))
+    yq <- unique(stats::quantile(data$lat, probs = seq(0, 1, length.out = ny + 1),
+                                 na.rm = TRUE, type = 8))
+    if (length(xq) > 2L && length(yq) > 2L) {
+      xb <- cut(data$lon, breaks = xq, include.lowest = TRUE, labels = FALSE)
+      yb <- cut(data$lat, breaks = yq, include.lowest = TRUE, labels = FALSE)
+      return(interaction(xb, yb, drop = TRUE))
+    }
+  }
+  as.factor(rep(1L, nrow(data)))
+}
+
+#' @keywords internal
+#' @noRd
+compute_invariance_metrics <- function(data, env_vars, response, block_var = NULL,
+                                       n_blocks = 5L) {
+  y <- as.integer(data[[response]])
+  blocks <- make_invariance_blocks(data, block_var = block_var, n_blocks = n_blocks)
+  block_levels <- levels(blocks)
+  out <- lapply(env_vars, function(v) {
+    signs <- numeric(0)
+    aucs <- numeric(0)
+    effects <- numeric(0)
+    for (b in block_levels) {
+      idx <- which(blocks == b)
+      if (length(idx) < 20L || length(unique(y[idx])) < 2L) next
+      x <- suppressWarnings(as.numeric(data[[v]][idx]))
+      yy <- y[idx]
+      ok <- is.finite(x) & !is.na(yy)
+      if (sum(ok) < 20L || stats::sd(x[ok]) == 0) next
+      xz <- as.numeric(scale(x[ok]))
+      fit <- tryCatch(
+        suppressWarnings(stats::glm(yy[ok] ~ xz, family = stats::binomial())),
+        error = function(e) NULL
+      )
+      if (is.null(fit) || length(stats::coef(fit)) < 2L) next
+      beta <- unname(stats::coef(fit)[2])
+      p <- stats::predict(fit, type = "response")
+      auc <- fast_auc01(yy[ok], p)
+      if (!is.finite(beta)) next
+      signs <- c(signs, sign(beta))
+      effects <- c(effects, abs(beta))
+      aucs <- c(aucs, auc)
+    }
+    nz <- signs[signs != 0]
+    sign_consistency <- if (length(nz) == 0L) {
+      0
+    } else {
+      max(mean(nz > 0), mean(nz < 0))
+    }
+    effect_stability <- if (length(effects) <= 1L || mean(effects) <= 0) {
+      if (length(effects) == 1L) 1 else 0
+    } else {
+      max(0, 1 - stats::sd(effects) / (mean(effects) + 1e-8))
+    }
+    auc_stability <- if (length(aucs) <= 1L) {
+      if (length(aucs) == 1L) 1 else 0
+    } else {
+      max(0, 1 - stats::sd(aucs, na.rm = TRUE) / (abs(mean(aucs, na.rm = TRUE) - 0.5) + 1e-4))
+    }
+    data.frame(
+      variable = v,
+      n_blocks_used = length(effects),
+      sign_consistency = sign_consistency,
+      effect_stability = effect_stability,
+      auc_stability = auc_stability,
+      mean_block_auc = if (length(aucs)) mean(aucs, na.rm = TRUE) else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, out)
+}
+
+#' @keywords internal
+#' @noRd
+correlation_clusters <- function(X, threshold = 0.8) {
+  vars <- names(X)
+  if (length(vars) <= 1L) return(stats::setNames(seq_along(vars), vars))
+  cors <- suppressWarnings(stats::cor(X, use = "pairwise.complete.obs"))
+  cors[!is.finite(cors)] <- 0
+  adj <- abs(cors) >= threshold
+  diag(adj) <- TRUE
+  seen <- stats::setNames(rep(FALSE, length(vars)), vars)
+  cluster <- stats::setNames(rep(NA_integer_, length(vars)), vars)
+  cid <- 0L
+  for (v in vars) {
+    if (seen[[v]]) next
+    cid <- cid + 1L
+    queue <- v
+    seen[[v]] <- TRUE
+    while (length(queue)) {
+      cur <- queue[[1]]
+      queue <- queue[-1]
+      cluster[[cur]] <- cid
+      nb <- vars[adj[cur, vars]]
+      nb <- nb[!seen[nb]]
+      if (length(nb)) {
+        seen[nb] <- TRUE
+        queue <- c(queue, nb)
+      }
+    }
+  }
+  cluster
+}
+
+#' @keywords internal
+#' @noRd
+greedy_invariant_select <- function(scores, X, min_vars, max_vars = NULL,
+                                    cor_threshold = 0.8,
+                                    max_per_cluster = 1L,
+                                    score_threshold = NULL) {
+  scores <- scores[order(-scores$invariant_score, -scores$importance), , drop = FALSE]
+  if (is.null(score_threshold) || !is.finite(score_threshold)) {
+    sorted <- scores$invariant_score
+    sorted <- sorted[is.finite(sorted)]
+    if (length(sorted) <= min_vars) {
+      score_threshold <- -Inf
+    } else {
+      gaps <- sorted[-length(sorted)] - sorted[-1L]
+      valid_idx <- which(seq_along(gaps) >= min_vars)
+      cut_at <- if (length(valid_idx)) valid_idx[which.max(gaps[valid_idx])] else min_vars
+      score_threshold <- sorted[cut_at]
+    }
+  }
+  max_vars <- if (is.null(max_vars) || !is.finite(max_vars)) {
+    Inf
+  } else {
+    max(min_vars, as.integer(max_vars))
+  }
+  clusters <- correlation_clusters(X[, scores$variable, drop = FALSE], cor_threshold)
+  scores$cor_cluster <- as.integer(clusters[scores$variable])
+  selected <- character(0)
+  selected_cluster_counts <- list()
+  redundant <- character(0)
+  for (v in scores$variable) {
+    if (length(selected) >= max_vars) break
+    score_v <- scores$invariant_score[scores$variable == v][1]
+    if (length(selected) >= min_vars && is.finite(score_v) && score_v < score_threshold) next
+    cl <- as.character(scores$cor_cluster[scores$variable == v][1])
+    n_cl <- if (!is.null(selected_cluster_counts[[cl]])) selected_cluster_counts[[cl]] else 0L
+    if (n_cl >= max_per_cluster && length(selected) >= min_vars) {
+      redundant <- c(redundant, v)
+      next
+    }
+    if (n_cl >= max_per_cluster) {
+      redundant <- c(redundant, v)
+      next
+    }
+    selected <- c(selected, v)
+    selected_cluster_counts[[cl]] <- n_cl + 1L
+  }
+  if (length(selected) < min_vars) {
+    add <- setdiff(scores$variable, selected)
+    selected <- unique(c(selected, add[seq_len(min(min_vars - length(selected), length(add)))]))
+  }
+  list(
+    selected = selected,
+    clusters = clusters,
+    redundant = setdiff(redundant, selected),
+    score_threshold = score_threshold
+  )
+}
+
+#' Causal-Aware Variable Selection
 #'
-#' Selects predictor variables by fusing two signals:
-#'
-#' 1. **Markov Blanket (MB)** of the response node extracted from a
-#'    response-focused DAG or MB graph - a compact local screening set under
-#'    standard Markov Blanket assumptions.
-#' 2. **RF permutation importance** - data-driven predictive relevance.
-#'
-#' All MB variables are automatically selected.
-#' Non-MB variables are added only if their RF importance exceeds the
-#' median importance of the MB variables.
-#'
-#' Each selected variable is assigned a **screening role**:
-#' - `"mb_direct"`: adjacent to the response in the response-focused MB graph.
-#' - `"mb_associated"`: retained through non-adjacent Markov Blanket structure
-#'   in an unconstrained local graph.
-#' - `"importance_added"`: outside the MB but retained by RF importance.
-#' - `"importance_screened"`: retained by RF importance when the MB is dense
-#'   or otherwise non-selective.
+#' Selects predictor variables with a response-focused causal screening
+#' workflow. The default method, `"invariant_screen"`, combines RF permutation
+#' importance, bootstrap selection frequency, spatial-block effect-direction
+#' consistency, and correlation-cluster redundancy control. The legacy
+#' `"mb_rf"` path preserves Markov Blanket + RF screening for audit and
+#' comparison.
 #'
 #' @param dag A [cast_dag] object, ideally learned with
 #'   `include_response = TRUE`.
@@ -25,46 +203,56 @@
 #'   variables.
 #' @param response Character. Name of the response column. Default
 #'   `"presence"`.
+#' @param method Character. `"invariant_screen"` (default), `"mb_rf"` legacy
+#'   Markov Blanket + RF fusion, or `"rf"` pure RF/stability screening.
 #' @param num_trees Integer. Number of trees for the RF importance step.
-#'   Default `300`.
-#' @param min_vars Integer. Minimum variables to retain. Default `5`.
+#' @param min_vars Integer. Minimum variables to retain.
 #' @param min_fraction Numeric in `[0, 1]`. Minimum fraction of candidate
-#'   variables to retain. Default `0.3`.
-#' @param seed Integer or `NULL`. Random seed. Default `NULL`.
-#' @param verbose Logical. Print progress. Default `TRUE`.
+#'   variables for the legacy `"mb_rf"` path.
+#' @param seed Integer or `NULL`. Random seed.
+#' @param verbose Logical. Print progress.
 #' @param stability_reps Integer. Bootstrap repetitions for lightweight
-#'   selection stability diagnostics. Default `0` disables this extra step.
-#' @param stability_threshold Numeric in `[0, 1]`. Minimum bootstrap selection
-#'   frequency used when a Markov Blanket is dense or non-selective.
+#'   selection stability diagnostics.
+#' @param stability_threshold Numeric in `[0, 1]`. Minimum bootstrap
+#'   selection frequency.
+#' @param max_vars Optional integer safety ceiling for variables retained by
+#'   `"invariant_screen"` and `"rf"`. Default `NULL` means no fixed cap; the
+#'   number of selected variables is determined by the adaptive score break and
+#'   redundancy control.
+#' @param score_threshold Optional numeric threshold on the invariant score.
+#'   Default `NULL` estimates an adaptive threshold from the largest score gap
+#'   after `min_vars`.
+#' @param cor_threshold Numeric. Absolute correlation above which predictors
+#'   are treated as redundant proxies.
+#' @param max_per_cluster Integer. Maximum selected variables allowed from one
+#'   correlation cluster.
+#' @param block_var Optional column name defining spatial/environmental
+#'   blocks. If `NULL`, blocks are built from `lon`/`lat` quantiles when
+#'   available.
+#' @param n_blocks Integer target number of blocks when `block_var = NULL`.
 #'
-#' @return A `cast_select` object with components:
-#' \describe{
-#'   \item{selected}{Character vector of selected variable names.}
-#'   \item{scores}{A `data.frame` with per-variable scores and metadata.}
-#'   \item{roles}{A `data.frame` with columns `variable` and `role`.}
-#' }
-#'
-#' @details
-#' When the DAG was learned without the response node
-#' (`include_response = FALSE`), the Markov Blanket cannot be computed.
-#' In that case, variable selection falls back to pure RF importance
-#' with a score-gap heuristic; all selected variables receive the
-#' `"importance_screened"` role.
-#'
+#' @return A `cast_select` object with `selected`, `scores`, and `roles`.
 #' @seealso [cast_dag()], [cast_fit()]
-#'
 #' @export
 cast_select <- function(dag,
                         data,
                         response = "presence",
+                        method = c("invariant_screen", "mb_rf", "rf"),
                         num_trees = 300L,
                         min_vars = 5L,
                         min_fraction = 0.3,
                         seed = NULL,
                         verbose = TRUE,
                         stability_reps = 0L,
-                        stability_threshold = 0.6) {
+                        stability_threshold = 0.6,
+                        max_vars = NULL,
+                        cor_threshold = 0.8,
+                        max_per_cluster = 1L,
+                        score_threshold = NULL,
+                        block_var = NULL,
+                        n_blocks = 5L) {
   check_suggested("ranger", "for RF importance")
+  method <- match.arg(method)
 
   # --- Determine candidate env vars (exclude response, lon, lat) -----------
   response_node <- dag$response_node
@@ -176,6 +364,125 @@ cast_select <- function(dag,
   )
 
   mb_selective <- TRUE
+
+  if (method %in% c("invariant_screen", "rf")) {
+    min_keep_inv <- max(1L, as.integer(min_vars))
+    X_numeric <- X
+    for (col in names(X_numeric)) X_numeric[[col]] <- as.numeric(X_numeric[[col]])
+
+    inv <- if (identical(method, "invariant_screen")) {
+      compute_invariance_metrics(
+        data = data,
+        env_vars = env_vars,
+        response = response,
+        block_var = block_var,
+        n_blocks = n_blocks
+      )
+    } else {
+      data.frame(
+        variable = env_vars,
+        n_blocks_used = NA_integer_,
+        sign_consistency = 0,
+        effect_stability = 0,
+        auc_stability = 0,
+        mean_block_auc = NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }
+
+    scores_df <- merge(scores_df, inv, by = "variable", all.x = TRUE, sort = FALSE)
+    for (nm in c("sign_consistency", "effect_stability", "auc_stability")) {
+      scores_df[[nm]][is.na(scores_df[[nm]])] <- 0
+    }
+    stability_component <- scores_df$selection_frequency
+    if (all(is.na(stability_component))) stability_component <- scores_df$imp_norm
+    stability_component[is.na(stability_component)] <- 0
+
+    scores_df$invariant_score <- if (identical(method, "invariant_screen")) {
+      0.35 * scores_df$imp_norm +
+        0.20 * stability_component +
+        0.25 * scores_df$sign_consistency +
+        0.15 * scores_df$effect_stability +
+        0.05 * scores_df$auc_stability
+    } else {
+      0.75 * scores_df$imp_norm + 0.25 * stability_component
+    }
+
+    pick <- greedy_invariant_select(
+      scores = scores_df,
+      X = X_numeric,
+      min_vars = min_keep_inv,
+      max_vars = max_vars,
+      cor_threshold = cor_threshold,
+      max_per_cluster = max_per_cluster,
+      score_threshold = score_threshold
+    )
+    selected <- pick$selected
+    scores_df$cor_cluster <- as.integer(pick$clusters[scores_df$variable])
+    scores_df$adaptive_score_threshold <- pick$score_threshold
+    scores_df$redundant_with_selected <- FALSE
+    if (length(selected)) {
+      cmat <- suppressWarnings(stats::cor(X_numeric[, env_vars, drop = FALSE],
+                                          use = "pairwise.complete.obs"))
+      cmat[!is.finite(cmat)] <- 0
+      for (v in setdiff(env_vars, selected)) {
+        scores_df$redundant_with_selected[scores_df$variable == v] <-
+          any(abs(cmat[v, selected]) >= cor_threshold, na.rm = TRUE)
+      }
+    }
+
+    roles_df <- data.frame(
+      variable = selected,
+      role = vapply(selected, function(v) {
+        row <- scores_df[scores_df$variable == v, , drop = FALSE]
+        if (identical(method, "rf")) return("stable_predictive")
+        if (isTRUE(row$sign_consistency[1] >= 0.75) &&
+            isTRUE(row$effect_stability[1] >= 0.4) &&
+            isTRUE(row$n_blocks_used[1] >= 2)) {
+          return("invariant_driver")
+        }
+        if (isTRUE((row$selection_frequency[1] %||% 0) >= stability_threshold) ||
+            isTRUE(row$imp_norm[1] >= 0.5)) {
+          return("stable_predictive")
+        }
+        "predictive_rescue"
+      }, character(1)),
+      stringsAsFactors = FALSE
+    )
+    roles_df$selection_frequency <- scores_df$selection_frequency[
+      match(roles_df$variable, scores_df$variable)
+    ]
+    roles_df$causal_role <- roles_df$role
+    scores_df$causal_role <- "unstable_rejected"
+    scores_df$causal_role[scores_df$redundant_with_selected] <- "redundant_proxy"
+    scores_df$causal_role[match(roles_df$variable, scores_df$variable)] <- roles_df$causal_role
+    scores_df$selected <- scores_df$variable %in% selected
+    scores_df$screening_method <- method
+    roles_df$screening_method <- method
+
+    scores_df <- scores_df[order(!scores_df$selected, -scores_df$invariant_score,
+                                 -scores_df$importance), ]
+    rownames(scores_df) <- NULL
+    roles_df$score <- scores_df$invariant_score[match(roles_df$variable, scores_df$variable)]
+    roles_df <- roles_df[order(-roles_df$score), ]
+    roles_df$score <- NULL
+    rownames(roles_df) <- NULL
+
+    if (verbose) {
+      n_inv <- sum(roles_df$role == "invariant_driver")
+      n_stable <- sum(roles_df$role == "stable_predictive")
+      n_rescue <- sum(roles_df$role == "predictive_rescue")
+      cli::cli_inform(
+        "Invariant screen: {length(selected)}/{length(env_vars)} variables ({n_inv} invariant drivers, {n_stable} stable predictive, {n_rescue} predictive rescue; cor threshold={cor_threshold})."
+      )
+    }
+
+    return(new_cast_select(
+      selected = selected,
+      scores = scores_df,
+      roles = roles_df
+    ))
+  }
 
   if (!is.null(mb) && length(mb$all) > 0) {
     # -- Fusion: MB vars auto-selected + importance-gated non-MB vars --

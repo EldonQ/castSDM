@@ -88,6 +88,9 @@ plot.cast_dag <- function(x, screen = NULL,
   igraph::V(g)$label <- vapply(node_names, label_fn, character(1))
 
   role_colors <- c(
+    invariant_driver = "#B2182B",
+    stable_predictive = "#2166AC",
+    redundant_proxy = "#999999",
     causal_core = "#B2182B",
     causal_adjuster = "#2166AC",
     predictive_rescue = "#27AE60",
@@ -309,7 +312,7 @@ plot.cast_dag <- function(x, screen = NULL,
 }
 
 
-#' Plot Variable Selection (Markov Blanket + RF Importance)
+#' Plot Variable Selection
 #'
 #' Bar chart showing MB membership (in_mb flag) and RF permutation importance
 #' for each variable. Selected variables are highlighted; roles are color-coded.
@@ -361,6 +364,9 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
   scr$display <- factor(scr$display, levels = rev(scr$display))
 
   role_colors <- c(
+    invariant_driver = "#B2182B",
+    stable_predictive = "#2166AC",
+    redundant_proxy = "#999999",
     causal_core = "#B2182B",
     causal_adjuster = "#2166AC",
     predictive_rescue = "#27AE60",
@@ -385,6 +391,9 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
   )
   if (!is.na(n_mb)) {
     sub_txt <- paste0(sub_txt, sprintf(" | %d in Markov Blanket", n_mb))
+  }
+  if ("screening_method" %in% names(scr)) {
+    sub_txt <- paste0(sub_txt, " | method = ", unique(scr$screening_method)[1])
   }
 
   p <- ggplot2::ggplot(scr, ggplot2::aes(

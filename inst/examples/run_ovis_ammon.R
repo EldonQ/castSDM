@@ -1,6 +1,6 @@
 # castSDM single-species example: Ovis ammon
 #
-# This example demonstrates the current response-focused MB screening workflow.
+# This example demonstrates the current invariant causal screening workflow.
 # It intentionally uses screen$roles directly; removed role helpers are not
 # part of the active package API.
 
@@ -38,7 +38,8 @@ screen <- cast_select(
   dag,
   split$train,
   min_vars = 5,
-  min_fraction = 0.3,
+  min_fraction = 0,
+  cor_threshold = 0.8,
   seed = 42,
   verbose = TRUE
 )

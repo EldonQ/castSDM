@@ -83,6 +83,7 @@ test_that("cast_select emits current screening role names", {
   screen <- cast_select(
     dag,
     dat,
+    method = "mb_rf",
     min_vars = 2,
     min_fraction = 0,
     num_trees = 20,
@@ -161,7 +162,7 @@ test_that("cast_refute_screen returns diagnostic tables", {
     )
   )
   screen <- cast_select(
-    dag, dat, min_vars = 2, min_fraction = 0, num_trees = 20,
+    dag, dat, method = "mb_rf", min_vars = 2, min_fraction = 0, num_trees = 20,
     seed = 2, verbose = FALSE
   )
   refute <- cast_refute_screen(
@@ -171,6 +172,60 @@ test_that("cast_refute_screen returns diagnostic tables", {
   expect_s3_class(refute, "cast_refute")
   expect_true(all(c("test", "overlap_fraction") %in% names(refute$tests)))
   expect_true(all(c("variable", "subset_frequency") %in% names(refute$summary)))
+})
+
+test_that("default invariant screen is sparse and role-aware", {
+  skip_if_not_installed("ranger")
+  set.seed(42)
+  n <- 120
+  x1 <- rnorm(n)
+  x2 <- x1 + rnorm(n, sd = 0.05)
+  x3 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 100, 110),
+    lat = runif(n, 20, 30),
+    presence = rbinom(n, 1, plogis(1.4 * x1 - 1.1 * x3)),
+    bio01 = x1,
+    bio02 = x2,
+    bio03 = x3,
+    bio04 = rnorm(n),
+    bio05 = rnorm(n),
+    bio06 = rnorm(n),
+    stringsAsFactors = FALSE
+  )
+  dag <- new_cast_dag(
+    edges = data.frame(
+      from = c("bio01", "bio02", "bio03", "bio04", "bio05", "bio06"),
+      to = "presence",
+      strength = 1,
+      direction = 1,
+      stringsAsFactors = FALSE
+    ),
+    nodes = c(paste0("bio0", 1:6), "presence"),
+    boot_R = NA_integer_,
+    strength_threshold = 0.7,
+    direction_threshold = 0.6,
+    score = "mb_first:fast.iamb",
+    structure_method = "mb_first",
+    response_node = "presence",
+    metadata = list(
+      mb_vars_stage1 = paste0("bio0", 1:6),
+      response_as_sink = TRUE
+    )
+  )
+
+  screen <- cast_select(
+    dag, dat, min_vars = 2, min_fraction = 0,
+    max_vars = 3, cor_threshold = 0.8, num_trees = 30,
+    seed = 42, verbose = FALSE
+  )
+
+  expect_lte(length(screen$selected), 3)
+  expect_true("screening_method" %in% names(screen$roles))
+  expect_true(all(screen$roles$role %in% c(
+    "invariant_driver", "stable_predictive", "predictive_rescue"
+  )))
+  expect_true("redundant_proxy" %in% screen$scores$causal_role)
 })
 
 test_that("cast_batch exposes prediction and ensemble controls", {

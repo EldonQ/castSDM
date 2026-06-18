@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Integrates causal DAG-guided variable selection with species distribution modeling. Learns species-specific causal structures via Directed Acyclic Graphs (DAG) using PC, two-stage MB-First (IAMB + local PC), or bootstrap Hill-Climbing algorithms, then selects ecologically relevant predictors through Markov Blanket extraction and RF importance screening. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
+Integrates causal-aware invariant variable screening with species distribution modeling. Uses response-focused structural constraints, spatial-block effect invariance, bootstrap stability, and correlation-cluster redundancy control to select ecologically relevant predictors for transferable SDM. Legacy DAG and Markov Blanket screening remain available for audit and comparison. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
 }
 \seealso{
 Useful links:

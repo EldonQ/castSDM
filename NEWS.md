@@ -1,9 +1,25 @@
 # castSDM 0.3.0
 
+## Current development update
+
+* `cast_select()` now defaults to `method = "invariant_screen"`, a fast
+  causal-aware selector based on RF importance, bootstrap stability,
+  spatial-block effect-direction consistency, and correlation-cluster
+  redundancy control.
+* The legacy Markov Blanket + RF selector remains available as
+  `method = "mb_rf"` for audit and comparison, but dense MB outputs are no
+  longer treated as successful causal variable selection.
+* New default screening roles are `invariant_driver`, `stable_predictive`,
+  `predictive_rescue`, and `redundant_proxy`.
+* `cast()` and `cast_batch()` expose selector controls:
+  `select_method`, optional `select_max_vars`, and `select_cor_threshold`.
+  By default, invariant screening uses an adaptive score break rather than a
+  fixed selected-variable count.
+
 ## Focus
 
 This release frames castSDM as a causal-aware SDM toolkit focused on
-response-focused Markov Blanket screening, standard multi-algorithm SDM
+spatially invariant response-focused screening, standard multi-algorithm SDM
 ensembles, spatial validation, and future projection.
 
 ## Breaking changes
@@ -18,8 +34,8 @@ ensembles, spatial validation, and future projection.
 
 * `cast_dag()` now supports `response_as_sink = TRUE` by default, forbidding
   directed `presence -> environmental predictor` edges.
-* `cast_select()` combines response-focused Markov Blanket membership with RF
-  permutation importance.
+* `cast_select(method = "mb_rf")` keeps the response-focused Markov Blanket +
+  RF permutation importance workflow as a legacy comparator.
 * New screening roles:
   * `mb_direct`
   * `mb_associated`

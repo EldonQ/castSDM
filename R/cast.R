@@ -1,8 +1,8 @@
 #' Run the Full castSDM Pipeline
 #'
 #' One-step pipeline that executes the entire workflow: data splitting,
-#' DAG learning (with response node), DAG-guided variable selection via
-#' Markov Blanket + RF importance, model fitting, spatial cross-validation,
+#' DAG learning (with response node), causal-aware invariant variable
+#' screening, model fitting, spatial cross-validation,
 #' evaluation, ensemble prediction, and optionally CATE estimation.
 #'
 #' @param species_data A `data.frame` with columns: `lon`, `lat`, `presence`
@@ -33,12 +33,19 @@
 #' @param direction_threshold Numeric. Minimum direction consistency. Default
 #'   `0.6`.
 #' @param select_min_vars Integer. Minimum retained variables. Default `5`.
-#' @param select_min_fraction Numeric. Minimum fraction of variables. Default
-#'   `0.3`.
+#' @param select_min_fraction Numeric. Minimum fraction of variables for the
+#'   legacy `"mb_rf"` selector. Default `0`.
 #' @param select_stability_reps Integer. Bootstrap repetitions for selection
 #'   stability. Default `0`.
 #' @param select_stability_threshold Numeric. Stability frequency threshold.
 #'   Default `0.6`.
+#' @param select_method Character. Variable screening method passed to
+#'   [cast_select()]. Default `"invariant_screen"`.
+#' @param select_max_vars Optional integer safety ceiling for variables
+#'   retained by the invariant screen. Default `NULL` uses adaptive selection
+#'   without a fixed cap.
+#' @param select_cor_threshold Numeric. Absolute correlation threshold for
+#'   redundant-proxy control. Default `0.8`.
 #' @param do_refute Logical. Run lightweight screen refutation diagnostics.
 #'   Default `TRUE`.
 #' @param refute_reps Integer. Number of refutation repetitions.
@@ -86,9 +93,12 @@ cast <- function(species_data,
                  strength_threshold = 0.7,
                  direction_threshold = 0.6,
                  select_min_vars = 5L,
-                 select_min_fraction = 0.3,
+                 select_min_fraction = 0,
                  select_stability_reps = 0L,
                  select_stability_threshold = 0.6,
+                 select_method = "invariant_screen",
+                 select_max_vars = NULL,
+                 select_cor_threshold = 0.8,
                  do_refute = TRUE,
                  refute_reps = 20L,
                  do_cv = TRUE,
@@ -144,14 +154,17 @@ cast <- function(species_data,
     whitelist = whitelist
   )
 
-  # === Step 3: Variable Selection (DAG MB + RF Importance) ===
+  # === Step 3: Variable Selection ===
   if (verbose) cli::cli_h2("Step 3: Variable Selection")
   screen <- cast_select(
     dag, train_data,
+    method = select_method,
     min_vars = select_min_vars,
     min_fraction = select_min_fraction,
     stability_reps = select_stability_reps,
     stability_threshold = select_stability_threshold,
+    max_vars = select_max_vars,
+    cor_threshold = select_cor_threshold,
     seed = seed, verbose = verbose
   )
 

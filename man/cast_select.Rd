@@ -2,19 +2,26 @@
 % Please edit documentation in R/var-select.R
 \name{cast_select}
 \alias{cast_select}
-\title{DAG-Guided Variable Selection via Markov Blanket + RF Importance}
+\title{Causal-Aware Variable Selection}
 \usage{
 cast_select(
   dag,
   data,
   response = "presence",
+  method = c("invariant_screen", "mb_rf", "rf"),
   num_trees = 300L,
   min_vars = 5L,
   min_fraction = 0.3,
   seed = NULL,
   verbose = TRUE,
   stability_reps = 0L,
-  stability_threshold = 0.6
+  stability_threshold = 0.6,
+  max_vars = NULL,
+  cor_threshold = 0.8,
+  max_per_cluster = 1L,
+  score_threshold = NULL,
+  block_var = NULL,
+  n_blocks = 5L
 )
 }
 \arguments{
@@ -27,62 +34,57 @@ variables.}
 \item{response}{Character. Name of the response column. Default
 \code{"presence"}.}
 
-\item{num_trees}{Integer. Number of trees for the RF importance step.
-Default \code{300}.}
+\item{method}{Character. \code{"invariant_screen"} (default), \code{"mb_rf"} legacy
+Markov Blanket + RF fusion, or \code{"rf"} pure RF/stability screening.}
 
-\item{min_vars}{Integer. Minimum variables to retain. Default \code{5}.}
+\item{num_trees}{Integer. Number of trees for the RF importance step.}
+
+\item{min_vars}{Integer. Minimum variables to retain.}
 
 \item{min_fraction}{Numeric in \verb{[0, 1]}. Minimum fraction of candidate
-variables to retain. Default \code{0.3}.}
+variables for the legacy \code{"mb_rf"} path.}
 
-\item{seed}{Integer or \code{NULL}. Random seed. Default \code{NULL}.}
+\item{seed}{Integer or \code{NULL}. Random seed.}
 
-\item{verbose}{Logical. Print progress. Default \code{TRUE}.}
+\item{verbose}{Logical. Print progress.}
 
 \item{stability_reps}{Integer. Bootstrap repetitions for lightweight
-selection stability diagnostics. Default \code{0} disables this extra step.}
+selection stability diagnostics.}
 
-\item{stability_threshold}{Numeric in \verb{[0, 1]}. Minimum bootstrap selection
-frequency used when a Markov Blanket is dense or non-selective.}
+\item{stability_threshold}{Numeric in \verb{[0, 1]}. Minimum bootstrap
+selection frequency.}
+
+\item{max_vars}{Optional integer safety ceiling for variables retained by
+\code{"invariant_screen"} and \code{"rf"}. Default \code{NULL} means no fixed cap; the
+number of selected variables is determined by the adaptive score break and
+redundancy control.}
+
+\item{cor_threshold}{Numeric. Absolute correlation above which predictors
+are treated as redundant proxies.}
+
+\item{max_per_cluster}{Integer. Maximum selected variables allowed from one
+correlation cluster.}
+
+\item{score_threshold}{Optional numeric threshold on the invariant score.
+Default \code{NULL} estimates an adaptive threshold from the largest score gap
+after \code{min_vars}.}
+
+\item{block_var}{Optional column name defining spatial/environmental
+blocks. If \code{NULL}, blocks are built from \code{lon}/\code{lat} quantiles when
+available.}
+
+\item{n_blocks}{Integer target number of blocks when \code{block_var = NULL}.}
 }
 \value{
-A \code{cast_select} object with components:
-\describe{
-\item{selected}{Character vector of selected variable names.}
-\item{scores}{A \code{data.frame} with per-variable scores and metadata.}
-\item{roles}{A \code{data.frame} with columns \code{variable} and \code{role}.}
-}
+A \code{cast_select} object with \code{selected}, \code{scores}, and \code{roles}.
 }
 \description{
-Selects predictor variables by fusing two signals:
-}
-\details{
-\enumerate{
-\item \strong{Markov Blanket (MB)} of the response node extracted from a
-response-focused DAG or MB graph - a compact local screening set under
-standard Markov Blanket assumptions.
-\item \strong{RF permutation importance} - data-driven predictive relevance.
-}
-
-All MB variables are automatically selected.
-Non-MB variables are added only if their RF importance exceeds the
-median importance of the MB variables.
-
-Each selected variable is assigned a \strong{screening role}:
-\itemize{
-\item \code{"mb_direct"}: adjacent to the response in the response-focused MB graph.
-\item \code{"mb_associated"}: retained through non-adjacent Markov Blanket structure
-in an unconstrained local graph.
-\item \code{"importance_added"}: outside the MB but retained by RF importance.
-\item \code{"importance_screened"}: retained by RF importance when the MB is dense
-or otherwise non-selective.
-}
-
-When the DAG was learned without the response node
-(\code{include_response = FALSE}), the Markov Blanket cannot be computed.
-In that case, variable selection falls back to pure RF importance
-with a score-gap heuristic; all selected variables receive the
-\code{"importance_screened"} role.
+Selects predictor variables with a response-focused causal screening
+workflow. The default method, \code{"invariant_screen"}, combines RF permutation
+importance, bootstrap selection frequency, spatial-block effect-direction
+consistency, and correlation-cluster redundancy control. The legacy
+\code{"mb_rf"} path preserves Markov Blanket + RF screening for audit and
+comparison.
 }
 \seealso{
 \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_fit]{cast_fit()}}
