@@ -191,20 +191,24 @@ greedy_invariant_select <- function(scores, X, min_vars, max_vars = NULL,
 #' Causal-Aware Variable Selection
 #'
 #' Selects predictor variables with a response-focused causal screening
-#' workflow. The default method, `"invariant_screen"`, combines RF permutation
-#' importance, bootstrap selection frequency, spatial-block effect-direction
-#' consistency, and correlation-cluster redundancy control. The legacy
-#' `"mb_rf"` path preserves Markov Blanket + RF screening for audit and
-#' comparison.
+#' workflow. The default `"causal_prior_rf"` method constrains a shallow RF,
+#' invariance and conditional-evidence ranking to variables declared eligible
+#' by an auditable causal-role specification. Data-only invariant and RF paths
+#' remain available as ablations; `"mb_rf"` is retained for compatibility.
 #'
-#' @param dag A [cast_dag] object, ideally learned with
-#'   `include_response = TRUE`.
+#' @param dag An optional [cast_dag] object. It is not required by
+#'   `"causal_prior_rf"`.
 #' @param data A `data.frame` with species occurrence and environmental
 #'   variables.
 #' @param response Character. Name of the response column. Default
 #'   `"presence"`.
-#' @param method Character. `"invariant_screen"` (default), `"mb_rf"` legacy
-#'   Markov Blanket + RF fusion, or `"rf"` pure RF/stability screening.
+#' @param method Character. `"causal_prior_rf"` (default),
+#'   `"invariant_screen"`, `"rf"`, or legacy `"mb_rf"`.
+#' @param causal_spec A causal-role specification created by
+#'   [cast_causal_spec()], a CSV path, or `NULL` to use the validated habitat
+#'   template. Used only by `"causal_prior_rf"`.
+#' @param prior_max_vars Maximum causal-core size for `"causal_prior_rf"`.
+#' @param prior_num_trees Number of trees in its shallow RF ranking.
 #' @param num_trees Integer. Number of trees for the RF importance step.
 #' @param min_vars Integer. Minimum variables to retain.
 #' @param min_fraction Numeric in `[0, 1]`. Minimum fraction of candidate
@@ -234,10 +238,10 @@ greedy_invariant_select <- function(scores, X, min_vars, max_vars = NULL,
 #' @return A `cast_select` object with `selected`, `scores`, and `roles`.
 #' @seealso [cast_dag()], [cast_fit()]
 #' @export
-cast_select <- function(dag,
+cast_select <- function(dag = NULL,
                         data,
                         response = "presence",
-                        method = c("invariant_screen", "mb_rf", "rf"),
+                        method = c("causal_prior_rf", "invariant_screen", "rf", "mb_rf"),
                         num_trees = 300L,
                         min_vars = 5L,
                         min_fraction = 0.3,
@@ -250,15 +254,48 @@ cast_select <- function(dag,
                         max_per_cluster = 1L,
                         score_threshold = NULL,
                         block_var = NULL,
-                        n_blocks = 5L) {
+                        n_blocks = 5L,
+                        causal_spec = NULL,
+                        prior_max_vars = 12L,
+                        prior_num_trees = 100L) {
   check_suggested("ranger", "for RF importance")
   method <- match.arg(method)
 
   # --- Determine candidate env vars (exclude response, lon, lat) -----------
-  response_node <- dag$response_node
-  env_vars <- setdiff(dag$nodes, c(response, "lon", "lat"))
+  response_node <- if (!is.null(dag)) dag$response_node else NULL
+  env_vars <- if (!is.null(dag)) {
+    intersect(setdiff(dag$nodes, c(response, "lon", "lat")), names(data))
+  } else {
+    get_env_vars(data, response = response)
+  }
   if (length(env_vars) < 3) {
     cli::cli_abort("Need at least 3 environmental variables for selection.")
+  }
+
+  if (identical(method, "causal_prior_rf")) {
+    result <- .select_causal_prior_rf(
+      data = data,
+      env_vars = env_vars,
+      response = response,
+      causal_spec = causal_spec,
+      min_vars = as.integer(min_vars),
+      max_vars = as.integer(prior_max_vars),
+      cor_threshold = cor_threshold,
+      num_trees = as.integer(prior_num_trees),
+      seed = seed
+    )
+    if (verbose) {
+      cli::cli_inform(
+        "Causal prior screen: {length(result$selected)}/{length(env_vars)} variables; all selected variables are declared direct candidates."
+      )
+    }
+    return(new_cast_select(
+      selected = result$selected,
+      scores = result$scores,
+      roles = result$roles,
+      method = "causal_prior_rf",
+      specification = result$specification
+    ))
   }
 
   # --- Extract Markov Blanket (if response was in DAG) ---------------------
@@ -480,7 +517,8 @@ cast_select <- function(dag,
     return(new_cast_select(
       selected = selected,
       scores = scores_df,
-      roles = roles_df
+      roles = roles_df,
+      method = method
     ))
   }
 
@@ -624,6 +662,7 @@ cast_select <- function(dag,
   new_cast_select(
     selected = selected,
     scores = scores_df,
-    roles = roles_df
+    roles = roles_df,
+    method = method
   )
 }

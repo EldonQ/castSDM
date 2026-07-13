@@ -1,8 +1,8 @@
 #' Run the Full castSDM Pipeline
 #'
 #' One-step pipeline that executes the entire workflow: data splitting,
-#' DAG learning (with response node), causal-aware invariant variable
-#' screening, model fitting, spatial cross-validation,
+#' auditable causal-role screening, optional DAG learning, model fitting,
+#' spatial cross-validation,
 #' evaluation, ensemble prediction, and optionally CATE estimation.
 #'
 #' @param species_data A `data.frame` with columns: `lon`, `lat`, `presence`
@@ -40,14 +40,18 @@
 #' @param select_stability_threshold Numeric. Stability frequency threshold.
 #'   Default `0.6`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"invariant_screen"`.
+#'   [cast_select()]. Default `"causal_prior_rf"`.
+#' @param causal_spec A causal-role data frame, CSV path, or `NULL` for the
+#'   validated habitat template.
+#' @param select_prior_max_vars Maximum causal-core size. Default `12`.
+#' @param select_prior_num_trees Trees in the shallow ranking RF. Default `100`.
 #' @param select_max_vars Optional integer safety ceiling for variables
 #'   retained by the invariant screen. Default `NULL` uses adaptive selection
 #'   without a fixed cap.
 #' @param select_cor_threshold Numeric. Absolute correlation threshold for
 #'   redundant-proxy control. Default `0.8`.
-#' @param do_refute Logical. Run lightweight screen refutation diagnostics.
-#'   Default `TRUE`.
+#' @param do_refute Logical. Run optional screen refutation diagnostics.
+#'   Default `FALSE` to keep routine selection fast.
 #' @param refute_reps Integer. Number of refutation repetitions.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
@@ -96,10 +100,13 @@ cast <- function(species_data,
                  select_min_fraction = 0,
                  select_stability_reps = 0L,
                  select_stability_threshold = 0.6,
-                 select_method = "invariant_screen",
+                 select_method = "causal_prior_rf",
+                 causal_spec = NULL,
+                 select_prior_max_vars = 12L,
+                 select_prior_num_trees = 100L,
                  select_max_vars = NULL,
                  select_cor_threshold = 0.8,
-                 do_refute = TRUE,
+                 do_refute = FALSE,
                  refute_reps = 20L,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -132,27 +139,32 @@ cast <- function(species_data,
     )
   }
 
-  # === Step 2: DAG Learning ===
-  if (verbose) cli::cli_h2("Step 2: DAG Learning")
-  dag <- cast_dag(
-    train_data,
-    include_response = dag_include_response,
-    response_as_sink = dag_response_as_sink,
-    R = n_bootstrap,
-    strength_threshold = strength_threshold,
-    direction_threshold = direction_threshold,
-    seed = seed,
-    verbose = verbose,
-    structure_method = dag_structure_method,
-    pc_alpha = dag_pc_alpha,
-    pc_test = dag_pc_test,
-    mb_method = dag_mb_method,
-    mb_alpha = dag_mb_alpha,
-    bidag_algorithm = dag_bidag_algorithm,
-    bidag_iterations = dag_bidag_iterations,
-    blacklist = blacklist,
-    whitelist = whitelist
-  )
+  # === Step 2: Optional DAG Learning ===
+  dag <- NULL
+  if (!identical(select_method, "causal_prior_rf")) {
+    if (verbose) cli::cli_h2("Step 2: DAG Learning")
+    dag <- cast_dag(
+      train_data,
+      include_response = dag_include_response,
+      response_as_sink = dag_response_as_sink,
+      R = n_bootstrap,
+      strength_threshold = strength_threshold,
+      direction_threshold = direction_threshold,
+      seed = seed,
+      verbose = verbose,
+      structure_method = dag_structure_method,
+      pc_alpha = dag_pc_alpha,
+      pc_test = dag_pc_test,
+      mb_method = dag_mb_method,
+      mb_alpha = dag_mb_alpha,
+      bidag_algorithm = dag_bidag_algorithm,
+      bidag_iterations = dag_bidag_iterations,
+      blacklist = blacklist,
+      whitelist = whitelist
+    )
+  } else if (verbose) {
+    cli::cli_inform("Step 2: using the reviewed causal-role specification; DAG learning is not required.")
+  }
 
   # === Step 3: Variable Selection ===
   if (verbose) cli::cli_h2("Step 3: Variable Selection")
@@ -165,6 +177,9 @@ cast <- function(species_data,
     stability_threshold = select_stability_threshold,
     max_vars = select_max_vars,
     cor_threshold = select_cor_threshold,
+    causal_spec = causal_spec,
+    prior_max_vars = select_prior_max_vars,
+    prior_num_trees = select_prior_num_trees,
     seed = seed, verbose = verbose
   )
 

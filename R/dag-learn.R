@@ -142,9 +142,9 @@ cast_dag <- function(data,
                      mb_method = c(
                        "fast.iamb", "iamb", "inter.iamb", "gs", "iamb.fdr"
                      ),
-                     mb_alpha = 0.05,
-                     mb_pc_max_nodes = 15L,
-                     mb_dense_action = c("star", "pc"),
+                      mb_alpha = 0.01,
+                      mb_pc_max_nodes = 25L,
+                      mb_dense_action = c("pc", "star"),
                      bidag_algorithm = c("order", "orderIter"),
                      bidag_iterations = NULL,
                      blacklist = NULL,

@@ -215,7 +215,7 @@ test_that("default invariant screen is sparse and role-aware", {
   )
 
   screen <- cast_select(
-    dag, dat, min_vars = 2, min_fraction = 0,
+    dag, dat, method = "invariant_screen", min_vars = 2, min_fraction = 0,
     max_vars = 3, cor_threshold = 0.8, num_trees = 30,
     seed = 42, verbose = FALSE
   )
@@ -226,6 +226,86 @@ test_that("default invariant screen is sparse and role-aware", {
     "invariant_driver", "stable_predictive", "predictive_rescue"
   )))
   expect_true("redundant_proxy" %in% screen$scores$causal_role)
+})
+
+test_that("causal role specification fails closed and supports review overrides", {
+  vars <- c("bio01", "elevation", "ndvi", "road_density", "mystery")
+  spec <- cast_causal_spec(vars)
+  expect_equal(spec$role[spec$variable == "road_density"], "sampling_bias")
+  expect_equal(spec$role[spec$variable == "mystery"], "unknown")
+  expect_equal(spec$role[spec$variable == "ndvi"], "direct_candidate")
+
+  reviewed <- cast_causal_spec(
+    vars,
+    overrides = data.frame(
+      variable = "road_density",
+      role = "direct_candidate",
+      rationale = "Species-specific road-response hypothesis declared before analysis."
+    )
+  )
+  expect_equal(reviewed$role[reviewed$variable == "road_density"],
+               "direct_candidate")
+})
+
+test_that("causal prior RF selects only declared direct candidates", {
+  skip_if_not_installed("ranger")
+  set.seed(7)
+  n <- 180
+  x1 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 100, 110),
+    lat = runif(n, 20, 30),
+    presence = rbinom(n, 1, plogis(1.2 * x1)),
+    bio01 = x1,
+    bio02 = rnorm(n),
+    bio03 = rnorm(n),
+    elevation = rnorm(n),
+    soil_ph = rnorm(n),
+    ndvi = rnorm(n),
+    road_density = rnorm(n),
+    stringsAsFactors = FALSE
+  )
+
+  screen <- cast_select(
+    data = dat,
+    method = "causal_prior_rf",
+    min_vars = 3,
+    prior_max_vars = 5,
+    prior_num_trees = 20,
+    seed = 7,
+    verbose = FALSE
+  )
+
+  expect_s3_class(screen, "cast_select")
+  expect_equal(screen$method, "causal_prior_rf")
+  expect_false("road_density" %in% screen$selected)
+  expect_true(all(screen$roles$specified_role == "direct_candidate"))
+  expect_true(all(screen$scores$selection_tier[screen$scores$selected] == "causal_core"))
+})
+
+test_that("cast defaults to the validated selector and skips routine refutation", {
+  expect_equal(formals(cast)$select_method, "causal_prior_rf")
+  expect_false(formals(cast)$do_refute)
+})
+
+test_that("result methods support the default workflow without a DAG", {
+  screen <- new_cast_select(
+    selected = "bio01",
+    scores = data.frame(variable = "bio01", selected = TRUE),
+    roles = data.frame(variable = "bio01", role = "prior_causal_core"),
+    method = "causal_prior_rf"
+  )
+  fit <- new_cast_fit(
+    models = list(rf = list()), cast_vars = "bio01", env_vars = "bio01",
+    scaling = list(means = 0, sds = 1), screen = screen
+  )
+  result <- new_cast_result(
+    dag = NULL, screen = screen, fit = fit,
+    eval = NULL, cv = NULL, predict = NULL, ensemble = NULL,
+    cate = NULL, refute = NULL
+  )
+  expect_no_error(print(result))
+  expect_no_error(summary(result))
 })
 
 test_that("cast_batch exposes prediction and ensemble controls", {

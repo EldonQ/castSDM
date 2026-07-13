@@ -79,13 +79,17 @@
 #' @param select_stability_threshold Numeric. Stability frequency threshold.
 #'   Default `0.6`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"invariant_screen"`.
+#'   [cast_select()]. Default `"causal_prior_rf"`.
+#' @param select_causal_spec A causal-role data frame, CSV path, or `NULL`.
+#' @param select_prior_max_vars,select_prior_num_trees Controls for the
+#'   role-constrained selector.
 #' @param select_max_vars Optional integer safety ceiling for variables
 #'   retained by the invariant screen. Default `NULL` uses adaptive selection
 #'   without a fixed cap.
 #' @param select_cor_threshold Numeric. Redundant-proxy correlation threshold.
 #'   Default `0.8`.
-#' @param do_refute Logical. Run screen refutation diagnostics. Default `TRUE`.
+#' @param do_refute Logical. Run optional screen refutation diagnostics.
+#'   Default `FALSE`.
 #' @param refute_reps Integer. Refutation repetitions. Default `10`.
 #' @param refute_num_trees Integer. Trees used by refutation RF screens.
 #'   Default `80`.
@@ -165,10 +169,13 @@ cast_batch <- function(species_list,
                        select_num_trees    = 300L,
                        select_stability_reps = 0L,
                        select_stability_threshold = 0.6,
-                       select_method = "invariant_screen",
+                       select_method = "causal_prior_rf",
+                       select_causal_spec = NULL,
+                       select_prior_max_vars = 12L,
+                       select_prior_num_trees = 100L,
                        select_max_vars = NULL,
                        select_cor_threshold = 0.8,
-                       do_refute = TRUE,
+                       do_refute = FALSE,
                        refute_reps = 10L,
                        refute_num_trees = 80L,
                        # -- CV --
@@ -291,7 +298,8 @@ cast_batch <- function(species_list,
     cli::cli_abort("{.arg shared_dag} must be a {.cls cast_dag} object or {.val NULL}.")
   }
 
-  if (is.null(shared_dag) && isTRUE(learn_shared_dag)) {
+  if (is.null(shared_dag) && isTRUE(learn_shared_dag) &&
+      !identical(select_method, "causal_prior_rf")) {
     shared_dir <- file.path(output_dir, ".shared")
     dir.create(shared_dir, showWarnings = FALSE, recursive = TRUE)
     shared_path <- file.path(shared_dir, "shared_dag.rds")
@@ -385,6 +393,9 @@ cast_batch <- function(species_list,
     select_stability_reps = select_stability_reps,
     select_stability_threshold = select_stability_threshold,
     select_method = select_method,
+    select_causal_spec = select_causal_spec,
+    select_prior_max_vars = select_prior_max_vars,
+    select_prior_num_trees = select_prior_num_trees,
     select_max_vars = select_max_vars,
     select_cor_threshold = select_cor_threshold,
     select_verbose = select_verbose,

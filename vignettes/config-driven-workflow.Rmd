@@ -15,7 +15,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 
 Reproducibility for multi-species batches lives or dies on parameter
 discipline. A single `cast_batch()` call already carries dozens of named
-arguments; tracking which seed, fold count, or DAG threshold was used for
+arguments; tracking which seed, fold count, role specification, or optional DAG threshold was used for
 which run quickly becomes a chore.
 
 `cast_run_from_config()` makes the parameter set the *artifact*. Save it
@@ -76,7 +76,7 @@ out <- cast_run_from_config("my_run.yaml")
 
 Long batches can be interrupted by anything from a kernel panic to a
 power loss. The toolkit writes per-step checkpoints under
-`output_dir/<species>/.steps/` (DAG, select, fit, CV, predict, CATE,
+`output_dir/<species>/.steps/` (role-constrained select, fit, CV, predict, CATE,
 consistency) and a per-species `cast_result.rds` once everything is done.
 
 When `run.resume: true` is set in the YAML and any species in
@@ -102,7 +102,7 @@ oversubscribing cores. Internally this calls `cast_worker_budget()`,
 which splits workers across two nested layers:
 
 * the species fan-out, and
-* per-species DAG bootstraps / CV folds.
+* optional per-species DAG bootstraps and CV folds.
 
 For example, 8 cores with 4 species -> 4 species in parallel x 2
 intra-species workers each.

@@ -14,9 +14,10 @@
 \item{...}{Ignored.}
 }
 \value{
-A \code{patchwork} combined plot.
+A \code{ggplot} or \code{patchwork} plot.
 }
 \description{
-Combines DAG and variable selection plots into a 2-panel figure using
-patchwork.
+Combines optional DAG and variable-selection plots. Under the default
+role-constrained selector, no DAG is required and the selection audit is
+returned as a single panel.
 }

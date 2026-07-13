@@ -35,12 +35,17 @@ summary.cast_eval <- function(object, ...) {
 #' @export
 summary.cast_result <- function(object, ...) {
   cli::cli_h1("castSDM Pipeline Result Summary")
-  cli::cli_h2("DAG")
-  cli::cli_ul(c(
-    "Nodes: {length(object$dag$nodes)} | Edges: {nrow(object$dag$edges)}",
-    if (!is.null(object$dag$response_node))
-      "Response node: {object$dag$response_node}" else NULL
-  ))
+  if (is.null(object$dag)) {
+    cli::cli_h2("Causal specification")
+    cli::cli_text("DAG not run; eligibility was defined by the reviewed role specification.")
+  } else {
+    cli::cli_h2("DAG")
+    cli::cli_ul(c(
+      "Nodes: {length(object$dag$nodes)} | Edges: {nrow(object$dag$edges)}",
+      if (!is.null(object$dag$response_node))
+        "Response node: {object$dag$response_node}" else NULL
+    ))
+  }
   cli::cli_h2("Variable Selection")
   cli::cli_ul(c(
     "Selected: {length(object$screen$selected)} variables",

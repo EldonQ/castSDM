@@ -58,6 +58,7 @@ cast_cate <- function(data,
   if (is.null(variables)) {
     if (!is.null(screen) && !is.null(screen$roles)) {
       role_priority <- c(
+        "prior_causal_core",
         "mb_direct", "parent",
         "mb_associated", "child", "co_parent",
         "importance_added", "predictive",

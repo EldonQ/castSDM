@@ -5,10 +5,10 @@
 \title{Causal-Aware Variable Selection}
 \usage{
 cast_select(
-  dag,
+  dag = NULL,
   data,
   response = "presence",
-  method = c("invariant_screen", "mb_rf", "rf"),
+  method = c("causal_prior_rf", "invariant_screen", "rf", "mb_rf"),
   num_trees = 300L,
   min_vars = 5L,
   min_fraction = 0.3,
@@ -21,12 +21,15 @@ cast_select(
   max_per_cluster = 1L,
   score_threshold = NULL,
   block_var = NULL,
-  n_blocks = 5L
+  n_blocks = 5L,
+  causal_spec = NULL,
+  prior_max_vars = 12L,
+  prior_num_trees = 100L
 )
 }
 \arguments{
-\item{dag}{A \link{cast_dag} object, ideally learned with
-\code{include_response = TRUE}.}
+\item{dag}{An optional \link{cast_dag} object. It is not required by
+\code{"causal_prior_rf"}.}
 
 \item{data}{A \code{data.frame} with species occurrence and environmental
 variables.}
@@ -34,8 +37,8 @@ variables.}
 \item{response}{Character. Name of the response column. Default
 \code{"presence"}.}
 
-\item{method}{Character. \code{"invariant_screen"} (default), \code{"mb_rf"} legacy
-Markov Blanket + RF fusion, or \code{"rf"} pure RF/stability screening.}
+\item{method}{Character. \code{"causal_prior_rf"} (default),
+\code{"invariant_screen"}, \code{"rf"}, or legacy \code{"mb_rf"}.}
 
 \item{num_trees}{Integer. Number of trees for the RF importance step.}
 
@@ -74,17 +77,24 @@ blocks. If \code{NULL}, blocks are built from \code{lon}/\code{lat} quantiles wh
 available.}
 
 \item{n_blocks}{Integer target number of blocks when \code{block_var = NULL}.}
+
+\item{causal_spec}{A causal-role specification created by
+\code{\link[=cast_causal_spec]{cast_causal_spec()}}, a CSV path, or \code{NULL} to use the validated habitat
+template. Used only by \code{"causal_prior_rf"}.}
+
+\item{prior_max_vars}{Maximum causal-core size for \code{"causal_prior_rf"}.}
+
+\item{prior_num_trees}{Number of trees in its shallow RF ranking.}
 }
 \value{
 A \code{cast_select} object with \code{selected}, \code{scores}, and \code{roles}.
 }
 \description{
 Selects predictor variables with a response-focused causal screening
-workflow. The default method, \code{"invariant_screen"}, combines RF permutation
-importance, bootstrap selection frequency, spatial-block effect-direction
-consistency, and correlation-cluster redundancy control. The legacy
-\code{"mb_rf"} path preserves Markov Blanket + RF screening for audit and
-comparison.
+workflow. The default \code{"causal_prior_rf"} method constrains a shallow RF,
+invariance and conditional-evidence ranking to variables declared eligible
+by an auditable causal-role specification. Data-only invariant and RF paths
+remain available as ablations; \code{"mb_rf"} is retained for compatibility.
 }
 \seealso{
 \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_fit]{cast_fit()}}

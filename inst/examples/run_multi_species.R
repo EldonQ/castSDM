@@ -1,18 +1,8 @@
 # castSDM multi-species example
 #
-# This example uses bundled package data and the current v0.3 API:
-# invariant causal screening and no removed role helpers.
+# This example uses the current v0.4 role-constrained selector.
 
-if (!requireNamespace("devtools", quietly = TRUE)) {
-  stop("Install devtools or install castSDM before running this example.")
-}
-
-pkg_root <- normalizePath(file.path("E:/Package/cast"), winslash = "/", mustWork = FALSE)
-if (file.exists(file.path(pkg_root, "DESCRIPTION"))) {
-  devtools::load_all(pkg_root)
-} else {
-  library(castSDM)
-}
+library(castSDM)
 
 data(Ovis_ammon)
 data(china_env_grid)
@@ -28,10 +18,7 @@ result <- cast_batch(
   output_dir = "castSDM_multi_species_example",
   parallel = FALSE,
   seed = 42,
-  dag_structure_method = "mb_first",
-  dag_include_response = TRUE,
-  dag_response_as_sink = TRUE,
-  select_method = "invariant_screen",
+  select_method = "causal_prior_rf",
   select_min_vars = 5,
   select_min_fraction = 0,
   select_cor_threshold = 0.8,

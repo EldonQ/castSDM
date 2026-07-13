@@ -17,7 +17,7 @@ cast_refute_screen(
 )
 }
 \arguments{
-\item{dag}{A \link{cast_dag} object.}
+\item{dag}{An optional \link{cast_dag} object.}
 
 \item{screen}{A \link{cast_select} object.}
 

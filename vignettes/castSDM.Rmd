@@ -16,20 +16,17 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-**castSDM** (Causal-Aware Species Distribution Modeling) combines
-spatially invariant causal screening with standard SDM models. Its main
-use is not to prove ecological causality from observational data, but to make
-variable screening more explicit, sparse, transferable, and reproducible.
+**castSDM** (Causal-Aware Species Distribution Modeling) combines explicit
+ecological role assumptions with fast covariate ranking and standard SDM
+models. It does not prove ecological causality from observational data.
 
 The active workflow:
 
-1. Learns a response-focused DAG or MB screening graph.
-2. Forbids `presence -> environmental predictor` edges by default.
-3. Selects variables with RF importance, bootstrap stability, spatial-block
-   effect consistency, and correlation-cluster redundancy control.
-4. Reports screening roles:
-   `invariant_driver`, `stable_predictive`, `predictive_rescue`, and
-   `redundant_proxy`.
+1. Declares predictor roles before selection.
+2. Allows only `direct_candidate` variables to enter the causal core.
+3. Ranks eligible variables with shallow RF, invariance, conditional evidence,
+   association, and redundancy control.
+4. Reports the selected core and a complete role and exclusion audit.
 5. Fits RF, BRT, MaxEnt, and GAM models and evaluates spatial transferability.
 6. Optionally estimates CATE surfaces for selected variables.
 
@@ -41,9 +38,7 @@ library(castSDM)
 result <- cast(
   species_data = my_species_df,
   env_data = my_env_grid,
-  models = c("rf", "brt", "maxent", "gam"),
-  dag_structure_method = "mb_first",
-  dag_response_as_sink = TRUE
+  models = c("rf", "brt", "maxent", "gam")
 )
 
 summary(result)
@@ -57,24 +52,22 @@ result$screen$roles
 # 1. Optional VIF screening
 clean <- cast_vif(env_data, threshold = 10)
 
-# 2. DAG / MB screening graph
-dag <- cast_dag(
-  train_data,
-  structure_method = "mb_first",
-  include_response = TRUE,
-  response_as_sink = TRUE
-)
+# 2. Review the default habitat role specification
+vars <- get_env_vars(train_data)
+spec <- cast_causal_spec(vars)
+spec[spec$role != "direct_candidate", ]
 
-# 3. Variable screening
-screen <- cast_select(dag, train_data)
+# 3. Role-constrained variable screening
+screen <- cast_select(data = train_data, causal_spec = spec)
 screen$selected
 screen$roles
+screen$scores[, c("variable", "specified_role", "selection_tier",
+                  "selection_reason")]
 
 # 4. Model fitting
 fit <- cast_fit(
   train_data,
   screen = screen,
-  dag = dag,
   models = c("rf", "brt", "maxent", "gam")
 )
 
@@ -82,7 +75,6 @@ fit <- cast_fit(
 cv <- cast_cv(
   train_data,
   screen = screen,
-  dag = dag,
   models = c("rf", "brt")
 )
 
@@ -97,23 +89,16 @@ ens <- cast_ensemble(fit, cv, env_grid, method = "weighted")
 proj <- cast_project(fit, cv, current_env, future_envs)
 
 # 9. Optional CATE estimation
-cate <- cast_cate(train_data, screen = screen, dag = dag, top_n = 3)
+cate <- cast_cate(train_data, screen = screen, top_n = 3)
 ```
 
-## Interpreting Screening Roles
+## Interpreting the Causal Audit
 
 `cast_select()` returns a `cast_select` object. The selected variables are in
-`screen$selected`, and their screening roles are in `screen$roles`.
+`screen$selected`, and the selected core is in `screen$roles`. The complete
+audit, including excluded variables, is in `screen$scores`.
 
-The roles mean:
-
-- `invariant_driver`: selected because it is predictive, direction-consistent,
-  and spatially stable.
-- `stable_predictive`: selected because it is predictive and stable, with
-  weaker effect-direction evidence.
-- `predictive_rescue`: retained to preserve model performance.
-- `redundant_proxy`: rejected because a higher-scoring correlated variable was
-  already selected.
-
-These roles describe the screening path for each variable. They should not be
-read as confirmed ecological mechanisms.
+Only variables declared `direct_candidate` can be selected. Roles including
+`mediator`, `proxy_only`, `sampling_bias`, `adjustment_only`, and `unknown`
+remain visible but are ineligible. These declarations are reviewable ecological
+assumptions, not confirmed mechanisms.

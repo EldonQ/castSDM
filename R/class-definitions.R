@@ -45,16 +45,21 @@ new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
 #' @param roles A `data.frame` with columns `variable` and `role` indicating
 #'   each variable's response-focused screening role: `"mb_direct"`,
 #'   `"mb_associated"`, `"importance_added"`, or `"importance_screened"`.
+#' @param method Character screening-method identifier.
+#' @param specification Optional causal-role specification used by the screen.
 #'
 #' @return A `cast_select` object.
 #' @keywords internal
 #' @export
-new_cast_select <- function(selected, scores, roles) {
+new_cast_select <- function(selected, scores, roles, method = NULL,
+                            specification = NULL) {
   structure(
     list(
       selected = selected,
       scores = scores,
-      roles = roles
+      roles = roles,
+      method = method,
+      specification = specification
     ),
     class = "cast_select"
   )

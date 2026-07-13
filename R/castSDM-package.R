@@ -3,21 +3,21 @@
 
 #' @section Overview:
 #' The \pkg{castSDM} package provides a complete pipeline for causal-aware
-#' species distribution modeling. The core innovation is **response-focused
-#' invariant variable screening** - a fast, auditable approach that prioritizes
-#' predictors with stable effects across spatial/environmental blocks while
-#' controlling redundant proxies.
+#' species distribution modeling. The core innovation is **role-constrained
+#' causal-core screening**: ecological roles are declared before selection,
+#' and only direct candidates enter a shallow RF, invariance, conditional-
+#' evidence, and redundancy ranking. The complete role and exclusion audit is
+#' retained in the returned object.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: Train/test splitting, VIF-based collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Screening Graph Learning**: DAG/MB graph discovery via PC algorithm,
-#'    two-stage MB-First (IAMB + local PC), or bootstrap Hill-Climbing,
-#'    with presence as a node ([cast_dag()])
-#' 3. **Variable Selection**: invariant screening with RF importance,
-#'    bootstrap stability, effect-direction consistency, and correlation
-#'    redundancy control ([cast_select()])
+#' 2. **Causal Role Specification**: reviewed default or user overrides
+#'    ([cast_causal_spec()])
+#' 3. **Variable Selection**: role-constrained shallow RF, invariance,
+#'    conditional evidence, and correlation redundancy control
+#'    ([cast_select()]); DAG/MB learning remains optional ([cast_dag()])
 #' 4. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
 #' 5. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]),

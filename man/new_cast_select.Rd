@@ -4,7 +4,7 @@
 \alias{new_cast_select}
 \title{Create a cast_select Object}
 \usage{
-new_cast_select(selected, scores, roles)
+new_cast_select(selected, scores, roles, method = NULL, specification = NULL)
 }
 \arguments{
 \item{selected}{Character vector of selected variable names.}
@@ -15,6 +15,10 @@ DAG Markov Blanket membership).}
 \item{roles}{A \code{data.frame} with columns \code{variable} and \code{role} indicating
 each variable's response-focused screening role: \code{"mb_direct"},
 \code{"mb_associated"}, \code{"importance_added"}, or \code{"importance_screened"}.}
+
+\item{method}{Character screening-method identifier.}
+
+\item{specification}{Optional causal-role specification used by the screen.}
 }
 \value{
 A \code{cast_select} object.

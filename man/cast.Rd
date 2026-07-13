@@ -25,10 +25,13 @@ cast(
   select_min_fraction = 0,
   select_stability_reps = 0L,
   select_stability_threshold = 0.6,
-  select_method = "invariant_screen",
+  select_method = "causal_prior_rf",
+  causal_spec = NULL,
+  select_prior_max_vars = 12L,
+  select_prior_num_trees = 100L,
   select_max_vars = NULL,
   select_cor_threshold = 0.8,
-  do_refute = TRUE,
+  do_refute = FALSE,
   refute_reps = 20L,
   do_cv = TRUE,
   cv_k = 5L,
@@ -101,7 +104,14 @@ stability. Default \code{0}.}
 Default \code{0.6}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"invariant_screen"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"causal_prior_rf"}.}
+
+\item{causal_spec}{A causal-role data frame, CSV path, or \code{NULL} for the
+validated habitat template.}
+
+\item{select_prior_max_vars}{Maximum causal-core size. Default \code{12}.}
+
+\item{select_prior_num_trees}{Trees in the shallow ranking RF. Default \code{100}.}
 
 \item{select_max_vars}{Optional integer safety ceiling for variables
 retained by the invariant screen. Default \code{NULL} uses adaptive selection
@@ -110,8 +120,8 @@ without a fixed cap.}
 \item{select_cor_threshold}{Numeric. Absolute correlation threshold for
 redundant-proxy control. Default \code{0.8}.}
 
-\item{do_refute}{Logical. Run lightweight screen refutation diagnostics.
-Default \code{TRUE}.}
+\item{do_refute}{Logical. Run optional screen refutation diagnostics.
+Default \code{FALSE} to keep routine selection fast.}
 
 \item{refute_reps}{Integer. Number of refutation repetitions.}
 
@@ -153,8 +163,8 @@ Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, and \code{
 }
 \description{
 One-step pipeline that executes the entire workflow: data splitting,
-DAG learning (with response node), causal-aware invariant variable
-screening, model fitting, spatial cross-validation,
+auditable causal-role screening, optional DAG learning, model fitting,
+spatial cross-validation,
 evaluation, ensemble prediction, and optionally CATE estimation.
 }
 \seealso{

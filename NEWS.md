@@ -1,3 +1,16 @@
+# castSDM 0.4.0
+
+* `cast_select()` now defaults to the frozen `causal_prior_rf` selector. It
+  applies RF, invariance and conditional-evidence ranking only inside an
+  explicitly eligible ecological role set and returns a full audit.
+* Added `cast_causal_spec()` for conservative habitat-role defaults and
+  reviewer-visible species-specific overrides.
+* `cast()` and `cast_batch()` skip DAG learning under the new default, reducing
+  routine screening cost. DAG/MB and data-only invariant screens remain
+  available as optional diagnostics or compatibility paths.
+* Screen refutation is now opt-in because it repeats selection and is not part
+  of the validated default timing claim.
+
 # castSDM 0.3.0
 
 ## Current development update

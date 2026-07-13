@@ -157,7 +157,8 @@ print.cast_cate <- function(x, ...) {
 print.cast_result <- function(x, ...) {
   cli::cli_h1("castSDM Pipeline Result")
   cli::cli_ul(c(
-    "DAG: {nrow(x$dag$edges)} edges",
+    if (is.null(x$dag)) "DAG: not run (role-constrained selector)" else
+      "DAG: {nrow(x$dag$edges)} edges",
     "Selected: {length(x$screen$selected)} variables",
     "Models: {.val {names(x$fit$models)}}",
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",

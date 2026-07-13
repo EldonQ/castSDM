@@ -44,7 +44,10 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     learn_shared_dag = FALSE,
 
     # -- Variable Selection --
-    select_method = "invariant_screen",
+    select_method = "causal_prior_rf",
+    select_causal_spec = NULL,
+    select_prior_max_vars = 12L,
+    select_prior_num_trees = 100L,
     select_min_vars = 5L,
     select_min_fraction = 0,
     select_max_vars = NULL,
@@ -55,7 +58,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     select_verbose = FALSE,
 
     # -- Screen Refutation --
-    do_refute = TRUE,
+    do_refute = FALSE,
     refute_reps = 20L,
     refute_num_trees = 100L,
 

@@ -48,7 +48,7 @@
     )
 
     dag <- cfg$shared_dag
-    if (is.null(dag)) {
+    if (is.null(dag) && !identical(cfg$select_method, "causal_prior_rf")) {
       dag <- cast_run_step("dag", output_dir, sp_name,
         cast_dag(
           split$train,
@@ -75,12 +75,15 @@
       )
     }
 
-    select_suffix <- paste0("_", cfg$select_method %||% "invariant_screen", shared_suffix)
+    select_suffix <- paste0("_", cfg$select_method %||% "causal_prior_rf", shared_suffix)
     screen <- cast_run_step(paste0("select", select_suffix), output_dir, sp_name,
       cast_select(
         dag, split$train,
         response = cfg$response,
-        method = cfg$select_method %||% "invariant_screen",
+        method = cfg$select_method %||% "causal_prior_rf",
+        causal_spec = cfg$select_causal_spec,
+        prior_max_vars = cfg$select_prior_max_vars %||% 12L,
+        prior_num_trees = cfg$select_prior_num_trees %||% 100L,
         min_vars = cfg$select_min_vars %||% 5L,
         min_fraction = cfg$select_min_fraction %||% 0,
         num_trees = cfg$select_num_trees %||% 300L,
@@ -246,7 +249,7 @@
     bm <- cfg$plot_basemap
 
     # DAG structure plot
-    if (requireNamespace("ggraph", quietly = TRUE) &&
+    if (!is.null(dag) && requireNamespace("ggraph", quietly = TRUE) &&
         requireNamespace("igraph", quietly = TRUE)) {
       p <- tryCatch(
         plot(dag, screen = screen, species = sp_name, var_labels = vl),

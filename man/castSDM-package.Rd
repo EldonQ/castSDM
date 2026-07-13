@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Integrates causal-aware invariant variable screening with species distribution modeling. Uses response-focused structural constraints, spatial-block effect invariance, bootstrap stability, and correlation-cluster redundancy control to select ecologically relevant predictors for transferable SDM. Legacy DAG and Markov Blanket screening remain available for audit and comparison. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
+Integrates auditable ecological role priors with fast causal-core covariate selection and species distribution modeling. The default selector ranks only predeclared direct candidates using shallow random-forest, invariance, conditional-association, and redundancy evidence, while retaining a complete exclusion audit. Data-only invariant, DAG, and Markov Blanket tools remain available as diagnostics and compatibility paths. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
 }
 \seealso{
 Useful links:

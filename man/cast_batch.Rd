@@ -35,10 +35,13 @@ cast_batch(
   select_num_trees = 300L,
   select_stability_reps = 0L,
   select_stability_threshold = 0.6,
-  select_method = "invariant_screen",
+  select_method = "causal_prior_rf",
+  select_causal_spec = NULL,
+  select_prior_max_vars = 12L,
+  select_prior_num_trees = 100L,
   select_max_vars = NULL,
   select_cor_threshold = 0.8,
-  do_refute = TRUE,
+  do_refute = FALSE,
   refute_reps = 10L,
   refute_num_trees = 80L,
   do_cv = TRUE,
@@ -146,7 +149,12 @@ selection stability diagnostics. Default \code{0}.}
 Default \code{0.6}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"invariant_screen"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"causal_prior_rf"}.}
+
+\item{select_causal_spec}{A causal-role data frame, CSV path, or \code{NULL}.}
+
+\item{select_prior_max_vars, select_prior_num_trees}{Controls for the
+role-constrained selector.}
 
 \item{select_max_vars}{Optional integer safety ceiling for variables
 retained by the invariant screen. Default \code{NULL} uses adaptive selection
@@ -155,7 +163,8 @@ without a fixed cap.}
 \item{select_cor_threshold}{Numeric. Redundant-proxy correlation threshold.
 Default \code{0.8}.}
 
-\item{do_refute}{Logical. Run screen refutation diagnostics. Default \code{TRUE}.}
+\item{do_refute}{Logical. Run optional screen refutation diagnostics.
+Default \code{FALSE}.}
 
 \item{refute_reps}{Integer. Refutation repetitions. Default \code{10}.}
 

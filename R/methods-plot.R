@@ -880,23 +880,26 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
 
 #' Plot castSDM Pipeline Result (Multi-Panel)
 #'
-#' Combines DAG and variable selection plots into a 2-panel figure using
-#' patchwork.
+#' Combines optional DAG and variable-selection plots. Under the default
+#' role-constrained selector, no DAG is required and the selection audit is
+#' returned as a single panel.
 #'
 #' @param x A `cast_result` object.
 #' @param var_labels Optional named character vector for display labels.
 #' @param ... Ignored.
 #'
-#' @return A `patchwork` combined plot.
+#' @return A `ggplot` or `patchwork` plot.
 #' @export
 plot.cast_result <- function(x, var_labels = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("patchwork", "for multi-panel layout")
 
-  p_dag <- plot.cast_dag(x$dag, screen = x$screen,
-                         var_labels = var_labels)
   p_scr <- plot.cast_select(x$screen, var_labels = var_labels)
 
+  if (is.null(x$dag)) return(p_scr)
+
+  p_dag <- plot.cast_dag(x$dag, screen = x$screen,
+                         var_labels = var_labels)
   combined <- p_dag | p_scr
   combined + patchwork::plot_layout(widths = c(1.2, 1))
 }

@@ -1,19 +1,8 @@
 # castSDM single-species example: Ovis ammon
 #
-# This example demonstrates the current invariant causal screening workflow.
-# It intentionally uses screen$roles directly; removed role helpers are not
-# part of the active package API.
+# This example demonstrates the role-constrained causal core.
 
-if (!requireNamespace("devtools", quietly = TRUE)) {
-  stop("Install devtools or install castSDM before running this example.")
-}
-
-pkg_root <- normalizePath(file.path("E:/Package/cast"), winslash = "/", mustWork = FALSE)
-if (file.exists(file.path(pkg_root, "DESCRIPTION"))) {
-  devtools::load_all(pkg_root)
-} else {
-  library(castSDM)
-}
+library(castSDM)
 
 data(Ovis_ammon)
 data(china_env_grid)
@@ -25,20 +14,9 @@ split <- cast_prepare(
   verbose = TRUE
 )
 
-dag <- cast_dag(
-  split$train,
-  structure_method = "mb_first",
-  include_response = TRUE,
-  response_as_sink = TRUE,
-  seed = 42,
-  verbose = TRUE
-)
-
 screen <- cast_select(
-  dag,
-  split$train,
+  data = split$train,
   min_vars = 5,
-  min_fraction = 0,
   cor_threshold = 0.8,
   seed = 42,
   verbose = TRUE
@@ -50,7 +28,6 @@ print(screen$roles)
 fit <- cast_fit(
   split$train,
   screen = screen,
-  dag = dag,
   models = c("rf", "brt", "maxent", "gam"),
   seed = 42,
   verbose = TRUE
@@ -62,7 +39,6 @@ print(eval)
 cv <- cast_cv(
   Ovis_ammon,
   screen = screen,
-  dag = dag,
   models = c("rf", "brt"),
   k = 5,
   seed = 42,

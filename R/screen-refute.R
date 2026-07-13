@@ -5,7 +5,7 @@
 #' whether selected variables are stable under common negative controls and
 #' resampling perturbations.
 #'
-#' @param dag A [cast_dag] object.
+#' @param dag An optional [cast_dag] object.
 #' @param screen A [cast_select] object.
 #' @param data A `data.frame` with response and environmental variables.
 #' @param response Character. Response column. Default `"presence"`.
@@ -29,8 +29,11 @@ cast_refute_screen <- function(dag,
                                verbose = TRUE) {
   check_suggested("ranger", "for screen refutation")
 
-  env_vars <- setdiff(dag$nodes, c(response, "lon", "lat"))
-  env_vars <- intersect(env_vars, names(data))
+  env_vars <- if (!is.null(dag)) {
+    intersect(setdiff(dag$nodes, c(response, "lon", "lat")), names(data))
+  } else {
+    get_env_vars(data, response = response)
+  }
   selected <- screen$selected %||% character()
   min_keep <- max(1L, length(selected))
   reps <- max(1L, as.integer(reps))
@@ -64,6 +67,9 @@ cast_refute_screen <- function(dag,
     keep <- tryCatch(
       cast_select(
         dag, sub_df, response = response,
+        method = screen$method %||% "causal_prior_rf",
+        causal_spec = screen$specification,
+        prior_num_trees = num_trees,
         min_vars = min_keep, min_fraction = 0,
         num_trees = num_trees, seed = if (!is.null(seed)) seed + ii else NULL,
         verbose = FALSE, stability_reps = 0L
