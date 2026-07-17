@@ -4,7 +4,16 @@
 \alias{new_cast_cv}
 \title{Create a cast_cv Object}
 \usage{
-new_cast_cv(metrics, fold_metrics, folds, k, block_method, thresholds)
+new_cast_cv(
+  metrics,
+  fold_metrics,
+  folds,
+  k,
+  block_method,
+  thresholds,
+  selections = list(),
+  screens = list()
+)
 }
 \arguments{
 \item{metrics}{\code{data.frame}. Aggregated per-model metrics (mean +/- SD).}
@@ -18,6 +27,10 @@ new_cast_cv(metrics, fold_metrics, folds, k, block_method, thresholds)
 \item{block_method}{Character. Blocking strategy used.}
 
 \item{thresholds}{Named numeric. TSS-optimal threshold per model.}
+
+\item{selections}{List of selected variables for each outer fold.}
+
+\item{screens}{List of fold-specific \code{cast_select} objects.}
 }
 \value{
 A \code{cast_cv} object.

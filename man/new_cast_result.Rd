@@ -5,21 +5,16 @@
 \title{Create a cast_result Object}
 \usage{
 new_cast_result(
-  dag,
   screen,
   fit,
   eval,
   cv = NULL,
   predict = NULL,
   ensemble = NULL,
-  cate = NULL,
-  refute = NULL,
   call = NULL
 )
 }
 \arguments{
-\item{dag}{A \code{cast_dag} object.}
-
 \item{screen}{A \code{cast_select} object.}
 
 \item{fit}{A \code{cast_fit} object.}
@@ -31,8 +26,6 @@ new_cast_result(
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
 \item{ensemble}{A \code{cast_ensemble} object (or \code{NULL}).}
-
-\item{cate}{A \code{cast_cate} object (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

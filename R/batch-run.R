@@ -1,44 +1,3 @@
-.cast_batch_shared_dag_data <- function(species_list,
-                                        env_data,
-                                        env_vars,
-                                        response,
-                                        max_rows,
-                                        seed = NULL) {
-  env_vars <- unique(env_vars)
-  if (!is.null(env_data) && is.data.frame(env_data) &&
-      nrow(env_data) > 0L && all(env_vars %in% names(env_data))) {
-    out <- as.data.frame(env_data[, env_vars, drop = FALSE])
-  } else {
-    rows_per_species <- max(1L, ceiling(max_rows / max(1L, length(species_list))))
-    chunks <- vector("list", length(species_list))
-    if (!is.null(seed)) set.seed(seed)
-    for (i in seq_along(species_list)) {
-      d <- species_list[[i]]
-      if (!is.data.frame(d) || !all(env_vars %in% names(d))) next
-      take <- min(nrow(d), rows_per_species)
-      idx <- if (nrow(d) > take) sample.int(nrow(d), take) else seq_len(nrow(d))
-      chunks[[i]] <- as.data.frame(d[idx, env_vars, drop = FALSE])
-    }
-    chunks <- chunks[!vapply(chunks, is.null, logical(1L))]
-    if (!length(chunks)) {
-      cli::cli_abort(
-        "Could not build shared DAG data: {.arg env_vars} are absent from both {.arg env_data} and {.arg species_list}."
-      )
-    }
-    out <- do.call(rbind, chunks)
-  }
-  for (nm in names(out)) out[[nm]] <- suppressWarnings(as.numeric(out[[nm]]))
-  out <- stats::na.omit(out)
-  if (nrow(out) > max_rows) {
-    if (!is.null(seed)) set.seed(seed + 7919L)
-    out <- out[sample.int(nrow(out), max_rows), , drop = FALSE]
-  }
-  if (nrow(out) < 10L) {
-    cli::cli_abort("Shared DAG data has fewer than 10 complete rows.")
-  }
-  out
-}
-
 #' Batch Multi-Species Modeling
 #'
 #' One-stop interface that runs the full castSDM pipeline on multiple
@@ -55,170 +14,85 @@
 #' @param seed Integer or `NULL`.
 #' @param verbose Logical. Default `TRUE`.
 #' @param fit_verbose Logical. Default `FALSE`.
-#' @param dag_R Integer. Bootstrap replicates. Default `100`.
-#' @param dag_structure_method Character. Default `"mb_first"`.
-#' @param dag_include_response Logical. Default `TRUE`.
-#' @param dag_response_as_sink Logical. If `TRUE` (default), forbids response
-#'   to environmental predictor edges.
-#' @param dag_pc_alpha Numeric. Default `0.05`.
-#' @param dag_pc_test Character or `NULL`. Default `NULL`.
-#' @param dag_mb_method Character. MB discovery algorithm. Default `"fast.iamb"`.
-#' @param dag_mb_alpha Numeric. MB discovery significance. Default `0.05`.
-#' @param dag_bidag_algorithm,dag_bidag_iterations BiDAG controls.
-#' @param dag_algorithm Character. Default `"hc"`.
-#' @param dag_score Character or `NULL`. Default `NULL`.
-#' @param dag_strength_threshold Numeric. Default `0.7`.
-#' @param dag_direction_threshold Numeric. Default `0.6`.
-#' @param dag_max_rows Integer. Default `8000`.
-#' @param select_min_vars Integer. Default `5`.
-#' @param select_min_fraction Numeric. Minimum fraction for legacy
-#'   `"mb_rf"` screening. Default `0`.
+#' @param select_min_vars Integer. Default `3`.
 #' @param select_num_trees Integer. Default `300`.
-#' @param select_stability_reps Integer. Bootstrap repetitions for lightweight
-#'   selection stability diagnostics. Default `0`.
-#' @param select_stability_threshold Numeric. Stability frequency threshold.
-#'   Default `0.6`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"causal_prior_rf"`.
-#' @param select_causal_spec A causal-role data frame, CSV path, or `NULL`.
-#' @param select_prior_max_vars,select_prior_num_trees Controls for the
-#'   role-constrained selector.
-#' @param select_max_vars Optional integer safety ceiling for variables
-#'   retained by the invariant screen. Default `NULL` uses adaptive selection
-#'   without a fixed cap.
+#'   [cast_select()]. Default `"stable"`.
+#' @param select_max_vars Candidate ceiling. Default `12`.
 #' @param select_cor_threshold Numeric. Redundant-proxy correlation threshold.
 #'   Default `0.8`.
-#' @param do_refute Logical. Run optional screen refutation diagnostics.
-#'   Default `FALSE`.
-#' @param refute_reps Integer. Refutation repetitions. Default `10`.
-#' @param refute_num_trees Integer. Trees used by refutation RF screens.
-#'   Default `80`.
 #' @param do_cv Logical. Default `TRUE`.
 #' @param cv_k Integer. Default `5`.
 #' @param cv_block_method Character. Default `"grid"`.
-#' @param do_cate Logical. Estimate spatial CATE. Default `FALSE`.
-#' @param cate_top_n Integer. Default `3`.
-#' @param cate_n_trees Integer. Default `1000`.
-#' @param cate_hss_model,cate_hss_threshold CATE masking. Defaults `"rf"`,
-#'   `0.1`.
-#' @param do_predict Logical. Generate spatial predictions when `env_data` is
-#'   provided. Default `TRUE`.
-#' @param do_ensemble Logical. Generate ensemble predictions when CV and
-#'   predictions are available. Default `TRUE`.
-#' @param ensemble_method Character. Ensemble method passed to
-#'   [cast_ensemble()]. One of `"weighted"`, `"best"`, or `"equal"`.
+#' @param do_predict Logical. Default `TRUE`.
+#' @param do_ensemble Logical. Default `TRUE`.
+#' @param ensemble_method Character. `"weighted"`, `"best"`, or `"equal"`.
 #'   Default `"weighted"`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
-#' @param dag_env_vars,dag_verbose Passed to [cast_dag()].
 #' @param select_verbose Passed to [cast_select()]. Default `FALSE`.
-#' @param cv_models Character or `NULL`. Models for CV.
+#' @param cv_models Character or `NULL`.
 #' @param cv_rf_ntree,cv_brt_n_trees,cv_parallel,cv_verbose CV controls.
 #' @param predict_models Passed to [cast_predict()].
 #' @param plot_basemap Character. Default `"world"`.
-#' @param cate_variables,cate_verbose Passed to [cast_cate()].
-#' @param cate_point_size Numeric. Default `0.45`.
 #' @param eval_response Character or `NULL`.
 #' @param var_labels Named character vector or `NULL`.
 #' @param dev_package_root Character or `NULL`.
-#' @param learn_shared_dag Logical. Default `FALSE`.
-#' @param shared_dag Optional precomputed [cast_dag].
-#' @param shared_dag_data Optional `data.frame`.
 #' @param raster_stack Optional `terra::SpatRaster` for raster-based
-#'   ensemble prediction via [cast_ensemble_raster()]. Default `NULL`.
+#'   ensemble prediction via [cast_ensemble_raster()].
 #' @param future_rasters Optional named list of `terra::SpatRaster` stacks
-#'   for future projection via [cast_project_raster()]. Default `NULL`.
+#'   for future projection via [cast_project_raster()].
 #' @param raster_mask Optional `terra::SpatRaster` prediction mask.
-#' @param raster_compression Character. GeoTIFF compression. Default `"LZW"`.
+#' @param raster_compression Character. Default `"LZW"`.
 #' @param overwrite_rasters Logical. Default `FALSE`.
 #' @param ... Additional arguments forwarded to [cast_fit()].
 #'
 #' @return A `cast_batch` object.
-#' @seealso [cast()], [cast_fit()], [cast_dag()], [cast_select()],
-#'   [cast_cv()], [cast_cate()]
+#' @seealso [cast()], [cast_fit()], [cast_select()], [cast_cv()]
 #' @export
 cast_batch <- function(species_list,
-                       env_data    = NULL,
-                       models      = c("rf", "brt", "maxent", "gam"),
-                       train_fraction = 0.7,
-                       output_dir  = "castSDM_batch_output",
-                       fig_dpi     = 300L,
-                       parallel    = TRUE,
-                       seed        = NULL,
-                       verbose     = TRUE,
-                       fit_verbose = FALSE,
-                       # -- DAG --
-                       dag_R                  = 100L,
-                       dag_structure_method   = "mb_first",
-                       dag_include_response   = TRUE,
-                       dag_response_as_sink    = TRUE,
-                       dag_pc_alpha           = 0.05,
-                       dag_pc_test            = NULL,
-                       dag_mb_method          = "fast.iamb",
-                       dag_mb_alpha           = 0.05,
-                       dag_bidag_algorithm    = "order",
-                       dag_bidag_iterations   = NULL,
-                       dag_algorithm          = "hc",
-                       dag_score              = NULL,
-                       dag_strength_threshold = 0.7,
-                       dag_direction_threshold = 0.6,
-                       dag_max_rows           = 8000L,
-                       # -- Selection --
-                       select_min_vars     = 5L,
-                       select_min_fraction = 0,
-                       select_num_trees    = 300L,
-                       select_stability_reps = 0L,
-                       select_stability_threshold = 0.6,
-                       select_method = "causal_prior_rf",
-                       select_causal_spec = NULL,
-                       select_prior_max_vars = 12L,
-                       select_prior_num_trees = 100L,
-                       select_max_vars = NULL,
-                       select_cor_threshold = 0.8,
-                       do_refute = FALSE,
-                       refute_reps = 10L,
-                       refute_num_trees = 80L,
-                       # -- CV --
-                       do_cv           = TRUE,
-                       cv_k            = 5L,
-                       cv_block_method = "grid",
-                       # -- CATE --
-                       do_cate      = FALSE,
-                       cate_top_n   = 3L,
-                       cate_n_trees = 1000L,
-                       cate_hss_model = "rf",
-                       cate_hss_threshold = 0.1,
-                       do_predict = TRUE,
-                       do_ensemble = TRUE,
-                       ensemble_method = "weighted",
-                       response = "presence",
-                       prepare_env_vars = NULL,
-                       prepare_verbose = FALSE,
-                       dag_env_vars = NULL,
-                       dag_verbose = FALSE,
-                       select_verbose = FALSE,
-                       cv_models = NULL,
-                       cv_rf_ntree = 300L,
-                       cv_brt_n_trees = 500L,
-                       cv_parallel = FALSE,
-                       cv_verbose = FALSE,
-                       predict_models = NULL,
-                       plot_basemap = "world",
-                       cate_variables = NULL,
-                       cate_verbose = FALSE,
-                       cate_point_size = 0.45,
-                       eval_response = NULL,
-                       var_labels = NULL,
-                       dev_package_root = NULL,
-                       learn_shared_dag = FALSE,
-                       shared_dag = NULL,
-                       shared_dag_data = NULL,
-                       raster_stack = NULL,
-                       future_rasters = NULL,
-                       raster_mask = NULL,
-                       raster_compression = "LZW",
-                       overwrite_rasters = FALSE,
-                       ...) {
+                      env_data    = NULL,
+                      models      = c("rf", "brt", "maxent", "gam"),
+                      train_fraction = 0.7,
+                      output_dir  = "castSDM_batch_output",
+                      fig_dpi     = 300L,
+                      parallel    = TRUE,
+                      seed        = NULL,
+                      verbose     = TRUE,
+                      fit_verbose = FALSE,
+                      # -- Selection --
+                      select_min_vars     = 3L,
+                      select_num_trees    = 300L,
+                      select_method = "stable",
+                      select_max_vars = 12L,
+                      select_cor_threshold = 0.8,
+                      # -- CV --
+                      do_cv           = TRUE,
+                      cv_k            = 5L,
+                      cv_block_method = "grid",
+                      do_predict = TRUE,
+                      do_ensemble = TRUE,
+                      ensemble_method = "weighted",
+                      response = "presence",
+                      prepare_env_vars = NULL,
+                      prepare_verbose = FALSE,
+                      select_verbose = FALSE,
+                      cv_models = NULL,
+                      cv_rf_ntree = 300L,
+                      cv_brt_n_trees = 500L,
+                      cv_parallel = FALSE,
+                      cv_verbose = FALSE,
+                      predict_models = NULL,
+                      plot_basemap = "world",
+                      eval_response = NULL,
+                      var_labels = NULL,
+                      dev_package_root = NULL,
+                      raster_stack = NULL,
+                      future_rasters = NULL,
+                      raster_mask = NULL,
+                      raster_compression = "LZW",
+                      overwrite_rasters = FALSE,
+                      ...) {
 
   if (!is.list(species_list) || is.null(names(species_list))) {
     cli::cli_abort("{.arg species_list} must be a named list of data.frames.")
@@ -237,10 +111,8 @@ cast_batch <- function(species_list,
   dev_root_workers <- NULL
   if (!is.null(dev_package_root) && nzchar(as.character(dev_package_root)[1])) {
     dev_root_workers <- tryCatch(
-      normalizePath(
-        as.character(dev_package_root)[1],
-        winslash = "/", mustWork = FALSE
-      ),
+      normalizePath(as.character(dev_package_root)[1],
+                    winslash = "/", mustWork = FALSE),
       error = function(e) NA_character_
     )
     if (!is.na(dev_root_workers) && nzchar(dev_root_workers) &&
@@ -264,10 +136,8 @@ cast_batch <- function(species_list,
         file.exists(file.path(root, "DESCRIPTION"))) {
       np <- root
       in_lib <- any(vapply(.libPaths(), function(lib) {
-        nl <- tryCatch(
-          normalizePath(lib, winslash = "/", mustWork = FALSE),
-          error = function(e) ""
-        )
+        nl <- tryCatch(normalizePath(lib, winslash = "/", mustWork = FALSE),
+                       error = function(e) "")
         nzchar(nl) && (identical(np, nl) || startsWith(np, paste0(nl, "/")))
       }, logical(1L)))
       if (!isTRUE(in_lib)) Sys.setenv(CASTSDM_ROOT = root)
@@ -294,114 +164,18 @@ cast_batch <- function(species_list,
   eval_resp <- if (is.null(eval_response)) response else eval_response
   cv_models_use <- if (is.null(cv_models)) models else cv_models
 
-  if (!is.null(shared_dag) && !inherits(shared_dag, "cast_dag")) {
-    cli::cli_abort("{.arg shared_dag} must be a {.cls cast_dag} object or {.val NULL}.")
-  }
-
-  if (is.null(shared_dag) && isTRUE(learn_shared_dag) &&
-      !identical(select_method, "causal_prior_rf")) {
-    shared_dir <- file.path(output_dir, ".shared")
-    dir.create(shared_dir, showWarnings = FALSE, recursive = TRUE)
-    shared_path <- file.path(shared_dir, "shared_dag.rds")
-    shared_dag <- tryCatch(
-      if (file.exists(shared_path)) readRDS(shared_path) else NULL,
-      error = function(e) NULL
-    )
-    if (!inherits(shared_dag, "cast_dag")) {
-      dag_vars <- dag_env_vars %||% prepare_env_vars %||%
-        get_env_vars(species_list[[sp_names[1L]]], response = response)
-      dag_data <- shared_dag_data %||%
-        .cast_batch_shared_dag_data(
-          species_list = species_list,
-          env_data = env_data,
-          env_vars = dag_vars,
-          response = response,
-          max_rows = max(dag_max_rows * 4L, dag_max_rows),
-          seed = seed
-        )
-      if (identical(dag_structure_method, "mb_first") &&
-          isTRUE(dag_include_response) &&
-          !response %in% names(dag_data)) {
-        cli::cli_abort(c(
-          "{.code learn_shared_dag = TRUE} is incompatible with response-focused {.code structure_method = \"mb_first\"} when shared data has no response column.",
-          "i" = "For robust species-specific Markov Blanket selection, set {.code learn_shared_dag = FALSE}.",
-          "i" = "Use shared DAGs only for predictor-only environmental structure, e.g. {.code dag_include_response = FALSE} with {.code structure_method = \"pc\"} or {.code \"bootstrap_hc\"}."
-        ))
-      }
-      if (verbose) {
-        cli::cli_inform(
-          "Learning shared DAG once: {length(dag_vars)} env vars, {nrow(dag_data)} rows."
-        )
-      }
-      shared_dag <- cast_run_step("shared_dag", output_dir, ".shared",
-        cast_dag(
-          dag_data,
-          response = response,
-          include_response = dag_include_response,
-          response_as_sink = dag_response_as_sink,
-          env_vars = dag_vars,
-          R = dag_R,
-          algorithm = dag_algorithm,
-          score = dag_score,
-          strength_threshold = dag_strength_threshold,
-          direction_threshold = dag_direction_threshold,
-          max_rows = dag_max_rows,
-          seed = seed,
-          verbose = dag_verbose,
-          structure_method = dag_structure_method,
-          pc_alpha = dag_pc_alpha,
-          pc_test = dag_pc_test,
-          mb_method = dag_mb_method,
-          mb_alpha = dag_mb_alpha,
-          bidag_algorithm = dag_bidag_algorithm,
-          bidag_iterations = dag_bidag_iterations
-        )
-      )
-      saveRDS(shared_dag, shared_path)
-    } else if (verbose) {
-      cli::cli_inform("Shared DAG cache hit: {.path {shared_path}}")
-    }
-  }
-
-  # Pack all pipeline config
   cfg <- list(
     response = response,
     eval_response = eval_resp,
     prepare_env_vars = prepare_env_vars,
     prepare_verbose = prepare_verbose,
     train_fraction = train_fraction,
-    dag_include_response = dag_include_response,
-    dag_response_as_sink = dag_response_as_sink,
-    dag_env_vars = dag_env_vars,
-    dag_verbose = dag_verbose,
-    dag_R = dag_R,
-    dag_structure_method = dag_structure_method,
-    dag_pc_alpha = dag_pc_alpha,
-    dag_pc_test = dag_pc_test,
-    dag_mb_method = dag_mb_method,
-    dag_mb_alpha = dag_mb_alpha,
-    dag_bidag_algorithm = dag_bidag_algorithm,
-    dag_bidag_iterations = dag_bidag_iterations,
-    dag_algorithm = dag_algorithm,
-    dag_score = dag_score,
-    dag_strength_threshold = dag_strength_threshold,
-    dag_direction_threshold = dag_direction_threshold,
-    dag_max_rows = dag_max_rows,
     select_min_vars = select_min_vars,
-    select_min_fraction = select_min_fraction,
     select_num_trees = select_num_trees,
-    select_stability_reps = select_stability_reps,
-    select_stability_threshold = select_stability_threshold,
     select_method = select_method,
-    select_causal_spec = select_causal_spec,
-    select_prior_max_vars = select_prior_max_vars,
-    select_prior_num_trees = select_prior_num_trees,
     select_max_vars = select_max_vars,
     select_cor_threshold = select_cor_threshold,
     select_verbose = select_verbose,
-    do_refute = do_refute,
-    refute_reps = refute_reps,
-    refute_num_trees = refute_num_trees,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
     cv_models = cv_models_use,
     cv_rf_ntree = cv_rf_ntree,
@@ -413,17 +187,8 @@ cast_batch <- function(species_list,
     do_ensemble = do_ensemble,
     ensemble_method = ensemble_method,
     plot_basemap = plot_basemap,
-    do_cate = do_cate, cate_top_n = cate_top_n,
-    cate_n_trees = cate_n_trees,
-    cate_variables = cate_variables,
-    cate_verbose = cate_verbose,
-    cate_point_size = cate_point_size,
-    cate_hss_model = cate_hss_model,
-    cate_hss_threshold = cate_hss_threshold,
     var_labels = var_labels,
     fit_verbose = fit_verbose,
-    shared_dag = shared_dag,
-    # -- Raster projection (new) --
     raster_stack = raster_stack,
     future_rasters = future_rasters,
     raster_mask = raster_mask,
@@ -433,16 +198,11 @@ cast_batch <- function(species_list,
 
   if (parallel && !is.null(dev_root_workers)) {
     nwrk <- tryCatch(
-      if (requireNamespace("future", quietly = TRUE)) {
-        future::nbrOfWorkers()
-      } else {
-        NA_integer_
-      },
+      if (requireNamespace("future", quietly = TRUE)) future::nbrOfWorkers()
+      else NA_integer_,
       error = function(e) NA_integer_
     )
-    if (is.na(nwrk) || nwrk < 1L) {
-      nwrk <- max(1L, parallel::detectCores() - 1L)
-    }
+    if (is.na(nwrk) || nwrk < 1L) nwrk <- max(1L, parallel::detectCores() - 1L)
     nwrk <- min(as.integer(nwrk), n_sp)
     if (verbose) {
       cli::cli_inform(
@@ -450,15 +210,13 @@ cast_batch <- function(species_list,
       )
     }
     root_value <- as.character(dev_root_workers)[1L]
-    cl <- NULL
     cl <- parallel::makeCluster(nwrk)
     results <- tryCatch(
       {
         parallel::clusterExport(cl, "root_value", envir = environment())
         ok <- parallel::clusterEvalQ(cl, {
-          if (!requireNamespace("pkgload", quietly = TRUE)) {
-            FALSE
-          } else {
+          if (!requireNamespace("pkgload", quietly = TRUE)) FALSE
+          else {
             suppressPackageStartupMessages(pkgload::load_all(root_value, quiet = TRUE))
             TRUE
           }
@@ -471,24 +229,18 @@ cast_batch <- function(species_list,
         eb <- environment()
         parallel::clusterExport(
           cl,
-          c(
-            "species_list", "sp_names", "env_data", "models", "output_dir",
-            "fig_dpi", "seed", "cfg", "fit_args"
-          ),
+          c("species_list", "sp_names", "env_data", "models", "output_dir",
+            "fig_dpi", "seed", "cfg", "fit_args"),
           envir = eb
         )
         parallel::parLapply(cl, seq_along(sp_names), function(ii) {
           sp <- sp_names[[ii]]
           sd <- species_list[[sp]]
           seed_i <- if (!is.null(seed)) seed + ii else NULL
-          worker_run <- utils::getFromNamespace(
-            ".cast_batch_run_one_species", "castSDM"
-          )
-          worker_run(
-            sp, sd, env_data, models,
-            output_dir, fig_dpi, seed_i,
-            cfg, fit_args, FALSE, NULL
-          )
+          worker_run <- utils::getFromNamespace(".cast_batch_run_one_species", "castSDM")
+          worker_run(sp, sd, env_data, models,
+                     output_dir, fig_dpi, seed_i,
+                     cfg, fit_args, FALSE, NULL)
         })
       },
       finally = if (!is.null(cl)) parallel::stopCluster(cl)
@@ -501,11 +253,9 @@ cast_batch <- function(species_list,
         sp <- sp_names[[ii]]
         sd <- species_list[[sp]]
         seed_i <- if (!is.null(seed)) seed + ii else NULL
-        .cast_batch_run_one_species(
-          sp, sd, env_data, models,
-          output_dir, fig_dpi, seed_i,
-          cfg, fit_args, TRUE, dev_root_workers
-        )
+        .cast_batch_run_one_species(sp, sd, env_data, models,
+                                   output_dir, fig_dpi, seed_i,
+                                   cfg, fit_args, TRUE, dev_root_workers)
       },
       future.seed = TRUE
     )
@@ -525,7 +275,6 @@ cast_batch <- function(species_list,
 
   names(results) <- sp_names
 
-  # Collect metrics
   metrics_rows <- list()
   for (sp in sp_names) {
     r <- results[[sp]]
@@ -544,23 +293,17 @@ cast_batch <- function(species_list,
       }
       em$fold <- 0L
       metrics_rows[[sp]] <- em[, intersect(
-        c("fold", "model", "auc", "tss", "cbi", "species"),
-        names(em)
+        c("fold", "model", "auc", "tss", "cbi", "species"), names(em)
       ), drop = FALSE]
     }
   }
 
-  species_metrics <- if (length(metrics_rows) > 0) {
-    do.call(rbind, metrics_rows)
-  } else {
-    data.frame()
-  }
+  species_metrics <- if (length(metrics_rows) > 0) do.call(rbind, metrics_rows)
+                     else data.frame()
   rownames(species_metrics) <- NULL
 
   n_ok <- sum(!vapply(results, is.null, logical(1)))
-  if (verbose) {
-    cli::cli_inform("Batch complete: {n_ok}/{n_sp} species succeeded.")
-  }
+  if (verbose) cli::cli_inform("Batch complete: {n_ok}/{n_sp} species succeeded.")
 
   new_cast_batch(
     species_metrics = species_metrics,
@@ -611,8 +354,7 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     ) +
     ggplot2::geom_jitter(
       ggplot2::aes(group = .data$species),
-      width = 0.15, size = 1.5, alpha = 0.55, color = "black",
-      shape = 16
+      width = 0.15, size = 1.5, alpha = 0.55, color = "black", shape = 16
     ) +
     ggplot2::facet_wrap(~ metric, scales = "free_y", nrow = 1) +
     ggplot2::scale_fill_manual(values = gray_fills, guide = "none") +
@@ -628,15 +370,11 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     ggplot2::theme(
       panel.grid.minor   = ggplot2::element_blank(),
       panel.grid.major.x = ggplot2::element_blank(),
-      panel.border       = ggplot2::element_rect(
-        fill = NA, color = "black", linewidth = 0.5
-      ),
+      panel.border       = ggplot2::element_rect(fill = NA, color = "black", linewidth = 0.5),
       strip.text         = ggplot2::element_text(face = "bold", size = 10),
       axis.title         = ggplot2::element_text(face = "bold"),
       plot.title         = ggplot2::element_text(face = "bold", hjust = 0.5),
-      plot.subtitle      = ggplot2::element_text(
-        hjust = 0.5, color = "grey40", size = 9
-      ),
+      plot.subtitle      = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       axis.text.x        = ggplot2::element_text(angle = 30, hjust = 1),
       legend.position    = "bottom",
       legend.text        = ggplot2::element_text(size = 8)

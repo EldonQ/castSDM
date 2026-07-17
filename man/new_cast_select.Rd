@@ -4,21 +4,17 @@
 \alias{new_cast_select}
 \title{Create a cast_select Object}
 \usage{
-new_cast_select(selected, scores, roles, method = NULL, specification = NULL)
+new_cast_select(selected, scores, method = NULL, diagnostics = list())
 }
 \arguments{
 \item{selected}{Character vector of selected variable names.}
 
-\item{scores}{A \code{data.frame} with per-variable scores (RF importance and
-DAG Markov Blanket membership).}
-
-\item{roles}{A \code{data.frame} with columns \code{variable} and \code{role} indicating
-each variable's response-focused screening role: \code{"mb_direct"},
-\code{"mb_associated"}, \code{"importance_added"}, or \code{"importance_screened"}.}
+\item{scores}{A \code{data.frame} with per-variable scores (RF importance,
+stability, invariant score, correlation cluster).}
 
 \item{method}{Character screening-method identifier.}
 
-\item{specification}{Optional causal-role specification used by the screen.}
+\item{diagnostics}{Named list of method diagnostics.}
 }
 \value{
 A \code{cast_select} object.

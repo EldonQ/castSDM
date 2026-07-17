@@ -2,100 +2,67 @@
 % Please edit documentation in R/var-select.R
 \name{cast_select}
 \alias{cast_select}
-\title{Causal-Aware Variable Selection}
+\title{Select Variables for Species Distribution Models}
 \usage{
 cast_select(
-  dag = NULL,
   data,
   response = "presence",
-  method = c("causal_prior_rf", "invariant_screen", "rf", "mb_rf"),
+  method = c("stable", "stable_no_invariance", "rf"),
+  domains = NULL,
+  domain_method = c("spatial", "environment"),
+  n_domains = 4L,
   num_trees = 300L,
-  min_vars = 5L,
-  min_fraction = 0.3,
-  seed = NULL,
-  verbose = TRUE,
-  stability_reps = 0L,
-  stability_threshold = 0.6,
-  max_vars = NULL,
+  min_vars = 3L,
+  max_vars = 12L,
+  alpha = 0.05,
+  loss_tolerance = 0.02,
   cor_threshold = 0.8,
-  max_per_cluster = 1L,
-  score_threshold = NULL,
-  block_var = NULL,
-  n_blocks = 5L,
-  causal_spec = NULL,
-  prior_max_vars = 12L,
-  prior_num_trees = 100L
+  seed = NULL,
+  verbose = TRUE
 )
 }
 \arguments{
-\item{dag}{An optional \link{cast_dag} object. It is not required by
-\code{"causal_prior_rf"}.}
+\item{data}{Data frame with response, coordinates, and predictors.}
 
-\item{data}{A \code{data.frame} with species occurrence and environmental
-variables.}
+\item{response}{Binary response column.}
 
-\item{response}{Character. Name of the response column. Default
-\code{"presence"}.}
+\item{method}{\code{"stable"} (default), \code{"stable_no_invariance"} (ablation),
+or conventional \code{"rf"}.}
 
-\item{method}{Character. \code{"causal_prior_rf"} (default),
-\code{"invariant_screen"}, \code{"rf"}, or legacy \code{"mb_rf"}.}
+\item{domains}{Optional precomputed domain factor. It must have one value per
+row and should be constructed from training data only.}
 
-\item{num_trees}{Integer. Number of trees for the RF importance step.}
+\item{domain_method}{\code{"spatial"} or \code{"environment"}.}
 
-\item{min_vars}{Integer. Minimum variables to retain.}
+\item{n_domains}{Requested number of domains.}
 
-\item{min_fraction}{Numeric in \verb{[0, 1]}. Minimum fraction of candidate
-variables for the legacy \code{"mb_rf"} path.}
+\item{num_trees}{Number of RF trees used for shortlisting/ranking.}
 
-\item{seed}{Integer or \code{NULL}. Random seed.}
+\item{min_vars}{Minimum retained variables.}
 
-\item{verbose}{Logical. Print progress.}
+\item{max_vars}{Maximum stable-selector shortlist size or RF output size.}
 
-\item{stability_reps}{Integer. Bootstrap repetitions for lightweight
-selection stability diagnostics.}
+\item{alpha}{Significance threshold for invariance tests.}
 
-\item{stability_threshold}{Numeric in \verb{[0, 1]}. Minimum bootstrap
-selection frequency.}
+\item{loss_tolerance}{Maximum allowed increase in leave-domain-out log-loss
+during greedy removal.}
 
-\item{max_vars}{Optional integer safety ceiling for variables retained by
-\code{"invariant_screen"} and \code{"rf"}. Default \code{NULL} means no fixed cap; the
-number of selected variables is determined by the adaptive score break and
-redundancy control.}
+\item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
 
-\item{cor_threshold}{Numeric. Absolute correlation above which predictors
-are treated as redundant proxies.}
+\item{seed}{Random seed.}
 
-\item{max_per_cluster}{Integer. Maximum selected variables allowed from one
-correlation cluster.}
-
-\item{score_threshold}{Optional numeric threshold on the invariant score.
-Default \code{NULL} estimates an adaptive threshold from the largest score gap
-after \code{min_vars}.}
-
-\item{block_var}{Optional column name defining spatial/environmental
-blocks. If \code{NULL}, blocks are built from \code{lon}/\code{lat} quantiles when
-available.}
-
-\item{n_blocks}{Integer target number of blocks when \code{block_var = NULL}.}
-
-\item{causal_spec}{A causal-role specification created by
-\code{\link[=cast_causal_spec]{cast_causal_spec()}}, a CSV path, or \code{NULL} to use the validated habitat
-template. Used only by \code{"causal_prior_rf"}.}
-
-\item{prior_max_vars}{Maximum causal-core size for \code{"causal_prior_rf"}.}
-
-\item{prior_num_trees}{Number of trees in its shallow RF ranking.}
+\item{verbose}{Print progress.}
 }
 \value{
-A \code{cast_select} object with \code{selected}, \code{scores}, and \code{roles}.
+A \code{cast_select} object.
 }
 \description{
-Selects predictor variables with a response-focused causal screening
-workflow. The default \code{"causal_prior_rf"} method constrains a shallow RF,
-invariance and conditional-evidence ranking to variables declared eligible
-by an auditable causal-role specification. Data-only invariant and RF paths
-remain available as ablations; \code{"mb_rf"} is retained for compatibility.
+\code{method = "stable"} is the CAST selector. It combines a fast response-aware
+shortlist with a cross-environment conditional-invariance test and a greedy
+minimum-set search. \code{method = "rf"} is retained as a conventional benchmark.
 }
-\seealso{
-\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_fit]{cast_fit()}}
+\details{
+The stable selector is causal-inspired: it tests whether the response still
+depends on the data-derived environment after conditioning on a predictor
+set. It does not claim automatic identification of ecological causes.
 }

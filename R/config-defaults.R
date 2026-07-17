@@ -25,42 +25,13 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     parallel = TRUE,
     resume = TRUE,
 
-    # -- DAG --
-    dag_env_vars = NULL,
-    dag_R = 100L,
-    dag_structure_method = "mb_first",
-    dag_include_response = TRUE,
-    dag_response_as_sink = TRUE,
-    dag_pc_alpha = 0.05,
-    dag_pc_test = NULL,
-    dag_mb_method = "fast.iamb",
-    dag_mb_alpha = 0.05,
-    dag_algorithm = "hc",
-    dag_score = NULL,
-    dag_strength_threshold = 0.7,
-    dag_direction_threshold = 0.6,
-    dag_max_rows = 8000L,
-    dag_verbose = FALSE,
-    learn_shared_dag = FALSE,
-
     # -- Variable Selection --
-    select_method = "causal_prior_rf",
-    select_causal_spec = NULL,
-    select_prior_max_vars = 12L,
-    select_prior_num_trees = 100L,
-    select_min_vars = 5L,
-    select_min_fraction = 0,
-    select_max_vars = NULL,
+    select_method = "stable",
+    select_min_vars = 3L,
+    select_max_vars = 12L,
     select_cor_threshold = 0.8,
     select_num_trees = 300L,
-    select_stability_reps = 0L,
-    select_stability_threshold = 0.6,
     select_verbose = FALSE,
-
-    # -- Screen Refutation --
-    do_refute = FALSE,
-    refute_reps = 20L,
-    refute_num_trees = 100L,
 
     # -- Model Fitting --
     fit_rf_ntree = 300L,
@@ -75,15 +46,6 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cv_models = NULL,
     cv_parallel = FALSE,
     cv_verbose = FALSE,
-
-    # -- CATE (optional; requires grf) --
-    do_cate = FALSE,
-    cate_top_n = 3L,
-    cate_n_trees = 1000L,
-    cate_variables = NULL,
-    cate_verbose = FALSE,
-    cate_hss_model = "rf",
-    cate_hss_threshold = 0.1,
 
     # -- Prediction / Ensemble --
     do_predict = TRUE,
@@ -118,22 +80,16 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     cfg$output_dir <- "castSDM_disdat"
     cfg$models <- c("rf", "gam", "maxent", "brt")
     cfg$fig_dpi <- 300L
-    cfg$cate_n_trees <- 500L
-    cfg$learn_shared_dag <- FALSE
   } else if (identical(profile, "fish")) {
     cfg$output_dir <- "castSDM_fish"
     cfg$fig_dpi <- 1200L
-    cfg$select_min_fraction <- 0.5
     cfg$fit_rf_ntree <- 300L
   } else if (identical(profile, "debug")) {
     cfg$output_dir <- "castSDM_debug"
-    cfg$dag_max_rows <- 1500L
-    cfg$dag_R <- 20L
     cfg$select_num_trees <- 100L
     cfg$fit_rf_ntree <- 100L
     cfg$fit_brt_n_trees <- 150L
     cfg$do_cv <- FALSE
-    cfg$do_cate <- FALSE
     cfg$parallel <- FALSE
   }
 

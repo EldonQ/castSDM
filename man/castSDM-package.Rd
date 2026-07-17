@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Causal-Aware Species Distribution Modeling}
+\title{castSDM: Stable and Transferable Species Distribution Modeling}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Integrates auditable ecological role priors with fast causal-core covariate selection and species distribution modeling. The default selector ranks only predeclared direct candidates using shallow random-forest, invariance, conditional-association, and redundancy evidence, while retaining a complete exclusion audit. Data-only invariant, DAG, and Markov Blanket tools remain available as diagnostics and compatibility paths. Fits an ensemble of standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted ensemble prediction. Supports future climate projection via CMIP6 data and spatial cross-validation.
+Provides an end-to-end species distribution modeling workflow with causal-inspired cross-environment stable variable selection, nested spatial cross-validation, standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM), ensemble prediction, and future climate projection. The stability screen tests whether species responses remain conditionally invariant across data-derived environments. It supports transferable prediction but does not claim automatic discovery of ecological causes.
 }
 \seealso{
 Useful links:

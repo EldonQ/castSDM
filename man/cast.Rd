@@ -9,42 +9,17 @@ cast(
   env_data = NULL,
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
-  n_bootstrap = 100L,
-  dag_structure_method = "mb_first",
-  dag_include_response = TRUE,
-  dag_response_as_sink = TRUE,
-  dag_pc_alpha = 0.05,
-  dag_pc_test = NULL,
-  dag_mb_method = "fast.iamb",
-  dag_mb_alpha = 0.05,
-  dag_bidag_algorithm = "order",
-  dag_bidag_iterations = NULL,
-  strength_threshold = 0.7,
-  direction_threshold = 0.6,
-  select_min_vars = 5L,
-  select_min_fraction = 0,
-  select_stability_reps = 0L,
-  select_stability_threshold = 0.6,
-  select_method = "causal_prior_rf",
-  causal_spec = NULL,
-  select_prior_max_vars = 12L,
-  select_prior_num_trees = 100L,
-  select_max_vars = NULL,
+  select_min_vars = 3L,
+  select_method = "stable",
+  select_num_trees = 300L,
+  select_max_vars = 12L,
   select_cor_threshold = 0.8,
-  do_refute = FALSE,
-  refute_reps = 20L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
   do_predict = NULL,
   do_ensemble = TRUE,
   ensemble_method = "weighted",
-  do_cate = FALSE,
-  cate_top_n = 3L,
-  cate_n_trees = 1000L,
-  cate_variables = NULL,
-  blacklist = NULL,
-  whitelist = NULL,
   seed = NULL,
   verbose = TRUE
 )
@@ -62,68 +37,18 @@ the same environmental columns as \code{species_data}.}
 
 \item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
 
-\item{n_bootstrap}{Integer. Number of bootstrap replicates for DAG when
-\code{dag_structure_method = "bootstrap_hc"}. Default \code{100}.}
-
-\item{dag_structure_method}{Character passed to \code{\link[=cast_dag]{cast_dag()}} as
-\code{structure_method}. Default \code{"mb_first"}.}
-
-\item{dag_include_response}{Logical. Include response in DAG learning for
-Markov Blanket extraction. Default \code{TRUE}.}
-
-\item{dag_response_as_sink}{Logical. If \code{TRUE} (default), forbids
-\verb{presence -> environmental predictor} edges during DAG learning.}
-
-\item{dag_pc_alpha}{Significance level for PC.}
-
-\item{dag_pc_test}{Conditional-independence test for \code{\link[=cast_dag]{cast_dag()}}.
-Default \code{NULL} (auto-selects \code{"mi-cg"} for mixed data).}
-
-\item{dag_mb_method}{Character. MB discovery algorithm for
-\code{structure_method = "mb_first"}. Default \code{"fast.iamb"}.}
-
-\item{dag_mb_alpha}{Numeric. Significance level for MB discovery stage.
-Default \code{0.05}.}
-
-\item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG options.}
-
-\item{strength_threshold}{Numeric. Minimum edge strength. Default \code{0.7}.}
-
-\item{direction_threshold}{Numeric. Minimum direction consistency. Default
-\code{0.6}.}
-
-\item{select_min_vars}{Integer. Minimum retained variables. Default \code{5}.}
-
-\item{select_min_fraction}{Numeric. Minimum fraction of variables for the
-legacy \code{"mb_rf"} selector. Default \code{0}.}
-
-\item{select_stability_reps}{Integer. Bootstrap repetitions for selection
-stability. Default \code{0}.}
-
-\item{select_stability_threshold}{Numeric. Stability frequency threshold.
-Default \code{0.6}.}
+\item{select_min_vars}{Integer. Minimum retained variables. Default \code{3}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"causal_prior_rf"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"stable"}.}
 
-\item{causal_spec}{A causal-role data frame, CSV path, or \code{NULL} for the
-validated habitat template.}
+\item{select_num_trees}{Integer. Trees in the RF importance step.
+Default \code{300}.}
 
-\item{select_prior_max_vars}{Maximum causal-core size. Default \code{12}.}
-
-\item{select_prior_num_trees}{Trees in the shallow ranking RF. Default \code{100}.}
-
-\item{select_max_vars}{Optional integer safety ceiling for variables
-retained by the invariant screen. Default \code{NULL} uses adaptive selection
-without a fixed cap.}
+\item{select_max_vars}{Candidate ceiling. Default \code{12}.}
 
 \item{select_cor_threshold}{Numeric. Absolute correlation threshold for
 redundant-proxy control. Default \code{0.8}.}
-
-\item{do_refute}{Logical. Run optional screen refutation diagnostics.
-Default \code{FALSE} to keep routine selection fast.}
-
-\item{refute_reps}{Integer. Number of refutation repetitions.}
 
 \item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 
@@ -140,34 +65,20 @@ if \code{env_data} is provided.}
 \item{ensemble_method}{Character. Ensemble method: \code{"weighted"},
 \code{"best"}, \code{"equal"}. Default \code{"weighted"}.}
 
-\item{do_cate}{Logical. Estimate spatial CATE via causal forests.
-Default \code{FALSE}. Requires package \code{grf}.}
-
-\item{cate_top_n}{Integer. Top variables for CATE. Default \code{3}.}
-
-\item{cate_n_trees}{Integer. Number of causal forest trees. Default
-\code{1000}.}
-
-\item{cate_variables}{Character vector or \code{NULL}. Specific variables
-for CATE estimation. Default \code{NULL} (auto-select top variables).}
-
-\item{blacklist, whitelist}{DAG edge constraints. Default \code{NULL}.}
-
-\item{seed}{Integer or \code{NULL}. Random seed.}
+\item{seed}{Integer or \code{NULL}.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_result} object (S3 class) containing all pipeline outputs.
-Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, and \code{\link[=plot]{plot()}} for inspection.
+A \code{cast_result} object (S3 class) containing pipeline outputs.
+Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, \code{\link[=plot]{plot()}}.
 }
 \description{
 One-step pipeline that executes the entire workflow: data splitting,
-auditable causal-role screening, optional DAG learning, model fitting,
-spatial cross-validation,
-evaluation, ensemble prediction, and optionally CATE estimation.
+variable screening, model fitting, spatial cross-validation,
+evaluation, ensemble prediction, and future projection.
 }
 \seealso{
-\code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_ensemble]{cast_ensemble()}},
-\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_ensemble]{cast_ensemble()}},
+\code{\link[=cast_predict]{cast_predict()}}
 }

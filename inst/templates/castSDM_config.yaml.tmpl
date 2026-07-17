@@ -1,75 +1,24 @@
-# castSDM_config.yaml — template configuration for `cast_run_from_config()`
-#
-# Quick-start:
-#   1. Copy this file to your project and rename it (e.g. `my_run.yaml`)
-#   2. Fill in the data paths, models, and any optional pipeline settings
-#   3. Run:
-#        castSDM::cast_run_from_config("my_run.yaml")
-#
-# All paths are interpreted RELATIVE to the directory containing this file.
-# Anything left commented out keeps cast_batch()'s default.
-# ---------------------------------------------------------------------------
-
 run:
-  output_dir: "castSDM_output"
-  seed: 1234
+  output_dir: castSDM_output
+  seed: 42
   parallel: true
-  # Optional: per-Windows worker_budget — total cores split across species
-  # and intra-species fan-out (see ?cast_worker_budget).
-  worker_budget:
-    total_workers: 8         # null/omit → uses parallel::detectCores() - 1
-  # If true and output_dir already has finished species, skip them.
   resume: true
 
-# Per-species data CSVs. One key = one species; names are used as the
-# species id (figures, subdirectories, results).
-# Each CSV must contain at least: lon, lat, presence + environmental columns.
 species:
-  species_a:
-    file: "data/species_a.csv"
-  species_b:
-    file: "data/species_b.csv"
+  example_species:
+    file: data/example_species.csv
 
-# Optional shared environmental grid for spatial prediction (HSS maps).
-# Leave commented to skip prediction.
+# Optional shared prediction grid:
 # env_data:
-#   file: "data/env_grid.csv"
+#   file: data/environment_grid.csv
 
-# Models to fit per species. Supported: rf, brt, maxent, gam.
-# Use cast_esm() separately for rare species with low presence counts.
 models: [rf, brt, maxent, gam]
 
-# ---------- Pipeline configuration --------------------------------------
-# Any key under `cast_batch_args` is forwarded as a named argument to
-# cast_batch(). See ?cast_batch for the full catalogue.
 cast_batch_args:
-  train_fraction: 0.7
-  fig_dpi: 300
+  select_method: stable
+  select_min_vars: 3
+  select_max_vars: 12
+  select_num_trees: 300
   do_cv: true
   cv_k: 5
   cv_block_method: grid
-  dag_R: 100
-  dag_structure_method: mb_first  # pc | bootstrap_hc | mb_first | bidag_bge
-  dag_response_as_sink: true
-  # dag_mb_method: fast.iamb     # MB discovery (mb_first only): fast.iamb | iamb | inter.iamb | gs
-  # dag_mb_alpha: 0.05           # significance for MB discovery phase
-  dag_strength_threshold: 0.7
-  dag_direction_threshold: 0.6
-  select_min_vars: 5
-  select_min_fraction: 0.3
-  select_stability_reps: 0       # set 10-30 for stability-audited screening
-  select_stability_threshold: 0.6
-  do_refute: false
-  refute_reps: 20
-  refute_num_trees: 100
-  do_predict: true
-  do_ensemble: true
-  ensemble_method: weighted       # weighted | best | equal
-  # Raster-native workflows are optional; pass SpatRaster objects from R when
-  # calling cast_batch() directly.
-  # ── CATE (optional; requires grf) ──
-  # do_cate: false
-  # cate_top_n: 3
-  # cate_n_trees: 1000
-  # cate_hss_model: rf
-  # cate_hss_threshold: 0.1

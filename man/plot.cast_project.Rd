@@ -16,7 +16,7 @@
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object or patchwork composite.
+A \code{ggplot} object.
 }
 \description{
 Plot Future Climate Projection

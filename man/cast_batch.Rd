@@ -15,51 +15,20 @@ cast_batch(
   seed = NULL,
   verbose = TRUE,
   fit_verbose = FALSE,
-  dag_R = 100L,
-  dag_structure_method = "mb_first",
-  dag_include_response = TRUE,
-  dag_response_as_sink = TRUE,
-  dag_pc_alpha = 0.05,
-  dag_pc_test = NULL,
-  dag_mb_method = "fast.iamb",
-  dag_mb_alpha = 0.05,
-  dag_bidag_algorithm = "order",
-  dag_bidag_iterations = NULL,
-  dag_algorithm = "hc",
-  dag_score = NULL,
-  dag_strength_threshold = 0.7,
-  dag_direction_threshold = 0.6,
-  dag_max_rows = 8000L,
-  select_min_vars = 5L,
-  select_min_fraction = 0,
+  select_min_vars = 3L,
   select_num_trees = 300L,
-  select_stability_reps = 0L,
-  select_stability_threshold = 0.6,
-  select_method = "causal_prior_rf",
-  select_causal_spec = NULL,
-  select_prior_max_vars = 12L,
-  select_prior_num_trees = 100L,
-  select_max_vars = NULL,
+  select_method = "stable",
+  select_max_vars = 12L,
   select_cor_threshold = 0.8,
-  do_refute = FALSE,
-  refute_reps = 10L,
-  refute_num_trees = 80L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
-  do_cate = FALSE,
-  cate_top_n = 3L,
-  cate_n_trees = 1000L,
-  cate_hss_model = "rf",
-  cate_hss_threshold = 0.1,
   do_predict = TRUE,
   do_ensemble = TRUE,
   ensemble_method = "weighted",
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
-  dag_env_vars = NULL,
-  dag_verbose = FALSE,
   select_verbose = FALSE,
   cv_models = NULL,
   cv_rf_ntree = 300L,
@@ -68,15 +37,9 @@ cast_batch(
   cv_verbose = FALSE,
   predict_models = NULL,
   plot_basemap = "world",
-  cate_variables = NULL,
-  cate_verbose = FALSE,
-  cate_point_size = 0.45,
   eval_response = NULL,
   var_labels = NULL,
   dev_package_root = NULL,
-  learn_shared_dag = FALSE,
-  shared_dag = NULL,
-  shared_dag_data = NULL,
   raster_stack = NULL,
   future_rasters = NULL,
   raster_mask = NULL,
@@ -106,70 +69,17 @@ cast_batch(
 
 \item{fit_verbose}{Logical. Default \code{FALSE}.}
 
-\item{dag_R}{Integer. Bootstrap replicates. Default \code{100}.}
-
-\item{dag_structure_method}{Character. Default \code{"mb_first"}.}
-
-\item{dag_include_response}{Logical. Default \code{TRUE}.}
-
-\item{dag_response_as_sink}{Logical. If \code{TRUE} (default), forbids response
-to environmental predictor edges.}
-
-\item{dag_pc_alpha}{Numeric. Default \code{0.05}.}
-
-\item{dag_pc_test}{Character or \code{NULL}. Default \code{NULL}.}
-
-\item{dag_mb_method}{Character. MB discovery algorithm. Default \code{"fast.iamb"}.}
-
-\item{dag_mb_alpha}{Numeric. MB discovery significance. Default \code{0.05}.}
-
-\item{dag_bidag_algorithm, dag_bidag_iterations}{BiDAG controls.}
-
-\item{dag_algorithm}{Character. Default \code{"hc"}.}
-
-\item{dag_score}{Character or \code{NULL}. Default \code{NULL}.}
-
-\item{dag_strength_threshold}{Numeric. Default \code{0.7}.}
-
-\item{dag_direction_threshold}{Numeric. Default \code{0.6}.}
-
-\item{dag_max_rows}{Integer. Default \code{8000}.}
-
-\item{select_min_vars}{Integer. Default \code{5}.}
-
-\item{select_min_fraction}{Numeric. Minimum fraction for legacy
-\code{"mb_rf"} screening. Default \code{0}.}
+\item{select_min_vars}{Integer. Default \code{3}.}
 
 \item{select_num_trees}{Integer. Default \code{300}.}
 
-\item{select_stability_reps}{Integer. Bootstrap repetitions for lightweight
-selection stability diagnostics. Default \code{0}.}
-
-\item{select_stability_threshold}{Numeric. Stability frequency threshold.
-Default \code{0.6}.}
-
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"causal_prior_rf"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"stable"}.}
 
-\item{select_causal_spec}{A causal-role data frame, CSV path, or \code{NULL}.}
-
-\item{select_prior_max_vars, select_prior_num_trees}{Controls for the
-role-constrained selector.}
-
-\item{select_max_vars}{Optional integer safety ceiling for variables
-retained by the invariant screen. Default \code{NULL} uses adaptive selection
-without a fixed cap.}
+\item{select_max_vars}{Candidate ceiling. Default \code{12}.}
 
 \item{select_cor_threshold}{Numeric. Redundant-proxy correlation threshold.
 Default \code{0.8}.}
-
-\item{do_refute}{Logical. Run optional screen refutation diagnostics.
-Default \code{FALSE}.}
-
-\item{refute_reps}{Integer. Refutation repetitions. Default \code{10}.}
-
-\item{refute_num_trees}{Integer. Trees used by refutation RF screens.
-Default \code{80}.}
 
 \item{do_cv}{Logical. Default \code{TRUE}.}
 
@@ -177,34 +87,20 @@ Default \code{80}.}
 
 \item{cv_block_method}{Character. Default \code{"grid"}.}
 
-\item{do_cate}{Logical. Estimate spatial CATE. Default \code{FALSE}.}
+\item{do_predict}{Logical. Default \code{TRUE}.}
 
-\item{cate_top_n}{Integer. Default \code{3}.}
+\item{do_ensemble}{Logical. Default \code{TRUE}.}
 
-\item{cate_n_trees}{Integer. Default \code{1000}.}
-
-\item{cate_hss_model, cate_hss_threshold}{CATE masking. Defaults \code{"rf"},
-\code{0.1}.}
-
-\item{do_predict}{Logical. Generate spatial predictions when \code{env_data} is
-provided. Default \code{TRUE}.}
-
-\item{do_ensemble}{Logical. Generate ensemble predictions when CV and
-predictions are available. Default \code{TRUE}.}
-
-\item{ensemble_method}{Character. Ensemble method passed to
-\code{\link[=cast_ensemble]{cast_ensemble()}}. One of \code{"weighted"}, \code{"best"}, or \code{"equal"}.
+\item{ensemble_method}{Character. \code{"weighted"}, \code{"best"}, or \code{"equal"}.
 Default \code{"weighted"}.}
 
 \item{response}{Character. Default \code{"presence"}.}
 
 \item{prepare_env_vars, prepare_verbose}{Passed to \code{\link[=cast_prepare]{cast_prepare()}}.}
 
-\item{dag_env_vars, dag_verbose}{Passed to \code{\link[=cast_dag]{cast_dag()}}.}
-
 \item{select_verbose}{Passed to \code{\link[=cast_select]{cast_select()}}. Default \code{FALSE}.}
 
-\item{cv_models}{Character or \code{NULL}. Models for CV.}
+\item{cv_models}{Character or \code{NULL}.}
 
 \item{cv_rf_ntree, cv_brt_n_trees, cv_parallel, cv_verbose}{CV controls.}
 
@@ -212,31 +108,21 @@ Default \code{"weighted"}.}
 
 \item{plot_basemap}{Character. Default \code{"world"}.}
 
-\item{cate_variables, cate_verbose}{Passed to \code{\link[=cast_cate]{cast_cate()}}.}
-
-\item{cate_point_size}{Numeric. Default \code{0.45}.}
-
 \item{eval_response}{Character or \code{NULL}.}
 
 \item{var_labels}{Named character vector or \code{NULL}.}
 
 \item{dev_package_root}{Character or \code{NULL}.}
 
-\item{learn_shared_dag}{Logical. Default \code{FALSE}.}
-
-\item{shared_dag}{Optional precomputed \link{cast_dag}.}
-
-\item{shared_dag_data}{Optional \code{data.frame}.}
-
 \item{raster_stack}{Optional \code{terra::SpatRaster} for raster-based
-ensemble prediction via \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}. Default \code{NULL}.}
+ensemble prediction via \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}.}
 
 \item{future_rasters}{Optional named list of \code{terra::SpatRaster} stacks
-for future projection via \code{\link[=cast_project_raster]{cast_project_raster()}}. Default \code{NULL}.}
+for future projection via \code{\link[=cast_project_raster]{cast_project_raster()}}.}
 
 \item{raster_mask}{Optional \code{terra::SpatRaster} prediction mask.}
 
-\item{raster_compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
+\item{raster_compression}{Character. Default \code{"LZW"}.}
 
 \item{overwrite_rasters}{Logical. Default \code{FALSE}.}
 
@@ -251,6 +137,5 @@ species, optionally in parallel. Results (RDS + diagnostic figures) are
 saved to separate subdirectories per species.
 }
 \seealso{
-\code{\link[=cast]{cast()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_dag]{cast_dag()}}, \code{\link[=cast_select]{cast_select()}},
-\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_cate]{cast_cate()}}
+\code{\link[=cast]{cast()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_cv]{cast_cv()}}
 }

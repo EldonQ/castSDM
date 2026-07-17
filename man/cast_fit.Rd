@@ -7,7 +7,6 @@
 cast_fit(
   data,
   screen = NULL,
-  dag = NULL,
   models = c("rf", "brt", "maxent", "gam"),
   response = "presence",
   rf_ntree = 300L,
@@ -21,8 +20,6 @@ cast_fit(
 \item{data}{A \code{data.frame} with \code{presence} column and predictor variables.}
 
 \item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
-
-\item{dag}{A \link{cast_dag} object, or \code{NULL}.}
 
 \item{models}{Character vector. Models to fit: \code{"rf"}, \code{"maxent"}, \code{"brt"},
 \code{"gam"}. Default \code{c("rf", "brt", "maxent", "gam")}.}
@@ -50,7 +47,7 @@ Generalised Additive Models (GAM).
 \details{
 Variable selection is driven by the \code{cast_select} object from
 \code{\link[=cast_select]{cast_select()}}. If no screen is provided, all environmental variables
-from the DAG (or data) are used.
+detected in \code{data} are used.
 \subsection{Supported Models}{
 \itemize{
 \item \strong{RF}: \code{\link[ranger:ranger]{ranger::ranger()}} with probability output.

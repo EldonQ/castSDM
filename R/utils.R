@@ -105,34 +105,6 @@ normalize01 <- function(x) {
 }
 
 
-#' Compute Out-degree and In-degree from DAG Edges
-#'
-#' @param edges A `data.frame` with columns `from` and `to`.
-#' @param variables Character vector of variable names.
-#' @return A `data.frame` with columns `variable`, `out_degree`, `in_degree`.
-#' @keywords internal
-#' @noRd
-compute_edge_degrees <- function(edges, variables) {
-  if (nrow(edges) > 0) {
-    out_agg <- stats::aggregate(to ~ from, data = edges, FUN = length)
-    names(out_agg) <- c("variable", "out_degree")
-    in_agg <- stats::aggregate(from ~ to, data = edges, FUN = length)
-    names(in_agg) <- c("variable", "in_degree")
-  } else {
-    out_agg <- data.frame(variable = character(0), out_degree = integer(0),
-                          stringsAsFactors = FALSE)
-    in_agg <- data.frame(variable = character(0), in_degree = integer(0),
-                         stringsAsFactors = FALSE)
-  }
-  df <- data.frame(variable = variables, stringsAsFactors = FALSE)
-  df <- merge(df, out_agg, by = "variable", all.x = TRUE)
-  df <- merge(df, in_agg, by = "variable", all.x = TRUE)
-  df$out_degree[is.na(df$out_degree)] <- 0
-  df$in_degree[is.na(df$in_degree)] <- 0
-  df
-}
-
-
 #' Full Model Evaluation: AUC, TSS, CBI
 #'
 #' @param pred Numeric vector of predicted probabilities [0,1].

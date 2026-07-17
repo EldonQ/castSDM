@@ -1,102 +1,31 @@
-# castSDM 0.4.0
+# castSDM 0.6.0
 
-* `cast_select()` now defaults to the frozen `causal_prior_rf` selector. It
-  applies RF, invariance and conditional-evidence ranking only inside an
-  explicitly eligible ecological role set and returns a full audit.
-* Added `cast_causal_spec()` for conservative habitat-role defaults and
-  reviewer-visible species-specific overrides.
-* `cast()` and `cast_batch()` skip DAG learning under the new default, reducing
-  routine screening cost. DAG/MB and data-only invariant screens remain
-  available as optional diagnostics or compatibility paths.
-* Screen refutation is now opt-in because it repeats selection and is not part
-  of the validated default timing claim.
+## New core
 
-# castSDM 0.3.0
+* Added `cast_domains()` for data-derived spatial or environmental domains.
+* Added `cast_select(method = "stable")`, the causal-inspired CAST selector.
+  It combines response-aware shortlisting, binomial-GLM invariance tests, and
+  a greedy minimum stable-set search.
+* Added `stable_no_invariance` as an explicit ablation for validation.
+* `cast_cv()` now re-runs selection inside every outer training fold and stores
+  fold-specific selections, preventing feature-selection leakage.
 
-## Current development update
+## Simplification
 
-* `cast_select()` now defaults to `method = "invariant_screen"`, a fast
-  causal-aware selector based on RF importance, bootstrap stability,
-  spatial-block effect-direction consistency, and correlation-cluster
-  redundancy control.
-* The legacy Markov Blanket + RF selector remains available as
-  `method = "mb_rf"` for audit and comparison, but dense MB outputs are no
-  longer treated as successful causal variable selection.
-* New default screening roles are `invariant_driver`, `stable_predictive`,
-  `predictive_rescue`, and `redundant_proxy`.
-* `cast()` and `cast_batch()` expose selector controls:
-  `select_method`, optional `select_max_vars`, and `select_cor_threshold`.
-  By default, invariant screening uses an adaptive score break rather than a
-  fixed selected-variable count.
+* Removed DAG learning, Markov-blanket selection, causal role specifications,
+  refutation utilities, CATE, and their plotting/classes/dependencies.
+* Removed causal-role labels from selection outputs. Stable variables are
+  candidates for transferable prediction, not automatically identified causes.
+* Default selection in `cast()`, `cast_batch()`, and configuration profiles is
+  now `stable` with a 12-variable shortlist ceiling.
 
-## Focus
+## Existing workflow
 
-This release frames castSDM as a causal-aware SDM toolkit focused on
-spatially invariant response-focused screening, standard multi-algorithm SDM
-ensembles, spatial validation, and future projection.
+* Retains data preparation, background sampling, RF/BRT/MaxEnt/GAM and ESM,
+  tiled raster prediction, ensembles, CMIP6 projection, batch checkpointing,
+  YAML configuration, and plotting.
 
-## Breaking changes
+# castSDM 0.2.0--0.5.1
 
-* Removed the previous ATE, neural-network, feature-engineering, E-value, and
-  NOTEARS components from the active workflow.
-* Replaced the older adaptive screening path with `cast_select()`.
-* Removed old role terminology from new outputs. New runs report screening
-  roles rather than parent/child causal labels.
-
-## New and changed
-
-* `cast_dag()` now supports `response_as_sink = TRUE` by default, forbidding
-  directed `presence -> environmental predictor` edges.
-* `cast_select(method = "mb_rf")` keeps the response-focused Markov Blanket +
-  RF permutation importance workflow as a legacy comparator.
-* New screening roles:
-  * `mb_direct`
-  * `mb_associated`
-  * `importance_added`
-  * `importance_screened`
-* Default DAG structure learning is `mb_first`, a two-stage Markov Blanket
-  discovery plus local PC workflow.
-* `cast_cate()` uses the same response-focused MB definition as
-  `cast_select()` when a `cast_dag` object is supplied.
-* `cast_ensemble()` supports weighted, best-model, and equal-weight ensemble
-  prediction.
-* `cast_project()` supports future climate range projection with
-  gain/loss/stable change maps and centroid shift statistics.
-* `cast_batch()` exposes prediction and ensemble controls aligned with
-  `cast()`: `do_predict`, `do_ensemble`, and `ensemble_method`.
-* Raster-native helpers were added for background sampling, bioclim loading,
-  ensemble prediction, and future projection.
-
-## Interpretation
-
-castSDM outputs should be read as data-informed screening structures, not as
-confirmed ecological causal mechanisms. The package is intended to make
-predictor screening explicit, sparse, reproducible, and easier to audit across
-single-species and multi-species SDM workflows.
-
-# castSDM 0.2.0
-
-## Windows platform improvements
-
-* Tile-based raster prediction keeps peak RAM bounded on large rasters.
-* Multi-layer worker budgeting distributes cores across species and
-  intra-species work on Windows PSOCK clusters.
-* Checkpoint and crash-safe resume support per-species recovery.
-* YAML config-driven workflows support reproducible batch runs.
-* GAM and Ensemble of Small Models support were added.
-* Resource profiling vignette was added.
-
-## Data
-
-* Bundled species datasets and `china_env_grid` were added for examples and
-  spatial prediction.
-
-# castSDM 0.1.0
-
-## Initial features
-
-* Core modular SDM pipeline with DAG learning, screening, fitting,
-  evaluation, prediction, CATE surfaces, spatial CV, and batch workflows.
-* S3 classes with `print()`, `summary()`, and `plot()` methods.
-* VIF-based collinearity screening.
-* Four DAG structure-learning routes available at the time.
+Earlier experimental releases explored DAG, role-prior, CATE, and RF-only
+screening designs. These interfaces are retired in 0.6.0.

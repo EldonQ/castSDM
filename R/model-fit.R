@@ -6,11 +6,10 @@
 #'
 #' Variable selection is driven by the `cast_select` object from
 #' [cast_select()]. If no screen is provided, all environmental variables
-#' from the DAG (or data) are used.
+#' detected in `data` are used.
 #'
 #' @param data A `data.frame` with `presence` column and predictor variables.
 #' @param screen A `cast_select` object from [cast_select()], or `NULL`.
-#' @param dag A [cast_dag] object, or `NULL`.
 #' @param models Character vector. Models to fit: `"rf"`, `"maxent"`, `"brt"`,
 #'   `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param response Character. Response column name. Default `"presence"`.
@@ -34,7 +33,6 @@
 #' @export
 cast_fit <- function(data,
                      screen       = NULL,
-                     dag          = NULL,
                      models       = c("rf", "brt", "maxent", "gam"),
                      response     = "presence",
                      rf_ntree     = 300L,
@@ -54,8 +52,6 @@ cast_fit <- function(data,
   # ---- Determine variables ------------------------------------------------
   env_vars <- if (!is.null(screen)) {
     screen$selected
-  } else if (!is.null(dag)) {
-    setdiff(dag$nodes, c(response, "lon", "lat"))
   } else {
     get_env_vars(data, response)
   }
@@ -89,7 +85,6 @@ cast_fit <- function(data,
     cast_vars = cast_vars,
     env_vars  = env_vars,
     scaling   = list(means = X_means, sds = X_sds),
-    dag       = dag,
     screen    = screen
   )
 }

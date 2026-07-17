@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
-Title: Causal-Aware Species Distribution Modeling
-Version: 0.4.0
+Title: Stable and Transferable Species Distribution Modeling
+Version: 0.6.0
 Author: Liqiang Q [aut, cre, cph] (ORCID: <https://orcid.org/0009-0002-6966-4633>)
 Maintainer: Liqiang Q <2759831686@qq.com>
 Authors@R: c(
@@ -12,55 +12,41 @@ Authors@R: c(
       comment = c(ORCID = "0009-0002-6966-4633")
     )
   )
-Description: Integrates auditable ecological role priors with fast
-    causal-core covariate selection and species distribution modeling. The
-    default selector ranks only predeclared direct candidates using shallow
-    random-forest, invariance, conditional-association, and redundancy evidence,
-    while retaining a complete exclusion audit. Data-only invariant, DAG, and
-    Markov Blanket tools remain available as diagnostics and compatibility
-    paths. Fits an ensemble of standard
-    SDM algorithms (Random Forest, BRT, MaxEnt, GAM) with performance-weighted
-    ensemble prediction. Supports future climate projection via CMIP6 data
-    and spatial cross-validation.
+Description: Provides an end-to-end species distribution modeling workflow
+    with causal-inspired cross-environment stable variable selection, nested
+    spatial cross-validation, standard SDM algorithms (Random Forest, BRT,
+    MaxEnt, GAM), ensemble prediction, and future climate projection. The
+    stability screen tests whether species responses remain conditionally
+    invariant across data-derived environments. It supports transferable
+    prediction but does not claim automatic discovery of ecological causes.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
 BugReports: https://github.com/EldonQ/castSDM/issues
 Encoding: UTF-8
-LazyData: true
-LazyDataCompression: xz
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Depends:
     R (>= 4.1.0)
 Imports:
-    cli,
-    grid
+    cli
 Suggests:
-    BiDAG,
-    bnlearn,
     car,
     future,
     future.apply,
     gbm,
     ggplot2,
-    ggraph,
-    grf,
-    igraph,
-    knitr,
+    glmnet,
     maxnet,
     mgcv,
     patchwork,
     peakRAM,
     pkgload,
-    pcalg,
     pROC,
     ragg,
     ranger,
-    rmarkdown,
     sf,
     terra,
     testthat (>= 3.0.0),
     viridisLite,
     yaml
 Config/testthat/edition: 3
-VignetteBuilder: knitr

@@ -1,25 +1,4 @@
-# Summary Methods --------------------------------------------------------------
-
-#' @export
-summary.cast_dag <- function(object, ...) {
-  cli::cli_h1("castSDM DAG Summary")
-  cli::cli_ul(c(
-    "Nodes: {length(object$nodes)}",
-    "Edges: {nrow(object$edges)}",
-    if (!is.null(object$response_node))
-      "Response node: {object$response_node}" else NULL,
-    "Structure method: {object$structure_method %||% 'pc'}",
-    "Bootstrap R: {object$boot_R}",
-    "Strength threshold: {object$strength_threshold}",
-    "Direction threshold: {object$direction_threshold}"
-  ))
-  if (nrow(object$edges) > 0) {
-    cli::cli_h2("Top edges by strength")
-    top <- object$edges[order(-object$edges$strength), ]
-    print(utils::head(top, 10))
-  }
-  invisible(object)
-}
+# Summary Methods -----------------------------------------------------------
 
 #' @export
 summary.cast_eval <- function(object, ...) {
@@ -35,25 +14,15 @@ summary.cast_eval <- function(object, ...) {
 #' @export
 summary.cast_result <- function(object, ...) {
   cli::cli_h1("castSDM Pipeline Result Summary")
-  if (is.null(object$dag)) {
-    cli::cli_h2("Causal specification")
-    cli::cli_text("DAG not run; eligibility was defined by the reviewed role specification.")
-  } else {
-    cli::cli_h2("DAG")
-    cli::cli_ul(c(
-      "Nodes: {length(object$dag$nodes)} | Edges: {nrow(object$dag$edges)}",
-      if (!is.null(object$dag$response_node))
-        "Response node: {object$dag$response_node}" else NULL
-    ))
-  }
   cli::cli_h2("Variable Selection")
   cli::cli_ul(c(
     "Selected: {length(object$screen$selected)} variables",
     "{paste(object$screen$selected, collapse = ', ')}"
   ))
-  if (!is.null(object$screen$roles) && nrow(object$screen$roles) > 0) {
-    role_tbl <- table(object$screen$roles$role)
-    cli::cli_text("Roles: {paste(names(role_tbl), role_tbl, sep = '=', collapse = ', ')}")
+  if (!is.null(object$screen$diagnostics$invariance_pass)) {
+    cli::cli_text(
+      "Cross-environment invariance: {object$screen$diagnostics$invariance_pass}"
+    )
   }
   cli::cli_h2("Models")
   if (!is.null(object$eval)) {

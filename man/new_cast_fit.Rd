@@ -4,7 +4,7 @@
 \alias{new_cast_fit}
 \title{Create a cast_fit Object}
 \usage{
-new_cast_fit(models, cast_vars, env_vars, scaling, dag = NULL, screen = NULL)
+new_cast_fit(models, cast_vars, env_vars, scaling, screen = NULL)
 }
 \arguments{
 \item{models}{Named list of fitted model objects.}
@@ -14,8 +14,6 @@ new_cast_fit(models, cast_vars, env_vars, scaling, dag = NULL, screen = NULL)
 \item{env_vars}{Character vector of all environmental variable names.}
 
 \item{scaling}{List with \code{means} and \code{sds} used for standardization.}
-
-\item{dag}{A \code{cast_dag} object (or \code{NULL}).}
 
 \item{screen}{A \code{cast_select} object (or \code{NULL}).}
 }

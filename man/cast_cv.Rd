@@ -2,12 +2,13 @@
 % Please edit documentation in R/spatial-cv.R
 \name{cast_cv}
 \alias{cast_cv}
-\title{Spatial K-Fold Cross-Validation for SDMs}
+\title{Nested Spatial Cross-Validation for SDMs}
 \usage{
 cast_cv(
   data,
   screen = NULL,
-  dag = NULL,
+  select_method = "stable",
+  select_args = list(),
   k = 5L,
   models = c("rf"),
   block_method = c("grid", "cluster"),
@@ -20,60 +21,38 @@ cast_cv(
 )
 }
 \arguments{
-\item{data}{A \code{data.frame} with \code{lon}, \code{lat}, \code{presence} columns and
-environmental variables.}
+\item{data}{Data frame with \code{lon}, \code{lat}, binary response, and predictors.}
 
-\item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
+\item{screen}{Optional final-data screen. It is used only when
+\code{select_method = NULL}; it is never re-used as a nested screen.}
 
-\item{dag}{A \link{cast_dag} object, or \code{NULL}.}
+\item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
+\code{"stable"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
-\item{k}{Integer. Number of spatial folds. Default \code{5}.}
+\item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.}
 
-\item{models}{Character vector. Models to cross-validate: \code{"rf"}, \code{"brt"},
-\code{"maxent"}, \code{"gam"}. Default \code{c("rf")}.}
+\item{k}{Number of outer spatial folds.}
 
-\item{block_method}{Character. How to create spatial blocks:
-\describe{
-\item{\code{"grid"}}{(Default) Divide bounding box into a grid and
-round-robin assign cells to folds.}
-\item{\code{"cluster"}}{k-means clustering on lon/lat.}
-}}
+\item{models}{Models passed to \code{\link[=cast_fit]{cast_fit()}}.}
 
-\item{response}{Character. Response column. Default \code{"presence"}.}
+\item{block_method}{\code{"grid"} or \code{"cluster"}.}
 
-\item{rf_ntree}{Integer. RF trees per fold. Default \code{300}.}
+\item{response}{Binary response column.}
 
-\item{brt_n_trees}{Integer. BRT iterations per fold. Default \code{500}.}
+\item{rf_ntree}{RF trees per fold.}
 
-\item{parallel}{Logical. Run folds in parallel via \pkg{future.apply}.
-Default \code{FALSE}.}
+\item{brt_n_trees}{BRT iterations per fold.}
 
-\item{seed}{Integer or \code{NULL}. Base random seed.}
+\item{parallel}{Run folds with \code{future.apply}.}
 
-\item{verbose}{Logical. Print fold progress. Default \code{TRUE}.}
+\item{seed}{Random seed.}
+
+\item{verbose}{Print progress.}
 }
 \value{
-A \code{cast_cv} object with components:
-\describe{
-\item{\code{metrics}}{\code{data.frame} -- per-model mean +/- SD.}
-\item{\code{fold_metrics}}{\code{data.frame} -- per-fold per-model raw metrics.}
-\item{\code{folds}}{Integer vector -- fold assignment for each row.}
-\item{\code{k}}{Number of folds used.}
-\item{\code{block_method}}{Blocking method used.}
-\item{\code{thresholds}}{Named numeric -- optimal TSS threshold per model.}
-}
+A \code{cast_cv} object including fold-level selections.
 }
 \description{
-Evaluates fitted models using spatially blocked k-fold cross-validation.
-Unlike random splitting, spatial blocks ensure test folds are geographically
-separated from training folds, providing honest estimates of model
-transferability.
-}
-\references{
-Roberts, D.R. et al. (2017). Cross-validation strategies for data with
-temporal, spatial, hierarchical, or phylogenetic structure.
-\emph{Ecography}, 40(8), 913-929.
-}
-\seealso{
-\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}
+Variable selection is re-fitted inside every outer training fold. This
+prevents the held-out fold from influencing predictor choice.
 }

@@ -1,311 +1,202 @@
-#' Spatial K-Fold Cross-Validation for SDMs
+#' Nested Spatial Cross-Validation for SDMs
 #'
-#' Evaluates fitted models using spatially blocked k-fold cross-validation.
-#' Unlike random splitting, spatial blocks ensure test folds are geographically
-#' separated from training folds, providing honest estimates of model
-#' transferability.
+#' Variable selection is re-fitted inside every outer training fold. This
+#' prevents the held-out fold from influencing predictor choice.
 #'
-#' @param data A `data.frame` with `lon`, `lat`, `presence` columns and
-#'   environmental variables.
-#' @param screen A `cast_select` object from [cast_select()], or `NULL`.
-#' @param dag A [cast_dag] object, or `NULL`.
-#' @param k Integer. Number of spatial folds. Default `5`.
-#' @param models Character vector. Models to cross-validate: `"rf"`, `"brt"`,
-#'   `"maxent"`, `"gam"`. Default `c("rf")`.
-#' @param block_method Character. How to create spatial blocks:
-#'   \describe{
-#'     \item{`"grid"`}{(Default) Divide bounding box into a grid and
-#'       round-robin assign cells to folds.}
-#'     \item{`"cluster"`}{k-means clustering on lon/lat.}
-#'   }
-#' @param response Character. Response column. Default `"presence"`.
-#' @param rf_ntree Integer. RF trees per fold. Default `300`.
-#' @param brt_n_trees Integer. BRT iterations per fold. Default `500`.
-#' @param parallel Logical. Run folds in parallel via \pkg{future.apply}.
-#'   Default `FALSE`.
-#' @param seed Integer or `NULL`. Base random seed.
-#' @param verbose Logical. Print fold progress. Default `TRUE`.
+#' @param data Data frame with `lon`, `lat`, binary response, and predictors.
+#' @param screen Optional final-data screen. It is used only when
+#'   `select_method = NULL`; it is never re-used as a nested screen.
+#' @param select_method Selection method passed to [cast_select()]. Default
+#'   `"stable"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#' @param select_args Named list of additional [cast_select()] arguments.
+#' @param k Number of outer spatial folds.
+#' @param models Models passed to [cast_fit()].
+#' @param block_method `"grid"` or `"cluster"`.
+#' @param response Binary response column.
+#' @param rf_ntree RF trees per fold.
+#' @param brt_n_trees BRT iterations per fold.
+#' @param parallel Run folds with `future.apply`.
+#' @param seed Random seed.
+#' @param verbose Print progress.
 #'
-#' @return A `cast_cv` object with components:
-#' \describe{
-#'   \item{`metrics`}{`data.frame` -- per-model mean +/- SD.}
-#'   \item{`fold_metrics`}{`data.frame` -- per-fold per-model raw metrics.}
-#'   \item{`folds`}{Integer vector -- fold assignment for each row.}
-#'   \item{`k`}{Number of folds used.}
-#'   \item{`block_method`}{Blocking method used.}
-#'   \item{`thresholds`}{Named numeric -- optimal TSS threshold per model.}
-#' }
-#'
-#' @references
-#' Roberts, D.R. et al. (2017). Cross-validation strategies for data with
-#' temporal, spatial, hierarchical, or phylogenetic structure.
-#' *Ecography*, 40(8), 913-929.
-#'
-#' @seealso [cast_fit()], [cast_evaluate()], [cast_ensemble()]
-#'
+#' @return A `cast_cv` object including fold-level selections.
 #' @export
 cast_cv <- function(data,
-                    screen  = NULL,
-                    dag     = NULL,
-                    k       = 5L,
-                    models  = c("rf"),
+                    screen = NULL,
+                    select_method = "stable",
+                    select_args = list(),
+                    k = 5L,
+                    models = c("rf"),
                     block_method = c("grid", "cluster"),
-                    response     = "presence",
-                    rf_ntree     = 300L,
-                    brt_n_trees  = 500L,
-                    parallel     = FALSE,
-                    seed         = NULL,
-                    verbose      = TRUE) {
-
+                    response = "presence",
+                    rf_ntree = 300L,
+                    brt_n_trees = 500L,
+                    parallel = FALSE,
+                    seed = NULL,
+                    verbose = TRUE) {
   block_method <- match.arg(block_method)
   k <- as.integer(k)
-  stopifnot(k >= 2L)
+  if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
+  validate_species_data(data, required_cols = c("lon", "lat", response))
+  folds <- make_spatial_folds(data$lon, data$lat, k, block_method, seed)
 
-  validate_species_data(data)
-
-  # -- 1. Build spatial folds ------------------------------------------------
-  folds <- make_spatial_folds(data$lon, data$lat, k = k,
-                               method = block_method, seed = seed)
-  fold_sizes <- table(folds)
-  if (verbose) {
-    cli::cli_inform(c(
-      "v" = "Spatial {block_method} blocking: {k} folds",
-      "i" = "Fold sizes: {paste(as.integer(fold_sizes), collapse = ' | ')}"
-    ))
-  }
-
-  # -- 2. Env vars -----------------------------------------------------------
-  env_vars <- if (!is.null(screen)) {
-    screen$selected
-  } else if (!is.null(dag)) {
-    setdiff(dag$nodes, c(response, "lon", "lat"))
-  } else {
-    get_env_vars(data, response)
-  }
-
-  # -- 3. Cross-validate -----------------------------------------------------
-  oof_obs <- data[[response]]
-
-  cv_one_fold <- function(fold_i, data, folds, screen, dag, models,
-                          response, env_vars, rf_ntree,
-                          brt_n_trees, seed) {
-    test_idx  <- which(folds == fold_i)
+  cv_one <- function(fold_i) {
+    test_idx <- which(folds == fold_i)
     train_idx <- which(folds != fold_i)
+    train <- data[train_idx, , drop = FALSE]
+    test <- data[test_idx, , drop = FALSE]
+    if (length(unique(train[[response]])) < 2L ||
+        length(unique(test[[response]])) < 2L) return(NULL)
 
-    if (length(test_idx) == 0 || sum(data[[response]][train_idx]) < 5) {
-      return(NULL)
+    fold_screen <- if (!is.null(select_method)) {
+      args <- utils::modifyList(
+        list(
+          data = train, response = response, method = select_method,
+          seed = if (is.null(seed)) NULL else seed + fold_i,
+          verbose = FALSE
+        ),
+        select_args
+      )
+      tryCatch(do.call(cast_select, args), error = function(e) {
+        warning(sprintf("Selection failed in fold %d: %s", fold_i, e$message))
+        NULL
+      })
+    } else {
+      screen
     }
+    if (is.null(fold_screen) || !length(fold_screen$selected)) return(NULL)
 
-    train_fold <- data[train_idx, , drop = FALSE]
-    test_fold  <- data[test_idx,  , drop = FALSE]
-
-    fold_fit <- tryCatch(
+    fit <- tryCatch(
       cast_fit(
-        train_fold,
-        screen   = screen,
-        dag      = dag,
-        models   = models,
-        response = response,
-        rf_ntree = rf_ntree,
-        brt_n_trees = brt_n_trees,
-        seed     = if (!is.null(seed)) seed + fold_i else NULL,
-        verbose  = FALSE
+        train, screen = fold_screen, models = models, response = response,
+        rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
+        seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
+        verbose = FALSE
       ),
       error = function(e) NULL
     )
-    if (is.null(fold_fit)) return(NULL)
+    if (is.null(fit)) return(NULL)
 
-    fold_rows <- list()
-    oof_updates <- list()
+    rows <- list()
+    updates <- list()
     for (mdl in models) {
-      if (!mdl %in% names(fold_fit$models)) next
-      mdl_info <- fold_fit$models[[mdl]]
-
-      X_test_raw <- as.data.frame(test_fold[, env_vars, drop = FALSE])
-      for (col in names(X_test_raw)) {
-        X_test_raw[[col]] <- as.numeric(X_test_raw[[col]])
-      }
-      X_test_raw[is.na(X_test_raw)] <- 0
-
-      preds <- tryCatch(
-        predict_single_model(mdl_info, X_test_raw),
-        error = function(e) rep(NA_real_, nrow(test_fold))
+      info <- fit$models[[mdl]]
+      if (is.null(info) || is.null(info$model)) next
+      x_test <- as.data.frame(test[, fit$env_vars, drop = FALSE])
+      for (nm in names(x_test)) x_test[[nm]] <- as.numeric(x_test[[nm]])
+      x_test[is.na(x_test)] <- 0
+      pred <- tryCatch(
+        predict_single_model(info, x_test),
+        error = function(e) rep(NA_real_, nrow(test))
       )
-
-      oof_updates[[mdl]] <- list(idx = test_idx, preds = preds)
-
-      m <- evaluate_model_full(preds, test_fold[[response]])
-      fold_rows[[mdl]] <- data.frame(
-        fold  = fold_i,
-        model = mdl,
-        auc   = m["auc"],
-        tss   = m["tss"],
-        cbi   = m["cbi"],
-        row.names = NULL
+      met <- evaluate_model_full(pred, test[[response]])
+      rows[[mdl]] <- data.frame(
+        fold = fold_i, model = mdl, auc = met["auc"], tss = met["tss"],
+        cbi = met["cbi"], n_selected = length(fold_screen$selected),
+        stringsAsFactors = FALSE
       )
+      updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
-    list(fold_rows = fold_rows, oof_updates = oof_updates)
+    list(rows = rows, updates = updates, selected = fold_screen$selected,
+         screen = fold_screen)
   }
-
-  if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
-    if (verbose) cli::cli_inform("Running {k}-fold CV in parallel...")
-    fold_results <- future.apply::future_lapply(
-      seq_len(k), cv_one_fold,
-      data = data, folds = folds, screen = screen, dag = dag,
-      models = models, response = response, env_vars = env_vars,
-      rf_ntree = rf_ntree, brt_n_trees = brt_n_trees, seed = seed,
-      future.seed = TRUE
-    )
-  } else {
-    fold_results <- vector("list", k)
-    for (fold_i in seq_len(k)) {
-      if (verbose) {
-        test_idx_v  <- which(folds == fold_i)
-        train_idx_v <- which(folds != fold_i)
-        n_pres_test <- sum(data[[response]][test_idx_v])
-        cli::cli_inform(
-          "Fold {fold_i}/{k}: train n={length(train_idx_v)}, test n={length(test_idx_v)} (pres={n_pres_test})"
-        )
-      }
-      fold_results[[fold_i]] <- cv_one_fold(
-        fold_i, data, folds, screen, dag, models, response,
-        env_vars, rf_ntree, brt_n_trees, seed
-      )
-    }
-  }
-
-  # Collect results
-  all_fold_rows <- list()
-  oof_preds <- lapply(models, function(m) rep(NA_real_, nrow(data)))
-  names(oof_preds) <- models
-
-  for (fr in fold_results) {
-    if (is.null(fr)) next
-    all_fold_rows <- c(all_fold_rows, fr$fold_rows)
-    for (mdl in names(fr$oof_updates)) {
-      upd <- fr$oof_updates[[mdl]]
-      oof_preds[[mdl]][upd$idx] <- upd$preds
-    }
-  }
-
-  # -- 4. Aggregate ----------------------------------------------------------
-  fold_df <- if (length(all_fold_rows) > 0) {
-    do.call(rbind, all_fold_rows)
-  } else {
-    data.frame(fold = integer(), model = character(),
-               auc = numeric(), tss = numeric(), cbi = numeric())
-  }
-
-  metric_cols <- c("auc", "tss", "cbi")
-  agg_rows <- list()
-  for (mdl in models) {
-    sub <- fold_df[fold_df$model == mdl, metric_cols, drop = FALSE]
-    if (nrow(sub) == 0) next
-    means <- colMeans(sub, na.rm = TRUE)
-    sds   <- apply(sub, 2, stats::sd, na.rm = TRUE)
-    agg_rows[[mdl]] <- data.frame(
-      model     = mdl,
-      auc_mean  = means["auc"],   auc_sd  = sds["auc"],
-      tss_mean  = means["tss"],   tss_sd  = sds["tss"],
-      cbi_mean  = means["cbi"],   cbi_sd  = sds["cbi"],
-      n_folds   = nrow(sub),
-      row.names = NULL
-    )
-  }
-  metrics_df <- if (length(agg_rows) > 0) {
-    do.call(rbind, agg_rows)
-  } else {
-    data.frame()
-  }
-  rownames(metrics_df) <- NULL
-
-  # -- 5. OOF optimal thresholds ---------------------------------------------
-  thresholds <- vapply(models, function(mdl) {
-    p <- oof_preds[[mdl]]
-    o <- oof_obs
-    valid <- !is.na(p) & !is.na(o)
-    if (sum(valid) < 10 || length(unique(o[valid])) < 2) return(0.5)
-    find_tss_threshold(p[valid], o[valid])
-  }, numeric(1))
 
   if (verbose) {
-    cli::cli_inform("Spatial CV complete.")
-    for (mdl in models) {
-      if (mdl %in% metrics_df$model) {
-        r <- metrics_df[metrics_df$model == mdl, ]
-        cli::cli_inform(
-          "  {mdl}: AUC={round(r$auc_mean,3)} TSS={round(r$tss_mean,3)} CBI={round(r$cbi_mean,3)} threshold={round(thresholds[mdl],3)}"
-        )
-      }
-    }
+    cli::cli_inform(
+      "Nested spatial CV: {k} folds; selector={select_method %||% 'fixed'}."
+    )
+  }
+  if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
+    results <- future.apply::future_lapply(
+      seq_len(k), function(i) cv_one(i), future.seed = TRUE
+    )
+  } else {
+    results <- lapply(seq_len(k), cv_one)
   }
 
+  row_list <- list()
+  oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
+  selections <- vector("list", k)
+  screens <- vector("list", k)
+  for (i in seq_along(results)) {
+    res <- results[[i]]
+    if (is.null(res)) next
+    row_list <- c(row_list, res$rows)
+    selections[[i]] <- res$selected
+    screens[[i]] <- res$screen
+    for (mdl in names(res$updates)) {
+      upd <- res$updates[[mdl]]
+      oof[[mdl]][upd$idx] <- upd$pred
+    }
+  }
+  fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
+  if (!nrow(fold_df)) cli::cli_abort("All spatial CV folds failed.")
+
+  agg <- lapply(models, function(mdl) {
+    z <- fold_df[fold_df$model == mdl, , drop = FALSE]
+    if (!nrow(z)) return(NULL)
+    data.frame(
+      model = mdl,
+      auc_mean = mean(z$auc, na.rm = TRUE), auc_sd = stats::sd(z$auc, na.rm = TRUE),
+      tss_mean = mean(z$tss, na.rm = TRUE), tss_sd = stats::sd(z$tss, na.rm = TRUE),
+      cbi_mean = mean(z$cbi, na.rm = TRUE), cbi_sd = stats::sd(z$cbi, na.rm = TRUE),
+      n_folds = nrow(z), n_selected_mean = mean(z$n_selected, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  })
+  metrics <- do.call(rbind, Filter(Negate(is.null), agg))
+  thresholds <- vapply(models, function(mdl) {
+    pred <- oof[[mdl]]
+    ok <- is.finite(pred)
+    if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) return(0.5)
+    find_tss_threshold(pred[ok], data[[response]][ok])
+  }, numeric(1))
+
   new_cast_cv(
-    metrics      = metrics_df,
-    fold_metrics = fold_df,
-    folds        = folds,
-    k            = k,
-    block_method = block_method,
-    thresholds   = thresholds
+    metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
+    block_method = block_method, thresholds = thresholds,
+    selections = selections, screens = screens
   )
 }
-
-
-# =============================================================================
-# Internal: spatial fold creation
-# =============================================================================
 
 #' @keywords internal
 #' @noRd
 make_spatial_folds <- function(lon, lat, k, method = "grid", seed = NULL) {
-  n <- length(lon)
   if (!is.null(seed)) set.seed(seed)
-
   if (method == "cluster") {
-    coords <- scale(cbind(lon, lat))
-    km <- stats::kmeans(coords, centers = k, nstart = 10, iter.max = 100)
-    folds <- as.integer(factor(km$cluster))
-    return(folds)
+    return(as.integer(factor(stats::kmeans(
+      scale(cbind(lon, lat)), centers = k, nstart = 10L
+    )$cluster)))
   }
-
-  # method == "grid"
-  lon_breaks <- seq(min(lon), max(lon), length.out = k + 1L)
-  lat_breaks <- seq(min(lat), max(lat), length.out = k + 1L)
-  lon_cell <- findInterval(lon, lon_breaks, rightmost.closed = TRUE)
-  lat_cell <- findInterval(lat, lat_breaks, rightmost.closed = TRUE)
-  grid_id  <- paste(lon_cell, lat_cell, sep = "_")
-
-  unique_cells <- unique(grid_id)
-  cell_counts  <- tabulate(match(grid_id, unique_cells))
-  ord   <- order(cell_counts, decreasing = TRUE)
-  cells_sorted <- unique_cells[ord]
-  fold_assign  <- integer(length(cells_sorted))
-  fold_totals  <- integer(k)
-  for (ci in seq_along(cells_sorted)) {
-    f <- which.min(fold_totals)
-    fold_assign[ci] <- f
-    fold_totals[f]  <- fold_totals[f] + cell_counts[ord[ci]]
+  side <- ceiling(sqrt(k * 2))
+  xb <- cut(lon, breaks = unique(stats::quantile(
+    lon, seq(0, 1, length.out = side + 1L), na.rm = TRUE
+  )), include.lowest = TRUE, labels = FALSE)
+  yb <- cut(lat, breaks = unique(stats::quantile(
+    lat, seq(0, 1, length.out = side + 1L), na.rm = TRUE
+  )), include.lowest = TRUE, labels = FALSE)
+  cell <- interaction(xb, yb, drop = TRUE)
+  counts <- sort(table(cell), decreasing = TRUE)
+  totals <- integer(k)
+  assignment <- integer(length(counts))
+  names(assignment) <- names(counts)
+  for (nm in names(counts)) {
+    f <- which.min(totals)
+    assignment[nm] <- f
+    totals[f] <- totals[f] + counts[nm]
   }
-  cell_to_fold <- stats::setNames(fold_assign, cells_sorted)
-  folds <- as.integer(cell_to_fold[grid_id])
-  folds[is.na(folds)] <- 1L
-  folds
+  as.integer(assignment[as.character(cell)])
 }
-
 
 #' @keywords internal
 #' @noRd
 find_tss_threshold <- function(pred, obs) {
   thresholds <- seq(0.01, 0.99, by = 0.01)
-  tss_vals <- vapply(thresholds, function(thr) {
-    pred_bin <- as.integer(pred >= thr)
-    tp <- sum(pred_bin == 1 & obs == 1)
-    tn <- sum(pred_bin == 0 & obs == 0)
-    fp <- sum(pred_bin == 1 & obs == 0)
-    fn <- sum(pred_bin == 0 & obs == 1)
-    sens <- if ((tp + fn) > 0) tp / (tp + fn) else 0
-    spec <- if ((tn + fp) > 0) tn / (tn + fp) else 0
+  values <- vapply(thresholds, function(thr) {
+    cls <- pred >= thr
+    sens <- sum(cls & obs == 1) / max(1, sum(obs == 1))
+    spec <- sum(!cls & obs == 0) / max(1, sum(obs == 0))
     sens + spec - 1
   }, numeric(1))
-  thresholds[which.max(tss_vals)]
+  thresholds[which.max(values)]
 }

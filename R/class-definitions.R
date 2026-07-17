@@ -1,87 +1,25 @@
-# S3 Class Constructors -------------------------------------------------------
-
-#' Create a cast_dag Object
-#'
-#' @param edges A `data.frame` with columns: `from`, `to`, `strength`,
-#'   `direction`.
-#' @param nodes Character vector of node (variable) names.
-#' @param boot_R Integer. Number of bootstrap replicates used.
-#' @param strength_threshold Numeric. Edge strength threshold applied.
-#' @param direction_threshold Numeric. Direction consistency threshold applied.
-#' @param score Character. Scoring criterion used (e.g., `"bic-cg"`).
-#' @param structure_method Character. Structure learning method used.
-#' @param response_node Character or `NULL`. Name of the response node if
-#'   included in DAG learning.
-#'
-#' @return A `cast_dag` object.
-#' @keywords internal
-#' @export
-new_cast_dag <- function(edges, nodes, boot_R, strength_threshold,
-                         direction_threshold, score = "bic-cg",
-                         structure_method = "pc",
-                         response_node = NULL,
-                         metadata = list()) {
-  structure(
-    list(
-      edges = edges,
-      nodes = nodes,
-      boot_R = boot_R,
-      strength_threshold = strength_threshold,
-      direction_threshold = direction_threshold,
-      score = score,
-      structure_method = structure_method,
-      response_node = response_node,
-      metadata = metadata %||% list()
-    ),
-    class = "cast_dag"
-  )
-}
+# S3 Class Constructors -----------------------------------------------------
 
 #' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable scores (RF importance and
-#'   DAG Markov Blanket membership).
-#' @param roles A `data.frame` with columns `variable` and `role` indicating
-#'   each variable's response-focused screening role: `"mb_direct"`,
-#'   `"mb_associated"`, `"importance_added"`, or `"importance_screened"`.
+#' @param scores A `data.frame` with per-variable scores (RF importance,
+#'   stability, invariant score, correlation cluster).
 #' @param method Character screening-method identifier.
-#' @param specification Optional causal-role specification used by the screen.
+#' @param diagnostics Named list of method diagnostics.
 #'
 #' @return A `cast_select` object.
 #' @keywords internal
 #' @export
-new_cast_select <- function(selected, scores, roles, method = NULL,
-                            specification = NULL) {
+new_cast_select <- function(selected, scores, method = NULL, diagnostics = list()) {
   structure(
     list(
       selected = selected,
       scores = scores,
-      roles = roles,
       method = method,
-      specification = specification
+      diagnostics = diagnostics
     ),
     class = "cast_select"
-  )
-}
-
-#' Create a cast_refute Object
-#'
-#' @param tests A `data.frame` with refutation diagnostics.
-#' @param summary A `data.frame` with per-variable stability diagnostics.
-#' @param settings A list of settings used by the refutation routine.
-#'
-#' @return A `cast_refute` object.
-#' @keywords internal
-#' @export
-new_cast_refute <- function(tests, summary, settings = list()) {
-  structure(
-    list(
-      tests = tests,
-      summary = summary,
-      settings = settings %||% list()
-    ),
-    class = "cast_refute"
   )
 }
 
@@ -91,21 +29,18 @@ new_cast_refute <- function(tests, summary, settings = list()) {
 #' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List with `means` and `sds` used for standardization.
-#' @param dag A `cast_dag` object (or `NULL`).
 #' @param screen A `cast_select` object (or `NULL`).
 #'
 #' @return A `cast_fit` object.
 #' @keywords internal
 #' @export
-new_cast_fit <- function(models, cast_vars, env_vars, scaling,
-                         dag = NULL, screen = NULL) {
+new_cast_fit <- function(models, cast_vars, env_vars, scaling, screen = NULL) {
   structure(
     list(
       models = models,
       cast_vars = cast_vars,
       env_vars = env_vars,
       scaling = scaling,
-      dag = dag,
       screen = screen
     ),
     class = "cast_fit"
@@ -129,7 +64,6 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
   )
 }
 
-
 #' Create a cast_cv Object
 #'
 #' @param metrics `data.frame`. Aggregated per-model metrics (mean +/- SD).
@@ -138,12 +72,15 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #' @param k Integer. Number of folds.
 #' @param block_method Character. Blocking strategy used.
 #' @param thresholds Named numeric. TSS-optimal threshold per model.
+#' @param selections List of selected variables for each outer fold.
+#' @param screens List of fold-specific `cast_select` objects.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
 #' @export
 new_cast_cv <- function(metrics, fold_metrics, folds,
-                        k, block_method, thresholds) {
+                        k, block_method, thresholds,
+                        selections = list(), screens = list()) {
   structure(
     list(
       metrics      = metrics,
@@ -151,7 +88,9 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       folds        = folds,
       k            = k,
       block_method = block_method,
-      thresholds   = thresholds
+      thresholds   = thresholds,
+      selections   = selections,
+      screens      = screens
     ),
     class = "cast_cv"
   )
@@ -176,61 +115,33 @@ new_cast_predict <- function(predictions, models) {
   )
 }
 
-#' Create a cast_cate Object
-#'
-#' @param effects A `data.frame` with columns: `lon`, `lat`, `variable`,
-#'   `cate`.
-#' @param variables Character vector of variables for which CATE was estimated.
-#' @param n_trees Integer. Number of causal forest trees used.
-#'
-#' @return A `cast_cate` object.
-#' @keywords internal
-#' @export
-new_cast_cate <- function(effects, variables, n_trees = 1000L) {
-  structure(
-    list(
-      effects = effects,
-      variables = variables,
-      n_trees = n_trees
-    ),
-    class = "cast_cate"
-  )
-}
-
 #' Create a cast_result Object
 #'
 #' Container for the full pipeline output.
 #'
-#' @param dag A `cast_dag` object.
 #' @param screen A `cast_select` object.
 #' @param fit A `cast_fit` object.
 #' @param eval A `cast_eval` object (hold-out evaluation).
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
-#' @param cate A `cast_cate` object (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
 #' @keywords internal
 #' @export
-new_cast_result <- function(dag, screen, fit, eval,
+new_cast_result <- function(screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
-                            cate = NULL,
-                            refute = NULL,
                             call = NULL) {
   structure(
     list(
-      dag = dag,
       screen = screen,
       fit = fit,
       eval = eval,
       cv = cv,
       predict = predict,
       ensemble = ensemble,
-      cate = cate,
-      refute = refute,
       call = call
     ),
     class = "cast_result"

@@ -17,6 +17,5 @@
 A \code{ggplot} object.
 }
 \description{
-Bar chart showing MB membership (in_mb flag) and RF permutation importance
-for each variable. Selected variables are highlighted; roles are color-coded.
+Bar chart showing predictor score and selection status.
 }

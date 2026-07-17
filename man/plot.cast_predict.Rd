@@ -12,8 +12,7 @@
 \item{model}{Character. Which model's HSS to plot. Default is the first
 model.}
 
-\item{basemap}{Character. Basemap type: \code{"world"}, \code{"china"}, or \code{"none"}.
-Default \code{"world"}.}
+\item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
 
 \item{title}{Optional character string for plot title.}
 
@@ -23,6 +22,5 @@ Default \code{"world"}.}
 A \code{ggplot} object.
 }
 \description{
-Displays predicted habitat suitability scores on a geographic map with
-an optional country/province boundary basemap.
+Plot Spatial Habitat Suitability Map
 }

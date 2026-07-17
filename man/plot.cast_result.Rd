@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_result}
 \alias{plot.cast_result}
-\title{Plot castSDM Pipeline Result (Multi-Panel)}
+\title{Plot castSDM Pipeline Result}
 \usage{
 \method{plot}{cast_result}(x, var_labels = NULL, ...)
 }
@@ -14,10 +14,8 @@
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} or \code{patchwork} plot.
+A \code{ggplot} object.
 }
 \description{
-Combines optional DAG and variable-selection plots. Under the default
-role-constrained selector, no DAG is required and the selection audit is
-returned as a single panel.
+Currently renders the variable-selection panel.
 }

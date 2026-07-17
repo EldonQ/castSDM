@@ -15,8 +15,7 @@
 
 \item{metric}{Character. Metric to show in right panel. Default \code{"auc"}.}
 
-\item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}. Default
-\code{"world"}.}
+\item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
 
 \item{...}{Ignored.}
 }
