@@ -246,7 +246,9 @@ cast_set_plot_defaults <- function(family = "Arial") {
 #'
 #' @param filename Output filename.
 #' @param plot Plot object.
-#' @param ... Additional arguments passed to [ggplot2::ggsave()].
+#' @param ... Additional arguments passed to [ggplot2::ggsave()]. When not
+#'   supplied, \code{dpi} defaults to \code{600} and \code{bg} defaults to
+#'   \code{"transparent"}.
 #'
 #' @return Invisibly returns \code{filename}.
 #' @export
@@ -268,6 +270,8 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
   ext <- tolower(tools::file_ext(filename))
   device <- NULL
   extra <- list(...)
+  if (is.null(extra$dpi)) extra$dpi <- 600L
+  if (is.null(extra$bg)) extra$bg <- "transparent"
   if (identical(ext, "png")) {
     device <- if (requireNamespace("ragg", quietly = TRUE)) {
       ragg::agg_png

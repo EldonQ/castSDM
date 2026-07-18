@@ -11,7 +11,9 @@ cast_safe_ggsave(filename, plot = ggplot2::last_plot(), ...)
 
 \item{plot}{Plot object.}
 
-\item{...}{Additional arguments passed to \code{\link[ggplot2:ggsave]{ggplot2::ggsave()}}.}
+\item{...}{Additional arguments passed to \code{\link[ggplot2:ggsave]{ggplot2::ggsave()}}. When not
+supplied, \code{dpi} defaults to \code{600} and \code{bg} defaults to
+\code{"transparent"}.}
 }
 \value{
 Invisibly returns \code{filename}.

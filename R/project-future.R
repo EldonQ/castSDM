@@ -460,7 +460,7 @@ cast_project_raster <- function(fit, cv,
       row.names = FALSE
     )
     if (verbose) {
-      cli::cli_inform("v" = "Projection stats saved to {.path {file.path(table_dir, 'projection_stats.csv')}}")
+      cli::cli_inform(c("v" = "Projection stats saved to {.path {file.path(table_dir, 'projection_stats.csv')}}"))
     }
   } else {
     stats_df <- data.frame()

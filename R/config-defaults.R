@@ -20,7 +20,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     models = c("rf", "brt", "maxent", "gam"),
     train_fraction = 0.7,
     output_dir = "castSDM_output",
-    fig_dpi = 300L,
+    fig_dpi = 600L,
     plot_font_family = "Arial",
     parallel = TRUE,
     resume = TRUE,
@@ -79,7 +79,7 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
   } else if (identical(profile, "disdat")) {
     cfg$output_dir <- "castSDM_disdat"
     cfg$models <- c("rf", "gam", "maxent", "brt")
-    cfg$fig_dpi <- 300L
+    cfg$fig_dpi <- 600L
   } else if (identical(profile, "fish")) {
     cfg$output_dir <- "castSDM_fish"
     cfg$fig_dpi <- 1200L

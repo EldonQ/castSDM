@@ -342,13 +342,23 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
       )
     }
   }
+  if (nrow(pred) > 2e5) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$hss_ensemble)
+      ) +
+      ggplot2::scale_fill_viridis_c(option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1))
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$hss_ensemble),
+        size = 0.4, alpha = 0.85
+      ) +
+      ggplot2::scale_color_viridis_c(option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1))
+  }
   p <- p +
-    ggplot2::geom_point(
-      data = pred,
-      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$hss_ensemble),
-      size = 0.4, alpha = 0.85
-    ) +
-    ggplot2::scale_color_viridis_c(option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1)) +
     ggplot2::labs(
       title = sprintf("Ensemble Habitat Suitability (%s)", x$method),
       subtitle = sprintf("Threshold = %.3f", x$threshold)
@@ -414,13 +424,23 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
       )
     }
   }
+  if (nrow(change) > 2e5) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = change,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$change)
+      ) +
+      ggplot2::scale_fill_manual(values = change_colors, name = "Range\nChange")
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = change,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$change),
+        size = 0.4, alpha = 0.8
+      ) +
+      ggplot2::scale_color_manual(values = change_colors, name = "Range\nChange")
+  }
   p <- p +
-    ggplot2::geom_point(
-      data = change,
-      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$change),
-      size = 0.4, alpha = 0.8
-    ) +
-    ggplot2::scale_color_manual(values = change_colors, name = "Range\nChange") +
     ggplot2::labs(
       title = sprintf("Range Change: %s", scenario),
       subtitle = {

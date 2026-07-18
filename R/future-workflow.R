@@ -67,7 +67,7 @@ cast_load_future_envs <- function(path) {
 #' @param future_envs Named list of future prediction grids.
 #' @param save_dir Output directory.
 #' @param basemap Basemap passed to plotting methods.
-#' @param fig_dpi Figure DPI.
+#' @param fig_dpi Figure DPI. Default `600`.
 #' @param method Ensemble method.
 #' @param threshold_method Threshold method.
 #' @param models Optional models used by [cast_project()].
@@ -77,7 +77,7 @@ cast_load_future_envs <- function(path) {
 cast_save_future_projection <- function(fit, cv, current_env, future_envs,
                                         save_dir,
                                         basemap = "world",
-                                        fig_dpi = 300L,
+                                        fig_dpi = 600L,
                                         method = "weighted",
                                         threshold_method = "maxTSS",
                                         models = NULL,
@@ -111,7 +111,7 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
       save_plot(
         file.path(save_dir, paste0(prefix, "_current_ensemble.png")),
         p_cur, width = 10, height = 7, dpi = fig_dpi,
-        bg = "white", limitsize = FALSE
+        limitsize = FALSE
       )
     }
 
@@ -121,7 +121,7 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
         save_plot(
           file.path(save_dir, paste0(prefix, "_", scen, "_ensemble.png")),
           p_fut, width = 10, height = 7, dpi = fig_dpi,
-          bg = "white", limitsize = FALSE
+          limitsize = FALSE
         )
       }
 
@@ -130,7 +130,7 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
         save_plot(
           file.path(save_dir, paste0(prefix, "_", scen, "_change.png")),
           p_chg, width = 10, height = 7, dpi = fig_dpi,
-          bg = "white", limitsize = FALSE
+          limitsize = FALSE
         )
       }
     }

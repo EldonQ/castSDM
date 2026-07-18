@@ -9,7 +9,7 @@
 #' @param models Character vector. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param train_fraction Numeric. Default `0.7`.
 #' @param output_dir Character. Default `"castSDM_batch_output"`.
-#' @param fig_dpi Integer. Default `300`.
+#' @param fig_dpi Integer. Default `600`.
 #' @param parallel Logical. Default `TRUE`.
 #' @param seed Integer or `NULL`.
 #' @param verbose Logical. Default `TRUE`.
@@ -55,7 +55,7 @@ cast_batch <- function(species_list,
                       models      = c("rf", "brt", "maxent", "gam"),
                       train_fraction = 0.7,
                       output_dir  = "castSDM_batch_output",
-                      fig_dpi     = 300L,
+                      fig_dpi     = 600L,
                       parallel    = TRUE,
                       seed        = NULL,
                       verbose     = TRUE,

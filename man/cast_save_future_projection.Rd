@@ -11,7 +11,7 @@ cast_save_future_projection(
   future_envs,
   save_dir,
   basemap = "world",
-  fig_dpi = 300L,
+  fig_dpi = 600L,
   method = "weighted",
   threshold_method = "maxTSS",
   models = NULL,
@@ -31,7 +31,7 @@ cast_save_future_projection(
 
 \item{basemap}{Basemap passed to plotting methods.}
 
-\item{fig_dpi}{Figure DPI.}
+\item{fig_dpi}{Figure DPI. Default \code{600}.}
 
 \item{method}{Ensemble method.}
 

@@ -10,7 +10,7 @@ cast_batch(
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
   output_dir = "castSDM_batch_output",
-  fig_dpi = 300L,
+  fig_dpi = 600L,
   parallel = TRUE,
   seed = NULL,
   verbose = TRUE,
@@ -59,7 +59,7 @@ cast_batch(
 
 \item{output_dir}{Character. Default \code{"castSDM_batch_output"}.}
 
-\item{fig_dpi}{Integer. Default \code{300}.}
+\item{fig_dpi}{Integer. Default \code{600}.}
 
 \item{parallel}{Logical. Default \code{TRUE}.}
 
