@@ -136,28 +136,32 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
 
   p <- .add_china_dashline(p, basemap)
   p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
-  .add_china_south_sea_inset(p, basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = pred, value_var = hss_col,
+    scale = ggplot2::scale_color_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+  )
 }
 
 
 #' Plot Evaluation Metrics Comparison
 #'
-#' Multi-panel bar chart comparing AUC, TSS, and CBI across fitted models.
+#' Cleveland-style dot plot comparing AUC, TSS, and CBI across fitted models:
+#' one row per model, one dodged dot per metric, values labelled directly.
 #'
 #' @param x A `cast_eval` object.
 #' @param metrics Character vector. Which metrics to show. Default
 #'   `c("auc","tss","cbi")`.
 #' @param ... Ignored.
 #'
-#' @return A `ggplot` object (faceted).
+#' @return A `ggplot` object.
 #' @export
 plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   check_suggested("ggplot2", "for plotting")
 
   m <- x$metrics
-  model_colors <- c(
-    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85",
-    gam = "#00A087", esm = "#E64B35"
+  metric_colors <- c(
+    AUC = "#0072B2", TSS = "#D55E00", CBI = "#009E73",
+    LOGLOSS = "#CC79A7"
   )
 
   src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test"
@@ -180,26 +184,44 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   }
   long <- do.call(rbind, rows)
   long$metric <- factor(long$metric, levels = toupper(sub("_mean$", "", present)))
-  long$model  <- factor(long$model, levels = names(model_colors))
+  long$model  <- factor(long$model, levels = rev(m$model))
+
+  # Numeric y positions with manual per-metric offsets keep stems horizontal
+  n_metric <- nlevels(long$metric)
+  long$y_pos <- as.numeric(long$model) +
+    (as.integer(long$metric) - (n_metric + 1) / 2) * 0.18
 
   ggplot2::ggplot(long, ggplot2::aes(
-    x = .data$model, y = .data$value, fill = .data$model
+    x = .data$value, y = .data$y_pos, color = .data$metric
   )) +
-    ggplot2::geom_col(width = 0.65, alpha = 0.9) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = 0, xend = .data$value, yend = .data$y_pos),
+      linewidth = 0.5, alpha = 0.45
+    ) +
+    ggplot2::geom_point(size = 2.6) +
     ggplot2::geom_text(
       ggplot2::aes(label = sprintf("%.3f", .data$value)),
-      vjust = -0.4, size = 2.8,
+      hjust = -0.3, size = 2.6,
       family = getOption("castSDM.font_family", "Arial"),
-      fontface = "bold"
+      show.legend = FALSE
     ) +
-    ggplot2::facet_wrap(~ metric, scales = "free_y", nrow = 2) +
-    ggplot2::scale_fill_manual(values = model_colors, guide = "none") +
-    ggplot2::labs(title = "Model Performance Comparison", subtitle = src,
-                  x = "", y = "Score") +
+    ggplot2::scale_color_manual(values = metric_colors, name = NULL) +
+    ggplot2::scale_y_continuous(
+      breaks = seq_along(levels(long$model)), labels = levels(long$model),
+      expand = ggplot2::expansion(mult = c(0.12, 0.12))
+    ) +
+    ggplot2::scale_x_continuous(
+      limits = c(0, 1.12), breaks = seq(0, 1, 0.25),
+      expand = ggplot2::expansion(mult = c(0, 0))
+    ) +
+    ggplot2::labs(
+      title = "Model Performance Comparison", subtitle = src,
+      x = "Score", y = NULL
+    ) +
     theme_cast() +
     ggplot2::theme(
-      strip.text = ggplot2::element_text(face = "bold", size = 9),
-      axis.text.x = ggplot2::element_text(angle = 30, hjust = 1)
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_blank()
     )
 }
 
@@ -290,7 +312,10 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
 
   p_map <- .add_china_dashline(p_map, basemap)
   p_map <- .add_china_outline(p_map, basemap)
-  p_map <- .add_china_south_sea_inset(p_map, basemap)
+  p_map <- .add_china_south_sea_inset(
+    p_map, basemap, data = map_df, value_var = "fold",
+    scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
+  )
 
   if (requireNamespace("patchwork", quietly = TRUE)) {
     p_map + p_metric + patchwork::plot_layout(widths = c(1.4, 1))
@@ -342,7 +367,8 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
       )
     }
   }
-  if (nrow(pred) > 2e5) {
+  large_grid <- nrow(pred) > 2e5
+  if (large_grid) {
     p <- p +
       ggplot2::geom_raster(
         data = pred,
@@ -361,7 +387,7 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
   p <- p +
     ggplot2::labs(
       title = sprintf("Ensemble Habitat Suitability (%s)", x$method),
-      subtitle = sprintf("Threshold = %.3f", x$threshold)
+      subtitle = if (is.finite(x$threshold %||% NA_real_)) sprintf("Threshold = %.3f", x$threshold)
     ) +
     ggplot2::theme_void(
       base_size = 10,
@@ -382,7 +408,14 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
 
   p <- .add_china_dashline(p, basemap)
   p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
-  .add_china_south_sea_inset(p, basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = pred, value_var = "hss_ensemble", raster = large_grid,
+    scale = if (large_grid) {
+      ggplot2::scale_fill_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+    } else {
+      ggplot2::scale_color_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+    }
+  )
 }
 
 
@@ -424,7 +457,8 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
       )
     }
   }
-  if (nrow(change) > 2e5) {
+  large_grid <- nrow(change) > 2e5
+  if (large_grid) {
     p <- p +
       ggplot2::geom_raster(
         data = change,
@@ -468,7 +502,14 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 
   p <- .add_china_dashline(p, basemap)
   p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
-  .add_china_south_sea_inset(p, basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = change, value_var = "change", raster = large_grid,
+    scale = if (large_grid) {
+      ggplot2::scale_fill_manual(values = change_colors, guide = "none")
+    } else {
+      ggplot2::scale_color_manual(values = change_colors, guide = "none")
+    }
+  )
 }
 
 
@@ -580,9 +621,14 @@ load_basemap <- function(type = "world") {
 
 #' Draw the South China Sea dashed-line inset inside a China map
 #'
+#' When `data` and `value_var` are given, the inset renders the same data
+#' layer as the main map (cropped to the inset extent) so colours match.
+#'
 #' @keywords internal
 #' @noRd
-.add_china_south_sea_inset <- function(plot, basemap) {
+.add_china_south_sea_inset <- function(plot, basemap, data = NULL,
+                                       value_var = NULL, scale = NULL,
+                                       raster = FALSE) {
   if (!identical(basemap, "china") ||
       !requireNamespace("sf", quietly = TRUE) ||
       !requireNamespace("ggplot2", quietly = TRUE)) return(plot)
@@ -593,15 +639,38 @@ load_basemap <- function(type = "world") {
   if (is.null(china) || is.null(dashline) || is.null(bounds)) return(plot)
 
   inset <- ggplot2::ggplot() +
-    ggplot2::geom_sf(
-      data = china, fill = "#F7F8F8", colour = "#4E5963", linewidth = 0.20
-    ) +
+    ggplot2::geom_sf(data = china, fill = "#F7F8F8", colour = NA)
+
+  if (!is.null(data) && !is.null(value_var) &&
+      all(c("lon", "lat", value_var) %in% names(data))) {
+    sub <- data[data$lon >= 104 & data$lon <= 127 &
+                  data$lat >= 1 & data$lat <= 27, , drop = FALSE]
+    if (nrow(sub) > 0) {
+      if (isTRUE(raster)) {
+        inset <- inset + ggplot2::geom_raster(
+          data = sub,
+          ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[value_var]])
+        )
+      } else {
+        inset <- inset + ggplot2::geom_point(
+          data = sub,
+          ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[value_var]]),
+          size = 0.2, alpha = 0.85
+        )
+      }
+      if (!is.null(scale)) inset <- inset + scale
+    }
+  }
+
+  inset <- inset +
+    ggplot2::geom_sf(data = china, fill = NA, colour = "#4E5963", linewidth = 0.20) +
     ggplot2::geom_sf(
       data = dashline, fill = NA, colour = "#4E5963", linewidth = 0.22, linetype = "solid"
     ) +
     ggplot2::coord_sf(xlim = c(105, 126), ylim = c(2, 26), expand = FALSE, datum = NA) +
     ggplot2::theme_void(base_family = getOption("castSDM.font_family", "Arial")) +
     ggplot2::theme(
+      legend.position = "none",
       panel.background = ggplot2::element_rect(fill = "white", colour = NA),
       panel.border = ggplot2::element_rect(fill = NA, colour = "#4E5963", linewidth = 0.35),
       plot.margin = ggplot2::margin(0, 0, 0, 0)

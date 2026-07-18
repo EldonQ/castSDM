@@ -15,8 +15,9 @@
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object (faceted).
+A \code{ggplot} object.
 }
 \description{
-Multi-panel bar chart comparing AUC, TSS, and CBI across fitted models.
+Cleveland-style dot plot comparing AUC, TSS, and CBI across fitted models:
+one row per model, one dodged dot per metric, values labelled directly.
 }
