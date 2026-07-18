@@ -671,7 +671,7 @@ load_basemap <- function(type = "world") {
     ggplot2::theme_void(base_family = getOption("castSDM.font_family", "Arial")) +
     ggplot2::theme(
       legend.position = "none",
-      panel.background = ggplot2::element_rect(fill = "white", colour = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", colour = NA),
       panel.border = ggplot2::element_rect(fill = NA, colour = "#4E5963", linewidth = 0.35),
       plot.margin = ggplot2::margin(0, 0, 0, 0)
     )
