@@ -92,19 +92,6 @@ compute_auc <- function(y, pred) {
 }
 
 
-#' Normalize a Numeric Vector to [0, 1]
-#'
-#' @param x Numeric vector.
-#' @return Numeric vector scaled to [0, 1].
-#' @keywords internal
-#' @noRd
-normalize01 <- function(x) {
-  rng <- range(x, na.rm = TRUE)
-  if (rng[1] == rng[2]) return(rep(0.5, length(x)))
-  (x - rng[1]) / (rng[2] - rng[1])
-}
-
-
 #' Full Model Evaluation: AUC, TSS, CBI
 #'
 #' @param pred Numeric vector of predicted probabilities [0,1].

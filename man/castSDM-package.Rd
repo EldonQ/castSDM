@@ -4,7 +4,7 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Stable and Transferable Species Distribution Modeling}
+\title{castSDM: Causal Variable Selection for Species Distribution Modeling}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 

@@ -13,9 +13,9 @@
 #' @param response Binary response column.
 #' @param method `"dml"` (default) or the conventional `"rf"` benchmark.
 #' @param alpha FDR level for the DML selector. Default `0.05`.
-#' @param max_candidates Predictors tested with DML (see [.cast_select_dml];
-#'   larger sets are pre-screened by RF importance for feasibility). Also the
-#'   output ceiling for the RF benchmark. Default `30`.
+#' @param max_candidates Predictors tested with DML; larger sets are
+#'   pre-screened by RF importance for feasibility. Also the output ceiling for
+#'   the RF benchmark. Default `30`.
 #' @param dml_folds Cross-fitting folds for the DML selector. Default `5`.
 #' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
 #' @param min_vars Minimum retained variables. Default `3`.

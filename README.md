@@ -1,20 +1,20 @@
 # castSDM
 
-`castSDM` is an end-to-end species distribution modelling toolkit for stable
+`castSDM` is an end-to-end species distribution modelling toolkit for causal
 variable selection, nested spatial validation, standard SDM ensembles, raster
 prediction, and future projection.
 
-Its distinguishing method is `cast_select(method = "stable")`. The selector:
+Its distinguishing method is `cast_select(method = "dml")`, a double
+machine-learning selector. For each candidate predictor it estimates a
+Neyman-orthogonal partially linear effect on occurrence while flexibly
+controlling for every other predictor, then keeps the predictors whose effect
+survives Benjamini-Hochberg FDR control.
 
-1. builds data-derived environments from the training data;
-2. creates a small response-aware predictor shortlist;
-3. tests whether the species response is conditionally invariant across those
-   environments;
-4. removes variables while preserving invariance and leave-domain-out
-   predictive performance.
-
-This causal-inspired criterion targets transferable prediction. It does not
-claim that observational occurrence data identify true ecological causes.
+The only ecological choice is the FDR level (`alpha`). Cross-fitting folds and
+the random-forest nuisance learner are method defaults, so the selector avoids
+the many hand-tuned knobs of traditional screening. Selection reports adjusted
+effect sizes with confidence intervals; it targets interpretable driver
+analysis but does not claim automatic causal discovery from observational data.
 
 ## Core workflow
 
@@ -24,25 +24,41 @@ library(castSDM)
 result <- cast(
   species_data,
   env_data = prediction_grid,
-  select_method = "stable",
+  select_method = "dml",
   models = c("rf", "brt", "maxent", "gam"),
   do_cv = TRUE,
   seed = 42
 )
 
 summary(result)
-plot(result$screen)
+plot(result$screen)          # selected effects, FDR-adjusted
 ```
 
 The pipeline runs:
 
 ```text
-prepare -> stable selection -> fit -> nested spatial CV
+prepare -> DML selection -> fit -> nested spatial CV
         -> evaluate -> predict -> ensemble -> projection
 ```
 
 Selection is repeated inside every outer spatial training fold. Held-out folds
 never influence variable choice or tuning.
+
+## Causal interpretation
+
+Two functions turn a fitted workflow into causal-flavoured evidence without a
+new estimation engine:
+
+```r
+eff <- cast_effect(result)               # tidy DML effect table + CIs
+plot(eff)                                # coefficient (forest) plot
+
+cf <- cast_counterfactual(               # g-computation what-if on current
+  result$fit, newdata = current_grid,    #   climate: shift one driver, hold
+  variable = "bio1", shift = 1           #   the rest fixed, map the change
+)
+plot(cf, basemap = "china")              # diverging map of change in HSS
+```
 
 ## Main functions
 
@@ -50,11 +66,12 @@ never influence variable choice or tuning.
 |---|---|
 | Study design | `cast_study_area()`, `cast_background()` |
 | Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
-| Stable selection | `cast_domains()`, `cast_select()` |
+| Causal selection | `cast_select()` |
 | Modelling | `cast_fit()`, `cast_esm()` |
 | Validation | `cast_cv()`, `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
+| Causal interpretation | `cast_effect()`, `cast_counterfactual()` |
 | Batch/resume | `cast_batch()`, `cast_batch_resume()` |
 
 ## Model backends
@@ -63,7 +80,7 @@ never influence variable choice or tuning.
 - BRT: `gbm`
 - MaxEnt: `maxnet`
 - GAM: `mgcv`
-- stable shortlisting: `glmnet` + `ranger`
+- DML selector: `DoubleML` + `mlr3` / `mlr3learners` (random-forest nuisance)
 
 Optional functionality is activated only when its suggested package is
 installed. Package installation is never attempted during a model run.
@@ -78,16 +95,19 @@ For the full workflow:
 
 ```r
 install.packages(c(
-  "glmnet", "ranger", "gbm", "maxnet", "mgcv", "pROC",
-  "ggplot2", "sf", "terra", "future", "future.apply", "yaml"
+  "DoubleML", "mlr3", "mlr3learners", "ranger", "gbm", "maxnet", "mgcv",
+  "pROC", "ggplot2", "sf", "terra", "future", "future.apply", "yaml"
 ))
 ```
 
 ## Interpretation
 
-- Selected variables are stable predictive-driver candidates.
-- A passed invariance test is evidence of transferability, not proof of a
-  manipulable causal effect.
+- Selected variables are FDR-significant partial-effect drivers, adjusted for
+  the remaining predictors.
+- The DML effect is an association purged of the measured confounders; it is
+  not proof of a manipulable causal mechanism.
+- Counterfactual maps are purely interpretive what-if summaries on the current
+  climate; they do not extrapolate to future scenarios.
 - Future projections assume that the learned response relationship remains
   applicable under the projected environment.
 

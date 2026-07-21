@@ -2,22 +2,29 @@
 
 ## New core
 
-* Added `cast_domains()` for data-derived spatial or environmental domains.
-* Added `cast_select(method = "stable")`, the causal-inspired CAST selector.
-  It combines response-aware shortlisting, binomial-GLM invariance tests, and
-  a greedy minimum stable-set search.
-* Added `stable_no_invariance` as an explicit ablation for validation.
-* `cast_cv()` now re-runs selection inside every outer training fold and stores
+* `cast_select(method = "dml")` is the new default selector. It fits a
+  double machine-learning partially linear model (`DoubleML` + `mlr3`
+  random-forest nuisance) per candidate predictor and keeps those whose
+  Neyman-orthogonal effect survives Benjamini-Hochberg FDR control. The FDR
+  level (`alpha`) is the only ecological tuning choice.
+* `method = "rf"` is retained as a conventional permutation-importance
+  benchmark for comparison.
+* Added `cast_effect()`: a tidy DML effect table with FDR-adjusted
+  significance and confidence intervals, plus a `plot()` coefficient (forest)
+  plot.
+* Added `cast_counterfactual()`: a g-computation what-if on the current
+  climate that shifts one predictor, holds the rest fixed, and maps the change
+  in habitat suitability, plus a diverging-map `plot()` method.
+* `cast_cv()` re-runs selection inside every outer training fold and stores
   fold-specific selections, preventing feature-selection leakage.
 
-## Simplification
+## Removed
 
-* Removed DAG learning, Markov-blanket selection, causal role specifications,
-  refutation utilities, CATE, and their plotting/classes/dependencies.
-* Removed causal-role labels from selection outputs. Stable variables are
-  candidates for transferable prediction, not automatically identified causes.
-* Default selection in `cast()`, `cast_batch()`, and configuration profiles is
-  now `stable` with a 12-variable shortlist ceiling.
+* Removed the `"stable"` selector and its invariance machinery (data-derived
+  environments, binomial-GLM invariance tests, greedy minimum stable-set
+  search), the `stable_no_invariance` ablation, `cast_domains()`, and the
+  `glmnet` dependency. Variable choice is now the single FDR-controlled DML
+  criterion.
 
 ## Existing workflow
 
@@ -27,5 +34,5 @@
 
 # castSDM 0.2.0--0.5.1
 
-Earlier experimental releases explored DAG, role-prior, CATE, and RF-only
-screening designs. These interfaces are retired in 0.6.0.
+Earlier experimental releases explored DAG, role-prior, CATE, RF-only, and
+stable/invariance screening designs. These interfaces are retired in 0.6.0.

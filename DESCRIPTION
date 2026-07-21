@@ -1,6 +1,6 @@
 Package: castSDM
 Type: Package
-Title: Stable and Transferable Species Distribution Modeling
+Title: Causal Variable Selection for Species Distribution Modeling
 Version: 0.6.0
 Author: Liqiang Q [aut, cre, cph] (ORCID: <https://orcid.org/0009-0002-6966-4633>)
 Maintainer: Liqiang Q <2759831686@qq.com>

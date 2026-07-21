@@ -1,6 +1,6 @@
 #' Run a Pipeline Step with Checkpoint, Timing, and Peak RAM Logging
 #'
-#' Internal helper used inside [.cast_batch_run_one_species()] to make the
+#' Internal helper used inside `.cast_batch_run_one_species()` to make the
 #' per-species pipeline resumable. Results are cached to
 #' `<output_dir>/<species>/.steps/<step>.rds`, so a re-invocation of
 #' [cast_batch()] over the same `output_dir` skips already-finished steps.

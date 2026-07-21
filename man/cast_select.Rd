@@ -27,9 +27,9 @@ cast_select(
 
 \item{alpha}{FDR level for the DML selector. Default \code{0.05}.}
 
-\item{max_candidates}{Predictors tested with DML (see \link{.cast_select_dml};
-larger sets are pre-screened by RF importance for feasibility). Also the
-output ceiling for the RF benchmark. Default \code{30}.}
+\item{max_candidates}{Predictors tested with DML; larger sets are
+pre-screened by RF importance for feasibility. Also the output ceiling for
+the RF benchmark. Default \code{30}.}
 
 \item{dml_folds}{Cross-fitting folds for the DML selector. Default \code{5}.}
 
