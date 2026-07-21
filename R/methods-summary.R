@@ -19,9 +19,9 @@ summary.cast_result <- function(object, ...) {
     "Selected: {length(object$screen$selected)} variables",
     "{paste(object$screen$selected, collapse = ', ')}"
   ))
-  if (!is.null(object$screen$diagnostics$invariance_pass)) {
+  if (!is.null(object$screen$diagnostics$engine)) {
     cli::cli_text(
-      "Cross-environment invariance: {object$screen$diagnostics$invariance_pass}"
+      "Screening engine: {object$screen$diagnostics$engine}"
     )
   }
   cli::cli_h2("Models")

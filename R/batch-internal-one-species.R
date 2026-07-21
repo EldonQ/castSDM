@@ -46,15 +46,16 @@
       )
     )
 
-    select_suffix <- paste0("_", cfg$select_method %||% "stable")
+    select_suffix <- paste0("_", cfg$select_method %||% "dml")
     screen <- cast_run_step(paste0("select", select_suffix), output_dir, sp_name,
       cast_select(
         split$train,
         response = cfg$response,
-        method = cfg$select_method %||% "stable",
-        min_vars = cfg$select_min_vars %||% 5L,
+        method = cfg$select_method %||% "dml",
+        alpha = cfg$select_alpha %||% 0.05,
+        min_vars = cfg$select_min_vars %||% 3L,
         num_trees = cfg$select_num_trees %||% 300L,
-        max_vars = cfg$select_max_vars %||% 12L,
+        max_candidates = cfg$select_max_vars %||% 30L,
         cor_threshold = cfg$select_cor_threshold %||% 0.8,
         seed = seed_i,
         verbose = cfg$select_verbose %||% FALSE
@@ -87,10 +88,11 @@
           cast_cv(
             sp_data,
             screen = screen,
-            select_method = cfg$select_method %||% "stable",
+            select_method = cfg$select_method %||% "dml",
             select_args = list(
+              alpha = cfg$select_alpha %||% 0.05,
               min_vars = cfg$select_min_vars %||% 3L,
-              max_vars = cfg$select_max_vars %||% 12L,
+              max_candidates = cfg$select_max_vars %||% 30L,
               num_trees = cfg$select_num_trees %||% 300L,
               cor_threshold = cfg$select_cor_threshold %||% 0.8
             ),

@@ -3,19 +3,20 @@
 
 #' @section Overview:
 #' \pkg{castSDM} is a focused species distribution modelling toolkit. It pairs
-#' causal-inspired cross-environment stable variable selection with standard
+#' a double-machine-learning causal variable selector with standard
 #' RF / BRT / MaxEnt / GAM learners, nested spatial cross-validation,
 #' habitat-suitability prediction, performance-weighted ensembles and future
-#' climate projection. Stability across data-derived environments supports
-#' transferability; the package does not claim automatic causal discovery.
+#' climate projection. The selector retains predictors whose orthogonalized
+#' effect on occurrence survives FDR control; the package supports
+#' interpretable driver analysis but does not claim automatic causal discovery.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: response-aware shortlisting followed by
-#'    cross-environment conditional-invariance testing
-#'    ([cast_select()])
+#' 2. **Variable Selection**: double machine learning with FDR control
+#'    ([cast_select()]); causal interpretation via [cast_effect()] and
+#'    counterfactual what-if maps ([cast_counterfactual()])
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial

@@ -17,8 +17,9 @@ cast_batch(
   fit_verbose = FALSE,
   select_min_vars = 3L,
   select_num_trees = 300L,
-  select_method = "stable",
-  select_max_vars = 12L,
+  select_method = "dml",
+  select_max_vars = 30L,
+  select_alpha = 0.05,
   select_cor_threshold = 0.8,
   do_cv = TRUE,
   cv_k = 5L,
@@ -74,9 +75,12 @@ cast_batch(
 \item{select_num_trees}{Integer. Default \code{300}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"stable"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"dml"}.}
 
-\item{select_max_vars}{Candidate ceiling. Default \code{12}.}
+\item{select_max_vars}{Candidate ceiling for DML testing / RF output.
+Default \code{30}.}
+
+\item{select_alpha}{Numeric. FDR level for the DML selector. Default \code{0.05}.}
 
 \item{select_cor_threshold}{Numeric. Redundant-proxy correlation threshold.
 Default \code{0.8}.}

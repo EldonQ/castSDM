@@ -7,7 +7,7 @@
 #' @param screen Optional final-data screen. It is used only when
 #'   `select_method = NULL`; it is never re-used as a nested screen.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"stable"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"dml"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
@@ -23,7 +23,7 @@
 #' @export
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "stable",
+                    select_method = "dml",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),

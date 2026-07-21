@@ -8,12 +8,54 @@ print.cast_select <- function(x, ...) {
     "Method: {x$method %||% 'unknown'}",
     "Selected variables: {n_selected}"
   ))
-  if (!is.null(x$diagnostics$invariance_pass)) {
-    cli::cli_text(
-      "Invariance: {x$diagnostics$invariance_pass} (domain p={round(x$diagnostics$p_domain, 3)}, interaction p={round(x$diagnostics$p_interaction, 3)})"
-    )
+  d <- x$diagnostics
+  if (!is.null(d$engine)) {
+    if (identical(x$method, "dml")) {
+      cli::cli_text(
+        "{d$engine} | FDR = {d$fdr_method} at alpha = {d$alpha} | {d$n_folds}-fold cross-fitting"
+      )
+    } else {
+      cli::cli_text("{d$engine}")
+    }
   }
   cli::cli_text("Variables: {.val {x$selected}}")
+  invisible(x)
+}
+
+#' @export
+print.cast_effect <- function(x, ...) {
+  eff <- x$effects
+  n_sig <- sum(eff$selected, na.rm = TRUE)
+  cli::cli_h1("castSDM Causal Effects (DML)")
+  cli::cli_ul(c(
+    "Partial-linear effect per +1 SD, {round(100 * x$conf_level)}% CI",
+    "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
+  ))
+  show <- utils::head(eff, 10L)
+  disp <- data.frame(
+    variable = show$variable,
+    estimate = round(show$estimate, 4),
+    ci = sprintf("[%.3f, %.3f]", show$conf_low, show$conf_high),
+    p_adjusted = signif(show$p_adjusted, 3),
+    sig = ifelse(show$selected, "*", ""),
+    stringsAsFactors = FALSE
+  )
+  print(disp, row.names = FALSE)
+  invisible(x)
+}
+
+#' @export
+print.cast_counterfactual <- function(x, ...) {
+  s <- x$summary
+  cli::cli_h1("castSDM Counterfactual What-If")
+  cli::cli_ul(c(
+    "Intervention: {x$variable} + {x$shift} ({x$shift_type})",
+    "Models averaged: {.val {x$models}}",
+    "Cells with suitability gain: {round(100 * s$frac_positive, 1)}%"
+  ))
+  cli::cli_text(
+    "Delta HSS: mean = {round(s$mean_delta, 4)}, range = [{round(s$max_loss, 3)}, {round(s$max_gain, 3)}]"
+  )
   invisible(x)
 }
 

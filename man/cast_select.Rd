@@ -7,15 +7,12 @@
 cast_select(
   data,
   response = "presence",
-  method = c("stable", "stable_no_invariance", "rf"),
-  domains = NULL,
-  domain_method = c("spatial", "environment"),
-  n_domains = 4L,
+  method = c("dml", "rf"),
+  alpha = 0.05,
+  max_candidates = 30L,
+  dml_folds = 5L,
   num_trees = 300L,
   min_vars = 3L,
-  max_vars = 12L,
-  alpha = 0.05,
-  loss_tolerance = 0.02,
   cor_threshold = 0.8,
   seed = NULL,
   verbose = TRUE
@@ -26,26 +23,19 @@ cast_select(
 
 \item{response}{Binary response column.}
 
-\item{method}{\code{"stable"} (default), \code{"stable_no_invariance"} (ablation),
-or conventional \code{"rf"}.}
+\item{method}{\code{"dml"} (default) or the conventional \code{"rf"} benchmark.}
 
-\item{domains}{Optional precomputed domain factor. It must have one value per
-row and should be constructed from training data only.}
+\item{alpha}{FDR level for the DML selector. Default \code{0.05}.}
 
-\item{domain_method}{\code{"spatial"} or \code{"environment"}.}
+\item{max_candidates}{Predictors tested with DML (see \link{.cast_select_dml};
+larger sets are pre-screened by RF importance for feasibility). Also the
+output ceiling for the RF benchmark. Default \code{30}.}
 
-\item{n_domains}{Requested number of domains.}
+\item{dml_folds}{Cross-fitting folds for the DML selector. Default \code{5}.}
 
-\item{num_trees}{Number of RF trees used for shortlisting/ranking.}
+\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
 
-\item{min_vars}{Minimum retained variables.}
-
-\item{max_vars}{Maximum stable-selector shortlist size or RF output size.}
-
-\item{alpha}{Significance threshold for invariance tests.}
-
-\item{loss_tolerance}{Maximum allowed increase in leave-domain-out log-loss
-during greedy removal.}
+\item{min_vars}{Minimum retained variables. Default \code{3}.}
 
 \item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
 
@@ -57,12 +47,15 @@ during greedy removal.}
 A \code{cast_select} object.
 }
 \description{
-\code{method = "stable"} is the CAST selector. It combines a fast response-aware
-shortlist with a cross-environment conditional-invariance test and a greedy
-minimum-set search. \code{method = "rf"} is retained as a conventional benchmark.
+\code{method = "dml"} is the castSDM causal selector. It estimates each
+predictor's Neyman-orthogonal partially linear effect on occurrence with
+\link[DoubleML:DoubleMLPLR]{DoubleML} while flexibly controlling for every other
+predictor, then keeps the predictors whose effect survives Benjamini-Hochberg
+FDR control. The only ecological choice is the FDR level; cross-fitting folds
+and the random-forest nuisance learner are method defaults. \code{method = "rf"}
+is retained as a conventional (associational) permutation-importance
+benchmark for comparison.
 }
-\details{
-The stable selector is causal-inspired: it tests whether the response still
-depends on the data-derived environment after conditioning on a predictor
-set. It does not claim automatic identification of ecological causes.
+\seealso{
+\code{\link[=cast_effect]{cast_effect()}}, \code{\link[=cast_counterfactual]{cast_counterfactual()}}
 }

@@ -18,7 +18,7 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
 
   scr$status <- ifelse(scr$is_selected, "selected", "not selected")
 
-  imp_candidates <- c("combined_score", "rf_importance")
+  imp_candidates <- c("abs_statistic", "rf_importance", "combined_score")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)][1]
   if (is.na(imp_col) || !length(imp_col)) {
     scr$importance_plot <- as.numeric(scr$is_selected)
@@ -56,7 +56,9 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
     ggplot2::labs(
       title = "Variable screening",
       subtitle = sub_txt,
-      x = if (identical(imp_col, "importance_plot")) "Selection indicator" else "Predictor score",
+      x = if (identical(imp_col, "importance_plot")) "Selection indicator"
+          else if (identical(imp_col, "abs_statistic")) "|DML statistic|"
+          else "Predictor score",
       y = ""
     ) +
     theme_cast(base_size = 11) +
@@ -508,6 +510,158 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
       ggplot2::scale_fill_manual(values = change_colors, guide = "none")
     } else {
       ggplot2::scale_color_manual(values = change_colors, guide = "none")
+    }
+  )
+}
+
+
+#' Plot Causal Effects (DML)
+#'
+#' Coefficient (forest) plot of each predictor's orthogonalized partial-linear
+#' effect on occurrence per one standard deviation, with confidence intervals.
+#' Predictors passing FDR control are highlighted.
+#'
+#' @param x A `cast_effect` object (from [cast_effect()]).
+#' @param var_labels Optional named character vector for display labels.
+#' @param top Optional integer. Show only the `top` largest-magnitude effects.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  eff <- x$effects
+  if (!is.null(top) && is.finite(top)) {
+    eff <- utils::head(eff[order(-abs(eff$estimate)), , drop = FALSE], as.integer(top))
+  }
+  eff$sig <- ifelse(eff$selected, "significant", "not significant")
+  if (!is.null(var_labels)) {
+    eff$display <- ifelse(eff$variable %in% names(var_labels),
+                          var_labels[eff$variable], eff$variable)
+  } else {
+    eff$display <- eff$variable
+  }
+  eff <- eff[order(eff$estimate), ]
+  eff$display <- factor(eff$display, levels = eff$display)
+
+  sig_colors <- c(significant = "#B2182B", `not significant` = "grey70")
+  n_sig <- sum(eff$selected, na.rm = TRUE)
+
+  ggplot2::ggplot(eff, ggplot2::aes(
+    x = .data$estimate, y = .data$display, color = .data$sig
+  )) +
+    ggplot2::geom_vline(xintercept = 0, linetype = "dashed",
+                        color = "grey50", linewidth = 0.4) +
+    ggplot2::geom_errorbarh(
+      ggplot2::aes(xmin = .data$conf_low, xmax = .data$conf_high),
+      height = 0.25, linewidth = 0.6
+    ) +
+    ggplot2::geom_point(size = 2.6) +
+    ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
+    ggplot2::labs(
+      title = "Causal effect on occurrence",
+      subtitle = sprintf(
+        "Double machine learning | %d/%d significant (FDR < %.2g) | %d%% CI",
+        n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
+      ),
+      x = "Partial-linear effect (per +1 SD)", y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_line(color = "grey93", linewidth = 0.3)
+    )
+}
+
+
+#' Plot Counterfactual What-If Map
+#'
+#' Diverging map of the per-cell change in habitat suitability under a
+#' single-predictor intervention on the current climate.
+#'
+#' @param x A `cast_counterfactual` object (from [cast_counterfactual()]).
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param var_label Optional display label for the intervened predictor.
+#' @param title Optional plot title.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
+                                     title = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  pred <- x$predictions
+  lab <- var_label %||% x$variable
+  title <- title %||% sprintf("What-if: %s + %g %s", lab, x$shift, x$shift_type)
+  lim <- max(abs(pred$delta_hss), na.rm = TRUE)
+  if (!is.finite(lim) || lim == 0) lim <- 1e-6
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf, fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  large_grid <- nrow(pred) > 2e5
+  fill_scale <- ggplot2::scale_fill_gradient2(
+    low = "#2166AC", mid = "grey95", high = "#B2182B", midpoint = 0,
+    limits = c(-lim, lim), name = "\u0394 HSS"
+  )
+  color_scale <- ggplot2::scale_color_gradient2(
+    low = "#2166AC", mid = "grey95", high = "#B2182B", midpoint = 0,
+    limits = c(-lim, lim), name = "\u0394 HSS"
+  )
+  if (large_grid) {
+    p <- p + ggplot2::geom_raster(
+      data = pred,
+      ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$delta_hss)
+    ) + fill_scale
+  } else {
+    p <- p + ggplot2::geom_point(
+      data = pred,
+      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$delta_hss),
+      size = 0.4, alpha = 0.85
+    ) + color_scale
+  }
+  p <- p +
+    ggplot2::labs(
+      title = title,
+      subtitle = sprintf("Suitability gain in %d%% of cells (mean \u0394 = %.3f)",
+                         round(100 * x$summary$frac_positive),
+                         x$summary$mean_delta)
+    ) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "Arial")
+    ) +
+    ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right",
+      legend.key.width = ggplot2::unit(0.5, "cm"),
+      legend.key.height = ggplot2::unit(1.5, "cm")
+    )
+
+  p <- .add_china_dashline(p, basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = pred, value_var = "delta_hss", raster = large_grid,
+    scale = if (large_grid) {
+      ggplot2::scale_fill_gradient2(low = "#2166AC", mid = "grey95",
+        high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
+    } else {
+      ggplot2::scale_color_gradient2(low = "#2166AC", mid = "grey95",
+        high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
     }
   )
 }

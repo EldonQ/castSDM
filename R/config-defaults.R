@@ -26,9 +26,10 @@ cast_default_config <- function(profile = c("single", "batch", "disdat", "fish",
     resume = TRUE,
 
     # -- Variable Selection --
-    select_method = "stable",
+    select_method = "dml",
     select_min_vars = 3L,
-    select_max_vars = 12L,
+    select_max_vars = 30L,
+    select_alpha = 0.05,
     select_cor_threshold = 0.8,
     select_num_trees = 300L,
     select_verbose = FALSE,

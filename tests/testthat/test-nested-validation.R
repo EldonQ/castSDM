@@ -1,5 +1,4 @@
 test_that("spatial CV stores fold-specific selections", {
-  skip_if_not_installed("glmnet")
   skip_if_not_installed("ranger")
   set.seed(21)
   n <- 300
@@ -10,8 +9,8 @@ test_that("spatial CV stores fold-specific selections", {
     x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
   cv <- cast_cv(
-    dat, select_method = "stable_no_invariance",
-    select_args = list(max_vars = 4, min_vars = 2, num_trees = 40),
+    dat, select_method = "rf",
+    select_args = list(max_candidates = 4, min_vars = 2, num_trees = 40),
     k = 3, models = "rf", rf_ntree = 40, seed = 22, verbose = FALSE
   )
   expect_s3_class(cv, "cast_cv")

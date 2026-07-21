@@ -3,8 +3,9 @@
 #' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable scores (RF importance,
-#'   stability, invariant score, correlation cluster).
+#' @param scores A `data.frame` with per-variable scores. For `method = "dml"`:
+#'   the orthogonalized effect estimate, standard error, statistic, and
+#'   FDR-adjusted p-value; for `method = "rf"`: permutation importance.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
 #'
@@ -20,6 +21,58 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
       diagnostics = diagnostics
     ),
     class = "cast_select"
+  )
+}
+
+#' Create a cast_effect Object
+#'
+#' @param effects A `data.frame` of per-predictor causal effects with
+#'   confidence intervals and FDR-adjusted significance.
+#' @param conf_level Confidence level used for the intervals.
+#' @param alpha FDR level used to flag significance.
+#' @param diagnostics Named list carried over from the DML screen.
+#'
+#' @return A `cast_effect` object.
+#' @keywords internal
+#' @export
+new_cast_effect <- function(effects, conf_level = 0.95, alpha = 0.05,
+                            diagnostics = list()) {
+  structure(
+    list(
+      effects = effects,
+      conf_level = conf_level,
+      alpha = alpha,
+      diagnostics = diagnostics
+    ),
+    class = "cast_effect"
+  )
+}
+
+#' Create a cast_counterfactual Object
+#'
+#' @param predictions A `data.frame` with `lon`, `lat`, `baseline`,
+#'   `counterfactual`, and `delta_hss`.
+#' @param variable Character. The intervened predictor.
+#' @param shift Numeric. Intervention size.
+#' @param shift_type Character. How `shift` is interpreted.
+#' @param models Character vector of models averaged for prediction.
+#' @param summary Named list of change summaries.
+#'
+#' @return A `cast_counterfactual` object.
+#' @keywords internal
+#' @export
+new_cast_counterfactual <- function(predictions, variable, shift, shift_type,
+                                    models, summary = list()) {
+  structure(
+    list(
+      predictions = predictions,
+      variable = variable,
+      shift = shift,
+      shift_type = shift_type,
+      models = models,
+      summary = summary
+    ),
+    class = "cast_counterfactual"
   )
 }
 

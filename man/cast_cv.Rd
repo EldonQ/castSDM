@@ -7,7 +7,7 @@
 cast_cv(
   data,
   screen = NULL,
-  select_method = "stable",
+  select_method = "dml",
   select_args = list(),
   k = 5L,
   models = c("rf"),
@@ -27,7 +27,7 @@ cast_cv(
 \code{select_method = NULL}; it is never re-used as a nested screen.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
-\code{"stable"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
+\code{"dml"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.}
 

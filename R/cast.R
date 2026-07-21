@@ -14,12 +14,14 @@
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
 #' @param select_min_vars Integer. Minimum retained variables. Default `3`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"stable"`.
-#' @param select_num_trees Integer. Trees in the RF importance step.
+#'   [cast_select()]. Default `"dml"`.
+#' @param select_num_trees Integer. Trees in the RF nuisance/benchmark forests.
 #'   Default `300`.
-#' @param select_max_vars Candidate ceiling. Default `12`.
-#' @param select_cor_threshold Numeric. Absolute correlation threshold for
-#'   redundant-proxy control. Default `0.8`.
+#' @param select_max_vars Candidate ceiling for DML testing / RF output.
+#'   Default `30`.
+#' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
+#' @param select_cor_threshold Numeric. Absolute correlation threshold for the
+#'   RF benchmark. Default `0.8`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
@@ -44,9 +46,10 @@ cast <- function(species_data,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
                  select_min_vars = 3L,
-                 select_method = "stable",
+                 select_method = "dml",
                  select_num_trees = 300L,
-                 select_max_vars = 12L,
+                 select_max_vars = 30L,
+                 select_alpha = 0.05,
                  select_cor_threshold = 0.8,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -78,9 +81,10 @@ cast <- function(species_data,
   screen <- cast_select(
     train_data,
     method = select_method,
+    alpha = select_alpha,
     min_vars = select_min_vars,
     num_trees = select_num_trees,
-    max_vars = select_max_vars,
+    max_candidates = select_max_vars,
     cor_threshold = select_cor_threshold,
     seed = seed, verbose = verbose
   )
@@ -104,8 +108,9 @@ cast <- function(species_data,
         screen = screen,
         select_method = select_method,
         select_args = list(
+          alpha = select_alpha,
           min_vars = select_min_vars,
-          max_vars = select_max_vars,
+          max_candidates = select_max_vars,
           num_trees = select_num_trees,
           cor_threshold = select_cor_threshold
         ),

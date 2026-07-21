@@ -17,8 +17,10 @@
 #' @param select_min_vars Integer. Default `3`.
 #' @param select_num_trees Integer. Default `300`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"stable"`.
-#' @param select_max_vars Candidate ceiling. Default `12`.
+#'   [cast_select()]. Default `"dml"`.
+#' @param select_max_vars Candidate ceiling for DML testing / RF output.
+#'   Default `30`.
+#' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
 #' @param select_cor_threshold Numeric. Redundant-proxy correlation threshold.
 #'   Default `0.8`.
 #' @param do_cv Logical. Default `TRUE`.
@@ -63,8 +65,9 @@ cast_batch <- function(species_list,
                       # -- Selection --
                       select_min_vars     = 3L,
                       select_num_trees    = 300L,
-                      select_method = "stable",
-                      select_max_vars = 12L,
+                      select_method = "dml",
+                      select_max_vars = 30L,
+                      select_alpha = 0.05,
                       select_cor_threshold = 0.8,
                       # -- CV --
                       do_cv           = TRUE,
@@ -174,6 +177,7 @@ cast_batch <- function(species_list,
     select_num_trees = select_num_trees,
     select_method = select_method,
     select_max_vars = select_max_vars,
+    select_alpha = select_alpha,
     select_cor_threshold = select_cor_threshold,
     select_verbose = select_verbose,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,

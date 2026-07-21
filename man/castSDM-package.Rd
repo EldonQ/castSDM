@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Provides an end-to-end species distribution modeling workflow with causal-inspired cross-environment stable variable selection, nested spatial cross-validation, standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM), ensemble prediction, and future climate projection. The stability screen tests whether species responses remain conditionally invariant across data-derived environments. It supports transferable prediction but does not claim automatic discovery of ecological causes.
+Provides an end-to-end species distribution modeling workflow built around a causal variable-selection engine. Double machine learning (Chernozhukov et al. 2018) estimates each predictor's orthogonalized partial-linear effect on occurrence while flexibly controlling for the others, and predictors surviving Benjamini-Hochberg FDR control are retained. The package couples this screen with standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM), nested spatial cross-validation, ensemble prediction, future climate projection, and a counterfactual what-if interpretation layer. It supports transferable prediction and interpretable driver analysis but does not claim automatic discovery of ecological causes.
 }
 \seealso{
 Useful links:

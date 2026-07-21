@@ -1,60 +1,51 @@
 #' Select Variables for Species Distribution Models
 #'
-#' `method = "stable"` is the CAST selector. It combines a fast response-aware
-#' shortlist with a cross-environment conditional-invariance test and a greedy
-#' minimum-set search. `method = "rf"` is retained as a conventional benchmark.
-#'
-#' The stable selector is causal-inspired: it tests whether the response still
-#' depends on the data-derived environment after conditioning on a predictor
-#' set. It does not claim automatic identification of ecological causes.
+#' `method = "dml"` is the castSDM causal selector. It estimates each
+#' predictor's Neyman-orthogonal partially linear effect on occurrence with
+#' [DoubleML][DoubleML::DoubleMLPLR] while flexibly controlling for every other
+#' predictor, then keeps the predictors whose effect survives Benjamini-Hochberg
+#' FDR control. The only ecological choice is the FDR level; cross-fitting folds
+#' and the random-forest nuisance learner are method defaults. `method = "rf"`
+#' is retained as a conventional (associational) permutation-importance
+#' benchmark for comparison.
 #'
 #' @param data Data frame with response, coordinates, and predictors.
 #' @param response Binary response column.
-#' @param method `"stable"` (default), `"stable_no_invariance"` (ablation),
-#'   or conventional `"rf"`.
-#' @param domains Optional precomputed domain factor. It must have one value per
-#'   row and should be constructed from training data only.
-#' @param domain_method `"spatial"` or `"environment"`.
-#' @param n_domains Requested number of domains.
-#' @param num_trees Number of RF trees used for shortlisting/ranking.
-#' @param min_vars Minimum retained variables.
-#' @param max_vars Maximum stable-selector shortlist size or RF output size.
-#' @param alpha Significance threshold for invariance tests.
-#' @param loss_tolerance Maximum allowed increase in leave-domain-out log-loss
-#'   during greedy removal.
+#' @param method `"dml"` (default) or the conventional `"rf"` benchmark.
+#' @param alpha FDR level for the DML selector. Default `0.05`.
+#' @param max_candidates Predictors tested with DML (see [.cast_select_dml];
+#'   larger sets are pre-screened by RF importance for feasibility). Also the
+#'   output ceiling for the RF benchmark. Default `30`.
+#' @param dml_folds Cross-fitting folds for the DML selector. Default `5`.
+#' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
+#' @param min_vars Minimum retained variables. Default `3`.
 #' @param cor_threshold Absolute-correlation threshold for the RF benchmark.
 #' @param seed Random seed.
 #' @param verbose Print progress.
 #'
 #' @return A `cast_select` object.
+#' @seealso [cast_effect()], [cast_counterfactual()]
 #' @export
 cast_select <- function(data,
                         response = "presence",
-                        method = c("stable", "stable_no_invariance", "rf"),
-                        domains = NULL,
-                        domain_method = c("spatial", "environment"),
-                        n_domains = 4L,
+                        method = c("dml", "rf"),
+                        alpha = 0.05,
+                        max_candidates = 30L,
+                        dml_folds = 5L,
                         num_trees = 300L,
                         min_vars = 3L,
-                        max_vars = 12L,
-                        alpha = 0.05,
-                        loss_tolerance = 0.02,
                         cor_threshold = 0.8,
                         seed = NULL,
                         verbose = TRUE) {
   method <- match.arg(method)
-  domain_method <- match.arg(domain_method)
   env_vars <- get_env_vars(data, response)
   if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
 
-  if (method %in% c("stable", "stable_no_invariance")) {
-    out <- .cast_select_stable(
+  if (identical(method, "dml")) {
+    out <- .cast_select_dml(
       data = data, env_vars = env_vars, response = response,
-      domains = domains, domain_method = domain_method,
-      n_domains = n_domains, max_candidates = max_vars,
-      min_vars = min_vars, alpha = alpha, loss_tolerance = loss_tolerance,
-      num_trees = num_trees,
-      use_invariance = identical(method, "stable"),
+      alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
+      num_trees = min(as.integer(num_trees), 200L), min_vars = min_vars,
       seed = seed, verbose = verbose
     )
     return(new_cast_select(
@@ -63,6 +54,7 @@ cast_select <- function(data,
     ))
   }
 
+  # -- Conventional RF permutation-importance benchmark ---------------------
   check_suggested("ranger", "for RF permutation selection")
   x <- as.data.frame(.cast_numeric_matrix(data, env_vars), check.names = FALSE)
   names(x) <- make.names(env_vars, unique = TRUE)
@@ -77,7 +69,8 @@ cast_select <- function(data,
   imp <- stats::setNames(as.numeric(imp), original)
   imp <- imp[env_vars]
   imp[!is.finite(imp) | is.na(imp)] <- 0
-  max_vars <- min(max(as.integer(min_vars), as.integer(max_vars)), length(env_vars))
+  max_vars <- min(max(as.integer(min_vars), as.integer(max_candidates)),
+                  length(env_vars))
   ranked <- env_vars[order(imp, decreasing = TRUE)]
 
   selected <- character()
@@ -106,6 +99,7 @@ cast_select <- function(data,
   scores <- scores[order(!scores$selected, -scores$rf_importance), , drop = FALSE]
   new_cast_select(
     selected = selected, scores = scores, method = "rf",
-    diagnostics = list(cor_threshold = cor_threshold)
+    diagnostics = list(engine = "RF permutation importance",
+                       cor_threshold = cor_threshold)
   )
 }
