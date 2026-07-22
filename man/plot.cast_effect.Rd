@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_effect}
 \alias{plot.cast_effect}
-\title{Plot Causal Effects (DML)}
+\title{Plot Causal Effects / Conditional Importance}
 \usage{
 \method{plot}{cast_effect}(x, var_labels = NULL, top = NULL, ...)
 }
@@ -19,7 +19,9 @@
 A \code{ggplot} object.
 }
 \description{
-Coefficient (forest) plot of each predictor's orthogonalized partial-linear
-effect on occurrence per one standard deviation, with confidence intervals.
-Predictors passing FDR control are highlighted.
+Forest plot of each predictor's conditional contribution. For a CPI screen
+this is the (non-negative) conditional predictive impact; for a DML screen it
+is the orthogonalized partial-linear effect on occurrence per one standard
+deviation, with confidence intervals. Predictors passing FDR control are
+highlighted.
 }

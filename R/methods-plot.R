@@ -515,11 +515,13 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 }
 
 
-#' Plot Causal Effects (DML)
+#' Plot Causal Effects / Conditional Importance
 #'
-#' Coefficient (forest) plot of each predictor's orthogonalized partial-linear
-#' effect on occurrence per one standard deviation, with confidence intervals.
-#' Predictors passing FDR control are highlighted.
+#' Forest plot of each predictor's conditional contribution. For a CPI screen
+#' this is the (non-negative) conditional predictive impact; for a DML screen it
+#' is the orthogonalized partial-linear effect on occurrence per one standard
+#' deviation, with confidence intervals. Predictors passing FDR control are
+#' highlighted.
 #'
 #' @param x A `cast_effect` object (from [cast_effect()]).
 #' @param var_labels Optional named character vector for display labels.

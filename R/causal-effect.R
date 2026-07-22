@@ -1,13 +1,14 @@
 # Causal interpretation layer -------------------------------------------------
 #
 # Two functions turn a fitted castSDM workflow into causal-flavoured evidence:
-#   * cast_effect()         - reads the Neyman-orthogonal partial-linear effects
-#                             already estimated by the DML screen and returns a
-#                             tidy effect table with confidence intervals.
+#   * cast_effect()         - reads the conditional-importance estimates already
+#                             produced by the causal screen (CPI impacts or DML
+#                             partial-linear effects) and returns a tidy table
+#                             with confidence intervals.
 #   * cast_counterfactual() - g-computation "what-if" on the current climate:
 #                             shift one predictor, hold the rest fixed, and map
 #                             the change in predicted habitat suitability.
-# Both reuse existing machinery (the DML screen; the fitted models) so no new
+# Both reuse existing machinery (the screen; the fitted models) so no new
 # estimation engine or hand-tuned knob is introduced.
 
 #' @keywords internal
