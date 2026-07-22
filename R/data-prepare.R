@@ -175,6 +175,14 @@ cast_vif <- function(data,
 #' response, known metadata columns, and near-constant columns. If the
 #' detection is incorrect, pass `env_vars` explicitly to override.
 #'
+#' The hold-out split defaults to a **spatial block** split (whole spatial
+#' blocks are assigned to the test set), which gives a more honest estimate of
+#' transferable performance than a random split by reducing spatial
+#' autocorrelation leakage between train and test (Roberts et al. 2017). When
+#' coordinates are unavailable or a spatial split would leave a partition
+#' without both classes, it falls back to a **presence-stratified** split that
+#' preserves prevalence, and finally to a random split.
+#'
 #' @param data A `data.frame` with columns: `lon`, `lat`, `presence` (0/1),
 #'   and environmental variables.
 #' @param train_fraction Numeric. Fraction for training set. Default `0.7`.
@@ -182,6 +190,12 @@ cast_vif <- function(data,
 #' @param env_vars Character vector or `NULL`. Environmental variable names
 #'   to use. If `NULL` (default), auto-detected from `data`. Useful when
 #'   auto-detection picks up metadata columns (e.g., occurrence indicators).
+#' @param split Hold-out strategy: `"spatial"` (default), `"stratified"`, or
+#'   `"random"`. Degenerate spatial/stratified splits fall back automatically.
+#' @param block_method Spatial blocking for `split = "spatial"`: `"grid"`
+#'   (default) or `"cluster"`.
+#' @param n_blocks Integer. Number of spatial blocks to form before assigning
+#'   whole blocks to the test set. Default `20`.
 #' @param verbose Logical. Print detected variables and excluded columns.
 #'   Default `TRUE`.
 #'
@@ -190,11 +204,22 @@ cast_vif <- function(data,
 #'   \item{`train`}{Training `data.frame`.}
 #'   \item{`test`}{Test `data.frame`.}
 #'   \item{`env_vars`}{Character vector of environmental variable names.}
+#'   \item{`split`}{Character describing the hold-out strategy actually used.}
 #' }
+#'
+#' @references
+#' Roberts, D. R. et al. (2017). Cross-validation strategies for data with
+#' temporal, spatial, hierarchical, or phylogenetic structure. *Ecography*,
+#' 40(8), 913-929.
 #'
 #' @export
 cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
-                         env_vars = NULL, verbose = TRUE) {
+                         env_vars = NULL,
+                         split = c("spatial", "stratified", "random"),
+                         block_method = c("grid", "cluster"),
+                         n_blocks = 20L, verbose = TRUE) {
+  split <- match.arg(split)
+  block_method <- match.arg(block_method)
   validate_species_data(data)
 
   if (!is.null(env_vars)) {
@@ -270,11 +295,82 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
 
   n <- nrow(data)
   if (!is.null(seed)) set.seed(seed)
-  train_idx <- sample.int(n, size = round(train_fraction * n))
+  sp <- .cast_holdout_split(data, train_fraction, split, block_method,
+                            as.integer(n_blocks), "presence", verbose)
+  train_idx <- sp$train
+  if (verbose) {
+    cli::cli_inform(
+      "Hold-out split: {sp$method} ({length(train_idx)}/{n} in training)."
+    )
+  }
 
   list(
     train    = data[train_idx, , drop = FALSE],
     test     = data[-train_idx, , drop = FALSE],
-    env_vars = final_vars
+    env_vars = final_vars,
+    split    = sp$method
   )
+}
+
+#' Hold-out index construction with spatial / stratified fallbacks
+#' @keywords internal
+#' @noRd
+.cast_holdout_split <- function(data, train_fraction, split, block_method,
+                                n_blocks, response, verbose) {
+  n <- nrow(data)
+  has_coords <- all(c("lon", "lat") %in% names(data)) &&
+    is.numeric(data$lon) && is.numeric(data$lat)
+  y <- if (response %in% names(data)) data[[response]] else NULL
+  two_class <- !is.null(y) && length(unique(y[!is.na(y)])) >= 2L
+
+  make_random <- function() sample.int(n, size = round(train_fraction * n))
+  make_stratified <- function() {
+    if (!two_class) return(make_random())
+    idx <- integer(0)
+    for (cl in unique(y[!is.na(y)])) {
+      pos <- which(y == cl)
+      take <- max(1L, round(train_fraction * length(pos)))
+      idx <- c(idx, if (length(pos) == 1L) pos else sample(pos, size = take))
+    }
+    sort(idx)
+  }
+
+  if (identical(split, "random")) {
+    return(list(train = make_random(), method = "random"))
+  }
+  if (identical(split, "stratified")) {
+    return(list(train = make_stratified(), method = "stratified"))
+  }
+
+  # split == "spatial"
+  if (!has_coords) {
+    if (verbose) cli::cli_warn("No {.val lon}/{.val lat}; using stratified hold-out.")
+    return(list(train = make_stratified(), method = "stratified (no coords)"))
+  }
+  blocks <- tryCatch(
+    make_spatial_folds(data$lon, data$lat, k = n_blocks, method = block_method),
+    error = function(e) NULL
+  )
+  if (is.null(blocks) || length(unique(blocks)) < 2L) {
+    if (verbose) cli::cli_warn("Spatial blocking failed; using stratified hold-out.")
+    return(list(train = make_stratified(), method = "stratified (block failed)"))
+  }
+  ub <- sample(unique(blocks))
+  target_test <- round((1 - train_fraction) * n)
+  test_blocks <- integer(0)
+  for (b in ub) {
+    if (sum(blocks %in% test_blocks) >= target_test) break
+    test_blocks <- c(test_blocks, b)
+  }
+  test_idx <- which(blocks %in% test_blocks)
+  train_idx <- setdiff(seq_len(n), test_idx)
+  ok_classes <- if (two_class) {
+    length(unique(y[train_idx])) >= 2L && length(unique(y[test_idx])) >= 2L
+  } else TRUE
+  if (!length(train_idx) || !length(test_idx) || !ok_classes) {
+    if (verbose) cli::cli_warn("Spatial split degenerate; using stratified hold-out.")
+    return(list(train = make_stratified(), method = "stratified (spatial degenerate)"))
+  }
+  list(train = sort(train_idx),
+       method = sprintf("spatial block (%s)", block_method))
 }

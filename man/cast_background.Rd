@@ -76,10 +76,26 @@ modeling, with adaptive count based on the number of presence records.
 Extracts environmental variables from a raster stack and merges with
 presence data to produce a ready-to-model dataset.
 }
+\section{Interpretation and sampling bias}{
+
+Background (pseudo-absence) points define an arbitrary reference prevalence,
+so downstream model outputs are \strong{relative habitat suitability}, not
+calibrated probabilities of occurrence: changing \code{ratio} shifts predicted
+values up or down without changing their spatial ranking. Presence records
+are also subject to sampling bias (accessibility, survey effort); unless
+corrected, the models partly describe where the species was \emph{observed}
+rather than where it \emph{occurs}. Carry both caveats into any HSS, effect, or
+projection interpretation.
+}
+
 \references{
 Barbet-Massin, M. et al. (2012). Selecting pseudo-absences for species
 distribution models: how, where and how many?
 \emph{Methods in Ecology and Evolution}, 3(2), 327-338.
+
+Phillips, S. J. et al. (2009). Sample selection bias and presence-only
+distribution models: implications for background and pseudo-absence data.
+\emph{Ecological Applications}, 19(1), 181-197.
 }
 \seealso{
 \code{\link[=cast_study_area]{cast_study_area()}}, \code{\link[=cast_prepare]{cast_prepare()}}

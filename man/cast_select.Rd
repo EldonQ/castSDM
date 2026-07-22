@@ -7,13 +7,14 @@
 cast_select(
   data,
   response = "presence",
-  method = c("dml", "rf"),
+  method = c("cpi", "dml", "rf"),
   alpha = 0.05,
   max_candidates = 30L,
   dml_folds = 5L,
   num_trees = 300L,
   min_vars = 3L,
   cor_threshold = 0.8,
+  num_threads = 1L,
   seed = NULL,
   verbose = TRUE
 )
@@ -23,21 +24,24 @@ cast_select(
 
 \item{response}{Binary response column.}
 
-\item{method}{\code{"dml"} (default) or the conventional \code{"rf"} benchmark.}
+\item{method}{\code{"cpi"} (default), \code{"dml"}, or the conventional \code{"rf"}
+benchmark.}
 
-\item{alpha}{FDR level for the DML selector. Default \code{0.05}.}
+\item{alpha}{FDR level for the CPI/DML selectors. Default \code{0.05}.}
 
-\item{max_candidates}{Predictors tested with DML; larger sets are
+\item{max_candidates}{Predictors tested with CPI/DML; larger sets are
 pre-screened by RF importance for feasibility. Also the output ceiling for
 the RF benchmark. Default \code{30}.}
 
-\item{dml_folds}{Cross-fitting folds for the DML selector. Default \code{5}.}
+\item{dml_folds}{Cross-fitting folds for the CPI/DML selectors. Default \code{5}.}
 
 \item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
 
 \item{min_vars}{Minimum retained variables. Default \code{3}.}
 
 \item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
+
+\item{num_threads}{Threads for the ranger learners/benchmark. Default \code{1}.}
 
 \item{seed}{Random seed.}
 
@@ -47,14 +51,22 @@ the RF benchmark. Default \code{30}.}
 A \code{cast_select} object.
 }
 \description{
-\code{method = "dml"} is the castSDM causal selector. It estimates each
-predictor's Neyman-orthogonal partially linear effect on occurrence with
-\link[DoubleML:DoubleMLPLR]{DoubleML} while flexibly controlling for every other
-predictor, then keeps the predictors whose effect survives Benjamini-Hochberg
-FDR control. The only ecological choice is the FDR level; cross-fitting folds
-and the random-forest nuisance learner are method defaults. \code{method = "rf"}
-is retained as a conventional (associational) permutation-importance
-benchmark for comparison.
+\code{method = "cpi"} (default) is the castSDM causal selector. It tests each
+predictor's conditional independence from occurrence given every other
+predictor via the conditional predictive impact (Watson & Wright 2021):
+a random forest is cross-fitted once, each predictor is replaced by a
+Gaussian knockoff, and the increase in log-loss measures its conditional
+contribution. Because the learner is a random forest, symmetric unimodal
+(bell-shaped) niche responses are detected. Predictors surviving
+Benjamini-Hochberg FDR control are kept.
+}
+\details{
+\code{method = "dml"} is an alternative causal selector estimating each
+predictor's Neyman-orthogonal partially linear effect with
+\link[DoubleML:DoubleMLPLR]{DoubleML}; it assumes an approximately linear
+conditional effect and is best paired with \code{\link[=cast_effect]{cast_effect()}} for a signed,
+interpretable coefficient. \code{method = "rf"} is retained as a conventional
+(associational) permutation-importance benchmark for comparison.
 }
 \seealso{
 \code{\link[=cast_effect]{cast_effect()}}, \code{\link[=cast_counterfactual]{cast_counterfactual()}}

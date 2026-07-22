@@ -546,6 +546,23 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 
   sig_colors <- c(significant = "#B2182B", `not significant` = "grey70")
   n_sig <- sum(eff$selected, na.rm = TRUE)
+  is_cpi <- identical(x$diagnostics$measure, "cpi")
+
+  if (is_cpi) {
+    plot_title <- "Conditional predictive impact"
+    plot_subtitle <- sprintf(
+      "CPI (log-loss knockoff) | %d/%d significant (FDR < %.2g) | %d%% CI",
+      n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
+    )
+    x_lab <- "Conditional predictive impact"
+  } else {
+    plot_title <- "Causal effect on occurrence"
+    plot_subtitle <- sprintf(
+      "Double machine learning | %d/%d significant (FDR < %.2g) | %d%% CI",
+      n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
+    )
+    x_lab <- "Partial-linear effect (per +1 SD)"
+  }
 
   ggplot2::ggplot(eff, ggplot2::aes(
     x = .data$estimate, y = .data$display, color = .data$sig
@@ -559,12 +576,9 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
     ggplot2::geom_point(size = 2.6) +
     ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
     ggplot2::labs(
-      title = "Causal effect on occurrence",
-      subtitle = sprintf(
-        "Double machine learning | %d/%d significant (FDR < %.2g) | %d%% CI",
-        n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
-      ),
-      x = "Partial-linear effect (per +1 SD)", y = ""
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = x_lab, y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(

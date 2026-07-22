@@ -17,7 +17,7 @@ cast_batch(
   fit_verbose = FALSE,
   select_min_vars = 3L,
   select_num_trees = 300L,
-  select_method = "dml",
+  select_method = "cpi",
   select_max_vars = 30L,
   select_alpha = 0.05,
   select_cor_threshold = 0.8,
@@ -75,7 +75,7 @@ cast_batch(
 \item{select_num_trees}{Integer. Default \code{300}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"dml"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"cpi"}.}
 
 \item{select_max_vars}{Candidate ceiling for DML testing / RF output.
 Default \code{30}.}

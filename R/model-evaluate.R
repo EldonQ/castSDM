@@ -25,11 +25,11 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
   Y_test <- test_data[[response]]
   env_vars <- fit$env_vars
 
-  X_test_raw <- as.data.frame(test_data[, env_vars, drop = FALSE])
+  X_test_raw <- as.data.frame(test_data[, env_vars, drop = FALSE], check.names = FALSE)
   for (col in names(X_test_raw)) {
     X_test_raw[[col]] <- as.numeric(X_test_raw[[col]])
   }
-  X_test_raw[is.na(X_test_raw)] <- 0
+  X_test_raw <- .cast_impute(X_test_raw, fit$scaling$impute)
 
   results <- list()
 

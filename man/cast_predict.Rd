@@ -4,7 +4,7 @@
 \alias{cast_predict}
 \title{Generate Spatial Habitat Suitability Predictions}
 \usage{
-cast_predict(fit, new_data, models = NULL)
+cast_predict(fit, new_data, models = NULL, clamp = FALSE, extrapolation = TRUE)
 }
 \arguments{
 \item{fit}{A \link{cast_fit} object.}
@@ -14,15 +14,43 @@ environmental variables used in fitting.}
 
 \item{models}{Character vector. Which models to predict with. Default
 \code{NULL} (all fitted models).}
+
+\item{clamp}{Logical. Clamp predictors to the training range before
+prediction. Default \code{FALSE}.}
+
+\item{extrapolation}{Logical. Append \code{mess} and \code{extrapolating} columns
+flagging out-of-envelope sites. Default \code{TRUE} (skipped if the fit lacks
+a stored reference).}
 }
 \value{
 A \code{cast_predict} object containing a \code{predictions} data.frame
-with \code{lon}, \code{lat}, and one \verb{HSS_*} column per model.
+with \code{lon}, \code{lat}, one \verb{HSS_*} column per model, and (when enabled)
+\code{mess} / \code{extrapolating} columns.
 }
 \description{
 Predicts habitat suitability scores (HSS) for new environmental data using
 fitted models. Each model produces a probability representing the
 predicted suitability of each site.
+}
+\details{
+HSS is a \strong{relative habitat suitability} score whose ranking is meaningful,
+not a calibrated probability of occurrence: its absolute level depends on the
+arbitrary presence:background prevalence set in \code{\link[=cast_background]{cast_background()}}. Compare
+and threshold HSS within a projection, and avoid reading it as an absolute
+occurrence probability.
+
+When the fit carries a training reference (it does by default), each
+prediction row is scored for \strong{extrapolation} via the multivariate
+environmental similarity surface (MESS; Elith et al. 2010). Negative MESS
+marks sites outside the training envelope of at least one predictor, where
+model output is an extrapolation and should be treated cautiously. Optional
+\code{clamp}ing caps each predictor to its training range before prediction,
+which curbs runaway extrapolation without hiding it (the MESS flag is still
+computed on the unclamped input).
+}
+\references{
+Elith, J., Kearney, M. & Phillips, S. (2010). The art of modelling
+range-shifting species. \emph{Methods in Ecology and Evolution}, 1(4), 330-342.
 }
 \seealso{
 \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}

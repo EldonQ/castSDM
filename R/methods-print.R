@@ -26,11 +26,20 @@ print.cast_select <- function(x, ...) {
 print.cast_effect <- function(x, ...) {
   eff <- x$effects
   n_sig <- sum(eff$selected, na.rm = TRUE)
-  cli::cli_h1("castSDM Causal Effects (DML)")
-  cli::cli_ul(c(
-    "Partial-linear effect per +1 SD, {round(100 * x$conf_level)}% CI",
-    "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
-  ))
+  is_cpi <- identical(x$diagnostics$measure, "cpi")
+  if (is_cpi) {
+    cli::cli_h1("castSDM Conditional Predictive Impact (CPI)")
+    cli::cli_ul(c(
+      "Conditional importance (log-loss knockoff), {round(100 * x$conf_level)}% CI",
+      "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
+    ))
+  } else {
+    cli::cli_h1("castSDM Causal Effects (DML)")
+    cli::cli_ul(c(
+      "Partial-linear effect per +1 SD, {round(100 * x$conf_level)}% CI",
+      "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
+    ))
+  }
   show <- utils::head(eff, 10L)
   disp <- data.frame(
     variable = show$variable,
@@ -40,6 +49,7 @@ print.cast_effect <- function(x, ...) {
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
+  if (is_cpi) names(disp)[names(disp) == "estimate"] <- "cpi"
   print(disp, row.names = FALSE)
   invisible(x)
 }

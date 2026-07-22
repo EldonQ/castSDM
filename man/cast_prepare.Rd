@@ -9,6 +9,9 @@ cast_prepare(
   train_fraction = 0.7,
   seed = NULL,
   env_vars = NULL,
+  split = c("spatial", "stratified", "random"),
+  block_method = c("grid", "cluster"),
+  n_blocks = 20L,
   verbose = TRUE
 )
 }
@@ -24,6 +27,15 @@ and environmental variables.}
 to use. If \code{NULL} (default), auto-detected from \code{data}. Useful when
 auto-detection picks up metadata columns (e.g., occurrence indicators).}
 
+\item{split}{Hold-out strategy: \code{"spatial"} (default), \code{"stratified"}, or
+\code{"random"}. Degenerate spatial/stratified splits fall back automatically.}
+
+\item{block_method}{Spatial blocking for \code{split = "spatial"}: \code{"grid"}
+(default) or \code{"cluster"}.}
+
+\item{n_blocks}{Integer. Number of spatial blocks to form before assigning
+whole blocks to the test set. Default \code{20}.}
+
 \item{verbose}{Logical. Print detected variables and excluded columns.
 Default \code{TRUE}.}
 }
@@ -33,6 +45,7 @@ A list with components:
 \item{\code{train}}{Training \code{data.frame}.}
 \item{\code{test}}{Test \code{data.frame}.}
 \item{\code{env_vars}}{Character vector of environmental variable names.}
+\item{\code{split}}{Character describing the hold-out strategy actually used.}
 }
 }
 \description{
@@ -44,4 +57,17 @@ training/test sets.
 Auto-detects environmental variable columns by excluding coordinates,
 response, known metadata columns, and near-constant columns. If the
 detection is incorrect, pass \code{env_vars} explicitly to override.
+
+The hold-out split defaults to a \strong{spatial block} split (whole spatial
+blocks are assigned to the test set), which gives a more honest estimate of
+transferable performance than a random split by reducing spatial
+autocorrelation leakage between train and test (Roberts et al. 2017). When
+coordinates are unavailable or a spatial split would leave a partition
+without both classes, it falls back to a \strong{presence-stratified} split that
+preserves prevalence, and finally to a random split.
+}
+\references{
+Roberts, D. R. et al. (2017). Cross-validation strategies for data with
+temporal, spatial, hierarchical, or phylogenetic structure. \emph{Ecography},
+40(8), 913-929.
 }

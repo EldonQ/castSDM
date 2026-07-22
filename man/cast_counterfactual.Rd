@@ -44,6 +44,17 @@ habitat suitability is mapped cell by cell. This isolates the modelled effect
 of a single driver on today's landscape - a clean, purely interpretive
 "what-if", with no future-climate extrapolation.
 }
+\section{Interpretation}{
+
+The result is a \emph{model-based} what-if conditional on the fitted models and
+the observed predictor distribution, reported on the relative habitat
+suitability scale (not calibrated occurrence probability). It is not a
+validated causal effect: it inherits the same no-unobserved-confounding and
+correct-functional-form assumptions as the screen (Byrnes & Dee 2025), and
+large shifts can push cells outside the training envelope - pair it with the
+MESS/extrapolation flags from \code{\link[=cast_predict]{cast_predict()}}.
+}
+
 \seealso{
 \code{\link[=cast_effect]{cast_effect()}}, \code{\link[=cast_predict]{cast_predict()}}
 }

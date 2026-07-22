@@ -7,7 +7,7 @@
 #' @param screen Optional final-data screen. It is used only when
 #'   `select_method = NULL`; it is never re-used as a nested screen.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"dml"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"cpi"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
@@ -23,7 +23,7 @@
 #' @export
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "dml",
+                    select_method = "cpi",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
@@ -82,9 +82,9 @@ cast_cv <- function(data,
     for (mdl in models) {
       info <- fit$models[[mdl]]
       if (is.null(info) || is.null(info$model)) next
-      x_test <- as.data.frame(test[, fit$env_vars, drop = FALSE])
+      x_test <- as.data.frame(test[, fit$env_vars, drop = FALSE], check.names = FALSE)
       for (nm in names(x_test)) x_test[[nm]] <- as.numeric(x_test[[nm]])
-      x_test[is.na(x_test)] <- 0
+      x_test <- .cast_impute(x_test, fit$scaling$impute)
       pred <- tryCatch(
         predict_single_model(info, x_test),
         error = function(e) rep(NA_real_, nrow(test))

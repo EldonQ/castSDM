@@ -30,58 +30,108 @@
   screen
 }
 
-#' Causal Effect Table from the DML Screen
+#' Causal Effect / Conditional Importance Table from the Screen
 #'
-#' Extracts each predictor's Neyman-orthogonal partial-linear effect on
-#' occurrence - already estimated by [cast_select()] with `method = "dml"` -
-#' and returns a tidy table with confidence intervals and FDR-adjusted
-#' significance. Effects are expressed per one within-sample standard deviation
-#' of the predictor, so magnitudes are directly comparable.
+#' Turns a causal screen into a tidy per-predictor table with confidence
+#' intervals and FDR-adjusted significance.
 #'
-#' @param object A `cast_select` (from `method = "dml"`), or a `cast_fit` /
-#'   `cast_result` that carries such a screen.
+#' For `method = "cpi"` screens the table reports each predictor's conditional
+#' predictive impact (CPI, Watson & Wright 2021): a non-negative measure of how
+#' much predictive accuracy is lost when the predictor is replaced by a knockoff
+#' given all other predictors. CPI is a magnitude of conditional dependence and
+#' carries no sign (direction), so it should be read together with
+#' [cast_counterfactual()] or partial-dependence for the shape of the response.
+#'
+#' For `method = "dml"` screens the table reports each predictor's
+#' Neyman-orthogonal partial-linear effect on occurrence, expressed per one
+#' within-sample standard deviation of the predictor, so magnitudes are
+#' directly comparable and signed.
+#'
+#' @section Causal interpretation (read before citing effects):
+#' CPI and DML both quantify a predictor's contribution *conditional on the
+#' other predictors*. A causal reading is licensed only under the usual
+#' assumptions - no unobserved confounding, a correctly specified adjustment
+#' set, and no reverse causation - which observational, sampling-biased SDM
+#' data rarely satisfy. Absent a defensible causal design, report these as
+#' conditional-importance / adjusted-association evidence rather than validated
+#' causal effects (Byrnes & Dee 2025).
+#'
+#' @param object A `cast_select` (from `method = "cpi"` or `"dml"`), or a
+#'   `cast_fit` / `cast_result` that carries such a screen.
 #' @param conf_level Confidence level for the intervals. Default `0.95`.
 #'
 #' @return A `cast_effect` object.
+#' @references
+#' Watson, D. S. & Wright, M. N. (2021). Testing conditional independence in
+#' supervised learning algorithms. *Machine Learning*, 110(8), 2107-2129.
+#'
+#' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
+#' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
 #' @seealso [cast_select()], [cast_counterfactual()]
 #' @export
 cast_effect <- function(object, conf_level = 0.95) {
   screen <- .cast_extract_screen(object)
-  if (!identical(screen$method, "dml")) {
+  if (!screen$method %in% c("cpi", "dml")) {
     cli::cli_abort(c(
-      "{.fn cast_effect} needs a DML screen.",
-      i = "Run {.code cast_select(..., method = \"dml\")} first."
+      "{.fn cast_effect} needs a causal screen.",
+      i = "Run {.code cast_select(..., method = \"cpi\")} (or {.val dml}) first."
     ))
   }
   if (!is.numeric(conf_level) || conf_level <= 0 || conf_level >= 1) {
     cli::cli_abort("{.arg conf_level} must be a single number in (0, 1).")
   }
 
-  sc <- screen$scores
-  sc <- sc[is.finite(sc$estimate) & is.finite(sc$std_error), , drop = FALSE]
-  if (!nrow(sc)) cli::cli_abort("The DML screen holds no finite effect estimates.")
-
   z <- stats::qnorm(1 - (1 - conf_level) / 2)
-  effects <- data.frame(
-    variable    = sc$variable,
-    estimate    = sc$estimate,
-    std_error   = sc$std_error,
-    statistic   = sc$statistic,
-    p_value     = sc$p_value,
-    p_adjusted  = sc$p_adjusted,
-    conf_low    = sc$estimate - z * sc$std_error,
-    conf_high   = sc$estimate + z * sc$std_error,
-    selected    = sc$selected,
-    stringsAsFactors = FALSE
-  )
-  effects <- effects[order(-abs(effects$estimate)), , drop = FALSE]
+  sc <- screen$scores
+
+  if (identical(screen$method, "cpi")) {
+    sc <- sc[is.finite(sc$cpi) & is.finite(sc$std_error), , drop = FALSE]
+    if (!nrow(sc)) {
+      cli::cli_abort("The CPI screen holds no finite impact estimates.")
+    }
+    effects <- data.frame(
+      variable    = sc$variable,
+      estimate    = sc$cpi,
+      std_error   = sc$std_error,
+      statistic   = sc$statistic,
+      p_value     = sc$p_value,
+      p_adjusted  = sc$p_adjusted,
+      conf_low    = sc$cpi - z * sc$std_error,
+      conf_high   = sc$cpi + z * sc$std_error,
+      selected    = sc$selected,
+      stringsAsFactors = FALSE
+    )
+    effects <- effects[order(-effects$estimate), , drop = FALSE]
+    measure <- "cpi"
+  } else {
+    sc <- sc[is.finite(sc$estimate) & is.finite(sc$std_error), , drop = FALSE]
+    if (!nrow(sc)) {
+      cli::cli_abort("The DML screen holds no finite effect estimates.")
+    }
+    effects <- data.frame(
+      variable    = sc$variable,
+      estimate    = sc$estimate,
+      std_error   = sc$std_error,
+      statistic   = sc$statistic,
+      p_value     = sc$p_value,
+      p_adjusted  = sc$p_adjusted,
+      conf_low    = sc$estimate - z * sc$std_error,
+      conf_high   = sc$estimate + z * sc$std_error,
+      selected    = sc$selected,
+      stringsAsFactors = FALSE
+    )
+    effects <- effects[order(-abs(effects$estimate)), , drop = FALSE]
+    measure <- "dml_plr"
+  }
   rownames(effects) <- NULL
 
+  diagnostics <- screen$diagnostics
+  diagnostics$measure <- measure
   new_cast_effect(
     effects = effects,
     conf_level = conf_level,
     alpha = screen$diagnostics$alpha %||% 0.05,
-    diagnostics = screen$diagnostics
+    diagnostics = diagnostics
   )
 }
 
@@ -104,6 +154,15 @@ cast_effect <- function(object, conf_level = 0.95) {
 #' habitat suitability is mapped cell by cell. This isolates the modelled effect
 #' of a single driver on today's landscape - a clean, purely interpretive
 #' "what-if", with no future-climate extrapolation.
+#'
+#' @section Interpretation:
+#' The result is a *model-based* what-if conditional on the fitted models and
+#' the observed predictor distribution, reported on the relative habitat
+#' suitability scale (not calibrated occurrence probability). It is not a
+#' validated causal effect: it inherits the same no-unobserved-confounding and
+#' correct-functional-form assumptions as the screen (Byrnes & Dee 2025), and
+#' large shifts can push cells outside the training envelope - pair it with the
+#' MESS/extrapolation flags from [cast_predict()].
 #'
 #' @param fit A `cast_fit` object.
 #' @param newdata A `data.frame` with the fitted predictors and coordinate
@@ -147,9 +206,9 @@ cast_counterfactual <- function(fit, newdata, variable,
   }, logical(1))]
   if (!length(models)) cli::cli_abort("No usable fitted model available for prediction.")
 
-  X_base <- as.data.frame(newdata[, env_vars, drop = FALSE])
+  X_base <- as.data.frame(newdata[, env_vars, drop = FALSE], check.names = FALSE)
   for (col in names(X_base)) X_base[[col]] <- as.numeric(X_base[[col]])
-  X_base[is.na(X_base)] <- 0
+  X_base <- .cast_impute(X_base, fit$scaling$impute)
 
   delta <- switch(shift_type,
     sd      = shift * (fit$scaling$sds[[variable]] %||% stats::sd(X_base[[variable]])),

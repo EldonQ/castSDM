@@ -14,7 +14,7 @@
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
 #' @param select_min_vars Integer. Minimum retained variables. Default `3`.
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"dml"`.
+#'   [cast_select()]. Default `"cpi"`.
 #' @param select_num_trees Integer. Trees in the RF nuisance/benchmark forests.
 #'   Default `300`.
 #' @param select_max_vars Candidate ceiling for DML testing / RF output.
@@ -46,7 +46,7 @@ cast <- function(species_data,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
                  select_min_vars = 3L,
-                 select_method = "dml",
+                 select_method = "cpi",
                  select_num_trees = 300L,
                  select_max_vars = 30L,
                  select_alpha = 0.05,

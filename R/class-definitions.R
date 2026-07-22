@@ -81,7 +81,13 @@ new_cast_counterfactual <- function(predictions, variable, shift, shift_type,
 #' @param models Named list of fitted model objects.
 #' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
-#' @param scaling List with `means` and `sds` used for standardization.
+#' @param scaling List of training-set predictor statistics reused across the
+#'   prediction stack: `means` and `sds` (for counterfactual SD-based shifts in
+#'   [cast_counterfactual()]), `impute` (per-predictor training median used by
+#'   the internal `.cast_impute()` helper), and `reference` (the imputed
+#'   training predictor frame for MESS/clamp extrapolation control). Models are
+#'   trained on the raw predictors; `means`/`sds` are not applied to fitting
+#'   inputs.
 #' @param screen A `cast_select` object (or `NULL`).
 #'
 #' @return A `cast_fit` object.

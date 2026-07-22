@@ -10,7 +10,7 @@ cast(
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
   select_min_vars = 3L,
-  select_method = "dml",
+  select_method = "cpi",
   select_num_trees = 300L,
   select_max_vars = 30L,
   select_alpha = 0.05,
@@ -41,7 +41,7 @@ the same environmental columns as \code{species_data}.}
 \item{select_min_vars}{Integer. Minimum retained variables. Default \code{3}.}
 
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"dml"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"cpi"}.}
 
 \item{select_num_trees}{Integer. Trees in the RF nuisance/benchmark forests.
 Default \code{300}.}

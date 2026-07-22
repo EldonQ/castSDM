@@ -16,6 +16,8 @@
 #' @param rf_ntree Integer. Number of RF trees. Default `300`.
 #' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
+#' @param num_threads Integer. Threads for the Random Forest learner. Default
+#'   `1` (safe under fold-parallel cross-validation; raise for a single fit).
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
 #'
@@ -38,6 +40,7 @@ cast_fit <- function(data,
                      rf_ntree     = 300L,
                      brt_n_trees  = 500L,
                      brt_depth    = 5L,
+                     num_threads  = 1L,
                      seed         = NULL,
                      verbose      = TRUE) {
   models <- tolower(models)
@@ -58,9 +61,15 @@ cast_fit <- function(data,
   cast_vars <- env_vars
 
   Y <- data[[response]]
-  X_raw <- as.data.frame(data[, env_vars, drop = FALSE])
+  X_raw <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
-  X_raw[is.na(X_raw)] <- 0
+
+  # -- Training-set median imputation, reused by evaluate/predict/CV --
+  X_impute <- vapply(X_raw, function(v) {
+    m <- stats::median(v, na.rm = TRUE)
+    if (is.finite(m)) m else 0
+  }, numeric(1))
+  X_raw <- .cast_impute(X_raw, X_impute)
 
   # -- Standardize (stored for prediction) --
   X_means <- colMeans(X_raw, na.rm = TRUE)
@@ -72,7 +81,8 @@ cast_fit <- function(data,
   for (mdl in models) {
     if (verbose) cli::cli_inform("Training {.val {mdl}}...")
     fitted_models[[mdl]] <- tryCatch(
-      fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth, seed),
+      fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth, seed,
+                      num_threads),
       error = function(e) {
         cli::cli_warn("{mdl} failed: {e$message}")
         list(type = "traditional", model = NULL, name = mdl)
@@ -84,9 +94,34 @@ cast_fit <- function(data,
     models    = fitted_models,
     cast_vars = cast_vars,
     env_vars  = env_vars,
-    scaling   = list(means = X_means, sds = X_sds),
+    scaling   = list(means = X_means, sds = X_sds, impute = X_impute,
+                     reference = X_raw),
     screen    = screen
   )
+}
+
+#' Impute missing predictor values from stored training statistics
+#'
+#' Fills `NA`s in a predictor `data.frame` column-by-column using the
+#' training-set imputation vector stored in `fit$scaling$impute` (median of
+#' each predictor at fit time). Columns absent from `impute` fall back to `0`.
+#' Centralizing this keeps train, hold-out, spatial-CV, prediction, and
+#' counterfactual pathways on the same, statistically defensible fill.
+#'
+#' @keywords internal
+#' @noRd
+.cast_impute <- function(X, impute = NULL) {
+  X <- as.data.frame(X)
+  for (col in names(X)) {
+    if (!is.numeric(X[[col]])) X[[col]] <- as.numeric(X[[col]])
+    na <- is.na(X[[col]])
+    if (any(na)) {
+      fill <- if (!is.null(impute) && col %in% names(impute) &&
+                  is.finite(impute[[col]])) impute[[col]] else 0
+      X[[col]][na] <- fill
+    }
+  }
+  X
 }
 
 
@@ -97,7 +132,7 @@ cast_fit <- function(data,
 #' @keywords internal
 #' @noRd
 fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
-                            brt_depth, seed) {
+                            brt_depth, seed, num_threads = 1L) {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
@@ -105,7 +140,8 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       m <- ranger::ranger(
         presence ~ .,
         data = cbind(presence = as.factor(Y), X),
-        num.trees = rf_ntree, probability = TRUE, seed = seed %||% 42L
+        num.trees = rf_ntree, probability = TRUE, seed = seed %||% 42L,
+        num.threads = as.integer(num_threads), verbose = FALSE
       )
       list(type = "traditional", model = m, name = "rf")
     },

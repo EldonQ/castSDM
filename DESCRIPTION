@@ -2,8 +2,6 @@ Package: castSDM
 Type: Package
 Title: Causal Variable Selection for Species Distribution Modeling
 Version: 0.6.0
-Author: Liqiang Q [aut, cre, cph] (ORCID: <https://orcid.org/0009-0002-6966-4633>)
-Maintainer: Liqiang Q <2759831686@qq.com>
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -13,16 +11,19 @@ Authors@R: c(
     )
   )
 Description: Provides an end-to-end species distribution modeling workflow
-    built around a causal variable-selection engine. Double machine learning
-    (Chernozhukov et al. 2018) estimates each predictor's orthogonalized
-    partial-linear effect on occurrence while flexibly controlling for the
-    others, and predictors surviving Benjamini-Hochberg FDR control are
-    retained. The package couples this screen with standard SDM algorithms
-    (Random Forest, BRT, MaxEnt, GAM), nested spatial cross-validation,
-    ensemble prediction, future climate projection, and a counterfactual
-    what-if interpretation layer. It supports transferable prediction and
-    interpretable driver analysis but does not claim automatic discovery of
-    ecological causes.
+    built around a causal variable-selection engine. By default the conditional
+    predictive impact (Watson & Wright 2021) tests each predictor's conditional
+    independence from occurrence given the others with a cross-fitted random
+    forest and knockoffs, so nonlinear (including symmetric unimodal) niche
+    responses are detected; an optional double machine learning selector
+    (Chernozhukov et al. 2018) estimates signed orthogonalized partial-linear
+    effects. Predictors surviving Benjamini-Hochberg FDR control are retained.
+    The package couples this screen with standard SDM algorithms (Random
+    Forest, BRT, MaxEnt, GAM), nested spatial cross-validation, ensemble
+    prediction, future climate projection with extrapolation control, and a
+    counterfactual what-if interpretation layer. It supports transferable
+    prediction and interpretable driver analysis but does not claim automatic
+    discovery of ecological causes.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
 BugReports: https://github.com/EldonQ/castSDM/issues
@@ -35,6 +36,7 @@ Imports:
     cli
 Suggests:
     car,
+    cpi,
     DoubleML,
     future,
     future.apply,
