@@ -40,14 +40,19 @@
 
 ## Plotting and stability
 
-* All China maps use the perceptually-uniform viridis scale and, on a China
-  basemap, fit the frame to the data footprint (`crop = TRUE`) so a
-  range-restricted species fills the panel without an artificial "torn" edge;
-  the South China Sea inset is drawn only when the frame still reaches the far
-  south. Widespread species keep an essentially full-China frame.
+* China maps always show the complete, standard national frame plus the South
+  China Sea inset; a range-restricted species is never cropped to its coloured
+  cells. Seamless colour is achieved instead by filling the whole basemap with
+  each map's null/background colour, so cells outside the accessible area
+  continue the surface rather than tearing it at an artificial edge.
+* Suitability maps (`plot.cast_predict()`, `plot.cast_ensemble()`) use a pale
+  grey to deep teal-blue sequential ramp whose low anchor equals the basemap
+  fill; range-change maps (`plot.cast_project()`) use a refined gain/loss/
+  stable-present palette over a neutral `stable_absent` background; what-if maps
+  (`plot.cast_counterfactual()`) diverge around a neutral grey midpoint.
 * `plot.cast_select()` gains a `top` argument and now colours predictors by
   ecological class with readable labels; `plot.cast_cv()` fold maps share the
-  same cropping and carry a spatial-block narrative.
+  full-China frame and carry a spatial-block narrative.
 * Ensemble/counterfactual raster prediction is chunked by rows to bound peak
   memory on national 1 km grids, preventing out-of-memory segfaults.
 

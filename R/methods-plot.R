@@ -101,14 +101,12 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
 #'   model.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
 #' @param title Optional character string for plot title.
-#' @param crop Logical. On a China basemap, fit the frame to the data footprint
-#'   so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_predict <- function(x, model = NULL, basemap = "world",
-                              title = NULL, crop = TRUE, ...) {
+                              title = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -132,7 +130,7 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     if (!is.null(basemap_sf)) {
       p <- p + ggplot2::geom_sf(
         data = basemap_sf,
-        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+        fill = .cast_map_bg(), color = "#bdc3c7", linewidth = 0.2
       )
     }
   }
@@ -142,7 +140,7 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
       ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[hss_col]]),
       size = 0.4, alpha = 0.85
     ) +
-    ggplot2::scale_color_viridis_c(option = "viridis", name = "HSS", limits = c(0, 1)) +
+    .cast_suitability_scale("colour", name = "HSS") +
     ggplot2::labs(title = title) +
     ggplot2::theme_void(
       base_size = 10,
@@ -161,11 +159,10 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
-  if (!.map_wants_inset(basemap, pred, crop)) return(p)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
   .add_china_south_sea_inset(
-    p, basemap, data = pred, value_var = hss_col,
-    scale = ggplot2::scale_color_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
+    p, basemap, data = pred, value_var = hss_col, bg_fill = .cast_map_bg(),
+    scale = .cast_suitability_scale("colour", guide = "none")
   )
 }
 
@@ -263,14 +260,12 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
 #' @param lat Numeric vector. Latitudes of the data used in [cast_cv()].
 #' @param metric Character. Metric to show in right panel. Default `"auc"`.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
-#' @param crop Logical. On a China basemap, fit the fold map to the data
-#'   footprint so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `patchwork` combined plot, or single ggplot if patchwork absent.
 #' @export
 plot.cast_cv <- function(x, lon = NULL, lat = NULL,
-                         metric = "auc", basemap = "world", crop = TRUE, ...) {
+                         metric = "auc", basemap = "world", ...) {
   check_suggested("ggplot2", "for plotting")
 
   model_colors <- c(
@@ -319,7 +314,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     bm <- load_basemap(basemap)
     if (!is.null(bm)) {
       p_map <- p_map + ggplot2::geom_sf(
-        data = bm, fill = "#f4f6f7",
+        data = bm, fill = .cast_map_bg(),
         color = "#bdc3c7", linewidth = 0.2
       )
     }
@@ -346,14 +341,11 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     )
 
   p_map <- .add_china_dashline(p_map, basemap)
-  p_map <- .add_china_outline(p_map, basemap) +
-    .coord_for_map(basemap, data = map_df, crop = crop)
-  if (.map_wants_inset(basemap, map_df, crop)) {
-    p_map <- .add_china_south_sea_inset(
-      p_map, basemap, data = map_df, value_var = "fold",
-      scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
-    )
-  }
+  p_map <- .add_china_outline(p_map, basemap) + .coord_for_map(basemap)
+  p_map <- .add_china_south_sea_inset(
+    p_map, basemap, data = map_df, value_var = "fold", bg_fill = .cast_map_bg(),
+    scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
+  )
 
   if (requireNamespace("patchwork", quietly = TRUE)) {
     p_map + p_metric + patchwork::plot_layout(widths = c(1.4, 1))
@@ -463,13 +455,10 @@ plot.cast_screen_comparison <- function(x, var_labels = NULL, ...) {
 #'
 #' @param x A `cast_ensemble` object.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
-#' @param crop Logical. On a China basemap, fit the frame to the data footprint
-#'   so a range-restricted species fills the panel instead of sitting inside an
-#'   empty country. Default `TRUE`.
 #' @param ... Ignored.
 #' @return A `ggplot` object.
 #' @export
-plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
+plot.cast_ensemble <- function(x, basemap = "world", ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -484,7 +473,7 @@ plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
     if (!is.null(basemap_sf)) {
       p <- p + ggplot2::geom_sf(
         data = basemap_sf,
-        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+        fill = .cast_map_bg(), color = "#bdc3c7", linewidth = 0.2
       )
     }
   }
@@ -495,7 +484,7 @@ plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
         data = pred,
         ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$hss_ensemble)
       ) +
-      ggplot2::scale_fill_viridis_c(option = "viridis", name = "Ensemble\nHSS", limits = c(0, 1))
+      .cast_suitability_scale("fill", name = "Ensemble\nHSS")
   } else {
     p <- p +
       ggplot2::geom_point(
@@ -503,7 +492,7 @@ plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
         ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$hss_ensemble),
         size = 0.4, alpha = 0.85
       ) +
-      ggplot2::scale_color_viridis_c(option = "viridis", name = "Ensemble\nHSS", limits = c(0, 1))
+      .cast_suitability_scale("colour", name = "Ensemble\nHSS")
   }
   p <- p +
     ggplot2::labs(
@@ -528,14 +517,14 @@ plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
-  if (!.map_wants_inset(basemap, pred, crop)) return(p)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = "hss_ensemble", raster = large_grid,
+    bg_fill = .cast_map_bg(),
     scale = if (large_grid) {
-      ggplot2::scale_fill_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
+      .cast_suitability_scale("fill", guide = "none")
     } else {
-      ggplot2::scale_color_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
+      .cast_suitability_scale("colour", guide = "none")
     }
   )
 }
@@ -546,12 +535,10 @@ plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
 #' @param x A `cast_project` object.
 #' @param scenario Character. Which scenario to plot. Default is the first.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
-#' @param crop Logical. On a China basemap, fit the frame to the data footprint.
-#'   Default `TRUE`.
 #' @param ... Ignored.
 #' @return A `ggplot` object.
 #' @export
-plot.cast_project <- function(x, scenario = NULL, basemap = "world", crop = TRUE, ...) {
+plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -566,9 +553,10 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", crop = TRUE
     cli::cli_abort("Change data must contain lon, lat, change columns.")
   }
 
+  change_bg <- "#E6E9ED"
   change_colors <- c(
-    gain = "#27AE60", loss = "#C0392B", stable_present = "#3498DB",
-    stable_absent = "grey85"
+    gain = "#2E9E5B", loss = "#CB4335", stable_present = "#2E86C1",
+    stable_absent = change_bg
   )
 
   p <- ggplot2::ggplot()
@@ -577,7 +565,7 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", crop = TRUE
     if (!is.null(basemap_sf)) {
       p <- p + ggplot2::geom_sf(
         data = basemap_sf,
-        fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+        fill = change_bg, color = "#bdc3c7", linewidth = 0.2
       )
     }
   }
@@ -625,10 +613,10 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", crop = TRUE
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = change, crop = crop)
-  if (!.map_wants_inset(basemap, change, crop)) return(p)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
   .add_china_south_sea_inset(
     p, basemap, data = change, value_var = "change", raster = large_grid,
+    bg_fill = change_bg,
     scale = if (large_grid) {
       ggplot2::scale_fill_manual(values = change_colors, guide = "none")
     } else {
@@ -722,14 +710,12 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
 #' @param var_label Optional display label for the intervened predictor.
 #' @param title Optional plot title.
-#' @param crop Logical. On a China basemap, fit the frame to the data footprint
-#'   so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
-                                     title = NULL, crop = TRUE, ...) {
+                                     title = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -744,7 +730,7 @@ plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
     basemap_sf <- load_basemap(basemap)
     if (!is.null(basemap_sf)) {
       p <- p + ggplot2::geom_sf(
-        data = basemap_sf, fill = "#f4f6f7", color = "#bdc3c7", linewidth = 0.2
+        data = basemap_sf, fill = "grey95", color = "#bdc3c7", linewidth = 0.2
       )
     }
   }
@@ -794,10 +780,10 @@ plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
-  if (!.map_wants_inset(basemap, pred, crop)) return(p)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = "delta_hss", raster = large_grid,
+    bg_fill = "grey95",
     scale = if (large_grid) {
       ggplot2::scale_fill_gradient2(low = "#2166AC", mid = "grey95",
         high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
@@ -878,59 +864,46 @@ load_basemap <- function(type = "world") {
   as.numeric(sf::st_bbox(china))
 }
 
-#' Bounding box of the plotted data (lon/lat footprint)
-#' @keywords internal
-#' @noRd
-.map_footprint <- function(data) {
-  if (is.null(data) || !all(c("lon", "lat") %in% names(data)) || !nrow(data)) {
-    return(NULL)
-  }
-  c(xmin = min(data$lon, na.rm = TRUE), xmax = max(data$lon, na.rm = TRUE),
-    ymin = min(data$lat, na.rm = TRUE), ymax = max(data$lat, na.rm = TRUE))
-}
-
-#' Choose the map extent for China plots
+#' Full national extent for China plots
 #'
-#' China maps default to the full national extent. For a range-restricted
-#' species that leaves the coloured cells stranded inside a large blank country,
-#' which reads as a "torn" edge. When `crop = TRUE` the frame is fitted to the
-#' data footprint instead (predictions are already masked to the accessible
-#' study area), so the species fills the panel and no artificial cut is visible;
-#' a near-nationwide species keeps an essentially full-China frame.
+#' China maps always show the complete, standard national frame; a
+#' range-restricted species is never cropped to its coloured cells. Seamless
+#' colour across the country is achieved instead by filling the whole basemap
+#' with each map's null/background colour (see the per-map `fill`), so cells
+#' outside the accessible area continue the surface rather than cutting it.
 #' @keywords internal
 #' @noRd
-.coord_for_map <- function(basemap, data = NULL, crop = FALSE, margin = 0.04) {
+.coord_for_map <- function(basemap) {
   if (!identical(basemap, "china")) return(ggplot2::coord_sf(expand = FALSE))
   bounds <- .china_main_bounds()
   if (is.null(bounds)) return(ggplot2::coord_sf(expand = FALSE))
-  fp <- if (isTRUE(crop)) .map_footprint(data) else NULL
-  if (is.null(fp)) {
-    return(ggplot2::coord_sf(xlim = bounds[c(1, 3)], ylim = bounds[c(2, 4)],
-                             expand = FALSE, datum = NA))
-  }
-  dx <- max(fp[["xmax"]] - fp[["xmin"]], 1e-6)
-  dy <- max(fp[["ymax"]] - fp[["ymin"]], 1e-6)
-  xlim <- c(max(bounds[1], fp[["xmin"]] - margin * dx),
-            min(bounds[3], fp[["xmax"]] + margin * dx))
-  ylim <- c(max(bounds[2], fp[["ymin"]] - margin * dy),
-            min(bounds[4], fp[["ymax"]] + margin * dy))
-  ggplot2::coord_sf(xlim = as.numeric(xlim), ylim = as.numeric(ylim),
+  ggplot2::coord_sf(xlim = bounds[c(1, 3)], ylim = bounds[c(2, 4)],
                     expand = FALSE, datum = NA)
 }
 
-#' Whether the South China Sea inset is meaningful for this frame
+#' Shared neutral background fill for suitability maps
 #'
-#' The inset only makes sense when the map still reaches the far south. A
-#' species cropped to, say, the Tibetan Plateau should not carry an inset of
-#' islands it never covers.
+#' Equal to the low anchor of the suitability ramp, so near-zero-suitability
+#' cells inside the accessible area are indistinguishable from the unmodelled
+#' country outside it and the map reads as one continuous surface.
 #' @keywords internal
 #' @noRd
-.map_wants_inset <- function(basemap, data = NULL, crop = FALSE) {
-  if (!identical(basemap, "china")) return(FALSE)
-  if (!isTRUE(crop)) return(TRUE)
-  fp <- .map_footprint(data)
-  if (is.null(fp)) return(TRUE)
-  fp[["ymin"]] <= 21
+.cast_map_bg <- function() "#EDF2F4"
+
+#' Sequential suitability colour ramp (pale grey -> deep teal-blue)
+#' @keywords internal
+#' @noRd
+.cast_suitability_scale <- function(aesthetic = c("fill", "colour"),
+                                    name = "HSS", guide = "colourbar") {
+  aesthetic <- match.arg(aesthetic)
+  cols <- c("#EDF2F4", "#9FD3DB", "#4FA3BE", "#256E92", "#0B3D5C")
+  if (aesthetic == "fill") {
+    ggplot2::scale_fill_gradientn(colours = cols, limits = c(0, 1),
+                                  name = name, guide = guide)
+  } else {
+    ggplot2::scale_colour_gradientn(colours = cols, limits = c(0, 1),
+                                    name = name, guide = guide)
+  }
 }
 
 #' Group a raw predictor name into a broad ecological theme
@@ -1031,7 +1004,7 @@ load_basemap <- function(type = "world") {
 #' @noRd
 .add_china_south_sea_inset <- function(plot, basemap, data = NULL,
                                        value_var = NULL, scale = NULL,
-                                       raster = FALSE) {
+                                       raster = FALSE, bg_fill = "#F7F8F8") {
   if (!identical(basemap, "china") ||
       !requireNamespace("sf", quietly = TRUE) ||
       !requireNamespace("ggplot2", quietly = TRUE)) return(plot)
@@ -1042,7 +1015,7 @@ load_basemap <- function(type = "world") {
   if (is.null(china) || is.null(dashline) || is.null(bounds)) return(plot)
 
   inset <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = china, fill = "#F7F8F8", colour = NA)
+    ggplot2::geom_sf(data = china, fill = bg_fill, colour = NA)
 
   if (!is.null(data) && !is.null(value_var) &&
       all(c("lon", "lat", value_var) %in% names(data))) {

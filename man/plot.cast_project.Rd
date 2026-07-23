@@ -4,7 +4,7 @@
 \alias{plot.cast_project}
 \title{Plot Future Climate Projection}
 \usage{
-\method{plot}{cast_project}(x, scenario = NULL, basemap = "world", crop = TRUE, ...)
+\method{plot}{cast_project}(x, scenario = NULL, basemap = "world", ...)
 }
 \arguments{
 \item{x}{A \code{cast_project} object.}
@@ -12,9 +12,6 @@
 \item{scenario}{Character. Which scenario to plot. Default is the first.}
 
 \item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
-
-\item{crop}{Logical. On a China basemap, fit the frame to the data footprint.
-Default \code{TRUE}.}
 
 \item{...}{Ignored.}
 }

@@ -4,7 +4,7 @@
 \alias{plot.cast_predict}
 \title{Plot Spatial Habitat Suitability Map}
 \usage{
-\method{plot}{cast_predict}(x, model = NULL, basemap = "world", title = NULL, crop = TRUE, ...)
+\method{plot}{cast_predict}(x, model = NULL, basemap = "world", title = NULL, ...)
 }
 \arguments{
 \item{x}{A \code{cast_predict} object.}
@@ -15,9 +15,6 @@ model.}
 \item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
 
 \item{title}{Optional character string for plot title.}
-
-\item{crop}{Logical. On a China basemap, fit the frame to the data footprint
-so a range-restricted species fills the panel. Default \code{TRUE}.}
 
 \item{...}{Ignored.}
 }

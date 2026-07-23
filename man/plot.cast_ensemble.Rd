@@ -4,16 +4,12 @@
 \alias{plot.cast_ensemble}
 \title{Plot Ensemble Prediction Map}
 \usage{
-\method{plot}{cast_ensemble}(x, basemap = "world", crop = TRUE, ...)
+\method{plot}{cast_ensemble}(x, basemap = "world", ...)
 }
 \arguments{
 \item{x}{A \code{cast_ensemble} object.}
 
 \item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
-
-\item{crop}{Logical. On a China basemap, fit the frame to the data footprint
-so a range-restricted species fills the panel instead of sitting inside an
-empty country. Default \code{TRUE}.}
 
 \item{...}{Ignored.}
 }
