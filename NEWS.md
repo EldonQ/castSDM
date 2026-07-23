@@ -2,6 +2,12 @@
 
 ## New core
 
+* `cast_screen_comparison()` contrasts the castSDM conditional predictive-impact
+  screen against the associational baselines researchers commonly use
+  (correlation filter, stepwise VIF, univariate marginal screen, and
+  random-forest permutation importance) on the same shared candidate pool, with
+  a `plot()` tile matrix that makes the conditional-vs-associational contrast
+  explicit for the Results narrative.
 * `cast_select(method = "dml")` is the new default selector. It fits a
   double machine-learning partially linear model (`DoubleML` + `mlr3`
   random-forest nuisance) per candidate predictor and keeps those whose
@@ -31,6 +37,19 @@
 * Retains data preparation, background sampling, RF/BRT/MaxEnt/GAM and ESM,
   tiled raster prediction, ensembles, CMIP6 projection, batch checkpointing,
   YAML configuration, and plotting.
+
+## Plotting and stability
+
+* All China maps use the perceptually-uniform viridis scale and, on a China
+  basemap, fit the frame to the data footprint (`crop = TRUE`) so a
+  range-restricted species fills the panel without an artificial "torn" edge;
+  the South China Sea inset is drawn only when the frame still reaches the far
+  south. Widespread species keep an essentially full-China frame.
+* `plot.cast_select()` gains a `top` argument and now colours predictors by
+  ecological class with readable labels; `plot.cast_cv()` fold maps share the
+  same cropping and carry a spatial-block narrative.
+* Ensemble/counterfactual raster prediction is chunked by rows to bound peak
+  memory on national 1 km grids, preventing out-of-memory segfaults.
 
 # castSDM 0.2.0--0.5.1
 

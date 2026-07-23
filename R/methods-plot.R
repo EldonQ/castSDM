@@ -6,64 +6,86 @@
 #'
 #' @param x A `cast_select` object (from [cast_select()]).
 #' @param var_labels Optional named character vector for display labels.
+#' @param top Integer. Show only the `top` highest-scoring predictors (union
+#'   with the retained set). Default `20`; use `NULL` for all tested predictors.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_select <- function(x, var_labels = NULL, ...) {
+plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   check_suggested("ggplot2", "for plotting")
 
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  scr$status <- ifelse(scr$is_selected, "selected", "not selected")
-
-  imp_candidates <- c("abs_statistic", "rf_importance", "combined_score")
+  imp_candidates <- c("abs_statistic", "cpi", "rf_importance", "combined_score")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)][1]
   if (is.na(imp_col) || !length(imp_col)) {
     scr$importance_plot <- as.numeric(scr$is_selected)
     imp_col <- "importance_plot"
   }
   scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
-  scr[[imp_col]][!is.finite(scr[[imp_col]])] <- 0
-  scr <- scr[order(-scr[[imp_col]]), ]
 
-  if (!is.null(var_labels)) {
-    scr$display <- ifelse(
-      scr$variable %in% names(var_labels),
-      var_labels[scr$variable], scr$variable
-    )
-  } else {
-    scr$display <- scr$variable
-  }
-  scr$display <- factor(scr$display, levels = rev(scr$display))
-
-  status_colors <- c(selected = "#2166AC", `not selected` = "grey75")
-
+  n_total <- nrow(scr)
   n_sel <- sum(scr$is_selected)
-  sub_txt <- sprintf("%d / %d variables selected", n_sel, nrow(scr))
-  sub_txt <- paste0(sub_txt, " | method = ", x$method %||% "unknown")
+
+  # The conditional screen tests a candidate subset, so untested predictors
+  # carry no score. Plotting all of them crushes the axis into an unreadable
+  # band; keep only the evaluated predictors, then the top-scoring slice.
+  tested <- scr[is.finite(scr[[imp_col]]), , drop = FALSE]
+  n_tested <- nrow(tested)
+  tested <- tested[order(-tested[[imp_col]]), , drop = FALSE]
+
+  n_top <- if (is.null(top) || !is.finite(top)) n_tested else as.integer(top)
+  keep <- union(utils::head(tested$variable, n_top),
+                tested$variable[tested$is_selected])
+  scr <- tested[tested$variable %in% keep, , drop = FALSE]
+  scr <- scr[order(-scr[[imp_col]]), , drop = FALSE]
+
+  raw_disp <- .cast_var_label(scr$variable)
+  if (!is.null(var_labels)) {
+    hit <- scr$variable %in% names(var_labels)
+    raw_disp[hit] <- var_labels[scr$variable[hit]]
+  }
+  scr$display <- factor(raw_disp, levels = rev(raw_disp))
+
+  pal <- .cast_category_palette()
+  scr$category <- factor(.cast_var_category(scr$variable), levels = names(pal))
+
+  sub_txt <- sprintf(
+    "%d / %d predictors retained \u00b7 %d tested by %s",
+    n_sel, n_total, n_tested, toupper(x$method %||% "CPI")
+  )
 
   p <- ggplot2::ggplot(scr, ggplot2::aes(
     x = .data[[imp_col]], y = .data$display,
-    fill = .data$status, alpha = .data$is_selected
+    fill = .data$category, alpha = .data$is_selected
   )) +
-    ggplot2::geom_col(width = 0.7) +
-    ggplot2::scale_fill_manual(values = status_colors, name = "Status") +
+    ggplot2::geom_col(width = 0.72) +
+    ggplot2::scale_fill_manual(
+      values = pal, name = "Predictor class", drop = TRUE
+    ) +
     ggplot2::scale_alpha_manual(
-      values = c("TRUE" = 0.95, "FALSE" = 0.35), guide = "none"
+      values = c("TRUE" = 1, "FALSE" = 0.32),
+      breaks = c("TRUE", "FALSE"),
+      labels = c("retained", "screened out"),
+      name = "Selection"
+    ) +
+    ggplot2::guides(
+      alpha = ggplot2::guide_legend(override.aes = list(fill = "grey35"))
     ) +
     ggplot2::labs(
       title = "Variable screening",
       subtitle = sub_txt,
-      x = if (identical(imp_col, "importance_plot")) "Selection indicator"
-          else if (identical(imp_col, "abs_statistic")) "|DML statistic|"
+      x = if (identical(imp_col, "abs_statistic")) "|CPI statistic|"
+          else if (identical(imp_col, "cpi")) "Conditional predictive impact"
+          else if (identical(imp_col, "importance_plot")) "Selection indicator"
           else "Predictor score",
       y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
-      legend.position = "bottom",
+      legend.position = "right",
       panel.grid.major.y = ggplot2::element_line(
         color = "grey93", linewidth = 0.3
       )
@@ -79,12 +101,14 @@ plot.cast_select <- function(x, var_labels = NULL, ...) {
 #'   model.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
 #' @param title Optional character string for plot title.
+#' @param crop Logical. On a China basemap, fit the frame to the data footprint
+#'   so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_predict <- function(x, model = NULL, basemap = "world",
-                              title = NULL, ...) {
+                              title = NULL, crop = TRUE, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -118,7 +142,7 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
       ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[hss_col]]),
       size = 0.4, alpha = 0.85
     ) +
-    ggplot2::scale_color_viridis_c(option = "turbo", name = "HSS", limits = c(0, 1)) +
+    ggplot2::scale_color_viridis_c(option = "viridis", name = "HSS", limits = c(0, 1)) +
     ggplot2::labs(title = title) +
     ggplot2::theme_void(
       base_size = 10,
@@ -137,10 +161,11 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
+  if (!.map_wants_inset(basemap, pred, crop)) return(p)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = hss_col,
-    scale = ggplot2::scale_color_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+    scale = ggplot2::scale_color_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
   )
 }
 
@@ -238,12 +263,14 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
 #' @param lat Numeric vector. Latitudes of the data used in [cast_cv()].
 #' @param metric Character. Metric to show in right panel. Default `"auc"`.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param crop Logical. On a China basemap, fit the fold map to the data
+#'   footprint so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `patchwork` combined plot, or single ggplot if patchwork absent.
 #' @export
 plot.cast_cv <- function(x, lon = NULL, lat = NULL,
-                         metric = "auc", basemap = "world", ...) {
+                         metric = "auc", basemap = "world", crop = TRUE, ...) {
   check_suggested("ggplot2", "for plotting")
 
   model_colors <- c(
@@ -275,8 +302,11 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     ggplot2::scale_color_manual(values = model_colors, name = "Model") +
     ggplot2::labs(
       title = sprintf("Per-fold %s", toupper(mcol)),
-      subtitle = sprintf("%d-fold spatial %s CV", x$k, x$block_method),
-      x = "Fold", y = toupper(mcol)
+      subtitle = sprintf(
+        "%d-fold spatial (%s) block CV \u2014 folds are geographically disjoint",
+        x$k, x$block_method
+      ),
+      x = "Spatial fold", y = toupper(mcol)
     ) +
     ggplot2::coord_cartesian(ylim = c(0, 1)) +
     theme_cast()
@@ -301,11 +331,14 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
       size = 0.8, alpha = 0.7
     ) +
     ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], name = "Fold") +
-    .coord_for_basemap(basemap) +
-    ggplot2::labs(title = "Spatial fold assignment") +
+    ggplot2::labs(
+      title = "Spatial block folds",
+      subtitle = "Contiguous geographic blocks, not random points"
+    ) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 8),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
       panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
       legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -313,11 +346,14 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     )
 
   p_map <- .add_china_dashline(p_map, basemap)
-  p_map <- .add_china_outline(p_map, basemap)
-  p_map <- .add_china_south_sea_inset(
-    p_map, basemap, data = map_df, value_var = "fold",
-    scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
-  )
+  p_map <- .add_china_outline(p_map, basemap) +
+    .coord_for_map(basemap, data = map_df, crop = crop)
+  if (.map_wants_inset(basemap, map_df, crop)) {
+    p_map <- .add_china_south_sea_inset(
+      p_map, basemap, data = map_df, value_var = "fold",
+      scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
+    )
+  }
 
   if (requireNamespace("patchwork", quietly = TRUE)) {
     p_map + p_metric + patchwork::plot_layout(widths = c(1.4, 1))
@@ -333,13 +369,93 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
 #'
 #' @param x A `cast_result` object.
 #' @param var_labels Optional named character vector for display labels.
+#' @param top Integer passed to [plot.cast_select()]. Default `20`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_result <- function(x, var_labels = NULL, ...) {
+plot.cast_result <- function(x, var_labels = NULL, top = 20L, ...) {
   check_suggested("ggplot2", "for plotting")
-  plot.cast_select(x$screen, var_labels = var_labels)
+  plot.cast_select(x$screen, var_labels = var_labels, top = top)
+}
+
+
+#' Plot Screening-Method Comparison
+#'
+#' Tile matrix of predictor (rows) by screening method (columns); a coloured
+#' tile marks retention, coloured by ecological class. It contrasts the
+#' conditional castSDM screen with the conventional associational baselines
+#' from [cast_screen_comparison()].
+#'
+#' @param x A `cast_screen_comparison` object.
+#' @param var_labels Optional named character vector for display labels.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_screen_comparison <- function(x, var_labels = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  mem <- x$membership
+  methods <- x$methods
+  if (!nrow(mem)) cli::cli_abort("No predictor was retained by any method.")
+
+  ord <- order(-as.integer(mem[[x$cpi_method]]), -mem$n_methods)
+  mem <- mem[ord, , drop = FALSE]
+
+  raw_disp <- .cast_var_label(mem$variable)
+  if (!is.null(var_labels)) {
+    hit <- mem$variable %in% names(var_labels)
+    raw_disp[hit] <- var_labels[mem$variable[hit]]
+  }
+  disp <- factor(raw_disp, levels = rev(raw_disp))
+  pal <- .cast_category_palette()
+  cats <- as.character(.cast_var_category(mem$variable))
+
+  method_labels <- c(
+    correlation = "Correlation\nfilter", vif = "Stepwise\nVIF",
+    univariate = "Univariate\nscreen", rf = "RF\nimportance",
+    cpi = "CPI\n(castSDM)"
+  )
+
+  long <- do.call(rbind, lapply(methods, function(m) {
+    data.frame(
+      display = disp, category = cats, method = m,
+      retained = as.logical(mem[[m]]), stringsAsFactors = FALSE
+    )
+  }))
+  long$fill_cat <- ifelse(long$retained, long$category, NA_character_)
+  long$fill_cat <- factor(long$fill_cat, levels = names(pal))
+  long$method <- factor(long$method, levels = methods,
+                        labels = method_labels[methods])
+
+  cnt <- vapply(methods, function(m) sum(mem[[m]]), integer(1))
+  sub_txt <- sprintf(
+    "Retained \u2014 correlation %d \u00b7 VIF %d \u00b7 univariate %d \u00b7 RF %d \u00b7 CPI %d",
+    cnt["correlation"], cnt["vif"], cnt["univariate"], cnt["rf"], cnt["cpi"]
+  )
+
+  ggplot2::ggplot(long, ggplot2::aes(
+    x = .data$method, y = .data$display, fill = .data$fill_cat
+  )) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.5) +
+    ggplot2::scale_fill_manual(
+      values = pal, name = "Predictor class", na.value = "grey95", drop = TRUE
+    ) +
+    ggplot2::scale_x_discrete(position = "top") +
+    ggplot2::labs(
+      title = "Conditional vs conventional predictor screening",
+      subtitle = sub_txt, x = NULL, y = NULL,
+      caption = paste(
+        "Associational filters keep collinear bystanders;",
+        "CPI retains conditionally predictive drivers."
+      )
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.text.x.top = ggplot2::element_text(face = "bold"),
+      legend.position = "right"
+    )
 }
 
 
@@ -347,10 +463,13 @@ plot.cast_result <- function(x, var_labels = NULL, ...) {
 #'
 #' @param x A `cast_ensemble` object.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param crop Logical. On a China basemap, fit the frame to the data footprint
+#'   so a range-restricted species fills the panel instead of sitting inside an
+#'   empty country. Default `TRUE`.
 #' @param ... Ignored.
 #' @return A `ggplot` object.
 #' @export
-plot.cast_ensemble <- function(x, basemap = "world", ...) {
+plot.cast_ensemble <- function(x, basemap = "world", crop = TRUE, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -376,7 +495,7 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
         data = pred,
         ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$hss_ensemble)
       ) +
-      ggplot2::scale_fill_viridis_c(option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1))
+      ggplot2::scale_fill_viridis_c(option = "viridis", name = "Ensemble\nHSS", limits = c(0, 1))
   } else {
     p <- p +
       ggplot2::geom_point(
@@ -384,7 +503,7 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
         ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$hss_ensemble),
         size = 0.4, alpha = 0.85
       ) +
-      ggplot2::scale_color_viridis_c(option = "turbo", name = "Ensemble\nHSS", limits = c(0, 1))
+      ggplot2::scale_color_viridis_c(option = "viridis", name = "Ensemble\nHSS", limits = c(0, 1))
   }
   p <- p +
     ggplot2::labs(
@@ -409,13 +528,14 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
+  if (!.map_wants_inset(basemap, pred, crop)) return(p)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = "hss_ensemble", raster = large_grid,
     scale = if (large_grid) {
-      ggplot2::scale_fill_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+      ggplot2::scale_fill_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
     } else {
-      ggplot2::scale_color_viridis_c(option = "turbo", limits = c(0, 1), guide = "none")
+      ggplot2::scale_color_viridis_c(option = "viridis", limits = c(0, 1), guide = "none")
     }
   )
 }
@@ -426,10 +546,12 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
 #' @param x A `cast_project` object.
 #' @param scenario Character. Which scenario to plot. Default is the first.
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param crop Logical. On a China basemap, fit the frame to the data footprint.
+#'   Default `TRUE`.
 #' @param ... Ignored.
 #' @return A `ggplot` object.
 #' @export
-plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
+plot.cast_project <- function(x, scenario = NULL, basemap = "world", crop = TRUE, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -503,7 +625,8 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = change, crop = crop)
+  if (!.map_wants_inset(basemap, change, crop)) return(p)
   .add_china_south_sea_inset(
     p, basemap, data = change, value_var = "change", raster = large_grid,
     scale = if (large_grid) {
@@ -599,12 +722,14 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
 #' @param var_label Optional display label for the intervened predictor.
 #' @param title Optional plot title.
+#' @param crop Logical. On a China basemap, fit the frame to the data footprint
+#'   so a range-restricted species fills the panel. Default `TRUE`.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
-                                     title = NULL, ...) {
+                                     title = NULL, crop = TRUE, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")
 
@@ -669,7 +794,8 @@ plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
     )
 
   p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_basemap(basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap, data = pred, crop = crop)
+  if (!.map_wants_inset(basemap, pred, crop)) return(p)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = "delta_hss", raster = large_grid,
     scale = if (large_grid) {
@@ -752,19 +878,126 @@ load_basemap <- function(type = "world") {
   as.numeric(sf::st_bbox(china))
 }
 
-#' Use a fixed, non-distorted extent for China maps
+#' Bounding box of the plotted data (lon/lat footprint)
 #' @keywords internal
 #' @noRd
-.coord_for_basemap <- function(basemap) {
+.map_footprint <- function(data) {
+  if (is.null(data) || !all(c("lon", "lat") %in% names(data)) || !nrow(data)) {
+    return(NULL)
+  }
+  c(xmin = min(data$lon, na.rm = TRUE), xmax = max(data$lon, na.rm = TRUE),
+    ymin = min(data$lat, na.rm = TRUE), ymax = max(data$lat, na.rm = TRUE))
+}
+
+#' Choose the map extent for China plots
+#'
+#' China maps default to the full national extent. For a range-restricted
+#' species that leaves the coloured cells stranded inside a large blank country,
+#' which reads as a "torn" edge. When `crop = TRUE` the frame is fitted to the
+#' data footprint instead (predictions are already masked to the accessible
+#' study area), so the species fills the panel and no artificial cut is visible;
+#' a near-nationwide species keeps an essentially full-China frame.
+#' @keywords internal
+#' @noRd
+.coord_for_map <- function(basemap, data = NULL, crop = FALSE, margin = 0.04) {
   if (!identical(basemap, "china")) return(ggplot2::coord_sf(expand = FALSE))
   bounds <- .china_main_bounds()
   if (is.null(bounds)) return(ggplot2::coord_sf(expand = FALSE))
-  ggplot2::coord_sf(
-    xlim = bounds[c(1, 3)],
-    ylim = bounds[c(2, 4)],
-    expand = FALSE,
-    datum = NA
+  fp <- if (isTRUE(crop)) .map_footprint(data) else NULL
+  if (is.null(fp)) {
+    return(ggplot2::coord_sf(xlim = bounds[c(1, 3)], ylim = bounds[c(2, 4)],
+                             expand = FALSE, datum = NA))
+  }
+  dx <- max(fp[["xmax"]] - fp[["xmin"]], 1e-6)
+  dy <- max(fp[["ymax"]] - fp[["ymin"]], 1e-6)
+  xlim <- c(max(bounds[1], fp[["xmin"]] - margin * dx),
+            min(bounds[3], fp[["xmax"]] + margin * dx))
+  ylim <- c(max(bounds[2], fp[["ymin"]] - margin * dy),
+            min(bounds[4], fp[["ymax"]] + margin * dy))
+  ggplot2::coord_sf(xlim = as.numeric(xlim), ylim = as.numeric(ylim),
+                    expand = FALSE, datum = NA)
+}
+
+#' Whether the South China Sea inset is meaningful for this frame
+#'
+#' The inset only makes sense when the map still reaches the far south. A
+#' species cropped to, say, the Tibetan Plateau should not carry an inset of
+#' islands it never covers.
+#' @keywords internal
+#' @noRd
+.map_wants_inset <- function(basemap, data = NULL, crop = FALSE) {
+  if (!identical(basemap, "china")) return(FALSE)
+  if (!isTRUE(crop)) return(TRUE)
+  fp <- .map_footprint(data)
+  if (is.null(fp)) return(TRUE)
+  fp[["ymin"]] <= 21
+}
+
+#' Group a raw predictor name into a broad ecological theme
+#'
+#' Keyword rules over the CHECO26 naming scheme so the variable-selection
+#' figure can colour predictors by class without a user-supplied dictionary.
+#' @keywords internal
+#' @noRd
+.cast_var_category <- function(vars) {
+  v <- tolower(vars)
+  cat <- rep("Other", length(v))
+  is_set <- rep(FALSE, length(v))
+  assign_cat <- function(pattern, label) {
+    hit <- !is_set & grepl(pattern, v)
+    cat[hit] <<- label
+    is_set[hit] <<- TRUE
+  }
+  assign_cat("landcover|land_cover|^lu_|_lu_|cropland|urban|forest|igbp|water_prop", "Land use / cover")
+  assign_cat("^anthro|landscan|popn|population|human|hfp|footprint|nightlight", "Anthropogenic")
+  assign_cat("^soil|_soil|clay|sand|silt|_ph|ocdens|bulkdens|_oc_|cec", "Soil")
+  assign_cat("^hydro|river|stream|flow|discharge|topowet|_cwd|wetland|water", "Hydrology")
+  assign_cat("elev|slope|aspect|^tri$|terrain|roughness|topo", "Terrain")
+  assign_cat("^vege|ndvi|lai|gpp|npp|canopy", "Vegetation")
+  assign_cat("bio[0-9]|temp|precip|prec_|aridity|thornthwaite|etccdi|clim|frost|gdd|season", "Climate")
+  cat
+}
+
+#' Fixed palette for predictor classes
+#' @keywords internal
+#' @noRd
+.cast_category_palette <- function() {
+  c(
+    "Climate"          = "#4C72B0",
+    "Land use / cover" = "#55A868",
+    "Soil"             = "#8C6D31",
+    "Hydrology"        = "#4BB6C6",
+    "Terrain"          = "#C44E52",
+    "Vegetation"       = "#8172B3",
+    "Anthropogenic"    = "#CCB974",
+    "Other"            = "grey70"
   )
+}
+
+#' Compact human-readable label for a raw CHECO26 predictor name
+#' @keywords internal
+#' @noRd
+.cast_var_label <- function(vars) {
+  lab <- vars
+  lab <- gsub("_r[0-9]+cell$", "", lab)
+  repl <- c(
+    "aridityindexthornthwaite" = "aridity index",
+    "maxtempcoldest" = "max temp coldest month",
+    "mintempwarmest" = "min temp warmest month",
+    "etccdi_cwd" = "consecutive wet days",
+    "topowet" = "topographic wetness",
+    "landcover_igbp" = "land cover (IGBP)",
+    "lu_water_prop" = "surface water proportion",
+    "lu_urban" = "urban proportion",
+    "lu_cropland" = "cropland proportion"
+  )
+  for (nm in names(repl)) lab <- gsub(nm, repl[[nm]], lab, fixed = TRUE)
+  lab <- gsub("^lu_", "", lab)
+  lab <- gsub("^anthro_", "human ", lab)
+  lab <- gsub("_", " ", lab)
+  lab <- trimws(gsub("\\s+", " ", lab))
+  substr(lab, 1, 1) <- toupper(substr(lab, 1, 1))
+  lab
 }
 
 #' Redraw the China outline above prediction layers

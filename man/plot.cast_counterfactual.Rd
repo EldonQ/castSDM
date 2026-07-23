@@ -4,7 +4,7 @@
 \alias{plot.cast_counterfactual}
 \title{Plot Counterfactual What-If Map}
 \usage{
-\method{plot}{cast_counterfactual}(x, basemap = "world", var_label = NULL, title = NULL, ...)
+\method{plot}{cast_counterfactual}(x, basemap = "world", var_label = NULL, title = NULL, crop = TRUE, ...)
 }
 \arguments{
 \item{x}{A \code{cast_counterfactual} object (from \code{\link[=cast_counterfactual]{cast_counterfactual()}}).}
@@ -14,6 +14,9 @@
 \item{var_label}{Optional display label for the intervened predictor.}
 
 \item{title}{Optional plot title.}
+
+\item{crop}{Logical. On a China basemap, fit the frame to the data footprint
+so a range-restricted species fills the panel. Default \code{TRUE}.}
 
 \item{...}{Ignored.}
 }

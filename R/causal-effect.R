@@ -139,13 +139,26 @@ cast_effect <- function(object, conf_level = 0.95) {
 
 #' @keywords internal
 #' @noRd
-.cast_predict_mean <- function(fit, X_raw, models) {
-  preds <- lapply(models, function(m) {
-    tryCatch(predict_single_model(fit$models[[m]], X_raw),
-             error = function(e) rep(NA_real_, nrow(X_raw)))
-  })
-  mat <- do.call(cbind, preds)
-  rowMeans(mat, na.rm = TRUE)
+.cast_predict_mean <- function(fit, X_raw, models, chunk_size = 200000L) {
+  n <- nrow(X_raw)
+  predict_block <- function(Xi) {
+    preds <- lapply(models, function(m) {
+      tryCatch(predict_single_model(fit$models[[m]], Xi),
+               error = function(e) rep(NA_real_, nrow(Xi)))
+    })
+    rowMeans(do.call(cbind, preds), na.rm = TRUE)
+  }
+  # Predict in row chunks. A single full-grid predict() (especially mgcv GAM,
+  # which allocates an n-by-ncoef basis matrix) can need many GB on national
+  # 1km grids (~10M cells) and segfault the process. Chunking bounds peak
+  # memory to one block at a time; results are identical (row-independent).
+  if (n <= chunk_size) return(predict_block(X_raw))
+  out <- numeric(n)
+  for (s in seq.int(1L, n, by = chunk_size)) {
+    idx <- seq.int(s, min(s + chunk_size - 1L, n))
+    out[idx] <- predict_block(X_raw[idx, , drop = FALSE])
+  }
+  out
 }
 
 #' Counterfactual What-If Map on the Current Climate

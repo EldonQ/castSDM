@@ -24,6 +24,33 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
   )
 }
 
+#' Create a cast_screen_comparison Object
+#'
+#' @param membership A `data.frame` with one row per predictor and a logical
+#'   column per screening method indicating retention.
+#' @param methods Character vector of method identifiers (column names in
+#'   `membership`, excluding `variable`).
+#' @param cpi_method Character. Which column holds the castSDM conditional
+#'   screen (highlighted in plots).
+#' @param diagnostics Named list of comparison diagnostics.
+#'
+#' @return A `cast_screen_comparison` object.
+#' @keywords internal
+#' @export
+new_cast_screen_comparison <- function(membership, methods,
+                                       cpi_method = "cpi",
+                                       diagnostics = list()) {
+  structure(
+    list(
+      membership = membership,
+      methods = methods,
+      cpi_method = cpi_method,
+      diagnostics = diagnostics
+    ),
+    class = "cast_screen_comparison"
+  )
+}
+
 #' Create a cast_effect Object
 #'
 #' @param effects A `data.frame` of per-predictor causal effects with

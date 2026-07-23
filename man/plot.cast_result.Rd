@@ -4,12 +4,14 @@
 \alias{plot.cast_result}
 \title{Plot castSDM Pipeline Result}
 \usage{
-\method{plot}{cast_result}(x, var_labels = NULL, ...)
+\method{plot}{cast_result}(x, var_labels = NULL, top = 20L, ...)
 }
 \arguments{
 \item{x}{A \code{cast_result} object.}
 
 \item{var_labels}{Optional named character vector for display labels.}
+
+\item{top}{Integer passed to \code{\link[=plot.cast_select]{plot.cast_select()}}. Default \code{20}.}
 
 \item{...}{Ignored.}
 }

@@ -126,3 +126,142 @@ cast_select <- function(data,
                        cor_threshold = cor_threshold)
   )
 }
+
+#' Compare castSDM Conditional Screening Against Conventional Baselines
+#'
+#' Runs the predictor-selection strategies most researchers actually use --
+#' a correlation filter (Dormann et al. 2013), stepwise VIF (Naimi & Araujo
+#' 2016), a univariate marginal screen (Guisan & Zimmermann 2000), and
+#' random-forest permutation importance (Cutler et al. 2007) -- alongside the
+#' castSDM conditional predictive impact screen, on the *same* data. The
+#' associational baselines cannot separate a genuine driver from a collinear
+#' bystander, whereas CPI tests each predictor given all others; the returned
+#' object makes that contrast explicit for the Results narrative.
+#'
+#' Because stepwise VIF and pairwise correlation scale poorly, the predictor
+#' pool is first reduced to the `pool` most marginally associated predictors
+#' (this mirrors practice -- nobody runs VIF on hundreds of raw layers) and
+#' every method, including CPI, is compared on that shared pool.
+#'
+#' @param data Data frame with response, coordinates, and predictors.
+#' @param response Binary response column. Default `"presence"`.
+#' @param cpi Optional precomputed `cast_select` object (`method = "cpi"`) to
+#'   reuse instead of recomputing the conditional screen.
+#' @param pool Integer. Size of the shared candidate pool. Default `40`.
+#' @param cor_threshold Correlation-filter cutoff. Default `0.7`.
+#' @param vif_threshold Stepwise-VIF cutoff. Default `10`.
+#' @param alpha FDR level for the marginal/associational screens and CPI.
+#'   Default `0.05`.
+#' @param seed Random seed.
+#' @param verbose Print progress.
+#'
+#' @return A `cast_screen_comparison` object.
+#' @seealso [cast_select()], [plot.cast_screen_comparison()]
+#' @export
+cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
+                                   pool = 40L, cor_threshold = 0.7,
+                                   vif_threshold = 10, alpha = 0.05,
+                                   seed = NULL, verbose = TRUE) {
+  env_vars <- get_env_vars(data, response)
+  if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
+
+  y <- as.integer(data[[response]])
+  xm <- .cast_numeric_matrix(data, env_vars)
+
+  # castSDM conditional predictive impact (reuse if supplied).
+  if (is.null(cpi)) {
+    cpi <- cast_select(data, response = response, method = "cpi",
+                       alpha = alpha, seed = seed, verbose = verbose)
+  }
+
+  # Shared candidate pool: the most marginally associated predictors, always
+  # augmented with the CPI selection so conditionally-important but marginally
+  # weak drivers stay visible in the comparison.
+  assoc <- abs(suppressWarnings(stats::cor(xm, y, use = "pairwise.complete.obs")))
+  assoc <- stats::setNames(as.numeric(assoc), env_vars)
+  assoc[!is.finite(assoc)] <- 0
+  pool <- min(as.integer(pool), length(env_vars))
+  cand <- union(env_vars[order(assoc, decreasing = TRUE)][seq_len(pool)],
+                intersect(env_vars, cpi$selected))
+
+  df <- as.data.frame(xm[, cand, drop = FALSE], check.names = FALSE)
+  df[[response]] <- y
+
+  assoc_p <- function(vars) vapply(vars, function(v)
+    suppressWarnings(stats::cor.test(df[[v]], df[[response]])$p.value), numeric(1))
+
+  # 1. Correlation filter
+  a <- abs(suppressWarnings(stats::cor(df[, cand, drop = FALSE], df[[response]])))
+  a <- stats::setNames(as.numeric(a), cand); a[!is.finite(a)] <- 0
+  kept <- character(0)
+  for (v in cand[order(-a)]) {
+    if (!length(kept) ||
+        max(abs(stats::cor(df[[v]], df[, kept, drop = FALSE]))) < cor_threshold)
+      kept <- c(kept, v)
+  }
+  cor_keep <- kept[stats::p.adjust(assoc_p(kept), "BH") < alpha]
+
+  # 2. Stepwise VIF
+  keep <- cand
+  repeat {
+    if (length(keep) < 2L) break
+    vifs <- vapply(keep, function(v) {
+      r2 <- summary(stats::lm(
+        stats::reformulate(setdiff(keep, v), response = v), data = df))$r.squared
+      if (!is.finite(r2) || r2 >= 1) Inf else 1 / (1 - r2)
+    }, numeric(1))
+    if (max(vifs) <= vif_threshold) break
+    keep <- setdiff(keep, names(which.max(vifs)))
+  }
+  vif_keep <- keep[stats::p.adjust(assoc_p(keep), "BH") < alpha]
+
+  # 3. Univariate marginal screen
+  uni_keep <- cand[stats::p.adjust(assoc_p(cand), "BH") < alpha]
+
+  # 4. RF permutation importance (top by importance)
+  rf_keep <- character(0)
+  if (requireNamespace("ranger", quietly = TRUE)) {
+    rdf <- df[, c(response, cand)]
+    rdf[[response]] <- factor(rdf[[response]])
+    rf <- ranger::ranger(
+      stats::reformulate(make.names(cand), response = response),
+      data = stats::setNames(rdf, c(response, make.names(cand))),
+      num.trees = 300L, importance = "permutation",
+      probability = TRUE, seed = seed %||% 42L, num.threads = 1L
+    )
+    imp <- rf$variable.importance
+    imp_orig <- stats::setNames(as.numeric(imp),
+                                cand[match(names(imp), make.names(cand))])
+    rf_keep <- names(sort(imp_orig[imp_orig > 0], decreasing = TRUE))
+  }
+
+  # CPI retentions restricted to the shared pool.
+  cpi_keep <- intersect(cand, cpi$selected)
+
+  membership <- data.frame(
+    variable = cand,
+    correlation = cand %in% cor_keep,
+    vif = cand %in% vif_keep,
+    univariate = cand %in% uni_keep,
+    rf = cand %in% rf_keep,
+    cpi = cand %in% cpi_keep,
+    stringsAsFactors = FALSE
+  )
+  methods <- c("correlation", "vif", "univariate", "rf", "cpi")
+  membership$n_methods <- rowSums(membership[methods])
+  membership <- membership[membership$n_methods > 0, , drop = FALSE]
+
+  if (verbose) {
+    cli::cli_inform(c(
+      "Screen comparison on {pool} shared candidates:",
+      i = "correlation {sum(membership$correlation)} | vif {sum(membership$vif)} | univariate {sum(membership$univariate)} | rf {sum(membership$rf)} | CPI {sum(membership$cpi)}"
+    ))
+  }
+
+  new_cast_screen_comparison(
+    membership = membership, methods = methods, cpi_method = "cpi",
+    diagnostics = list(pool = pool, cor_threshold = cor_threshold,
+                       vif_threshold = vif_threshold, alpha = alpha,
+                       n_predictors = length(env_vars))
+  )
+}

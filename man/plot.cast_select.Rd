@@ -4,12 +4,15 @@
 \alias{plot.cast_select}
 \title{Plot Variable Selection}
 \usage{
-\method{plot}{cast_select}(x, var_labels = NULL, ...)
+\method{plot}{cast_select}(x, var_labels = NULL, top = 20L, ...)
 }
 \arguments{
 \item{x}{A \code{cast_select} object (from \code{\link[=cast_select]{cast_select()}}).}
 
 \item{var_labels}{Optional named character vector for display labels.}
+
+\item{top}{Integer. Show only the \code{top} highest-scoring predictors (union
+with the retained set). Default \code{20}; use \code{NULL} for all tested predictors.}
 
 \item{...}{Ignored.}
 }

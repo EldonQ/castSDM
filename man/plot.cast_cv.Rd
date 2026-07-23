@@ -4,7 +4,15 @@
 \alias{plot.cast_cv}
 \title{Plot Spatial CV Fold Map and Metrics}
 \usage{
-\method{plot}{cast_cv}(x, lon = NULL, lat = NULL, metric = "auc", basemap = "world", ...)
+\method{plot}{cast_cv}(
+  x,
+  lon = NULL,
+  lat = NULL,
+  metric = "auc",
+  basemap = "world",
+  crop = TRUE,
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{cast_cv} object.}
@@ -16,6 +24,9 @@
 \item{metric}{Character. Metric to show in right panel. Default \code{"auc"}.}
 
 \item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
+
+\item{crop}{Logical. On a China basemap, fit the fold map to the data
+footprint so a range-restricted species fills the panel. Default \code{TRUE}.}
 
 \item{...}{Ignored.}
 }
