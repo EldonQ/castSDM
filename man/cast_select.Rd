@@ -13,6 +13,7 @@ cast_select(
   dml_folds = 5L,
   num_trees = 300L,
   min_vars = 3L,
+  force_include = character(),
   cor_threshold = 0.8,
   num_threads = 1L,
   seed = NULL,
@@ -38,6 +39,13 @@ the RF benchmark. Default \code{30}.}
 \item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
 
 \item{min_vars}{Minimum retained variables. Default \code{3}.}
+
+\item{force_include}{Character vector of predictor names to always retain,
+regardless of the selector's decision. Use for known niche-defining axes
+(e.g. temperature, elevation) that a within-calibration conditional screen
+may drop as redundant but that are essential for spatial transfer; the
+selector still runs normally on every other predictor. Names absent from
+the predictor pool are skipped. Default none.}
 
 \item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
 

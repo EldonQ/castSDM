@@ -27,6 +27,12 @@
 #' @param dml_folds Cross-fitting folds for the CPI/DML selectors. Default `5`.
 #' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
 #' @param min_vars Minimum retained variables. Default `3`.
+#' @param force_include Character vector of predictor names to always retain,
+#'   regardless of the selector's decision. Use for known niche-defining axes
+#'   (e.g. temperature, elevation) that a within-calibration conditional screen
+#'   may drop as redundant but that are essential for spatial transfer; the
+#'   selector still runs normally on every other predictor. Names absent from
+#'   the predictor pool are skipped. Default none.
 #' @param cor_threshold Absolute-correlation threshold for the RF benchmark.
 #' @param num_threads Threads for the ranger learners/benchmark. Default `1`.
 #' @param seed Random seed.
@@ -43,6 +49,7 @@ cast_select <- function(data,
                         dml_folds = 5L,
                         num_trees = 300L,
                         min_vars = 3L,
+                        force_include = character(),
                         cor_threshold = 0.8,
                         num_threads = 1L,
                         seed = NULL,
@@ -58,9 +65,12 @@ cast_select <- function(data,
       num_trees = min(as.integer(num_trees), 200L), min_vars = min_vars,
       seed = seed, verbose = verbose, num_threads = num_threads
     )
+    res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
+                                     force_include, verbose)
     return(new_cast_select(
-      selected = out$selected, scores = out$scores,
-      method = method, diagnostics = out$diagnostics
+      selected = res$selected, scores = res$scores, method = method,
+      diagnostics = c(out$diagnostics,
+                      list(forced = intersect(force_include, env_vars)))
     ))
   }
 
@@ -71,9 +81,12 @@ cast_select <- function(data,
       num_trees = min(as.integer(num_trees), 200L), min_vars = min_vars,
       seed = seed, verbose = verbose, num_threads = num_threads
     )
+    res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
+                                     force_include, verbose)
     return(new_cast_select(
-      selected = out$selected, scores = out$scores,
-      method = method, diagnostics = out$diagnostics
+      selected = res$selected, scores = res$scores, method = method,
+      diagnostics = c(out$diagnostics,
+                      list(forced = intersect(force_include, env_vars)))
     ))
   }
 
@@ -120,11 +133,39 @@ cast_select <- function(data,
     stringsAsFactors = FALSE
   )
   scores <- scores[order(!scores$selected, -scores$rf_importance), , drop = FALSE]
+  res <- .cast_apply_force_include(selected, scores, env_vars,
+                                   force_include, verbose)
   new_cast_select(
-    selected = selected, scores = scores, method = "rf",
+    selected = res$selected, scores = res$scores, method = "rf",
     diagnostics = list(engine = "RF permutation importance",
-                       cor_threshold = cor_threshold)
+                       cor_threshold = cor_threshold,
+                       forced = intersect(force_include, env_vars))
   )
+}
+
+# Post-hoc guarantee that ecologically mandatory predictors survive selection.
+# Applied by cast_select() after any selector (cpi/dml/rf) so the behaviour is
+# identical across methods: forced predictors are unioned into `selected` and
+# flagged in the score table. Names absent from the candidate pool are skipped.
+.cast_apply_force_include <- function(selected, scores, env_vars,
+                                      force_include, verbose = TRUE) {
+  force_include <- intersect(unique(force_include), env_vars)
+  if (!length(force_include)) return(list(selected = selected, scores = scores))
+  newly <- setdiff(force_include, selected)
+  selected <- unique(c(selected, force_include))
+  if (!is.null(scores) && "variable" %in% names(scores)) {
+    hit <- scores$variable %in% force_include
+    if ("selected" %in% names(scores)) scores$selected[hit] <- TRUE
+    if ("exclusion_reason" %in% names(scores)) {
+      scores$exclusion_reason[hit] <- "force_included"
+    }
+  }
+  if (verbose && length(newly)) {
+    cli::cli_inform(
+      "Force-included {length(newly)} predictor{?s} the selector dropped: {.val {newly}}."
+    )
+  }
+  list(selected = selected, scores = scores)
 }
 
 #' Compare castSDM Conditional Screening Against Conventional Baselines
