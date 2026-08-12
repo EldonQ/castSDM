@@ -58,9 +58,11 @@ the per-model habitat-suitability surface (HSS) to disk via
 \code{terra::writeRaster()}.
 }
 \details{
-Per-tile checkpoints (\verb{<output_dir>/.cast_tile_<model>_<tileid>.rds}) are
-written eagerly so that an interrupted run can be resumed without
-recomputing already-finished tiles.
+Per-tile checkpoints are written eagerly under a per-fit directory
+(\verb{<output_dir>/.cast_tiles_<fingerprint>/}) so an interrupted run can be
+resumed without recomputing finished tiles, and a new fit can never
+replay tiles predicted by an older model. \code{overwrite = TRUE} bypasses
+and refreshes the checkpoints.
 
 Tiles are dispatched through \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}} when a
 \code{cast_worker_budget} is given, using the Windows-friendly

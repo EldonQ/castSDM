@@ -40,7 +40,10 @@
 #' @param seed Random seed.
 #' @param verbose Print progress.
 #'
-#' @return A `cast_select` object.
+#' @return A `cast_select` object. Its `scores` data.frame marks each
+#'   predictor with `selected` (retained), `fallback` (kept only through the
+#'   `min_vars` floor, i.e. it did not pass FDR), and `forced` (added via
+#'   `force_include`).
 #' @seealso [cast_effect()], [cast_counterfactual()]
 #' @export
 cast_select <- function(data,
@@ -134,13 +137,17 @@ cast_select <- function(data,
       if (!any(cors >= cor_threshold, na.rm = TRUE)) selected <- c(selected, v)
     }
   }
+  loop_selected <- selected
   if (length(selected) < min_vars) {
     selected <- unique(c(selected, ranked))[seq_len(min(min_vars, length(ranked)))]
   }
+  fallback_added <- setdiff(selected, loop_selected)
   scores <- data.frame(
     variable = env_vars,
     rf_importance = unname(imp),
     selected = env_vars %in% selected,
+    fallback = env_vars %in% fallback_added,
+    forced = FALSE,
     exclusion_reason = ifelse(env_vars %in% selected, "selected", "lower_or_redundant"),
     stringsAsFactors = FALSE
   )
@@ -168,6 +175,7 @@ cast_select <- function(data,
   if (!is.null(scores) && "variable" %in% names(scores)) {
     hit <- scores$variable %in% force_include
     if ("selected" %in% names(scores)) scores$selected[hit] <- TRUE
+    if ("forced" %in% names(scores)) scores$forced[hit] <- TRUE
     if ("exclusion_reason" %in% names(scores)) {
       scores$exclusion_reason[hit] <- "force_included"
     }
@@ -192,9 +200,11 @@ cast_select <- function(data,
 #' object makes that contrast explicit for the Results narrative.
 #'
 #' Because stepwise VIF and pairwise correlation scale poorly, the predictor
-#' pool is first reduced to the `pool` most marginally associated predictors
-#' (this mirrors practice -- nobody runs VIF on hundreds of raw layers) and
-#' every method, including CPI, is compared on that shared pool.
+# pool is first reduced to the `pool` most marginally associated predictors
+# (this mirrors practice -- nobody runs VIF on hundreds of raw layers) and
+# every method, including CPI, is compared on that shared pool. The RF
+# importance baseline keeps the same number of predictors as CPI so the
+# comparison is budget-matched.
 #'
 #' @param data Data frame with response, coordinates, and predictors.
 #' @param response Binary response column. Default `"presence"`.
@@ -271,7 +281,12 @@ cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
   # 3. Univariate marginal screen
   uni_keep <- cand[stats::p.adjust(assoc_p(cand), "BH") < alpha]
 
-  # 4. RF permutation importance (top by importance)
+  # CPI retentions restricted to the shared pool.
+  cpi_keep <- intersect(cand, cpi$selected)
+
+  # 4. RF permutation importance: budget-matched to the CPI retention count
+  #    so the associational benchmark and the conditional screen compete on
+  #    the same number of predictors.
   rf_keep <- character(0)
   if (requireNamespace("ranger", quietly = TRUE)) {
     rdf <- df[, c(response, cand)]
@@ -285,11 +300,10 @@ cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
     imp <- rf$variable.importance
     imp_orig <- stats::setNames(as.numeric(imp),
                                 cand[match(names(imp), make.names(cand))])
-    rf_keep <- names(sort(imp_orig[imp_orig > 0], decreasing = TRUE))
+    ranked_imp <- sort(imp_orig[imp_orig > 0], decreasing = TRUE)
+    n_keep <- min(length(ranked_imp), max(1L, length(cpi_keep)))
+    rf_keep <- names(ranked_imp)[seq_len(n_keep)]
   }
-
-  # CPI retentions restricted to the shared pool.
-  cpi_keep <- intersect(cand, cpi$selected)
 
   membership <- data.frame(
     variable = cand,

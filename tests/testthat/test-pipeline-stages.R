@@ -131,3 +131,35 @@ test_that("cast_vif removes collinear columns", {
   expect_true(length(out$selected) < ncol(dat))
   expect_false(all(c("a", "b") %in% out$selected))
 })
+
+test_that("cast() refits final models on the full data set", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  dat <- make_syn_data(n = 200)
+  grid <- make_syn_grid(dat)
+  res <- cast(dat, env_data = grid, models = "rf",
+              select_method = "rf", select_min_vars = 2,
+              do_cv = TRUE, cv_k = 2, refit_full = TRUE,
+              seed = 45, verbose = FALSE)
+  expect_s3_class(res, "cast_result")
+  expect_s3_class(res$fit_full, "cast_fit")
+  expect_true("HSS_rf" %in% names(res$predict$predictions))
+})
+
+test_that("cast() reports when the ensemble is skipped (no CV)", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  dat <- make_syn_data(n = 150)
+  grid <- make_syn_grid(dat)
+  msg <- character(0)
+  withCallingHandlers(
+    res <- cast(dat, env_data = grid, models = "rf",
+                select_method = "rf", select_min_vars = 2,
+                do_cv = FALSE, refit_full = FALSE,
+                seed = 46, verbose = TRUE),
+    message = function(m) { msg <<- c(msg, conditionMessage(m));
+                            invokeRestart("muffleMessage") }
+  )
+  expect_null(res$ensemble)
+  expect_true(any(grepl("Ensemble skipped", msg)))
+})

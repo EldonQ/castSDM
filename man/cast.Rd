@@ -14,13 +14,16 @@ cast(
   select_num_trees = 300L,
   select_max_vars = 30L,
   select_alpha = 0.05,
+  select_dml_folds = 5L,
   select_cor_threshold = 0.8,
+  num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
   cv_block_method = "grid",
   do_predict = NULL,
   do_ensemble = TRUE,
   ensemble_method = "weighted",
+  refit_full = TRUE,
   seed = NULL,
   verbose = TRUE
 )
@@ -51,8 +54,14 @@ Default \code{30}.}
 
 \item{select_alpha}{Numeric. FDR level for the DML selector. Default \code{0.05}.}
 
+\item{select_dml_folds}{Integer. Cross-fitting folds for the CPI/DML
+selectors. Default \code{5}.}
+
 \item{select_cor_threshold}{Numeric. Absolute correlation threshold for the
 RF benchmark. Default \code{0.8}.}
+
+\item{num_threads}{Integer. Threads for the ranger learners/benchmark.
+Default \code{1}.}
 
 \item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 
@@ -68,6 +77,11 @@ if \code{env_data} is provided.}
 
 \item{ensemble_method}{Character. Ensemble method: \code{"weighted"},
 \code{"best"}, \code{"equal"}. Default \code{"weighted"}.}
+
+\item{refit_full}{Logical. Refit the final models on the full data set
+(instead of the training split only) before spatial prediction and
+ensemble, standard SDM practice. Variable selection is still decided on
+the training split. Default \code{TRUE}.}
 
 \item{seed}{Integer or \code{NULL}.}
 

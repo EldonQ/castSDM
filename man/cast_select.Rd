@@ -58,7 +58,10 @@ the predictor pool are skipped. Default none.}
 \item{verbose}{Print progress.}
 }
 \value{
-A \code{cast_select} object.
+A \code{cast_select} object. Its \code{scores} data.frame marks each
+predictor with \code{selected} (retained), \code{fallback} (kept only through the
+\code{min_vars} floor, i.e. it did not pass FDR), and \code{forced} (added via
+\code{force_include}).
 }
 \description{
 \code{method = "cpi"} (default) is the castSDM causal selector. It tests each

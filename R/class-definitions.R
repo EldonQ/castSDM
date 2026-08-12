@@ -211,6 +211,8 @@ new_cast_predict <- function(predictions, models) {
 #' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
+#' @param fit_full A `cast_fit` object refitted on the full data set for
+#'   final prediction maps (or `NULL`).
 #' @param call The original function call.
 #'
 #' @return A `cast_result` object.
@@ -219,6 +221,7 @@ new_cast_predict <- function(predictions, models) {
 new_cast_result <- function(screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
+                            fit_full = NULL,
                             call = NULL) {
   structure(
     list(
@@ -228,6 +231,7 @@ new_cast_result <- function(screen, fit, eval,
       cv = cv,
       predict = predict,
       ensemble = ensemble,
+      fit_full = fit_full,
       call = call
     ),
     class = "cast_result"

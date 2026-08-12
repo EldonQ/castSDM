@@ -7,6 +7,7 @@
 cast_esm(
   data,
   vars = NULL,
+  screen = NULL,
   top_k = 8L,
   base_algo = c("glm", "gam"),
   val_fraction = 0.25,
@@ -20,6 +21,10 @@ cast_esm(
 
 \item{vars}{Character vector of candidate predictor names. If \code{NULL},
 uses \code{\link[=get_env_vars]{get_env_vars()}}.}
+
+\item{screen}{Optional \code{\link[=cast_select]{cast_select()}} object. When supplied, its selected
+predictors replace the univariate-AUC ranking used to cap \code{top_k},
+keeping the rare-species path consistent with the conditional screen.}
 
 \item{top_k}{Integer. Maximum number of predictors retained before
 enumerating pairs (defends against combinatorial explosion). Default

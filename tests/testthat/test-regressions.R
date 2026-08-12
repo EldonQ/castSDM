@@ -133,8 +133,56 @@ test_that("resource logging writes one CSV per species", {
 test_that("cast_run_step caches and replays identical steps", {
   dir.create(td <- tempfile("ckpt"), showWarnings = FALSE)
   on.exit(unlink(td, recursive = TRUE), add = TRUE)
-  v1 <- cast_run_step("prepare", td, "spA", { 111 }, verbose = FALSE)
-  v2 <- cast_run_step("prepare", td, "spA", { 111 }, verbose = FALSE)
+  v1 <- cast_run_step("prepare", td, "spA", { 111 },
+                      params = list(signature = "s1"), verbose = FALSE)
+  v2 <- cast_run_step("prepare", td, "spA", { 111 },
+                      params = list(signature = "s1"), verbose = FALSE)
   expect_equal(v1, 111)
   expect_equal(v2, 111)
+})
+
+test_that("cast_run_step invalidates the cache when params change", {
+  dir.create(td <- tempfile("ckpt"), showWarnings = FALSE)
+  on.exit(unlink(td, recursive = TRUE), add = TRUE)
+  v1 <- cast_run_step("prepare", td, "spA", { 111 },
+                      params = list(signature = "s1"), verbose = FALSE)
+  # Same step, different params: must recompute instead of replaying 111.
+  v2 <- cast_run_step("prepare", td, "spA", { 222 },
+                      params = list(signature = "s2"), verbose = FALSE)
+  expect_equal(v1, 111)
+  expect_equal(v2, 222)
+})
+
+test_that("cast_select scores carry fallback and forced flags", {
+  skip_if_not_installed("ranger")
+  set.seed(41)
+  n <- 150
+  x1 <- rnorm(n); x2 <- rnorm(n); noise <- replicate(4, rnorm(n))
+  dat <- data.frame(
+    lon = runif(n), lat = runif(n),
+    presence = rbinom(n, 1, plogis(1.5 * x1)), x1 = x1, x2 = x2, noise
+  )
+  out <- cast_select(dat, method = "rf", min_vars = 3, max_candidates = 4,
+                     num_trees = 40, force_include = "x2", seed = 42,
+                     verbose = FALSE)
+  expect_true(all(c("fallback", "forced") %in% names(out$scores)))
+  expect_true(out$scores$forced[out$scores$variable == "x2"])
+  expect_true("x2" %in% out$selected)
+})
+
+test_that("cast_esm accepts a screen instead of univariate ranking", {
+  set.seed(43)
+  n <- 80
+  dat <- data.frame(
+    lon = runif(n), lat = runif(n),
+    presence = c(rep(1, 12), rep(0, n - 12)),
+    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n)
+  )
+  screen <- new_cast_select(c("x1", "x2", "x3"),
+                            data.frame(variable = c("x1", "x2", "x3")),
+                            method = "manual")
+  esm <- cast_esm(dat, screen = screen, base_algo = "glm", seed = 44,
+                  verbose = FALSE)
+  expect_s3_class(esm, "cast_esm")
+  expect_setequal(esm$vars, c("x1", "x2", "x3"))
 })

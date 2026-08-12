@@ -6,9 +6,11 @@
 #' the per-model habitat-suitability surface (HSS) to disk via
 #' `terra::writeRaster()`.
 #'
-#' Per-tile checkpoints (`<output_dir>/.cast_tile_<model>_<tileid>.rds`) are
-#' written eagerly so that an interrupted run can be resumed without
-#' recomputing already-finished tiles.
+#' Per-tile checkpoints are written eagerly under a per-fit directory
+#' (`<output_dir>/.cast_tiles_<fingerprint>/`) so an interrupted run can be
+#' resumed without recomputing finished tiles, and a new fit can never
+#' replay tiles predicted by an older model. `overwrite = TRUE` bypasses
+#' and refreshes the checkpoints.
 #'
 #' Tiles are dispatched through [future.apply::future_lapply()] when a
 #' `cast_worker_budget` is given, using the Windows-friendly
@@ -112,14 +114,16 @@ cast_predict_tiled <- function(fit, raster,
     list(tile_id = k, r0 = r0, c0 = c0, nr = nr, nc = nc, df = df)
   }
 
-  predict_tile <- function(tile, mdl_name) {
+  # Tile checkpoints live in a per-fit directory so a new fit can never
+  # replay predictions of an older model, and `overwrite = TRUE` bypasses
+  # (and refreshes) the checkpoints instead of silently reusing them.
+  predict_tile <- function(tile, mdl_name, chk_root) {
     df <- tile$df
     nr <- tile$nr; nc <- tile$nc
     if (nrow(df) == 0L) return(matrix(NA_real_, nr, nc))
-    chk_path <- file.path(output_dir,
-                          sprintf(".cast_tile_%s_%05d.rds",
-                                  mdl_name, tile$tile_id))
-    if (file.exists(chk_path)) {
+    chk_path <- file.path(chk_root,
+                          sprintf("%s_%05d.rds", mdl_name, tile$tile_id))
+    if (!isTRUE(overwrite) && file.exists(chk_path)) {
       vals <- tryCatch(readRDS(chk_path), error = function(e) NULL)
       if (!is.null(vals)) return(matrix(vals, nr, nc, byrow = TRUE))
     }
@@ -150,9 +154,17 @@ cast_predict_tiled <- function(fit, raster,
     if (file.exists(op) && !overwrite) next
     if (verbose) cli::cli_inform("  predicting tiles for {.val {mdl}}...")
 
+    # Fit fingerprint: content digest of the fitted model object itself.
+    mdl_sig <- tryCatch(
+      .cast_digest(fit$models[[mdl]]$model, len = 10),
+      error = function(e) "unknown"
+    )
+    chk_root <- file.path(output_dir, paste0(".cast_tiles_", mdl_sig))
+    dir.create(chk_root, showWarnings = FALSE, recursive = TRUE)
+
     process_one <- function(k) {
       tile <- do_tile(k)
-      list(tile = tile, vals = predict_tile(tile, mdl))
+      list(tile = tile, vals = predict_tile(tile, mdl, chk_root))
     }
 
     results <- if (parallel) {

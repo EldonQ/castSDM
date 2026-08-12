@@ -52,9 +52,6 @@ object makes that contrast explicit for the Results narrative.
 }
 \details{
 Because stepwise VIF and pairwise correlation scale poorly, the predictor
-pool is first reduced to the \code{pool} most marginally associated predictors
-(this mirrors practice -- nobody runs VIF on hundreds of raw layers) and
-every method, including CPI, is compared on that shared pool.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=plot.cast_screen_comparison]{plot.cast_screen_comparison()}}

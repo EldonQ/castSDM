@@ -159,6 +159,7 @@ print.cast_result <- function(x, ...) {
   cli::cli_ul(c(
     "Selected: {length(x$screen$selected)} variables",
     "Models: {.val {names(x$fit$models)}}",
+    "Full-data refit: {if (!is.null(x$fit_full)) 'Yes' else 'No'}",
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",
     "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}"
   ))

@@ -226,11 +226,42 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
 }
 
 
+#' Content Digest for Cache Keys
+#'
+#' Returns a stable hash of an arbitrary R object, used to parameterise
+#' step- and tile-level checkpoints so that stale caches are never replayed
+#' after a configuration or data change. Uses \pkg{digest} when available
+#' and falls back to a fast FNV-1a hash over the serialised object.
+#'
+#' @param x Any R object.
+#' @param len Number of hash characters to return (default all).
+#' @return Character scalar.
+#' @keywords internal
+#' @noRd
+.cast_digest <- function(x, len = NULL) {
+  if (requireNamespace("digest", quietly = TRUE)) {
+    out <- digest::digest(x)
+  } else {
+    raw <- serialize(x, NULL, version = 3)
+    h <- 2166136261
+    for (b in as.integer(raw)) {
+      h <- bitwXor(h, b)
+      h <- (h * 16777619) %% 4294967296
+    }
+    out <- sprintf("%08x", h)
+  }
+  if (!is.null(len)) out <- substr(out, 1L, len)
+  out
+}
+
+
 #' Configure Plot Fonts
 #'
-#' Sets the plotting font used by castSDM figures. The package default is
+#' Sets the font family used by castSDM figures. The package default is
 #' \code{"Arial"}; on Windows the family is registered with
-#' [grDevices::windowsFont()] when available. Use [cast_safe_ggsave()] for
+#' [grDevices::windowsFont()] when available. The choice is stored in the
+#' session option `castSDM.font_family` and read by every plot method; the
+#' global ggplot2 theme is never modified. Use [cast_safe_ggsave()] for
 #' export so PNG/PDF devices handle fonts consistently.
 #'
 #' @param family Character. Font family passed to ggplot2. Default
@@ -246,12 +277,6 @@ cast_set_plot_defaults <- function(family = "Arial") {
     )
   }
   options(castSDM.font_family = family)
-  if (requireNamespace("ggplot2", quietly = TRUE)) {
-    ggplot2::theme_set(
-      ggplot2::theme_get() +
-        ggplot2::theme(text = ggplot2::element_text(family = family))
-    )
-  }
   invisible(family)
 }
 

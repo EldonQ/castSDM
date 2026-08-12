@@ -107,10 +107,12 @@
   colnames(x_std) <- safe_names
 
   candidates <- active
+  prescreen <- "none"
   if (length(active) > max_candidates) {
     top_safe <- .cast_prescreen_importance(x_std, y, max_candidates,
                                            num_trees, seed, num_threads)
     candidates <- active[match(top_safe, safe_names)]
+    prescreen <- "RF importance (top candidates)"
     if (verbose) {
       cli::cli_inform(
         "CPI: pre-screened {length(active)} -> {length(candidates)} candidates by RF importance."
@@ -146,11 +148,13 @@
 
   selected <- orig[is.finite(p_adj) & p_adj < alpha & is.finite(cpi_val) &
                      cpi_val > 0]
+  fdr_passed <- selected
   if (length(selected) < min_vars) {
     ord <- order(cpi_val, decreasing = TRUE)
     selected <- orig[ord][seq_len(min(min_vars, length(orig)))]
     selected <- selected[!is.na(selected)]
   }
+  fallback_added <- setdiff(selected, fdr_passed)
 
   scores <- data.frame(
     variable = orig,
@@ -161,6 +165,8 @@
     p_value = p_raw,
     p_adjusted = p_adj,
     selected = orig %in% selected,
+    fallback = orig %in% fallback_added,
+    forced = FALSE,
     stringsAsFactors = FALSE
   )
   not_tested <- setdiff(env_vars, orig)
@@ -168,7 +174,8 @@
     scores <- rbind(scores, data.frame(
       variable = not_tested, cpi = NA_real_, std_error = NA_real_,
       statistic = NA_real_, abs_statistic = NA_real_, p_value = NA_real_,
-      p_adjusted = NA_real_, selected = FALSE, stringsAsFactors = FALSE
+      p_adjusted = NA_real_, selected = FALSE, fallback = FALSE,
+      forced = FALSE, stringsAsFactors = FALSE
     ))
   }
   scores <- scores[order(!scores$selected, -scores$cpi), , drop = FALSE]
@@ -181,7 +188,8 @@
     test = "one-sided t",
     n_folds = as.integer(n_folds),
     n_candidates = length(candidates),
-    n_predictors = length(env_vars)
+    n_predictors = length(env_vars),
+    prescreen = prescreen
   )
   if (verbose) {
     cli::cli_inform(
@@ -235,10 +243,12 @@
   colnames(x_std) <- safe_names
 
   candidates <- active
+  prescreen <- "none"
   if (length(active) > max_candidates) {
     top_safe <- .cast_prescreen_importance(x_std, y, max_candidates,
                                            num_trees, seed, num_threads)
     candidates <- active[match(top_safe, safe_names)]
+    prescreen <- "RF importance (top candidates)"
     if (verbose) {
       cli::cli_inform(
         "DML: pre-screened {length(active)} -> {length(candidates)} candidates by RF importance."
@@ -271,11 +281,13 @@
   if (any(ok)) p_adj[ok] <- stats::p.adjust(p_raw[ok], method = "BH")
 
   selected <- candidates[is.finite(p_adj) & p_adj < alpha]
+  fdr_passed <- selected
   if (length(selected) < min_vars) {
     ord <- order(abs(est[, "statistic"]), decreasing = TRUE)
     selected <- candidates[ord][seq_len(min(min_vars, length(candidates)))]
     selected <- selected[!is.na(selected)]
   }
+  fallback_added <- setdiff(selected, fdr_passed)
 
   scores <- data.frame(
     variable = candidates,
@@ -286,6 +298,8 @@
     p_value = p_raw,
     p_adjusted = p_adj,
     selected = candidates %in% selected,
+    fallback = candidates %in% fallback_added,
+    forced = FALSE,
     stringsAsFactors = FALSE
   )
   not_tested <- setdiff(env_vars, candidates)
@@ -293,7 +307,8 @@
     scores <- rbind(scores, data.frame(
       variable = not_tested, estimate = NA_real_, std_error = NA_real_,
       statistic = NA_real_, abs_statistic = NA_real_, p_value = NA_real_,
-      p_adjusted = NA_real_, selected = FALSE, stringsAsFactors = FALSE
+      p_adjusted = NA_real_, selected = FALSE, fallback = FALSE,
+      forced = FALSE, stringsAsFactors = FALSE
     ))
   }
   scores <- scores[order(!scores$selected, -scores$abs_statistic), , drop = FALSE]
@@ -305,7 +320,8 @@
     fdr_method = "BH",
     n_folds = as.integer(n_folds),
     n_candidates = length(candidates),
-    n_predictors = length(env_vars)
+    n_predictors = length(env_vars),
+    prescreen = prescreen
   )
   if (verbose) {
     cli::cli_inform(

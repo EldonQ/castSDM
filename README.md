@@ -65,9 +65,9 @@ new estimation engine:
 eff <- cast_effect(result)               # tidy DML effect table + CIs
 plot(eff)                                # coefficient (forest) plot
 
-cf <- cast_counterfactual(               # g-computation what-if on current
-  result$fit, newdata = current_grid,    #   climate: shift one driver, hold
-  variable = "bio1", shift = 1           #   the rest fixed, map the change
+cf <- cast_counterfactual(result$fit_full %||% result$fit, # g-computation what-if
+  newdata = current_grid,    #   climate: shift one driver, hold
+  variable = "bio1", shift = 1   #   the rest fixed, map the change
 )
 plot(cf, basemap = "china")              # diverging map of change in HSS
 ```

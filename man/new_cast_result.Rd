@@ -11,6 +11,7 @@ new_cast_result(
   cv = NULL,
   predict = NULL,
   ensemble = NULL,
+  fit_full = NULL,
   call = NULL
 )
 }
@@ -26,6 +27,9 @@ new_cast_result(
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
 \item{ensemble}{A \code{cast_ensemble} object (or \code{NULL}).}
+
+\item{fit_full}{A \code{cast_fit} object refitted on the full data set for
+final prediction maps (or \code{NULL}).}
 
 \item{call}{The original function call.}
 }

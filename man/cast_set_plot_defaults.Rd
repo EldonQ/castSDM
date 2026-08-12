@@ -14,8 +14,10 @@ cast_set_plot_defaults(family = "Arial")
 Invisibly returns \code{family}.
 }
 \description{
-Sets the plotting font used by castSDM figures. The package default is
+Sets the font family used by castSDM figures. The package default is
 \code{"Arial"}; on Windows the family is registered with
-\code{\link[grDevices:windowsFonts]{grDevices::windowsFont()}} when available. Use \code{\link[=cast_safe_ggsave]{cast_safe_ggsave()}} for
+\code{\link[grDevices:windowsFonts]{grDevices::windowsFont()}} when available. The choice is stored in the
+session option \code{castSDM.font_family} and read by every plot method; the
+global ggplot2 theme is never modified. Use \code{\link[=cast_safe_ggsave]{cast_safe_ggsave()}} for
 export so PNG/PDF devices handle fonts consistently.
 }

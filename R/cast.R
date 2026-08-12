@@ -20,8 +20,12 @@
 #' @param select_max_vars Candidate ceiling for DML testing / RF output.
 #'   Default `30`.
 #' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
+#' @param select_dml_folds Integer. Cross-fitting folds for the CPI/DML
+#'   selectors. Default `5`.
 #' @param select_cor_threshold Numeric. Absolute correlation threshold for the
 #'   RF benchmark. Default `0.8`.
+#' @param num_threads Integer. Threads for the ranger learners/benchmark.
+#'   Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
@@ -31,6 +35,10 @@
 #' @param do_ensemble Logical. Generate ensemble prediction. Default `TRUE`.
 #' @param ensemble_method Character. Ensemble method: `"weighted"`,
 #'   `"best"`, `"equal"`. Default `"weighted"`.
+#' @param refit_full Logical. Refit the final models on the full data set
+#'   (instead of the training split only) before spatial prediction and
+#'   ensemble, standard SDM practice. Variable selection is still decided on
+#'   the training split. Default `TRUE`.
 #' @param seed Integer or `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
 #'
@@ -50,13 +58,16 @@ cast <- function(species_data,
                  select_num_trees = 300L,
                  select_max_vars = 30L,
                  select_alpha = 0.05,
+                 select_dml_folds = 5L,
                  select_cor_threshold = 0.8,
+                 num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
                  cv_block_method = "grid",
                  do_predict = NULL,
                  do_ensemble = TRUE,
                  ensemble_method = "weighted",
+                 refit_full = TRUE,
                  seed = NULL,
                  verbose = TRUE) {
   do_predict <- do_predict %||% !is.null(env_data)
@@ -85,7 +96,9 @@ cast <- function(species_data,
     min_vars = select_min_vars,
     num_trees = select_num_trees,
     max_candidates = select_max_vars,
+    dml_folds = select_dml_folds,
     cor_threshold = select_cor_threshold,
+    num_threads = num_threads,
     seed = seed, verbose = verbose
   )
 
@@ -95,6 +108,7 @@ cast <- function(species_data,
     train_data,
     screen = screen,
     models = models,
+    num_threads = num_threads,
     seed = seed, verbose = verbose
   )
 
@@ -112,7 +126,9 @@ cast <- function(species_data,
           min_vars = select_min_vars,
           max_candidates = select_max_vars,
           num_trees = select_num_trees,
-          cor_threshold = select_cor_threshold
+          dml_folds = select_dml_folds,
+          cor_threshold = select_cor_threshold,
+          num_threads = num_threads
         ),
         k = cv_k, models = models,
         block_method = cv_block_method,
@@ -137,9 +153,27 @@ cast <- function(species_data,
   # === Step 6: Spatial Prediction & Ensemble ===
   pred_result <- NULL
   ensemble_result <- NULL
+  fit_full <- NULL
   if (do_predict && !is.null(env_data)) {
+    # Refit on the full data set for final maps: selection stays decided on
+    # the training split, but published predictions reuse every record.
+    if (isTRUE(refit_full)) {
+      if (verbose) cli::cli_inform("Refitting final models on the full data set.")
+      fit_full <- tryCatch(
+        cast_fit(
+          species_data, screen = screen, models = models,
+          num_threads = num_threads, seed = seed, verbose = verbose
+        ),
+        error = function(e) {
+          cli::cli_warn("Full-data refit failed ({e$message}); using the training fit.")
+          NULL
+        }
+      )
+    }
+    fit_use <- if (!is.null(fit_full)) fit_full else fit
+
     if (verbose) cli::cli_h2("Step 6: Spatial Prediction")
-    pred_result <- cast_predict(fit, env_data)
+    pred_result <- cast_predict(fit_use, env_data)
     if (verbose) {
       cli::cli_inform("Predicted {nrow(pred_result$predictions)} sites.")
     }
@@ -147,12 +181,16 @@ cast <- function(species_data,
     if (do_ensemble && !is.null(cv_result)) {
       if (verbose) cli::cli_inform("Building ensemble ({ensemble_method})...")
       ensemble_result <- tryCatch(
-        cast_ensemble(fit, cv_result, env_data, method = ensemble_method),
+        cast_ensemble(fit_use, cv_result, env_data, method = ensemble_method),
         error = function(e) {
           cli::cli_warn("Ensemble failed: {e$message}")
           NULL
         }
       )
+    } else if (do_ensemble) {
+      if (verbose) {
+        cli::cli_inform("Ensemble skipped: spatial CV unavailable (do_cv = FALSE or CV failed).")
+      }
     }
   }
 
@@ -163,6 +201,7 @@ cast <- function(species_data,
     fit = fit, eval = eval_result,
     cv = cv_result,
     predict = pred_result,
-    ensemble = ensemble_result
+    ensemble = ensemble_result,
+    fit_full = fit_full
   )
 }

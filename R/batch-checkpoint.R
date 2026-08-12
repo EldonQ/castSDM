@@ -4,35 +4,40 @@
 #' per-species pipeline resumable. Results are cached to
 #' `<output_dir>/<species>/.steps/<step>.rds`, so a re-invocation of
 #' [cast_batch()] over the same `output_dir` skips already-finished steps.
-#' Elapsed seconds and peak RAM (in MiB) are appended to
-#' `<output_dir>/resource_log.csv`.
+#' Elapsed seconds and peak RAM (in MiB) are appended to the per-species
+#' resource log.
 #'
-#' Lazy semantics: `expr` is only evaluated when no cache hit exists. This
-#' makes the wrapper non-invasive: wrapping `cast_run_step("select", ...,
-#' cast_select(...))` does not call `cast_select()` if its output is on
-#' disk.
+#' Cache entries store the step's `params` next to its value. A cache hit
+#' requires the stored `params` to be identical to the current call, so
+#' changing any step input (data, configuration, seed) silently invalidates
+#' the cache instead of replaying a stale result. Bare-value cache files
+#' written by castSDM < 0.7.0 are treated as misses and overwritten.
 #'
 #' @param step_name Character. Step identifier (filename-safe).
 #' @param output_dir Top-level batch directory.
 #' @param species Species name (used as subdirectory under `output_dir`).
 #' @param expr Lazy expression producing the step's result.
+#' @param params Named list describing the step inputs; the cache key.
 #' @param verbose Logical. Print a `cli_inform` line on cache hit / miss.
 #'
 #' @return The step's result (either freshly computed or loaded from cache).
 #' @keywords internal
 #' @noRd
 cast_run_step <- function(step_name, output_dir, species, expr,
-                          verbose = FALSE) {
+                          params = list(), verbose = FALSE) {
   ckpt_dir <- file.path(output_dir, species, ".steps")
   dir.create(ckpt_dir, showWarnings = FALSE, recursive = TRUE)
   ckpt <- file.path(ckpt_dir, paste0(step_name, ".rds"))
 
   if (file.exists(ckpt)) {
     val <- tryCatch(readRDS(ckpt), error = function(e) NULL)
-    if (!is.null(val)) {
-      if (verbose)
+    if (!is.null(val) && is.list(val) &&
+        all(c("params", "value") %in% names(val)) &&
+        identical(val$params, params)) {
+      if (verbose) {
         cli::cli_inform("  [{species}] {step_name}: cache hit; skipped.")
-      return(val)
+      }
+      return(val$value)
     }
   }
 
@@ -58,13 +63,14 @@ cast_run_step <- function(step_name, output_dir, species, expr,
   elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
   if (!is.null(val)) {
-    saveRDS(val, ckpt)
+    saveRDS(list(params = params, value = val), ckpt)
   }
   cast_log_resource(output_dir, species, step_name, elapsed, peak_mb)
-  if (verbose)
+  if (verbose) {
     cli::cli_inform(
       "  [{species}] {step_name}: {round(elapsed,2)}s, peak {round(peak_mb,1)} MiB."
     )
+  }
   val
 }
 

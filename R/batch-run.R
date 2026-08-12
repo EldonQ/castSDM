@@ -21,8 +21,12 @@
 #' @param select_max_vars Candidate ceiling for DML testing / RF output.
 #'   Default `30`.
 #' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
+#' @param select_dml_folds Integer. Cross-fitting folds for the CPI/DML
+#'   selectors. Default `5`.
 #' @param select_cor_threshold Numeric. Redundant-proxy correlation threshold.
 #'   Default `0.8`.
+#' @param num_threads Integer. Threads for the ranger learners/benchmark.
+#'   Default `1`.
 #' @param do_cv Logical. Default `TRUE`.
 #' @param cv_k Integer. Default `5`.
 #' @param cv_block_method Character. Default `"grid"`.
@@ -30,6 +34,8 @@
 #' @param do_ensemble Logical. Default `TRUE`.
 #' @param ensemble_method Character. `"weighted"`, `"best"`, or `"equal"`.
 #'   Default `"weighted"`.
+#' @param refit_full Logical. Refit final models on the full data set before
+#'   spatial prediction. Default `TRUE`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
 #' @param select_verbose Passed to [cast_select()]. Default `FALSE`.
@@ -68,7 +74,9 @@ cast_batch <- function(species_list,
                       select_method = "cpi",
                       select_max_vars = 30L,
                       select_alpha = 0.05,
+                      select_dml_folds = 5L,
                       select_cor_threshold = 0.8,
+                      num_threads = 1L,
                       # -- CV --
                       do_cv           = TRUE,
                       cv_k            = 5L,
@@ -76,6 +84,7 @@ cast_batch <- function(species_list,
                       do_predict = TRUE,
                       do_ensemble = TRUE,
                       ensemble_method = "weighted",
+                      refit_full = TRUE,
                       response = "presence",
                       prepare_env_vars = NULL,
                       prepare_verbose = FALSE,
@@ -178,7 +187,9 @@ cast_batch <- function(species_list,
     select_method = select_method,
     select_max_vars = select_max_vars,
     select_alpha = select_alpha,
+    select_dml_folds = select_dml_folds,
     select_cor_threshold = select_cor_threshold,
+    num_threads = num_threads,
     select_verbose = select_verbose,
     do_cv = do_cv, cv_k = cv_k, cv_block_method = cv_block_method,
     cv_models = cv_models_use,
@@ -190,6 +201,7 @@ cast_batch <- function(species_list,
     do_predict = do_predict,
     do_ensemble = do_ensemble,
     ensemble_method = ensemble_method,
+    refit_full = refit_full,
     plot_basemap = plot_basemap,
     var_labels = var_labels,
     fit_verbose = fit_verbose,
