@@ -49,6 +49,7 @@ is restricted to cells where mask is non-NA.}
 A list with components:
 \describe{
 \item{hss_path}{File path to the HSS raster.}
+\item{hss_sd_path}{File path to the cross-model uncertainty (SD) raster.}
 \item{binary_path}{File path to the binary raster.}
 \item{weights}{Named numeric vector of per-model weights.}
 \item{threshold}{Binary classification threshold.}

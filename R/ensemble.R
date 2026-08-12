@@ -19,6 +19,7 @@
 #' @return A `cast_ensemble` object with components:
 #' \describe{
 #'   \item{predictions}{A `data.frame` with `lon`, `lat`, `hss_ensemble`,
+#'     `hss_sd` (cross-model standard deviation, `NA` for a single model),
 #'     and `binary_ensemble` columns.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
 #'   \item{method}{The ensemble method used.}
@@ -95,7 +96,7 @@ cast_ensemble <- function(fit, cv, new_data,
   pred_obj <- cast_predict(fit, new_data, models = mdl_names)
   pred_df <- pred_obj$predictions
 
-  # ---- Combine into ensemble HSS ------------------------------------------
+  # ---- Combine into ensemble HSS + cross-model uncertainty --------------
   hss_cols <- paste0("HSS_", mdl_names)
   include <- rep(TRUE, length(mdl_names))
   for (i in seq_along(mdl_names)) {
@@ -119,11 +120,17 @@ cast_ensemble <- function(fit, cv, new_data,
   if (sum(w) <= 0) w <- rep(1, sum(include))
   w <- w / sum(w)
 
+  inc_cols <- hss_cols[include]
   ensemble_hss <- rep(0, nrow(pred_df))
-  for (j in seq_along(which(include))) {
-    i <- which(include)[j]
-    col <- hss_cols[i]
-    ensemble_hss <- ensemble_hss + w[j] * pred_df[[col]]
+  for (j in seq_along(inc_cols)) {
+    ensemble_hss <- ensemble_hss + w[j] * pred_df[[inc_cols[j]]]
+  }
+  # Cross-model standard deviation as an uncertainty layer.
+  pred_mat <- do.call(cbind, lapply(inc_cols, function(col) pred_df[[col]]))
+  hss_sd <- if (ncol(pred_mat) > 1L) {
+    apply(pred_mat, 1L, stats::sd, na.rm = TRUE)
+  } else {
+    rep(NA_real_, nrow(pred_df))
   }
 
   # ---- Binary threshold ---------------------------------------------------
@@ -137,6 +144,7 @@ cast_ensemble <- function(fit, cv, new_data,
     data.frame(site = seq_len(nrow(pred_df)))
   }
   out_df$hss_ensemble <- ensemble_hss
+  out_df$hss_sd <- hss_sd
   out_df$binary_ensemble <- as.integer(ensemble_hss >= threshold)
 
   new_cast_ensemble(
@@ -203,6 +211,7 @@ cast_ensemble <- function(fit, cv, new_data,
 #' @return A list with components:
 #' \describe{
 #'   \item{hss_path}{File path to the HSS raster.}
+#'   \item{hss_sd_path}{File path to the cross-model uncertainty (SD) raster.}
 #'   \item{binary_path}{File path to the binary raster.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
 #'   \item{threshold}{Binary classification threshold.}
@@ -244,6 +253,10 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     output_dir,
     paste0(prefix, if (nzchar(prefix)) "_" else "", "hss_ensemble.tif")
   )
+  hss_sd_path <- file.path(
+    output_dir,
+    paste0(prefix, if (nzchar(prefix)) "_" else "", "hss_sd.tif")
+  )
   bin_path <- file.path(
     output_dir,
     paste0(prefix, if (nzchar(prefix)) "_" else "", "binary_ensemble.tif")
@@ -252,7 +265,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   if (!overwrite && file.exists(hss_path) && file.exists(bin_path)) {
     if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
     return(invisible(list(
-      hss_path = hss_path, binary_path = bin_path,
+      hss_path = hss_path, hss_sd_path = hss_sd_path,
+      binary_path = bin_path,
       weights = NULL, threshold = NULL, n_valid_cells = NA_integer_
     )))
   }
@@ -347,8 +361,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
 
   # Pre-allocate output vectors
   n_cells_total <- as.double(nr) * as.double(nc)
-  hss_vec <- rep(NA_real_,    n_cells_total)
-  bin_vec <- rep(NA_integer_, n_cells_total)
+  hss_vec  <- rep(NA_real_,    n_cells_total)
+  hss_sd_vec <- rep(NA_real_,  n_cells_total)
+  bin_vec  <- rep(NA_integer_, n_cells_total)
 
   n_valid <- 0L
   warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
@@ -385,6 +400,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
 
       ens_hss <- rep(0, n_ok)
+      pred_mat <- matrix(NA_real_, nrow = n_ok, ncol = length(mdl_names),
+                         dimnames = list(NULL, mdl_names))
       for (mdl_name in mdl_names) {
         if (weights[mdl_name] == 0) next
         mdl_info <- fit$models[[mdl_name]]
@@ -403,13 +420,20 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
           next
         }
         ens_hss <- ens_hss + weights[mdl_name] * preds
+        pred_mat[, mdl_name] <- preds
+      }
+      ens_sd <- if (sum(warned, na.rm = TRUE) < length(mdl_names) - 1L) {
+        apply(pred_mat, 1L, stats::sd, na.rm = TRUE)
+      } else {
+        rep(NA_real_, n_ok)
       }
 
       valid_idx <- cell_start - 1L + which(ok)
       hss_vec[valid_idx] <- ens_hss
+      hss_sd_vec[valid_idx] <- ens_sd
       bin_vec[valid_idx] <- as.integer(ens_hss >= threshold)
       n_valid <- n_valid + n_ok
-      rm(X_raw, ens_hss, valid_idx)
+      rm(X_raw, ens_hss, ens_sd, pred_mat, valid_idx)
     }
 
     rm(v)
@@ -438,6 +462,14 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   rm(hss_out, hss_vec)
   invisible(gc())
 
+  hss_sd_out <- terra::setValues(template, hss_sd_vec)
+  names(hss_sd_out) <- "hss_sd"
+  terra::writeRaster(hss_sd_out, hss_sd_path, overwrite = TRUE,
+    gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
+    wopt = list(datatype = "FLT4S"))
+  rm(hss_sd_out, hss_sd_vec)
+  invisible(gc())
+
   bin_out <- terra::setValues(terra::rast(template), bin_vec)
   names(bin_out) <- "binary_ensemble"
   terra::writeRaster(bin_out, bin_path, overwrite = TRUE,
@@ -449,12 +481,14 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     cli::cli_inform(c(
       "v" = "Ensemble rasters saved ({format(n_valid, big.mark = ',')} valid cells):",
       " " = "HSS: {.path {hss_path}}",
+      " " = "HSS SD: {.path {hss_sd_path}}",
       " " = "Binary: {.path {bin_path}}"
     ))
   }
 
   invisible(list(
     hss_path     = hss_path,
+    hss_sd_path  = hss_sd_path,
     binary_path  = bin_path,
     weights      = weights,
     threshold    = threshold,

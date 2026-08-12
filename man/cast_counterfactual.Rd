@@ -35,7 +35,10 @@ uses every successfully fitted model (an ensemble mean).}
 \item{coords}{Coordinate column names. Default \code{c("lon", "lat")}.}
 }
 \value{
-A \code{cast_counterfactual} object.
+A \code{cast_counterfactual} object. The \code{predictions} data.frame
+carries \code{baseline}, \code{counterfactual}, \code{delta_hss} (ensemble-mean change)
+and \code{delta_sd} (cross-model standard deviation of the change; \code{NA} for
+a single model).
 }
 \description{
 Performs a g-computation intervention: one predictor is shifted while every

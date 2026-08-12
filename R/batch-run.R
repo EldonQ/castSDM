@@ -36,6 +36,15 @@
 #'   Default `"weighted"`.
 #' @param refit_full Logical. Refit final models on the full data set before
 #'   spatial prediction. Default `TRUE`.
+#' @param min_occ Integer. Species with fewer than this many presences are
+#'   routed to the ESM pipeline ([cast_esm()]) instead of the standard
+#'   route. Set `0` to disable the gate. Default `20`.
+#' @param esm_min Integer. Species with fewer than this many presences are
+#'   skipped with a warning (no reliable model is possible). Default `5`.
+#' @param esm_top_k Integer. Maximum predictors retained by the ESM route
+#'   before pair enumeration. Default `8`.
+#' @param esm_algo Character. ESM base algorithm, `"glm"` or `"gam"`.
+#'   Default `"glm"`.
 #' @param response Character. Default `"presence"`.
 #' @param prepare_env_vars,prepare_verbose Passed to [cast_prepare()].
 #' @param select_verbose Passed to [cast_select()]. Default `FALSE`.
@@ -85,6 +94,10 @@ cast_batch <- function(species_list,
                       do_ensemble = TRUE,
                       ensemble_method = "weighted",
                       refit_full = TRUE,
+                      min_occ = 20L,
+                      esm_min = 5L,
+                      esm_top_k = 8L,
+                      esm_algo = "glm",
                       response = "presence",
                       prepare_env_vars = NULL,
                       prepare_verbose = FALSE,
@@ -202,6 +215,10 @@ cast_batch <- function(species_list,
     do_ensemble = do_ensemble,
     ensemble_method = ensemble_method,
     refit_full = refit_full,
+    min_occ = min_occ,
+    esm_min = esm_min,
+    esm_top_k = esm_top_k,
+    esm_algo = esm_algo,
     plot_basemap = plot_basemap,
     var_labels = var_labels,
     fit_verbose = fit_verbose,

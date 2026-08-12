@@ -1,5 +1,23 @@
 # castSDM 0.7.0 (development)
 
+## Replicate design, uncertainty layers, ODMAP reporting, rare-species routing
+
+* `cast_rep()` repeats background sampling `n_reps` times and aggregates
+  evaluation metrics (mean +/- SD), selection frequencies, and per-cell
+  prediction mean/SD across replicates.
+* `cast_ensemble()` now returns a cross-model `hss_sd` uncertainty column;
+  `cast_ensemble_raster()` additionally writes an `hss_sd.tif` raster.
+  `cast_counterfactual()` returns `delta_sd` (cross-model SD of the
+  change) and a `mean_abs_delta_sd` summary.
+* `cast_report_odmap()` renders an ODMAP-aligned (Zurell et al. 2020)
+  Markdown report of the model, data, assessment, and prediction settings.
+* `cast_batch()` gains occurrence-count gates: species with fewer than
+  `esm_min` presences are skipped with a warning; species between
+  `esm_min` and `min_occ` are routed to the ESM pipeline automatically
+  (`esm_used = TRUE` in the result).
+* `cast()` and `cast_batch()` expose `select_dml_folds` and `num_threads`;
+  the YAML template covers the full current argument set.
+
 ## Defect fixes and engineering hardening
 
 * `plot.cast_select()` labels the DML axis `|DML statistic|` instead of the
@@ -24,6 +42,18 @@
 * CPI confidence intervals are clamped at zero (CPI is non-negative).
 * Batch resource logging writes one CSV per species and merges them after
   the run, removing the parallel-append race.
+* Step-level checkpoints are keyed on a run signature (data, config, seed,
+  models) and tile-level checkpoints on a per-fit fingerprint, so stale
+  caches are never replayed after a configuration or data change;
+  `overwrite = TRUE` now refreshes tile checkpoints too.
+* `cast()` and `cast_batch()` refit final models on the full data set
+  before spatial prediction (`refit_full = TRUE`), reuse every record for
+  published maps, and report explicitly when the ensemble is skipped.
+* Selection scores now flag `fallback` (kept through the `min_vars` floor)
+  and `forced` (kept through `force_include`) predictors; the RF baseline
+  in `cast_screen_comparison()` is budget-matched to CPI; `cast_esm()`
+  accepts a `screen` so the rare-species route can use conditional
+  selection instead of univariate ranking.
 * Documentation alignment: README, package overview, and NEWS now describe
   the CPI default with the DML effect-reporting layer; N-SDM is cited as
   Adde et al. (2020).

@@ -214,6 +214,7 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     )
   }
   long <- do.call(rbind, rows)
+  long <- long[!is.na(long$value), , drop = FALSE]
   long$metric <- factor(long$metric, levels = toupper(sub("_mean$", "", present)))
   long$model  <- factor(long$model, levels = rev(m$model))
 

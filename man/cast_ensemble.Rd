@@ -35,6 +35,7 @@ models with Score < 0.5.
 A \code{cast_ensemble} object with components:
 \describe{
 \item{predictions}{A \code{data.frame} with \code{lon}, \code{lat}, \code{hss_ensemble},
+\code{hss_sd} (cross-model standard deviation, \code{NA} for a single model),
 and \code{binary_ensemble} columns.}
 \item{weights}{Named numeric vector of per-model weights.}
 \item{method}{The ensemble method used.}

@@ -30,6 +30,10 @@ cast_batch(
   do_ensemble = TRUE,
   ensemble_method = "weighted",
   refit_full = TRUE,
+  min_occ = 20L,
+  esm_min = 5L,
+  esm_top_k = 8L,
+  esm_algo = "glm",
   response = "presence",
   prepare_env_vars = NULL,
   prepare_verbose = FALSE,
@@ -109,6 +113,19 @@ Default \code{"weighted"}.}
 
 \item{refit_full}{Logical. Refit final models on the full data set before
 spatial prediction. Default \code{TRUE}.}
+
+\item{min_occ}{Integer. Species with fewer than this many presences are
+routed to the ESM pipeline (\code{\link[=cast_esm]{cast_esm()}}) instead of the standard
+route. Set \code{0} to disable the gate. Default \code{20}.}
+
+\item{esm_min}{Integer. Species with fewer than this many presences are
+skipped with a warning (no reliable model is possible). Default \code{5}.}
+
+\item{esm_top_k}{Integer. Maximum predictors retained by the ESM route
+before pair enumeration. Default \code{8}.}
+
+\item{esm_algo}{Character. ESM base algorithm, \code{"glm"} or \code{"gam"}.
+Default \code{"glm"}.}
 
 \item{response}{Character. Default \code{"presence"}.}
 

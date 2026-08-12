@@ -141,24 +141,24 @@ cast_effect <- function(object, conf_level = 0.95) {
 
 #' @keywords internal
 #' @noRd
-.cast_predict_mean <- function(fit, X_raw, models, chunk_size = 200000L) {
+.cast_predict_matrix <- function(fit, X_raw, models, chunk_size = 200000L) {
   n <- nrow(X_raw)
   predict_block <- function(Xi) {
     preds <- lapply(models, function(m) {
       tryCatch(predict_single_model(fit$models[[m]], Xi),
                error = function(e) rep(NA_real_, nrow(Xi)))
     })
-    rowMeans(do.call(cbind, preds), na.rm = TRUE)
+    do.call(cbind, preds)
   }
   # Predict in row chunks. A single full-grid predict() (especially mgcv GAM,
   # which allocates an n-by-ncoef basis matrix) can need many GB on national
   # 1km grids (~10M cells) and segfault the process. Chunking bounds peak
   # memory to one block at a time; results are identical (row-independent).
   if (n <= chunk_size) return(predict_block(X_raw))
-  out <- numeric(n)
+  out <- matrix(NA_real_, nrow = n, ncol = length(models))
   for (s in seq.int(1L, n, by = chunk_size)) {
     idx <- seq.int(s, min(s + chunk_size - 1L, n))
-    out[idx] <- predict_block(X_raw[idx, , drop = FALSE])
+    out[idx, ] <- predict_block(X_raw[idx, , drop = FALSE])
   }
   out
 }
@@ -193,7 +193,10 @@ cast_effect <- function(object, conf_level = 0.95) {
 #'   uses every successfully fitted model (an ensemble mean).
 #' @param coords Coordinate column names. Default `c("lon", "lat")`.
 #'
-#' @return A `cast_counterfactual` object.
+#' @return A `cast_counterfactual` object. The `predictions` data.frame
+#'   carries `baseline`, `counterfactual`, `delta_hss` (ensemble-mean change)
+#'   and `delta_sd` (cross-model standard deviation of the change; `NA` for
+#'   a single model).
 #' @seealso [cast_effect()], [cast_predict()]
 #' @export
 cast_counterfactual <- function(fit, newdata, variable,
@@ -234,8 +237,16 @@ cast_counterfactual <- function(fit, newdata, variable,
   X_cf <- X_base
   X_cf[[variable]] <- X_base[[variable]] + delta
 
-  base_pred <- .cast_predict_mean(fit, X_base, models)
-  cf_pred   <- .cast_predict_mean(fit, X_cf, models)
+  base_mat <- .cast_predict_matrix(fit, X_base, models)
+  cf_mat   <- .cast_predict_matrix(fit, X_cf, models)
+  base_pred <- rowMeans(base_mat, na.rm = TRUE)
+  cf_pred   <- rowMeans(cf_mat, na.rm = TRUE)
+  delta_mat <- cf_mat - base_mat
+  delta_sd <- if (ncol(delta_mat) > 1L) {
+    apply(delta_mat, 1L, stats::sd, na.rm = TRUE)
+  } else {
+    rep(NA_real_, nrow(delta_mat))
+  }
 
   predictions <- data.frame(
     lon = newdata[[coords[1]]],
@@ -243,6 +254,7 @@ cast_counterfactual <- function(fit, newdata, variable,
     baseline = base_pred,
     counterfactual = cf_pred,
     delta_hss = cf_pred - base_pred,
+    delta_sd = delta_sd,
     stringsAsFactors = FALSE
   )
 
@@ -252,7 +264,8 @@ cast_counterfactual <- function(fit, newdata, variable,
     median_delta = stats::median(d),
     frac_positive = mean(d > 0),
     max_gain = if (length(d)) max(d) else NA_real_,
-    max_loss = if (length(d)) min(d) else NA_real_
+    max_loss = if (length(d)) min(d) else NA_real_,
+    mean_abs_delta_sd = mean(abs(predictions$delta_sd), na.rm = TRUE)
   )
 
   new_cast_counterfactual(

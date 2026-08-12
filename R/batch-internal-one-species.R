@@ -1,24 +1,9 @@
-# One species pipeline for cast_batch(); kept at package level so PSOCK
-# workers can utils::getFromNamespace() after pkgload::load_all (future::
-# multisession cannot).
-.cast_batch_run_one_species <- function(sp_name, sp_data, env_data, models,
+# Standard one-species pipeline for cast_batch(); kept at package level so
+# PSOCK workers can utils::getFromNamespace() after pkgload::load_all (future::
+# multisession cannot). Dispatched from .cast_batch_run_one_species().
+.cast_batch_standard_route <- function(sp_name, sp_data, env_data, models,
                             output_dir, fig_dpi, seed_i,
                             cfg, fit_args, parallel_batch, dev_root) {
-  if (isTRUE(parallel_batch)) {
-    root <- dev_root
-    if (is.null(root) || !nzchar(as.character(root)[1])) {
-      root <- Sys.getenv("CASTSDM_ROOT", "")
-    }
-    root <- tryCatch(
-      normalizePath(as.character(root)[1], winslash = "/", mustWork = FALSE),
-      error = function(e) ""
-    )
-    if (nzchar(root) && file.exists(file.path(root, "DESCRIPTION"))) {
-      if (requireNamespace("pkgload", quietly = TRUE)) {
-        suppressPackageStartupMessages(pkgload::load_all(root, quiet = TRUE))
-      }
-    }
-  }
   sp_dir  <- file.path(output_dir, sp_name)
   fig_dir <- file.path(sp_dir, "figures")
   dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
@@ -276,4 +261,172 @@
   })
 
   result
+}
+
+
+# Rare-species route: Ensemble of Small Models (Breiner et al. 2015).
+# Triggered when a species has fewer than `min_occ` presences (and at least
+# `esm_min`). No spatial CV is run for these species; evaluation is on the
+# spatial hold-out split, and predictions reuse a fit carrying a single
+# "esm" model.
+.cast_batch_esm_route <- function(sp_name, sp_data, env_data, models,
+                                  output_dir, fig_dpi, seed_i, cfg, fit_args) {
+  sp_dir  <- file.path(output_dir, sp_name)
+  fig_dir <- file.path(sp_dir, "figures")
+  dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+
+  save_fig <- function(p, fname, w = 10, h = 7) {
+    if (is.null(p)) return(invisible(NULL))
+    tryCatch(
+      cast_safe_ggsave(
+        file.path(fig_dir, fname), p,
+        width = w, height = h, dpi = fig_dpi,
+        bg = "transparent", limitsize = FALSE
+      ),
+      error = function(e) NULL
+    )
+  }
+
+  cli::cli_inform(
+    "[{sp_name}] Fewer than {.code min_occ} presences: using the ESM (Ensemble of Small Models) route."
+  )
+
+  result <- tryCatch({
+    sig <- .cast_digest(list(
+      species = sp_name, data = sp_data, models = models,
+      seed = seed_i, cfg = cfg, fit_args = fit_args
+    ))
+
+    split <- cast_run_step("prepare", output_dir, sp_name,
+      cast_prepare(
+        sp_data,
+        train_fraction = cfg$train_fraction,
+        seed = seed_i,
+        env_vars = cfg$prepare_env_vars,
+        verbose = cfg$prepare_verbose
+      ),
+      params = list(signature = sig)
+    )
+
+    esm <- cast_run_step("esm", output_dir, sp_name,
+      cast_esm(
+        split$train,
+        top_k = cfg$esm_top_k %||% 8L,
+        base_algo = cfg$esm_algo %||% "glm",
+        response = cfg$response,
+        seed = seed_i,
+        verbose = FALSE
+      ),
+      params = list(signature = sig)
+    )
+
+    screen_esm <- new_cast_select(
+      selected = esm$vars,
+      scores = data.frame(variable = esm$vars, stringsAsFactors = FALSE),
+      method = "esm",
+      diagnostics = list(engine = "Ensemble of Small Models (bivariate GLM/GAM)")
+    )
+
+    fit <- cast_run_step("fitesm", output_dir, sp_name, {
+      f <- cast_fit(
+        split$train, screen = screen_esm, models = character(0),
+        response = cfg$response, num_threads = cfg$num_threads %||% 1L,
+        seed = seed_i, verbose = FALSE
+      )
+      f$models$esm <- list(type = "esm", model = esm, name = "esm")
+      f
+    }, params = list(signature = sig))
+
+    eval_result <- cast_run_step("evalesm", output_dir, sp_name,
+      cast_evaluate(fit, split$test, response = cfg$eval_response),
+      params = list(signature = sig)
+    )
+
+    pred_result <- NULL
+    if (isTRUE(cfg$do_predict) && !is.null(env_data)) {
+      pred_result <- cast_run_step("predictesm", output_dir, sp_name,
+        tryCatch(
+          cast_predict(fit, env_data, models = "esm"),
+          error = function(e) NULL
+        ),
+        params = list(signature = sig)
+      )
+    }
+
+    check_suggested("ggplot2", "for plotting")
+    p <- tryCatch(plot(screen_esm), error = function(e) NULL)
+    save_fig(p, "variable_selection.png", w = 10, h = 7)
+    p <- tryCatch(plot(eval_result), error = function(e) NULL)
+    save_fig(p, "model_evaluation.png", w = 10, h = 6)
+    if (!is.null(pred_result) && requireNamespace("sf", quietly = TRUE)) {
+      p <- tryCatch(
+        plot(pred_result, model = "esm", basemap = cfg$plot_basemap),
+        error = function(e) NULL
+      )
+      save_fig(p, "HSS_esm.png", w = 14, h = 8)
+    }
+
+    sp_result <- new_cast_result(
+      screen = screen_esm,
+      fit = fit,
+      eval = eval_result,
+      cv = NULL,
+      predict = pred_result,
+      ensemble = NULL,
+      fit_full = fit
+    )
+    sp_result$split <- split
+    sp_result$esm_used <- TRUE
+    saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
+    sp_result
+  }, error = function(e) {
+    warning(sprintf("Species '%s' (ESM route) failed: %s", sp_name, e$message))
+    NULL
+  })
+
+  result
+}
+
+
+# Batch dispatcher: load the package on parallel workers, apply the
+# occurrence-count gates (esm_min / min_occ), and route each species to the
+# standard or ESM pipeline.
+.cast_batch_run_one_species <- function(sp_name, sp_data, env_data, models,
+                                        output_dir, fig_dpi, seed_i,
+                                        cfg, fit_args, parallel_batch,
+                                        dev_root) {
+  if (isTRUE(parallel_batch)) {
+    root <- dev_root
+    if (is.null(root) || !nzchar(as.character(root)[1])) {
+      root <- Sys.getenv("CASTSDM_ROOT", "")
+    }
+    root <- tryCatch(
+      normalizePath(as.character(root)[1], winslash = "/", mustWork = FALSE),
+      error = function(e) ""
+    )
+    if (nzchar(root) && file.exists(file.path(root, "DESCRIPTION"))) {
+      if (requireNamespace("pkgload", quietly = TRUE)) {
+        suppressPackageStartupMessages(pkgload::load_all(root, quiet = TRUE))
+      }
+    }
+  }
+
+  n_pres <- sum(sp_data[[cfg$response]] == 1, na.rm = TRUE)
+  min_occ <- as.integer(cfg$min_occ %||% 20L)
+  esm_min  <- as.integer(cfg$esm_min %||% 5L)
+
+  if (min_occ > 0L && n_pres < esm_min) {
+    cli::cli_warn(
+      "Skipping {.val {sp_name}}: {n_pres} presence{?s} < {.code esm_min} ({esm_min})."
+    )
+    return(NULL)
+  }
+  if (min_occ > 0L && n_pres < min_occ) {
+    return(.cast_batch_esm_route(sp_name, sp_data, env_data, models,
+                                 output_dir, fig_dpi, seed_i, cfg, fit_args))
+  }
+
+  .cast_batch_standard_route(sp_name, sp_data, env_data, models,
+                             output_dir, fig_dpi, seed_i, cfg, fit_args,
+                             parallel_batch, dev_root)
 }

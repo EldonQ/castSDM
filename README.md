@@ -84,6 +84,8 @@ plot(cf, basemap = "china")              # diverging map of change in HSS
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
 | Causal interpretation | `cast_effect()`, `cast_counterfactual()` |
+| Replicates & uncertainty | `cast_rep()`, `hss_sd` layers, `delta_sd` |
+| Reporting | `cast_report_odmap()` |
 | Batch/resume | `cast_batch()`, `cast_batch_resume()` |
 
 ## Model backends
@@ -114,14 +116,23 @@ install.packages(c(
 
 ## Interpretation
 
-- Selected variables are FDR-significant partial-effect drivers, adjusted for
-  the remaining predictors.
+- Selected variables are FDR-significant conditional drivers, adjusted for
+  the remaining predictors; scores flag `fallback` (kept via the `min_vars`
+  floor) and `forced` (kept via `force_include`) retentions.
+- Replicate runs (`cast_rep()`) quantify the sensitivity of metrics,
+  selection, and maps to the arbitrary choice of background points; ensemble
+  predictions carry a cross-model `hss_sd` uncertainty layer.
+- Batch runs route species with few presences to the ESM pipeline
+  automatically (`min_occ` / `esm_min` gates) and flag the result with
+  `esm_used = TRUE`.
 - The DML effect is an association purged of the measured confounders; it is
   not proof of a manipulable causal mechanism.
 - Counterfactual maps are purely interpretive what-if summaries on the current
   climate; they do not extrapolate to future scenarios.
 - Future projections assume that the learned response relationship remains
   applicable under the projected environment.
+- `cast_report_odmap()` renders the analysis settings as an ODMAP-aligned
+  report (Zurell et al. 2020).
 
 ## License
 
