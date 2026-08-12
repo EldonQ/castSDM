@@ -35,6 +35,7 @@ cast_cv <- function(data,
                     seed = NULL,
                     verbose = TRUE) {
   block_method <- match.arg(block_method)
+  check_suggested("pROC", "for fold evaluation metrics")
   k <- as.integer(k)
   if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
   validate_species_data(data, required_cols = c("lon", "lat", response))
@@ -89,7 +90,10 @@ cast_cv <- function(data,
         predict_single_model(info, x_test),
         error = function(e) rep(NA_real_, nrow(test))
       )
-      met <- evaluate_model_full(pred, test[[response]])
+      met <- tryCatch(
+        evaluate_model_full(pred, test[[response]]),
+        error = function(e) c(auc = NA_real_, tss = NA_real_, cbi = NA_real_)
+      )
       rows[[mdl]] <- data.frame(
         fold = fold_i, model = mdl, auc = met["auc"], tss = met["tss"],
         cbi = met["cbi"], n_selected = length(fold_screen$selected),

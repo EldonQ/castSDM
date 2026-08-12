@@ -11,7 +11,6 @@ cast_project_raster(
   future_rasters,
   output_dir,
   method = c("weighted", "best", "equal"),
-  threshold_method = "maxTSS",
   models = NULL,
   mask = NULL,
   overwrite = FALSE,
@@ -34,8 +33,6 @@ each for a future scenario (e.g., \code{list(ssp126_2050 = rast1, ...)}).}
 \item{output_dir}{Character. Output directory for all rasters and CSV.}
 
 \item{method}{Character. Ensemble method. Default \code{"weighted"}.}
-
-\item{threshold_method}{Character. Threshold method. Default \code{"maxTSS"}.}
 
 \item{models}{Character vector or \code{NULL}. Models to use.}
 

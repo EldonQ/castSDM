@@ -62,6 +62,15 @@ cast_vif <- function(data,
   if (nrow(dat_clean) < 10) {
     cli::cli_abort("Fewer than 10 complete cases after NA removal.")
   }
+  nonfinite <- names(dat_clean)[vapply(
+    dat_clean, function(v) any(!is.finite(v)), logical(1)
+  )]
+  if (length(nonfinite)) {
+    cli::cli_abort(c(
+      "Non-finite values (NA/NaN/Inf) in predictor{?s}: {.val {nonfinite}}.",
+      i = "Clean or impute these columns before VIF screening."
+    ))
+  }
 
   # Stage 2: Iterative VIF elimination
   current_vars <- num_cols
@@ -102,12 +111,14 @@ cast_vif <- function(data,
           dat_clean[, current_vars, drop = FALSE],
           stats::sd, numeric(1), na.rm = TRUE
         )
-        bad <- names(sds[sds < 1e-10])
+        bad <- names(sds[sds < 1e-10 & !is.na(sds)])
         if (length(bad) > 0) {
           removed <<- c(removed, bad)
           current_vars <<- setdiff(current_vars, bad)
+          return(NULL)
         }
-        NULL
+        # No recoverable cause: fail loudly instead of looping forever.
+        cli::cli_abort("VIF computation failed: {conditionMessage(e)}")
       }
     )
     if (is.null(vif_vals)) next

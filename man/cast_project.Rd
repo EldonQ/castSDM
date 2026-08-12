@@ -10,7 +10,6 @@ cast_project(
   current_env,
   future_envs,
   method = c("weighted", "best", "equal"),
-  threshold_method = "maxTSS",
   models = NULL,
   save_dir = NULL
 )
@@ -30,9 +29,6 @@ variables for the current (baseline) period.}
 
 \item{method}{Character. Ensemble strategy: \code{"weighted"} (default),
 \code{"best"}, \code{"equal"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
-
-\item{threshold_method}{Character. Binary threshold method. Default
-\code{"maxTSS"}.}
 
 \item{models}{Character vector. Models to use. Default \code{NULL} (all).}
 

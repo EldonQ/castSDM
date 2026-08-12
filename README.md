@@ -4,11 +4,16 @@
 variable selection, nested spatial validation, standard SDM ensembles, raster
 prediction, and future projection.
 
-Its distinguishing method is `cast_select(method = "dml")`, a double
-machine-learning selector. For each candidate predictor it estimates a
-Neyman-orthogonal partially linear effect on occurrence while flexibly
-controlling for every other predictor, then keeps the predictors whose effect
-survives Benjamini-Hochberg FDR control.
+Its distinguishing method is `cast_select(method = "cpi")` (the default),
+a conditional predictive impact (CPI) selector. For each candidate
+predictor it replaces the variable with a knockoff given every other
+predictor and measures the loss of predictive accuracy, then keeps the
+predictors whose conditional contribution survives Benjamini-Hochberg FDR
+control. An optional double machine-learning selector
+(`method = "dml"`) reports signed Neyman-orthogonal partial-linear effects
+with confidence intervals via [cast_effect()], and
+[cast_counterfactual()] maps single-driver what-if shifts on the current
+climate.
 
 The only ecological choice is the FDR level (`alpha`). Cross-fitting folds and
 the random-forest nuisance learner are method defaults, so the selector avoids
@@ -24,14 +29,22 @@ library(castSDM)
 result <- cast(
   species_data,
   env_data = prediction_grid,
-  select_method = "dml",
+  select_method = "cpi",
   models = c("rf", "brt", "maxent", "gam"),
   do_cv = TRUE,
   seed = 42
 )
 
 summary(result)
-plot(result$screen)          # selected effects, FDR-adjusted
+plot(result$screen)          # conditional impacts, FDR-adjusted
+```
+
+Signed effect reporting with the DML engine:
+
+```r
+screen_dml <- cast_select(species_data, method = "dml")
+eff <- cast_effect(screen_dml)   # tidy DML effect table + CIs
+plot(eff)                        # coefficient (forest) plot
 ```
 
 The pipeline runs:
@@ -48,7 +61,6 @@ never influence variable choice or tuning.
 
 Two functions turn a fitted workflow into causal-flavoured evidence without a
 new estimation engine:
-
 ```r
 eff <- cast_effect(result)               # tidy DML effect table + CIs
 plot(eff)                                # coefficient (forest) plot

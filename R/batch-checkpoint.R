@@ -69,11 +69,14 @@ cast_run_step <- function(step_name, output_dir, species, expr,
 }
 
 
-#' Append a Row to the Batch Resource Log
+#' Append a Row to the Per-Species Batch Resource Log
 #'
-#' Writes a single CSV row to `<output_dir>/resource_log.csv`. The file is
-#' created with a header on first use; subsequent calls append. Rows
-#' contain timestamp, species, step, elapsed seconds, and peak RAM (MiB).
+#' Writes a single CSV row to `<output_dir>/resource_log_<species>.csv`.
+#' One file per species avoids the header/append race that parallel
+#' workers would create when sharing a single log file. The per-species
+#' files are merged into a single `<output_dir>/resource_log.csv` by
+#' `.cast_merge_resource_logs()` after all workers have finished (called
+#' by [cast_batch()]).
 #'
 #' @param output_dir Top-level batch directory.
 #' @param species Species name.
@@ -86,7 +89,8 @@ cast_run_step <- function(step_name, output_dir, species, expr,
 #' @noRd
 cast_log_resource <- function(output_dir, species, step,
                               elapsed_sec, peak_mb = NA_real_) {
-  log_path <- file.path(output_dir, "resource_log.csv")
+  safe_sp <- gsub("[^A-Za-z0-9_-]", "_", species)
+  log_path <- file.path(output_dir, paste0("resource_log_", safe_sp, ".csv"))
   row <- data.frame(
     timestamp   = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     species     = species,
@@ -105,4 +109,37 @@ cast_log_resource <- function(output_dir, species, step,
     TRUE
   }, error = function(e) FALSE)
   invisible(ok)
+}
+
+
+#' Merge Per-Species Resource Logs into One CSV
+#'
+#' Combines all `<output_dir>/resource_log_<species>.csv` files written by
+#' [cast_log_resource()] into `<output_dir>/resource_log.csv`, sorted by
+#' timestamp. Safe to call repeatedly; existing per-species files are kept
+#' so interrupted runs can re-merge without losing rows.
+#'
+#' @param output_dir Top-level batch directory.
+#' @return Invisibly `TRUE` if a merged file was written, `FALSE` otherwise.
+#' @keywords internal
+#' @noRd
+.cast_merge_resource_logs <- function(output_dir) {
+  files <- list.files(output_dir, pattern = "^resource_log_.*\\.csv$",
+                      full.names = TRUE)
+  files <- files[!grepl("/resource_log\\.csv$", files)]
+  if (!length(files)) return(invisible(FALSE))
+  rows <- lapply(files, function(f) {
+    tryCatch(
+      utils::read.csv(f, stringsAsFactors = FALSE, check.names = FALSE),
+      error = function(e) NULL
+    )
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (!length(rows)) return(invisible(FALSE))
+  merged <- do.call(rbind, rows)
+  merged <- merged[order(merged$timestamp, merged$species, merged$step), ]
+  rownames(merged) <- NULL
+  utils::write.csv(merged, file.path(output_dir, "resource_log.csv"),
+                   row.names = FALSE)
+  invisible(TRUE)
 }

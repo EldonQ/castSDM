@@ -46,12 +46,12 @@
       )
     )
 
-    select_suffix <- paste0("_", cfg$select_method %||% "dml")
+    select_suffix <- paste0("_", cfg$select_method %||% "cpi")
     screen <- cast_run_step(paste0("select", select_suffix), output_dir, sp_name,
       cast_select(
         split$train,
         response = cfg$response,
-        method = cfg$select_method %||% "dml",
+        method = cfg$select_method %||% "cpi",
         alpha = cfg$select_alpha %||% 0.05,
         min_vars = cfg$select_min_vars %||% 3L,
         num_trees = cfg$select_num_trees %||% 300L,
@@ -88,7 +88,7 @@
           cast_cv(
             sp_data,
             screen = screen,
-            select_method = cfg$select_method %||% "dml",
+            select_method = cfg$select_method %||% "cpi",
             select_args = list(
               alpha = cfg$select_alpha %||% 0.05,
               min_vars = cfg$select_min_vars %||% 3L,

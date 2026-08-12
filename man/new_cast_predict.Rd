@@ -8,7 +8,7 @@ new_cast_predict(predictions, models)
 }
 \arguments{
 \item{predictions}{A \code{data.frame} with columns: \code{lon}, \code{lat}, and one
-\verb{hss_*} column per model.}
+\verb{HSS_*} column per model.}
 
 \item{models}{Character vector of model names included.}
 }

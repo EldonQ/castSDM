@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Causal Variable Selection for Species Distribution Modeling
-Version: 0.6.0
+Version: 0.7.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -37,11 +37,13 @@ Imports:
 Suggests:
     car,
     cpi,
+    digest,
     DoubleML,
     future,
     future.apply,
     gbm,
     ggplot2,
+    knitr,
     lgr,
     maxnet,
     mgcv,
@@ -53,9 +55,11 @@ Suggests:
     pROC,
     ragg,
     ranger,
+    rmarkdown,
     sf,
     terra,
     testthat (>= 3.0.0),
     viridisLite,
     yaml
 Config/testthat/edition: 3
+VignetteBuilder: knitr

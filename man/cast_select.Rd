@@ -36,7 +36,9 @@ the RF benchmark. Default \code{30}.}
 
 \item{dml_folds}{Cross-fitting folds for the CPI/DML selectors. Default \code{5}.}
 
-\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
+\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.
+The CPI and DML selectors cap this at \code{200} with an informational message
+(the nuisance forest keeps fitting tractable on large candidate sets).}
 
 \item{min_vars}{Minimum retained variables. Default \code{3}.}
 

@@ -69,7 +69,6 @@ cast_load_future_envs <- function(path) {
 #' @param basemap Basemap passed to plotting methods.
 #' @param fig_dpi Figure DPI. Default `600`.
 #' @param method Ensemble method.
-#' @param threshold_method Threshold method.
 #' @param models Optional models used by [cast_project()].
 #' @param prefix Filename prefix.
 #' @return A `cast_project` object.
@@ -79,7 +78,6 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
                                         basemap = "world",
                                         fig_dpi = 600L,
                                         method = "weighted",
-                                        threshold_method = "maxTSS",
                                         models = NULL,
                                         prefix = "future") {
   if (is.null(cv)) {
@@ -93,7 +91,6 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
     current_env = current_env,
     future_envs = future_envs,
     method = method,
-    threshold_method = threshold_method,
     models = models,
     save_dir = save_dir
   )

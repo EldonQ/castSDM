@@ -14,8 +14,6 @@
 #'   (e.g., `list(ssp245_2070 = df1, ssp585_2070 = df2)`).
 #' @param method Character. Ensemble strategy: `"weighted"` (default),
 #'   `"best"`, `"equal"`. See [cast_ensemble()].
-#' @param threshold_method Character. Binary threshold method. Default
-#'   `"maxTSS"`.
 #' @param models Character vector. Models to use. Default `NULL` (all).
 #' @param save_dir Optional character. When provided, saves CSV and (if
 #'   `terra` is available) GeoTIFF outputs to this directory:
@@ -52,7 +50,6 @@
 #' @export
 cast_project <- function(fit, cv, current_env, future_envs,
                          method = c("weighted", "best", "equal"),
-                         threshold_method = "maxTSS",
                          models = NULL,
                          save_dir = NULL) {
   method <- match.arg(method)
@@ -67,7 +64,6 @@ cast_project <- function(fit, cv, current_env, future_envs,
   # ---- Current prediction -------------------------------------------------
   current <- cast_ensemble(fit, cv, current_env,
                            method = method,
-                           threshold_method = threshold_method,
                            models = models)
 
   # ---- Future predictions -------------------------------------------------
@@ -81,7 +77,6 @@ cast_project <- function(fit, cv, current_env, future_envs,
     # Predict using the same ensemble configuration
     fut <- cast_ensemble(fit, cv, fut_env,
                          method = method,
-                         threshold_method = threshold_method,
                          models = models)
     future_list[[scen]] <- fut
 
@@ -89,11 +84,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
     cur_bin <- current$predictions$binary_ensemble
     fut_bin <- fut$predictions$binary_ensemble
 
-    change <- character(length(cur_bin))
-    change[cur_bin == 0 & fut_bin == 1] <- "gain"
-    change[cur_bin == 1 & fut_bin == 0] <- "loss"
-    change[cur_bin == 1 & fut_bin == 1] <- "stable_present"
-    change[cur_bin == 0 & fut_bin == 0] <- "stable_absent"
+    change <- .cast_change_classes(cur_bin, fut_bin)
 
     has_coords <- all(c("lon", "lat") %in% names(current$predictions))
     change_df <- if (has_coords) {
@@ -113,11 +104,11 @@ cast_project <- function(fit, cv, current_env, future_envs,
     changes_list[[scen]] <- change_df
 
     # ---- Summary statistics -----------------------------------------------
-    n_gain   <- sum(change == "gain")
-    n_loss   <- sum(change == "loss")
-    n_stable <- sum(change == "stable_present")
-    n_absent <- sum(change == "stable_absent")
-    total_present_now <- sum(cur_bin == 1)
+    n_gain   <- sum(change == "gain", na.rm = TRUE)
+    n_loss   <- sum(change == "loss", na.rm = TRUE)
+    n_stable <- sum(change == "stable_present", na.rm = TRUE)
+    n_absent <- sum(change == "stable_absent", na.rm = TRUE)
+    total_present_now <- sum(cur_bin == 1, na.rm = TRUE)
     pct_change <- if (total_present_now > 0) {
       100 * (n_gain - n_loss) / total_present_now
     } else {
@@ -128,8 +119,10 @@ cast_project <- function(fit, cv, current_env, future_envs,
     centroid_km <- NA_real_
     if (has_coords) {
       centroid_km <- tryCatch({
-        cur_pres <- current$predictions[cur_bin == 1, ]
-        fut_pres <- fut$predictions[fut_bin == 1, ]
+        ok_cur <- !is.na(cur_bin) & cur_bin == 1
+        ok_fut <- !is.na(fut_bin) & fut_bin == 1
+        cur_pres <- current$predictions[ok_cur, ]
+        fut_pres <- fut$predictions[ok_fut, ]
         if (nrow(cur_pres) > 0 && nrow(fut_pres) > 0) {
           # Weight by HSS for more stable centroids
           w_cur <- cur_pres$hss_ensemble
@@ -220,6 +213,28 @@ cast_project <- function(fit, cv, current_env, future_envs,
 }
 
 
+#' Classify current vs future binary predictions into change categories
+#'
+#' Maps each cell to `"gain"`, `"loss"`, `"stable_present"`, or
+#' `"stable_absent"`; cells with a non-binary value on either side (failed
+#' model, masked cell) receive `NA` rather than an empty-string class.
+#'
+#' @param cur_bin,fut_bin Integer vectors (0/1, possibly with `NA`).
+#' @return Character vector of change classes.
+#' @keywords internal
+#' @noRd
+.cast_change_classes <- function(cur_bin, fut_bin) {
+  change <- character(length(cur_bin))
+  change[cur_bin == 0 & fut_bin == 1] <- "gain"
+  change[cur_bin == 1 & fut_bin == 0] <- "loss"
+  change[cur_bin == 1 & fut_bin == 1] <- "stable_present"
+  change[cur_bin == 0 & fut_bin == 0] <- "stable_absent"
+  unknown <- !(cur_bin %in% c(0, 1)) | !(fut_bin %in% c(0, 1))
+  change[unknown] <- NA_character_
+  change
+}
+
+
 #' Haversine distance in km
 #' @keywords internal
 #' @noRd
@@ -270,7 +285,6 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #'   each for a future scenario (e.g., `list(ssp126_2050 = rast1, ...)`).
 #' @param output_dir Character. Output directory for all rasters and CSV.
 #' @param method Character. Ensemble method. Default `"weighted"`.
-#' @param threshold_method Character. Threshold method. Default `"maxTSS"`.
 #' @param models Character vector or `NULL`. Models to use.
 #' @param mask A `terra::SpatRaster` or `NULL`. Prediction mask.
 #' @param overwrite Logical. Overwrite existing outputs. Default `FALSE`.
@@ -302,7 +316,6 @@ cast_project_raster <- function(fit, cv,
                                 future_rasters,
                                 output_dir,
                                 method = c("weighted", "best", "equal"),
-                                threshold_method = "maxTSS",
                                 models = NULL,
                                 mask = NULL,
                                 overwrite = FALSE,
@@ -331,7 +344,6 @@ cast_project_raster <- function(fit, cv,
     fit, cv, current_raster,
     output_dir = raster_dir,
     method = method,
-    threshold_method = threshold_method,
     models = models,
     mask = mask,
     prefix = "current",
@@ -361,7 +373,6 @@ cast_project_raster <- function(fit, cv,
       fit, cv, fut_raster,
       output_dir = raster_dir,
       method = method,
-      threshold_method = threshold_method,
       models = models,
       mask = mask,
       prefix = scen,

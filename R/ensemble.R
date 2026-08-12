@@ -13,8 +13,6 @@
 #'     models with Score < 0.5.
 #'   - `"best"`: use the single highest-scoring model.
 #'   - `"equal"`: simple average of all models.
-#' @param threshold_method Character. Method for binary thresholding.
-#'   `"maxTSS"` (default) uses the threshold that maximises TSS from CV.
 #' @param models Character vector. Subset of models to include. Default
 #'   `NULL` (all fitted models).
 #'
@@ -33,15 +31,22 @@
 #'
 #' \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 #'
-#' following the N-SDM (Nfiles Species Distribution Modeling) framework.
+#' following the N-SDM nested-modelling framework (Adde et al. 2020).
 #' Models with Score < 0.5 are excluded from the weighted ensemble.
+#' Models whose predictions contain non-finite values are excluded from
+#' the ensemble with a warning, and the remaining weights are
+#' renormalised.
+#'
+#' @references
+#' Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
+#' computing pipeline for Nested Species Distribution Modelling.
+#' *Ecography*, 43(2), 331-334.
 #'
 #' @seealso [cast_cv()], [cast_predict()], [cast_project()]
 #'
 #' @export
 cast_ensemble <- function(fit, cv, new_data,
                           method = c("weighted", "best", "equal"),
-                          threshold_method = "maxTSS",
                           models = NULL) {
   method <- match.arg(method)
 
@@ -92,14 +97,33 @@ cast_ensemble <- function(fit, cv, new_data,
 
   # ---- Combine into ensemble HSS ------------------------------------------
   hss_cols <- paste0("HSS_", mdl_names)
-  ensemble_hss <- rep(0, nrow(pred_df))
+  include <- rep(TRUE, length(mdl_names))
   for (i in seq_along(mdl_names)) {
     col <- hss_cols[i]
-    if (col %in% names(pred_df) && weights[i] > 0) {
-      vals <- pred_df[[col]]
-      vals[is.na(vals)] <- 0
-      ensemble_hss <- ensemble_hss + weights[i] * vals
+    if (!col %in% names(pred_df)) {
+      include[i] <- FALSE
+      next
     }
+    vals <- pred_df[[col]]
+    if (!all(is.finite(vals))) {
+      cli::cli_warn(
+        "{.val {mdl_names[i]}} produced non-finite predictions; excluded from the ensemble."
+      )
+      include[i] <- FALSE
+    }
+  }
+  if (!any(include)) {
+    cli::cli_abort("No model produced finite predictions for the ensemble.")
+  }
+  w <- weights[include]
+  if (sum(w) <= 0) w <- rep(1, sum(include))
+  w <- w / sum(w)
+
+  ensemble_hss <- rep(0, nrow(pred_df))
+  for (j in seq_along(which(include))) {
+    i <- which(include)[j]
+    col <- hss_cols[i]
+    ensemble_hss <- ensemble_hss + w[j] * pred_df[[col]]
   }
 
   # ---- Binary threshold ---------------------------------------------------
@@ -168,8 +192,6 @@ cast_ensemble <- function(fit, cv, new_data,
 #'   it does not exist.
 #' @param method Character. Ensemble strategy: `"weighted"` (default),
 #'   `"best"`, `"equal"`. See [cast_ensemble()].
-#' @param threshold_method Character. Binary threshold method. Default
-#'   `"maxTSS"`.
 #' @param models Character vector or `NULL`. Models to use. Default all.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
 #'   is restricted to cells where mask is non-NA.
@@ -193,7 +215,6 @@ cast_ensemble <- function(fit, cv, new_data,
 cast_ensemble_raster <- function(fit, cv, raster_stack,
                                  output_dir,
                                  method = c("weighted", "best", "equal"),
-                                 threshold_method = "maxTSS",
                                  models = NULL,
                                  mask = NULL,
                                  prefix = "",
@@ -330,6 +351,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   bin_vec <- rep(NA_integer_, n_cells_total)
 
   n_valid <- 0L
+  warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
 
   for (bi in seq_len(n_blocks)) {
     row_start <- (bi - 1L) * rows_per_block + 1L
@@ -373,7 +395,13 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
             rep(NA_real_, n_ok)
           }
         )
-        preds[is.na(preds)] <- 0
+        if (!all(is.finite(preds))) {
+          if (!warned[mdl_name]) {
+            cli::cli_warn("{.val {mdl_name}} produced non-finite raster predictions; excluded from the ensemble.")
+            warned[mdl_name] <- TRUE
+          }
+          next
+        }
         ens_hss <- ens_hss + weights[mdl_name] * preds
       }
 

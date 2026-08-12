@@ -30,3 +30,12 @@ Returns column names excluding coordinates, response, metadata, and
 non-numeric columns. Useful for identifying which columns in your
 data are environmental predictors.
 }
+\details{
+Columns named \code{HID}, \code{species}, \code{sid}, \code{family}, \code{category}, \code{fraction},
+\code{id}, \code{ID}, \code{site}, \code{cell_id}, \code{grid_id}, \code{group}, \code{spid}, \code{siteid},
+\code{occ}, or \code{fold} are treated as metadata and excluded from the returned
+predictor set, together with any names in \code{meta}. If one of your real
+predictors carries one of these names, rename the column or pass an
+explicit predictor vector to the modelling functions instead of relying
+on auto-detection.
+}

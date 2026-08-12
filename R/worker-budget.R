@@ -8,8 +8,8 @@
 #'
 #' Why two layers and not just one? When the batch contains many species,
 #' the species-level fan-out alone saturates the CPU. When the batch is
-#' small (1-3 species), nesting the spare cores into per-species fitting
-#' bootstraps / ATE folds / CV folds avoids idle cores.
+#' small (1-3 species), nesting the spare cores into per-species CV folds
+#' avoids idle cores.
 #'
 #' @param total_workers Integer. Total parallel worker budget. Default
 #'   `parallel::detectCores() - 1L`, capped at the available cores.

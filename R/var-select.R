@@ -26,6 +26,8 @@
 #'   the RF benchmark. Default `30`.
 #' @param dml_folds Cross-fitting folds for the CPI/DML selectors. Default `5`.
 #' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
+#'   The CPI and DML selectors cap this at `200` with an informational message
+#'   (the nuisance forest keeps fitting tractable on large candidate sets).
 #' @param min_vars Minimum retained variables. Default `3`.
 #' @param force_include Character vector of predictor names to always retain,
 #'   regardless of the selector's decision. Use for known niche-defining axes
@@ -58,11 +60,21 @@ cast_select <- function(data,
   env_vars <- get_env_vars(data, response)
   if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
 
+  num_trees <- as.integer(num_trees)
+  if (method %in% c("cpi", "dml") && num_trees > 200L) {
+    if (verbose) {
+      cli::cli_inform(
+        "CPI/DML: capping {.arg num_trees} at 200 (nuisance-forest tractability)."
+      )
+    }
+    num_trees <- 200L
+  }
+
   if (identical(method, "cpi")) {
     out <- .cast_select_cpi(
       data = data, env_vars = env_vars, response = response,
       alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
-      num_trees = min(as.integer(num_trees), 200L), min_vars = min_vars,
+      num_trees = num_trees, min_vars = min_vars,
       seed = seed, verbose = verbose, num_threads = num_threads
     )
     res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
@@ -78,7 +90,7 @@ cast_select <- function(data,
     out <- .cast_select_dml(
       data = data, env_vars = env_vars, response = response,
       alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
-      num_trees = min(as.integer(num_trees), 200L), min_vars = min_vars,
+      num_trees = num_trees, min_vars = min_vars,
       seed = seed, verbose = verbose, num_threads = num_threads
     )
     res <- .cast_apply_force_include(out$selected, out$scores, env_vars,

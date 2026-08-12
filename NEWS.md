@@ -1,3 +1,33 @@
+# castSDM 0.7.0 (development)
+
+## Defect fixes and engineering hardening
+
+* `plot.cast_select()` labels the DML axis `|DML statistic|` instead of the
+  wrong `|CPI statistic|`; fold maps extend their palette beyond 10 folds.
+* `cast_project()` marks cells with non-binary predictions as `NA` instead of
+  an empty-string change class; summary counts ignore them explicitly.
+* `cast_vif()` rejects non-finite predictors with a targeted error and fails
+  loudly instead of looping when VIF cannot be computed.
+* `cast_ensemble()` excludes models with non-finite predictions (with a
+  warning) and renormalises weights, instead of silently zeroing them.
+* Removed the dead `threshold_method` argument from `cast_ensemble()`,
+  `cast_project()`, `cast_ensemble_raster()`, `cast_project_raster()`, and
+  `cast_save_future_projection()`; binary thresholds always follow the
+  max-TSS rule.
+* `load_basemap()` restores the user's global `sf` s2 setting after reading.
+* `cast_cv()` checks for `pROC` with a friendly error and isolates per-fold
+  metric failures.
+* `cast_select()` reports the CPI/DML 200-tree cap instead of truncating
+  silently; the batch pipeline falls back to `"cpi"` (not `"dml"`).
+* `cast_predict()` errors with the missing column names when a prediction
+  grid lacks fitted predictors.
+* CPI confidence intervals are clamped at zero (CPI is non-negative).
+* Batch resource logging writes one CSV per species and merges them after
+  the run, removing the parallel-append race.
+* Documentation alignment: README, package overview, and NEWS now describe
+  the CPI default with the DML effect-reporting layer; N-SDM is cited as
+  Adde et al. (2020).
+
 # castSDM 0.6.0
 
 ## New core

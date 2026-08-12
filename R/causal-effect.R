@@ -97,7 +97,9 @@ cast_effect <- function(object, conf_level = 0.95) {
       statistic   = sc$statistic,
       p_value     = sc$p_value,
       p_adjusted  = sc$p_adjusted,
-      conf_low    = sc$cpi - z * sc$std_error,
+      # CPI is non-negative by definition; clamp the normal-approximation
+      # lower bound at 0 so error bars never cross below zero.
+      conf_low    = pmax(0, sc$cpi - z * sc$std_error),
       conf_high   = sc$cpi + z * sc$std_error,
       selected    = sc$selected,
       stringsAsFactors = FALSE

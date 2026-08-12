@@ -13,7 +13,6 @@ cast_save_future_projection(
   basemap = "world",
   fig_dpi = 600L,
   method = "weighted",
-  threshold_method = "maxTSS",
   models = NULL,
   prefix = "future"
 )
@@ -34,8 +33,6 @@ cast_save_future_projection(
 \item{fig_dpi}{Figure DPI. Default \code{600}.}
 
 \item{method}{Ensemble method.}
-
-\item{threshold_method}{Threshold method.}
 
 \item{models}{Optional models used by \code{\link[=cast_project]{cast_project()}}.}
 

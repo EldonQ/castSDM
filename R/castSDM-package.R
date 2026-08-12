@@ -3,20 +3,22 @@
 
 #' @section Overview:
 #' \pkg{castSDM} is a focused species distribution modelling toolkit. It pairs
-#' a double-machine-learning causal variable selector with standard
-#' RF / BRT / MaxEnt / GAM learners, nested spatial cross-validation,
-#' habitat-suitability prediction, performance-weighted ensembles and future
-#' climate projection. The selector retains predictors whose orthogonalized
-#' effect on occurrence survives FDR control; the package supports
-#' interpretable driver analysis but does not claim automatic causal discovery.
+#' a conditional variable selector (conditional predictive impact with FDR
+#' control by default; an optional double-machine-learning effect reporter)
+#' with standard RF / BRT / MaxEnt / GAM learners, nested spatial
+#' cross-validation, habitat-suitability prediction, performance-weighted
+#' ensembles and future climate projection. The selector retains predictors
+#' whose conditional contribution on occurrence survives FDR control; the
+#' package supports interpretable driver analysis but does not claim
+#' automatic causal discovery.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: double machine learning with FDR control
-#'    ([cast_select()]); causal interpretation via [cast_effect()] and
-#'    counterfactual what-if maps ([cast_counterfactual()])
+#' 2. **Variable Selection**: conditional predictive impact screening with
+#'    FDR control ([cast_select()]); effect reporting via [cast_effect()]
+#'    and counterfactual what-if maps ([cast_counterfactual()])
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
 #'    rare species ([cast_esm()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial

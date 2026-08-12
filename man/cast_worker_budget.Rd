@@ -30,8 +30,8 @@ who want to inspect or override the allocation.
 \details{
 Why two layers and not just one? When the batch contains many species,
 the species-level fan-out alone saturates the CPU. When the batch is
-small (1-3 species), nesting the spare cores into per-species fitting
-bootstraps / ATE folds / CV folds avoids idle cores.
+small (1-3 species), nesting the spare cores into per-species CV folds
+avoids idle cores.
 }
 \examples{
 cast_worker_budget(total_workers = 8L, n_species = 4L)

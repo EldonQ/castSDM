@@ -309,6 +309,8 @@ cast_batch <- function(species_list,
   n_ok <- sum(!vapply(results, is.null, logical(1)))
   if (verbose) cli::cli_inform("Batch complete: {n_ok}/{n_sp} species succeeded.")
 
+  .cast_merge_resource_logs(output_dir)
+
   new_cast_batch(
     species_metrics = species_metrics,
     species         = sp_names,
@@ -348,6 +350,11 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
 
   n_models <- length(levels(long$model))
   gray_fills <- grDevices::gray.colors(n_models, start = 0.4, end = 0.9)
+  eval_src <- if ("fold" %in% names(sm) && any(sm$fold > 0, na.rm = TRUE)) {
+    "Spatial CV"
+  } else {
+    "Hold-out evaluation"
+  }
 
   ggplot2::ggplot(long, ggplot2::aes(
     x = .data$model, y = .data$value, fill = .data$model
@@ -364,7 +371,7 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     ggplot2::scale_fill_manual(values = gray_fills, guide = "none") +
     ggplot2::labs(
       title    = "Multi-species Model Performance Comparison",
-      subtitle = sprintf("%d species | Spatial CV", length(x$species)),
+      subtitle = sprintf("%d species | %s", length(x$species), eval_src),
       x = "", y = "Score"
     ) +
     ggplot2::theme_minimal(

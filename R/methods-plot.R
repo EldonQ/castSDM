@@ -57,6 +57,16 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
     n_sel, n_total, n_tested, toupper(x$method %||% "CPI")
   )
 
+  x_lab <- if (identical(imp_col, "abs_statistic")) {
+    if (identical(x$method, "dml")) "|DML statistic|" else "|CPI statistic|"
+  } else if (identical(imp_col, "cpi")) {
+    "Conditional predictive impact"
+  } else if (identical(imp_col, "importance_plot")) {
+    "Selection indicator"
+  } else {
+    "Predictor score"
+  }
+
   p <- ggplot2::ggplot(scr, ggplot2::aes(
     x = .data[[imp_col]], y = .data$display,
     fill = .data$category, alpha = .data$is_selected
@@ -77,10 +87,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
     ggplot2::labs(
       title = "Variable screening",
       subtitle = sub_txt,
-      x = if (identical(imp_col, "abs_statistic")) "|CPI statistic|"
-          else if (identical(imp_col, "cpi")) "Conditional predictive impact"
-          else if (identical(imp_col, "importance_plot")) "Selection indicator"
-          else "Predictor score",
+      x = x_lab,
       y = ""
     ) +
     theme_cast(base_size = 11) +
@@ -319,13 +326,20 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
       )
     }
   }
+  # Extend the palette for k > 10 folds instead of yielding NA colours.
+  fold_pal <- if (x$k <= length(fold_colors)) {
+    fold_colors[seq_len(x$k)]
+  } else {
+    grDevices::colorRampPalette(fold_colors)(x$k)
+  }
+
   p_map <- p_map +
     ggplot2::geom_point(
       data = map_df,
       ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$fold),
       size = 0.8, alpha = 0.7
     ) +
-    ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], name = "Fold") +
+    ggplot2::scale_color_manual(values = fold_pal, name = "Fold") +
     ggplot2::labs(
       title = "Spatial block folds",
       subtitle = "Contiguous geographic blocks, not random points"
@@ -344,7 +358,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
   p_map <- .add_china_outline(p_map, basemap) + .coord_for_map(basemap)
   p_map <- .add_china_south_sea_inset(
     p_map, basemap, data = map_df, value_var = "fold", bg_fill = .cast_map_bg(),
-    scale = ggplot2::scale_color_manual(values = fold_colors[seq_len(x$k)], guide = "none")
+    scale = ggplot2::scale_color_manual(values = fold_pal, guide = "none")
   )
 
   if (requireNamespace("patchwork", quietly = TRUE)) {
@@ -840,7 +854,11 @@ load_basemap <- function(type = "world") {
   shp_path <- system.file("basemap", shp_name, package = "castSDM")
   if (shp_path == "") return(NULL)
 
+  # Toggle spherical geometry off for the read only; restore the user's
+  # global s2 setting on exit so plotting never mutates session state.
+  prev_s2 <- sf::sf_use_s2()
   sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(prev_s2), add = TRUE)
   basemap <- tryCatch(
     sf::st_read(shp_path, quiet = TRUE),
     error = function(e) NULL

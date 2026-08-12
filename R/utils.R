@@ -45,6 +45,15 @@ validate_species_data <- function(data,
 #' @param meta Optional character vector of additional metadata column
 #'   names to exclude.
 #'
+#' @details
+#' Columns named `HID`, `species`, `sid`, `family`, `category`, `fraction`,
+#' `id`, `ID`, `site`, `cell_id`, `grid_id`, `group`, `spid`, `siteid`,
+#' `occ`, or `fold` are treated as metadata and excluded from the returned
+#' predictor set, together with any names in `meta`. If one of your real
+#' predictors carries one of these names, rename the column or pass an
+#' explicit predictor vector to the modelling functions instead of relying
+#' on auto-detection.
+#'
 #' @return Character vector of environmental variable names.
 #'
 #' @export

@@ -185,7 +185,7 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
 #' Create a cast_predict Object
 #'
 #' @param predictions A `data.frame` with columns: `lon`, `lat`, and one
-#'   `hss_*` column per model.
+#'   `HSS_*` column per model.
 #' @param models Character vector of model names included.
 #'
 #' @return A `cast_predict` object.

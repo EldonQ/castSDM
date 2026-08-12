@@ -1,0 +1,130 @@
+---
+title: "Getting started with castSDM"
+author: "castSDM authors"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with castSDM}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Overview
+
+`castSDM` is an end-to-end species distribution modelling (SDM) toolkit whose
+variable-selection stage is built on conditional screening rather than
+associational filters:
+
+- `cast_select(method = "cpi")` (default) keeps predictors whose conditional
+  predictive impact survives Benjamini-Hochberg FDR control, testing each
+  predictor *given every other predictor*;
+- `cast_select(method = "dml")` reports signed Neyman-orthogonal
+  partial-linear effects via `cast_effect()`;
+- selection is re-run inside every spatial cross-validation fold, so
+  held-out data never influence variable choice.
+
+The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
+learners, nested spatial CV, MESS extrapolation flags, performance-weighted
+ensembles (N-SDM score), ESM for rare species, and CMIP6 projection.
+
+## Data
+
+Species data are presence/background tables with `lon`, `lat`, `presence`
+(0/1) and environmental predictors. `inst/extdata` ships example tables:
+
+```{r data}
+library(castSDM)
+
+data_file <- system.file("extdata",
+  "CAST_Alces_alces_Res9_screened.csv", package = "castSDM")
+dat <- read.csv(data_file)
+
+# Keep the workflow light for this vignette: subsample rows.
+set.seed(1)
+dat <- dat[c(
+  sample(which(dat$presence == 1), 150),
+  sample(which(dat$presence == 0), 150)
+), ]
+
+head(dat[, c("lon", "lat", "presence", "bio01", "bio12", "elevation")])
+```
+
+## One-step pipeline
+
+```{r pipeline}
+result <- cast(
+  dat,
+  models = c("rf", "gam"),
+  select_method = "cpi",
+  select_min_vars = 3,
+  select_num_trees = 100,
+  do_cv = TRUE,
+  cv_k = 3,
+  seed = 42,
+  verbose = FALSE
+)
+
+summary(result)
+plot(result$screen)
+```
+
+## Signed effect reporting with DML
+
+```{r effect}
+screen_dml <- cast_select(dat, method = "dml", num_trees = 100,
+                          dml_folds = 3, seed = 42, verbose = FALSE)
+eff <- cast_effect(screen_dml)
+plot(eff)
+```
+
+## Counterfactual what-if map
+
+```{r counterfactual}
+cf <- cast_counterfactual(result$fit, newdata = dat,
+                          variable = "bio01", shift = 1,
+                          shift_type = "sd")
+plot(cf, basemap = "none")
+```
+
+## Spatial prediction on a grid
+
+```{r predict}
+# Build a small prediction grid from the data range.
+grid <- expand.grid(
+  lon = seq(min(dat$lon), max(dat$lon), length.out = 20),
+  lat = seq(min(dat$lat), max(dat$lat), length.out = 20)
+)
+env_vars <- result$fit$env_vars
+for (v in env_vars) {
+  grid[[v]] <- median(dat[[v]], na.rm = TRUE)
+}
+
+pred <- cast_predict(result$fit, grid)
+plot(pred, basemap = "none")
+```
+
+## Rare species: ensemble of small models
+
+```{r esm}
+rare <- dat[1:60, ]
+rare$presence[1:50] <- 0   # 10 presences, 50 backgrounds
+esm <- cast_esm(rare, top_k = 4, base_algo = "glm", seed = 7, verbose = FALSE)
+print(esm)
+```
+
+## Batch + config
+
+```{r batch}
+template <- cast_config_template(tempfile(fileext = ".yaml"), overwrite = TRUE)
+batch <- cast_batch(
+  list("example" = dat),
+  models = "rf",
+  do_cv = TRUE, cv_k = 3,
+  select_method = "rf", select_num_trees = 100,
+  parallel = FALSE, seed = 1, verbose = FALSE
+)
+print(batch)
+```

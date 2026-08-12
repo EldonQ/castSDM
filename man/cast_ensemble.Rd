@@ -9,7 +9,6 @@ cast_ensemble(
   cv,
   new_data,
   method = c("weighted", "best", "equal"),
-  threshold_method = "maxTSS",
   models = NULL
 )
 }
@@ -28,9 +27,6 @@ models with Score < 0.5.
 \item \code{"best"}: use the single highest-scoring model.
 \item \code{"equal"}: simple average of all models.
 }}
-
-\item{threshold_method}{Character. Method for binary thresholding.
-\code{"maxTSS"} (default) uses the threshold that maximises TSS from CV.}
 
 \item{models}{Character vector. Subset of models to include. Default
 \code{NULL} (all fitted models).}
@@ -56,8 +52,16 @@ The composite score for each model is:
 
 \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 
-following the N-SDM (Nfiles Species Distribution Modeling) framework.
+following the N-SDM nested-modelling framework (Adde et al. 2020).
 Models with Score < 0.5 are excluded from the weighted ensemble.
+Models whose predictions contain non-finite values are excluded from
+the ensemble with a warning, and the remaining weights are
+renormalised.
+}
+\references{
+Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
+computing pipeline for Nested Species Distribution Modelling.
+\emph{Ecography}, 43(2), 331-334.
 }
 \seealso{
 \code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_project]{cast_project()}}

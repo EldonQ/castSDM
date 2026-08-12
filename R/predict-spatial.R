@@ -44,6 +44,12 @@
 cast_predict <- function(fit, new_data, models = NULL,
                          clamp = FALSE, extrapolation = TRUE) {
   env_vars <- fit$env_vars
+  missing_vars <- setdiff(env_vars, names(new_data))
+  if (length(missing_vars)) {
+    cli::cli_abort(
+      "{.arg new_data} is missing fitted predictor{?s}: {.val {missing_vars}}."
+    )
+  }
   mdl_names <- models %||% names(fit$models)
   mdl_names <- intersect(mdl_names, names(fit$models))
 

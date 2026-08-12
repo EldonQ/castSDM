@@ -10,7 +10,6 @@ cast_ensemble_raster(
   raster_stack,
   output_dir,
   method = c("weighted", "best", "equal"),
-  threshold_method = "maxTSS",
   models = NULL,
   mask = NULL,
   prefix = "",
@@ -32,9 +31,6 @@ it does not exist.}
 
 \item{method}{Character. Ensemble strategy: \code{"weighted"} (default),
 \code{"best"}, \code{"equal"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
-
-\item{threshold_method}{Character. Binary threshold method. Default
-\code{"maxTSS"}.}
 
 \item{models}{Character vector or \code{NULL}. Models to use. Default all.}
 
