@@ -160,13 +160,16 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #' @param thresholds Named numeric. TSS-optimal threshold per model.
 #' @param selections List of selected variables for each outer fold.
 #' @param screens List of fold-specific `cast_select` objects.
+#' @param selection_freq A `data.frame` with each predictor's fold-level
+#'   selection frequency (`variable`, `freq`), sorted descending.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
 #' @export
 new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
-                        selections = list(), screens = list()) {
+                        selections = list(), screens = list(),
+                        selection_freq = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -176,7 +179,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       block_method = block_method,
       thresholds   = thresholds,
       selections   = selections,
-      screens      = screens
+      screens      = screens,
+      selection_freq = selection_freq
     ),
     class = "cast_cv"
   )

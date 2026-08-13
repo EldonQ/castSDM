@@ -133,6 +133,23 @@ cast_cv <- function(data,
       oof[[mdl]][upd$idx] <- upd$pred
     }
   }
+
+  # Fold-level selection frequency: the fraction of outer folds in which
+  # each predictor was retained. The basis of the consensus selector
+  # (cast_consensus()) and of the spatial-stability diagnostic.
+  nonempty <- Filter(function(s) length(s) > 0L, selections)
+  selection_freq <- data.frame(variable = character(0), freq = numeric(0),
+                               stringsAsFactors = FALSE)
+  if (length(nonempty)) {
+    all_vars <- unique(unlist(nonempty))
+    freq <- vapply(all_vars, function(v) {
+      mean(vapply(nonempty, function(s) v %in% s, logical(1)))
+    }, numeric(1))
+    selection_freq <- data.frame(
+      variable = all_vars, freq = unname(freq), stringsAsFactors = FALSE)
+    selection_freq <- selection_freq[order(-selection_freq$freq), , drop = FALSE]
+    rownames(selection_freq) <- NULL
+  }
   fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
   if (!nrow(fold_df)) cli::cli_abort("All spatial CV folds failed.")
 
@@ -159,7 +176,8 @@ cast_cv <- function(data,
   new_cast_cv(
     metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
     block_method = block_method, thresholds = thresholds,
-    selections = selections, screens = screens
+    selections = selections, screens = screens,
+    selection_freq = selection_freq
   )
 }
 

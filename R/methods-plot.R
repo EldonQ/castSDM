@@ -18,7 +18,8 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("abs_statistic", "cpi", "rf_importance", "combined_score")
+  imp_candidates <- c("freq", "abs_statistic", "cpi", "rf_importance",
+                      "combined_score")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)][1]
   if (is.na(imp_col) || !length(imp_col)) {
     scr$importance_plot <- as.numeric(scr$is_selected)
@@ -61,6 +62,8 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
     if (identical(x$method, "dml")) "|DML statistic|" else "|CPI statistic|"
   } else if (identical(imp_col, "cpi")) {
     "Conditional predictive impact"
+  } else if (identical(imp_col, "freq")) {
+    "Fold selection frequency"
   } else if (identical(imp_col, "importance_plot")) {
     "Selection indicator"
   } else {

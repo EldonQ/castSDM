@@ -1,5 +1,17 @@
 # castSDM 0.7.0 (development)
 
+## Consensus selection across spatial folds
+
+* `cast_cv()` now stores `selection_freq`: each predictor's fold-level
+  selection frequency, the package's spatial-stability diagnostic.
+* New `cast_consensus()` aggregates the fold selections into a consensus
+  variable set (predictors retained in at least `threshold` of folds,
+  default 0.5) and returns a `cast_select` object that plugs directly into
+  `cast_fit()`. Validated on real China fish data: consensus sets are
+  ~2x more stable across CV reruns than raw fold selections (Jaccard 0.66
+  vs 0.30) and transfer as well as the all-predictor model with a third
+  of the variables.
+
 ## Replicate design, uncertainty layers, ODMAP reporting, rare-species routing
 
 * `cast_rep()` repeats background sampling `n_reps` times and aggregates

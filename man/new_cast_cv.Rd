@@ -12,7 +12,8 @@ new_cast_cv(
   block_method,
   thresholds,
   selections = list(),
-  screens = list()
+  screens = list(),
+  selection_freq = NULL
 )
 }
 \arguments{
@@ -31,6 +32,9 @@ new_cast_cv(
 \item{selections}{List of selected variables for each outer fold.}
 
 \item{screens}{List of fold-specific \code{cast_select} objects.}
+
+\item{selection_freq}{A \code{data.frame} with each predictor's fold-level
+selection frequency (\code{variable}, \code{freq}), sorted descending.}
 }
 \value{
 A \code{cast_cv} object.
