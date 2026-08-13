@@ -184,12 +184,40 @@ cast_background <- function(occurrences,
   )
   out_df <- cbind(out_df, env_df)
 
-  # Remove rows with NA in any environmental variable
-  complete <- stats::complete.cases(env_df)
-  n_removed <- sum(!complete)
-  out_df <- out_df[complete, , drop = FALSE]
+  # Remove rows with NA in any environmental variable, then top the
+  # background set back up to the requested size (cells that are NA in any
+  # layer other than the first would otherwise silently shrink the sample).
+  keep_topup <- TRUE
+  topup_rounds <- 0L
+  while (keep_topup && topup_rounds < 5L) {
+    complete <- stats::complete.cases(out_df)
+    n_bg_ok <- sum(complete & out_df$presence == 0)
+    n_pres_ok <- sum(complete & out_df$presence == 1)
+    if (n_bg_ok >= n_bg || length(valid_cells) <= n_bg_ok) break
+    topup_rounds <- topup_rounds + 1L
+    extra <- min(length(valid_cells) - n_bg_ok, n_bg - n_bg_ok)
+    if (extra < 1L) break
+    used_cells <- all_cells[complete & out_df$presence == 0]
+    pool <- setdiff(valid_cells, used_cells)
+    if (length(pool) < extra) {
+      add <- sample(pool, length(pool))
+    } else {
+      add <- sample(pool, extra)
+    }
+    add_xy <- terra::xyFromCell(raster_stack, add)
+    add_env <- as.data.frame(raster_stack[add])
+    add_df <- cbind(
+      data.frame(lon = add_xy[, 1], lat = add_xy[, 2], presence = 0L,
+                 stringsAsFactors = FALSE),
+      add_env
+    )
+    out_df <- rbind(out_df, add_df)
+  }
+  out_df <- out_df[stats::complete.cases(out_df), , drop = FALSE]
   rownames(out_df) <- NULL
 
+  n_removed <- n_bg - sum(out_df$presence == 0)
+  n_removed <- max(0L, n_removed)
   n_pres_final <- sum(out_df$presence == 1)
   n_bg_final <- sum(out_df$presence == 0)
 

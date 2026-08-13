@@ -148,9 +148,11 @@ cast_load_bioclim <- function(bioclim_root,
       ,
       drop = FALSE
     ]
-    # Filter by model if specified
+    # Filter by model if specified: exact dataset-token match
+    # (e.g. 'cnclim1km_ensmean'), never a bare substring search.
     if (!is.null(model) && nzchar(model)) {
-      rows <- rows[grepl(model, rows$dataset, fixed = TRUE), , drop = FALSE]
+      token <- paste0("cnclim1km_", model)
+      rows <- rows[rows$dataset == token, , drop = FALSE]
     }
   }
 
@@ -216,9 +218,9 @@ cast_load_bioclim <- function(bioclim_root,
     cli::cli_abort("Bioclim directory not found: {.path {search_dir}}")
   }
 
-  # Find TIF files recursively
-  all_tifs <- list.files(search_dir, pattern = "\\.tif$",
-                         recursive = TRUE, full.names = TRUE)
+  # Find TIF files recursively (sorted: deterministic first-match)
+  all_tifs <- sort(list.files(search_dir, pattern = "\\.tif$",
+                             recursive = TRUE, full.names = TRUE))
   # Exclude .tmp.tif files
   all_tifs <- all_tifs[!grepl("\\.tmp\\.tif$", all_tifs)]
 
@@ -228,18 +230,17 @@ cast_load_bioclim <- function(bioclim_root,
 
   for (i in seq_along(variables)) {
     v <- variables[i]
-    # Match pattern: variable name in filename, e.g., *_bio01.tif
-    pattern <- paste0("_", v, "\\.tif$")
-    matches <- grep(pattern, all_tifs, value = TRUE)
+    # Prefer the variable's own subdirectory, then an exact filename token.
+    pattern_dir <- paste0("/", v, "/")
+    matches <- grep(pattern_dir, all_tifs, value = TRUE, fixed = TRUE)
     if (length(matches) == 0) {
-      # Try broader match: /bio01/ directory
-      pattern2 <- paste0("/", v, "/")
-      matches <- grep(pattern2, all_tifs, value = TRUE)
+      pattern <- paste0("_", v, "\\.tif$")
+      matches <- grep(pattern, all_tifs, value = TRUE)
     }
     if (length(matches) == 0) {
       cli::cli_abort("Could not find TIF for variable {.val {v}} in {.path {search_dir}}")
     }
-    paths[i] <- matches[1]  # Take first match
+    paths[i] <- matches[1]  # deterministic: sorted order
   }
 
   if (verbose) {

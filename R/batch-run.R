@@ -271,9 +271,15 @@ cast_batch <- function(species_list,
           sd <- species_list[[sp]]
           seed_i <- if (!is.null(seed)) seed + ii else NULL
           worker_run <- utils::getFromNamespace(".cast_batch_run_one_species", "castSDM")
-          worker_run(sp, sd, env_data, models,
-                     output_dir, fig_dpi, seed_i,
-                     cfg, fit_args, FALSE, NULL)
+          tryCatch(
+            worker_run(sp, sd, env_data, models,
+                       output_dir, fig_dpi, seed_i,
+                       cfg, fit_args, FALSE, NULL),
+            error = function(e) {
+              warning(sprintf("Species '%s' failed: %s", sp, e$message))
+              NULL
+            }
+          )
         })
       },
       finally = if (!is.null(cl)) parallel::stopCluster(cl)
@@ -312,11 +318,12 @@ cast_batch <- function(species_list,
   for (sp in sp_names) {
     r <- results[[sp]]
     if (is.null(r)) next
+    keep_cols <- c("fold", "model", "auc", "tss", "cbi", "species")
     if (!is.null(r$cv) && !is.null(r$cv$fold_metrics) &&
         nrow(r$cv$fold_metrics) > 0) {
       fm <- r$cv$fold_metrics
       fm$species <- sp
-      metrics_rows[[sp]] <- fm
+      metrics_rows[[sp]] <- fm[, intersect(keep_cols, names(fm)), drop = FALSE]
     } else if (!is.null(r$eval) && !is.null(r$eval$metrics)) {
       em <- r$eval$metrics
       em$species <- sp
@@ -325,9 +332,7 @@ cast_batch <- function(species_list,
         if (mean_col %in% names(em)) em[[mcol]] <- em[[mean_col]]
       }
       em$fold <- 0L
-      metrics_rows[[sp]] <- em[, intersect(
-        c("fold", "model", "auc", "tss", "cbi", "species"), names(em)
-      ), drop = FALSE]
+      metrics_rows[[sp]] <- em[, intersect(keep_cols, names(em)), drop = FALSE]
     }
   }
 

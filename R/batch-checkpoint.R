@@ -44,11 +44,15 @@ cast_run_step <- function(step_name, output_dir, species, expr,
   has_pram <- requireNamespace("peakRAM", quietly = TRUE)
   t0 <- Sys.time()
   val <- NULL
+  expr_err <- NULL
   if (has_pram) {
     pram <- tryCatch(
       peakRAM::peakRAM({ val <- expr }),
-      error = function(e) NULL
+      error = function(e) { expr_err <<- e; NULL }
     )
+    if (!is.null(expr_err)) {
+      cli::cli_abort("Step {.val {step_name}} failed: {conditionMessage(expr_err)}")
+    }
     peak_mb <- if (is.null(pram)) NA_real_ else
       suppressWarnings(as.numeric(pram$Peak_RAM_Used_MiB[1]))
   } else {

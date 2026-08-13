@@ -408,56 +408,58 @@ cast_project_raster <- function(fit, cv,
       terra::writeRaster(change_r, change_path, overwrite = TRUE,
                          gdal = c(paste0("COMPRESS=", compression)),
                          wopt = list(datatype = "INT2S"))
+    }
 
-      # ---- Statistics ---------------------------------------------------------
-      change_vals <- terra::values(change_r, mat = FALSE)
-      change_vals <- change_vals[!is.na(change_vals)]
+    # ---- Statistics (always computed, from disk, also on the skip branch) ---
+    change_vals <- terra::values(terra::rast(change_path), mat = FALSE)
+    change_vals <- change_vals[!is.na(change_vals)]
 
-      n_gain   <- sum(change_vals == 1L)
-      n_loss   <- sum(change_vals == -1L)
-      n_stable <- sum(change_vals == 2L)
-      n_absent <- sum(change_vals == 0L)
-      total_present_now <- n_loss + n_stable
+    n_gain   <- sum(change_vals == 1L)
+    n_loss   <- sum(change_vals == -1L)
+    n_stable <- sum(change_vals == 2L)
+    n_absent <- sum(change_vals == 0L)
+    total_present_now <- n_loss + n_stable
 
-      pct_change <- if (total_present_now > 0) {
-        100 * (n_gain - n_loss) / total_present_now
-      } else {
-        NA_real_
-      }
+    pct_change <- if (total_present_now > 0) {
+      100 * (n_gain - n_loss) / total_present_now
+    } else {
+      NA_real_
+    }
 
-      # Future centroid
-      fut_centroid <- .weighted_centroid_raster(fut_hss, fut_bin)
+    # Future centroid
+    fut_centroid <- .weighted_centroid_raster(
+      terra::rast(fut_result$hss_path),
+      terra::rast(fut_result$binary_path))
 
-      # Centroid shift
-      shift_km <- tryCatch(
-        .haversine_km(
-          cur_centroid$lat, cur_centroid$lon,
-          fut_centroid$lat, fut_centroid$lon
-        ),
-        error = function(e) NA_real_
-      )
+    # Centroid shift
+    shift_km <- tryCatch(
+      .haversine_km(
+        cur_centroid$lat, cur_centroid$lon,
+        fut_centroid$lat, fut_centroid$lon
+      ),
+      error = function(e) NA_real_
+    )
 
-      stats_rows[[scen]] <- data.frame(
-        scenario          = scen,
-        n_gain            = n_gain,
-        n_loss            = n_loss,
-        n_stable_present  = n_stable,
-        n_stable_absent   = n_absent,
-        pct_change        = round(pct_change, 2),
-        current_centroid_lon = round(cur_centroid$lon, 4),
-        current_centroid_lat = round(cur_centroid$lat, 4),
-        future_centroid_lon  = round(fut_centroid$lon, 4),
-        future_centroid_lat  = round(fut_centroid$lat, 4),
-        centroid_shift_km = round(shift_km, 1),
-        stringsAsFactors  = FALSE
-      )
+    stats_rows[[scen]] <- data.frame(
+      scenario          = scen,
+      n_gain            = n_gain,
+      n_loss            = n_loss,
+      n_stable_present  = n_stable,
+      n_stable_absent   = n_absent,
+      pct_change        = round(pct_change, 2),
+      current_centroid_lon = round(cur_centroid$lon, 4),
+      current_centroid_lat = round(cur_centroid$lat, 4),
+      future_centroid_lon  = round(fut_centroid$lon, 4),
+      future_centroid_lat  = round(fut_centroid$lat, 4),
+      centroid_shift_km = round(shift_km, 1),
+      stringsAsFactors  = FALSE
+    )
 
-      if (verbose) {
-        cli::cli_inform(c(
-          " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
-          " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
-        ))
-      }
+    if (verbose) {
+      cli::cli_inform(c(
+        " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
+        " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
+      ))
     }
   }
 

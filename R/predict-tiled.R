@@ -78,17 +78,21 @@ cast_predict_tiled <- function(fit, raster,
   )
 
   # Output rasters: one per model, init NA, written tile by tile.
+  # `pre_existing` records which outputs existed BEFORE this call so the
+  # later write-back loop skips exactly those (the NA prototype created
+  # here must NOT count as a reason to skip prediction).
   out_paths <- stats::setNames(
     file.path(output_dir, paste0("HSS_", mdl_names, ".tif")),
     mdl_names
   )
+  pre_existing <- stats::setNames(file.exists(out_paths), mdl_names)
   for (mdl in mdl_names) {
     op <- out_paths[[mdl]]
-    if (file.exists(op) && !overwrite) {
+    if (pre_existing[[mdl]] && !overwrite) {
       cli::cli_inform("  {basename(op)} exists; skipping (overwrite = FALSE).")
       next
     }
-    proto <- terra::rast(raster, nlyrs = 1L)
+    proto <- terra::init(terra::rast(raster, nlyrs = 1L), NA_real_)
     names(proto) <- paste0("HSS_", mdl)
     terra::writeRaster(proto, op, overwrite = TRUE,
                        gdal = c(paste0("COMPRESS=", compression),
@@ -151,7 +155,7 @@ cast_predict_tiled <- function(fit, raster,
 
   for (mdl in mdl_names) {
     op <- out_paths[[mdl]]
-    if (file.exists(op) && !overwrite) next
+    if (pre_existing[[mdl]] && !overwrite) next
     if (verbose) cli::cli_inform("  predicting tiles for {.val {mdl}}...")
 
     # Fit fingerprint: content digest of the fitted model object itself.
@@ -177,20 +181,25 @@ cast_predict_tiled <- function(fit, raster,
       lapply(seq_len(n_tiles), process_one)
     }
 
-    # Write tiles back to the persistent raster.
-    out_r <- terra::rast(op)
+    # Write tiles back to the persistent raster. Accumulate into a plain
+    # vector (built on the INPUT stack's geometry, never re-opening the
+    # output file, which would lock it on Windows) and write once.
+    out_template <- terra::rast(raster, nlyrs = 1L)
+    names(out_template) <- paste0("HSS_", mdl)
+    n_cells_out <- as.double(nrow_r) * as.double(ncol_r)
+    out_vec <- rep(NA_real_, n_cells_out)
     for (res in results) {
       tile <- res$tile
       vals <- as.numeric(t(res$vals))
       cells <- terra::cellFromRowColCombine(
-        out_r,
+        out_template,
         seq(tile$r0, tile$r0 + tile$nr - 1L),
         seq(tile$c0, tile$c0 + tile$nc - 1L)
       )
-      out_r[cells] <- vals
+      out_vec[cells] <- vals
     }
     terra::writeRaster(
-      out_r, op, overwrite = TRUE,
+      terra::setValues(out_template, out_vec), op, overwrite = TRUE,
       gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
       wopt = list(datatype = "FLT4S")
     )

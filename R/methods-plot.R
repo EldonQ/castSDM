@@ -439,6 +439,7 @@ plot.cast_screen_comparison <- function(x, var_labels = NULL, ...) {
                         labels = method_labels[methods])
 
   cnt <- vapply(methods, function(m) sum(mem[[m]]), integer(1))
+  names(cnt) <- methods
   sub_txt <- sprintf(
     "Retained \u2014 correlation %d \u00b7 VIF %d \u00b7 univariate %d \u00b7 RF %d \u00b7 CPI %d",
     cnt["correlation"], cnt["vif"], cnt["univariate"], cnt["rf"], cnt["cpi"]

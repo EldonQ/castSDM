@@ -61,36 +61,10 @@ cast_ensemble <- function(fit, cv, new_data,
   }
 
   cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
-  scores <- vapply(mdl_names, function(m) {
-    row <- cv_sub[cv_sub$model == m, , drop = FALSE]
-    if (nrow(row) == 0) return(NA_real_)
-    auc_val <- row$auc_mean[1]
-    tss_val <- row$tss_mean[1]
-    cbi_val <- if ("cbi_mean" %in% names(row)) row$cbi_mean[1] else 0
-    mean(c(2 * auc_val - 1, tss_val, cbi_val), na.rm = TRUE)
-  }, numeric(1))
-  names(scores) <- mdl_names
+  scores <- .cast_ensemble_scores(cv_sub, mdl_names)
 
   # ---- Determine weights --------------------------------------------------
-  weights <- switch(method,
-    weighted = {
-      w <- scores
-      w[is.na(w) | w < 0.5] <- 0
-      total <- sum(w)
-      if (total > 0) w / total else rep(1 / length(w), length(w))
-    },
-    best = {
-      w <- rep(0, length(mdl_names))
-      names(w) <- mdl_names
-      best_idx <- which.max(scores)
-      if (length(best_idx) > 0) w[best_idx] <- 1
-      w
-    },
-    equal = {
-      rep(1 / length(mdl_names), length(mdl_names))
-    }
-  )
-  names(weights) <- mdl_names
+  weights <- .cast_ensemble_weights(scores, method)
 
   # ---- Generate per-model predictions -------------------------------------
   pred_obj <- cast_predict(fit, new_data, models = mdl_names)
@@ -154,6 +128,48 @@ cast_ensemble <- function(fit, cv, new_data,
     threshold    = threshold,
     model_scores = scores
   )
+}
+
+
+#' Composite per-model scores from CV metrics (N-SDM score)
+#' @keywords internal
+#' @noRd
+.cast_ensemble_scores <- function(cv_sub, mdl_names) {
+  scores <- vapply(mdl_names, function(m) {
+    row <- cv_sub[cv_sub$model == m, , drop = FALSE]
+    if (nrow(row) == 0) return(NA_real_)
+    auc_val <- row$auc_mean[1]
+    tss_val <- row$tss_mean[1]
+    cbi_val <- if ("cbi_mean" %in% names(row)) row$cbi_mean[1] else 0
+    mean(c(2 * auc_val - 1, tss_val, cbi_val), na.rm = TRUE)
+  }, numeric(1))
+  stats::setNames(scores, mdl_names)
+}
+
+#' Ensemble weights from composite scores
+#' @keywords internal
+#' @noRd
+.cast_ensemble_weights <- function(scores, method) {
+  mdl_names <- names(scores)
+  weights <- switch(method,
+    weighted = {
+      w <- scores
+      w[is.na(w) | w < 0.5] <- 0
+      total <- sum(w)
+      if (total > 0) w / total else rep(1 / length(w), length(w))
+    },
+    best = {
+      w <- rep(0, length(mdl_names))
+      names(w) <- mdl_names
+      best_idx <- which.max(scores)
+      if (length(best_idx) > 0) w[best_idx] <- 1
+      w
+    },
+    equal = {
+      rep(1 / length(mdl_names), length(mdl_names))
+    }
+  )
+  stats::setNames(weights, mdl_names)
 }
 
 
@@ -280,39 +296,14 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
 
   cv_metrics <- cv$metrics
   mdl_names <- intersect(mdl_names, cv_metrics$model)
+  if (length(mdl_names) == 0) {
+    cli::cli_abort("No models found in both {.arg fit} and {.arg cv}.")
+  }
   cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
 
-  scores <- vapply(mdl_names, function(m) {
-    row <- cv_sub[cv_sub$model == m, , drop = FALSE]
-    if (nrow(row) == 0) return(NA_real_)
-    auc_val <- row$auc_mean[1]
-    tss_val <- row$tss_mean[1]
-    cbi_val <- if ("cbi_mean" %in% names(row)) row$cbi_mean[1] else 0
-    mean(c(2 * auc_val - 1, tss_val, cbi_val), na.rm = TRUE)
-  }, numeric(1))
-  names(scores) <- mdl_names
+  scores <- .cast_ensemble_scores(cv_sub, mdl_names)
 
-  weights <- switch(method,
-    weighted = {
-      w <- scores
-      w[is.na(w) | w < 0.5] <- 0
-      total <- sum(w)
-      if (total > 0) w / total else rep(1 / length(w), length(w))
-    },
-    best = {
-      w <- rep(0, length(mdl_names))
-      names(w) <- mdl_names
-      best_idx <- which.max(scores)
-      if (length(best_idx) > 0) w[best_idx] <- 1
-      w
-    },
-    equal = {
-      w <- rep(1 / length(mdl_names), length(mdl_names))
-      names(w) <- mdl_names
-      w
-    }
-  )
-  names(weights) <- mdl_names
+  weights <- .cast_ensemble_weights(scores, method)
 
   threshold <- .ensemble_threshold(cv, mdl_names, weights, method)
 
@@ -350,13 +341,25 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   # Pre-load mask values (single layer, safe for memory)
   mask_vals <- NULL
   if (!is.null(mask)) {
-    mask_vals <- tryCatch(
-      terra::values(mask, mat = FALSE),
-      error = function(e) {
-        cli::cli_warn("Mask read failed ({e$message}); predicting full extent")
-        NULL
-      }
+    geom_ok <- tryCatch(
+      terra::compareGeom(mask, r, ext = TRUE, rowcol = TRUE, res = TRUE,
+                         crs = FALSE, stopOnError = FALSE),
+      error = function(e) FALSE
     )
+    if (!isTRUE(geom_ok)) {
+      cli::cli_warn(
+        "Mask geometry does not match the raster stack; predicting the full extent."
+      )
+      mask_vals <- NULL
+    } else {
+      mask_vals <- tryCatch(
+        terra::values(mask, mat = FALSE),
+        error = function(e) {
+          cli::cli_warn("Mask read failed ({e$message}); predicting full extent")
+          NULL
+        }
+      )
+    }
   }
 
   # Pre-allocate output vectors
@@ -422,7 +425,12 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
         ens_hss <- ens_hss + weights[mdl_name] * preds
         pred_mat[, mdl_name] <- preds
       }
-      ens_sd <- if (sum(warned, na.rm = TRUE) < length(mdl_names) - 1L) {
+      # Cross-model SD only when at least two models contributed finite
+      # predictions to THIS block.
+      n_contrib <- sum(vapply(seq_len(ncol(pred_mat)),
+                              function(j) any(is.finite(pred_mat[, j])),
+                              logical(1)))
+      ens_sd <- if (n_contrib > 1L) {
         apply(pred_mat, 1L, stats::sd, na.rm = TRUE)
       } else {
         rep(NA_real_, n_ok)

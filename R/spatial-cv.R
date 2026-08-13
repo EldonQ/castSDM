@@ -185,18 +185,21 @@ cast_cv <- function(data,
 #' @noRd
 make_spatial_folds <- function(lon, lat, k, method = "grid", seed = NULL) {
   if (!is.null(seed)) set.seed(seed)
+  n <- length(lon)
+  n_uniq <- length(unique(interaction(lon, lat, drop = TRUE)))
   if (method == "cluster") {
+    centres <- min(k, max(2L, n_uniq))
+    k_use <- min(k, n)
+    if (k_use < 2L) return(rep(1L, n))
     return(as.integer(factor(stats::kmeans(
-      scale(cbind(lon, lat)), centers = k, nstart = 10L
+      scale(cbind(lon, lat)), centers = k_use, nstart = 10L
     )$cluster)))
   }
+  # grid blocking; degenerate coordinates (few distinct values) collapse to
+  # a coarser grid rather than erroring
   side <- ceiling(sqrt(k * 2))
-  xb <- cut(lon, breaks = unique(stats::quantile(
-    lon, seq(0, 1, length.out = side + 1L), na.rm = TRUE
-  )), include.lowest = TRUE, labels = FALSE)
-  yb <- cut(lat, breaks = unique(stats::quantile(
-    lat, seq(0, 1, length.out = side + 1L), na.rm = TRUE
-  )), include.lowest = TRUE, labels = FALSE)
+  xb <- .cast_bin(lon, side)
+  yb <- .cast_bin(lat, side)
   cell <- interaction(xb, yb, drop = TRUE)
   counts <- sort(table(cell), decreasing = TRUE)
   totals <- integer(k)
@@ -208,6 +211,21 @@ make_spatial_folds <- function(lon, lat, k, method = "grid", seed = NULL) {
     totals[f] <- totals[f] + counts[nm]
   }
   as.integer(assignment[as.character(cell)])
+}
+
+#' Bin a coordinate into `side` quantile bins (degenerate-safe)
+#' @keywords internal
+#' @noRd
+.cast_bin <- function(x, side) {
+  x <- as.numeric(x)
+  u <- sort(unique(x[!is.na(x)]))
+  if (length(u) < 2L) return(rep(1L, length(x)))
+  breaks <- unique(stats::quantile(x, seq(0, 1, length.out = side + 1L),
+                                    na.rm = TRUE, names = FALSE))
+  if (length(breaks) < 2L) breaks <- c(u[1], u[length(u)])
+  b <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+  b[is.na(b)] <- 1L
+  b
 }
 
 #' @keywords internal

@@ -46,9 +46,12 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
   cv <- object$cv
   ev <- object$eval
 
-  engine <- scr$diagnostics$engine %||% "unknown"
-  alpha <- scr$diagnostics$alpha %||% NA_real_
-  n_sel <- length(scr$selected)
+  diag <- scr$diagnostics %||% list()
+  engine <- diag$engine %||% "unknown"
+  alpha <- diag$alpha %||% NA_real_
+  n_sel <- length(scr$selected %||% character(0))
+  sel_vars <- scr$selected %||% character(0)
+  forced_vars <- diag$forced %||% character(0)
   models_used <- names(fit$models)
   cv_info <- if (!is.null(cv)) {
     sprintf("%d-fold spatial (%s) nested CV, selection re-run per fold",
@@ -89,9 +92,9 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     sprintf("- **Variable selection engine**: %s", engine),
     sprintf("- **FDR level**: %s", alpha),
     sprintf("- **Predictors retained**: %s (%d)",
-            paste(scr$selected, collapse = ", "), n_sel),
+            paste(sel_vars, collapse = ", "), n_sel),
     "- **Transfer-critical axes (force_include)**:",
-    sprintf("  %s", paste(scr$diagnostics$forced %||% "none", collapse = ", ")),
+    sprintf("  %s", paste(forced_vars %||% "none", collapse = ", ")),
     "- **Selection leakage control**: variable selection is re-run inside",
     "  every outer spatial CV fold",
     sprintf("- **Expertise / prior knowledge used**: %s", get_meta("expertise")),

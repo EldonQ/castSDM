@@ -242,13 +242,14 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
   if (requireNamespace("digest", quietly = TRUE)) {
     out <- digest::digest(x)
   } else {
+    # Polynomial rolling hash on the serialised bytes; double arithmetic
+    # avoids the 32-bit overflow that breaks a bitwXor-based FNV-1a in R.
     raw <- serialize(x, NULL, version = 3)
-    h <- 2166136261
+    h <- 0
     for (b in as.integer(raw)) {
-      h <- bitwXor(h, b)
-      h <- (h * 16777619) %% 4294967296
+      h <- (h * 1000003 + (b + 2^31)) %% 2^52
     }
-    out <- sprintf("%08x", h)
+    out <- sprintf("%013.0f", h)
   }
   if (!is.null(len)) out <- substr(out, 1L, len)
   out

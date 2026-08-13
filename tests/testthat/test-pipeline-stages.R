@@ -121,6 +121,35 @@ test_that("cast_esm fits bivariate sub-models for rare species", {
   expect_true(all(pred >= 0 & pred <= 1))
 })
 
+test_that("cast_predict_tiled writes real predictions on a fresh output dir", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("terra")
+  set.seed(90)
+  n <- 150
+  dat <- data.frame(
+    lon = runif(n, 100, 105), lat = runif(n, 30, 35),
+    presence = rbinom(n, 1, plogis(rnorm(n))),
+    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
+  )
+  screen <- new_cast_select(c("x1", "x2", "x3"),
+                            data.frame(variable = c("x1", "x2", "x3")),
+                            method = "manual")
+  fit <- cast_fit(dat, screen = screen, models = "rf", rf_ntree = 40,
+                  seed = 91, verbose = FALSE)
+  r <- terra::rast(nrows = 12, ncols = 12, xmin = 99, xmax = 106,
+                   ymin = 29, ymax = 36)
+  r$x1 <- terra::setValues(r, runif(144))
+  r$x2 <- terra::setValues(r, runif(144))
+  r$x3 <- terra::setValues(r, runif(144))
+  td <- tempfile("tiled")
+  out <- cast_predict_tiled(fit, r, output_dir = td, tile_size = 6L,
+                            verbose = FALSE)
+  rr <- terra::rast(out$rasters[["rf"]])
+  vals <- terra::values(rr, mat = FALSE)
+  expect_true(any(is.finite(vals)))
+  unlink(td, recursive = TRUE)
+})
+
 test_that("cast_vif removes collinear columns", {
   skip_if_not_installed("car")
   set.seed(12)

@@ -62,6 +62,15 @@ cast_fit <- function(data,
 
   Y <- data[[response]]
   X_raw <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
+  # Reject non-numeric / factor predictors explicitly: silently coercing a
+  # factor with as.numeric() would model its level codes, not its values.
+  bad <- names(X_raw)[!vapply(X_raw, is.numeric, logical(1))]
+  if (length(bad)) {
+    cli::cli_abort(c(
+      "Non-numeric predictor{?s} in {.arg data}: {.val {bad}}.",
+      i = "Convert factors/characters to numeric before fitting."
+    ))
+  }
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
 
   # -- Training-set median imputation, reused by evaluate/predict/CV --
@@ -70,7 +79,6 @@ cast_fit <- function(data,
     if (is.finite(m)) m else 0
   }, numeric(1))
   X_raw <- .cast_impute(X_raw, X_impute)
-
   # -- Standardize (stored for prediction) --
   X_means <- colMeans(X_raw, na.rm = TRUE)
   X_sds   <- apply(X_raw, 2, stats::sd, na.rm = TRUE)

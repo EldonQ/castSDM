@@ -86,21 +86,33 @@ cast_esm <- function(data,
 
   pairs <- utils::combn(vars, 2L)  # 2 x P matrix
 
-  # Stratified val split
+  # Validation split. Rare-species safety: a held-out split needs at least
+  # MIN_VAL_CLASS observations per class; below that the only presence
+  # would leave the training set without positives. Fall back to fitting on
+  # all rows and weighting by in-sample AUC (reported as val_auc = NA).
+  MIN_VAL_CLASS <- 4L
+  y_va <- NULL; va_df <- NULL; tr_df <- data
   if (!is.null(seed)) set.seed(seed)
   pos_idx <- which(Y == 1L); neg_idx <- which(Y == 0L)
-  val_pos <- sample(pos_idx, max(1L, round(val_fraction * length(pos_idx))))
-  val_neg <- sample(neg_idx, max(1L, round(val_fraction * length(neg_idx))))
-  val_idx <- c(val_pos, val_neg)
-  tr_idx  <- setdiff(seq_len(nrow(data)), val_idx)
-  tr_df   <- data[tr_idx, ]
-  va_df   <- data[val_idx, ]
-  y_va    <- Y[val_idx]
+  can_validate <- length(pos_idx) >= 2L * MIN_VAL_CLASS &&
+    length(neg_idx) >= 2L * MIN_VAL_CLASS
+  if (can_validate) {
+    val_pos <- sample(pos_idx, max(MIN_VAL_CLASS, round(val_fraction * length(pos_idx))))
+    val_neg <- sample(neg_idx, max(MIN_VAL_CLASS, round(val_fraction * length(neg_idx))))
+    val_idx <- c(val_pos, val_neg)
+    tr_idx  <- setdiff(seq_len(nrow(data)), val_idx)
+    tr_df   <- data[tr_idx, ]
+    va_df   <- data[val_idx, ]
+    y_va    <- Y[val_idx]
+  }
+  # in-sample fallback target: full response (used when validation is unsafe)
+  y_fit <- if (is.null(y_va)) Y else tr_df[[response]]
+  fit_rows <- if (is.null(va_df)) data else tr_df
 
   fit_one <- function(v1, v2) {
     df_tr <- data.frame(
-      presence = tr_df[[response]],
-      x1 = tr_df[[v1]], x2 = tr_df[[v2]]
+      presence = fit_rows[[response]],
+      x1 = fit_rows[[v1]], x2 = fit_rows[[v2]]
     )
     if (base_algo == "glm") {
       stats::glm(presence ~ x1 + I(x1^2) + x2 + I(x2^2) + x1:x2,
@@ -116,6 +128,11 @@ cast_esm <- function(data,
     as.numeric(stats::predict(mdl, newdata = nd, type = "response"))
   }
 
+  # AUC target used for sub-model weighting: held-out when a safe
+  # validation split exists, in-sample otherwise (rare-species fallback).
+  weight_rows <- if (is.null(va_df)) fit_rows else va_df
+  weight_y    <- if (is.null(y_va))  y_fit    else y_va
+
   P <- ncol(pairs)
   models <- vector("list", P)
   weights <- numeric(P)
@@ -127,9 +144,9 @@ cast_esm <- function(data,
     if (is.null(mdl)) {
       models[[j]] <- NULL; weights[j] <- 0; next
     }
-    pv <- tryCatch(predict_one(mdl, v1, v2, va_df),
-                   error = function(e) rep(NA_real_, nrow(va_df)))
-    auc <- tryCatch(compute_auc(y_va, pv), error = function(e) 0.5)
+    pv <- tryCatch(predict_one(mdl, v1, v2, weight_rows),
+                   error = function(e) rep(NA_real_, nrow(weight_rows)))
+    auc <- tryCatch(compute_auc(weight_y, pv), error = function(e) 0.5)
     if (!is.finite(auc)) auc <- 0.5
     # Convert to weight: scale (AUC - 0.5) and clip below 0.
     w <- pmax(0, auc - 0.5)
@@ -139,16 +156,20 @@ cast_esm <- function(data,
   if (sum(weights) <= 0) weights[] <- 1 / length(weights)
   weights <- weights / sum(weights)
 
-  # Validate ensemble
-  ens_va <- rep(0, nrow(va_df))
-  for (j in seq_len(P)) {
-    if (is.null(models[[j]])) next
-    pv <- tryCatch(predict_one(models[[j]], pairs[1L, j], pairs[2L, j], va_df),
-                   error = function(e) rep(NA_real_, nrow(va_df)))
-    pv[is.na(pv)] <- mean(pv, na.rm = TRUE)
-    ens_va <- ens_va + weights[j] * pv
+  # Held-out ensemble validation (skipped when the rare-species fallback
+  # is active; val_auc is then NA).
+  val_auc <- NA_real_
+  if (!is.null(va_df)) {
+    ens_va <- rep(0, nrow(va_df))
+    for (j in seq_len(P)) {
+      if (is.null(models[[j]])) next
+      pv <- tryCatch(predict_one(models[[j]], pairs[1L, j], pairs[2L, j], va_df),
+                     error = function(e) rep(NA_real_, nrow(va_df)))
+      pv[is.na(pv)] <- mean(pv, na.rm = TRUE)
+      ens_va <- ens_va + weights[j] * pv
+    }
+    val_auc <- compute_auc(y_va, ens_va)
   }
-  val_auc <- compute_auc(y_va, ens_va)
 
   if (verbose) cli::cli_inform(
     "ESM: fitted {sum(!vapply(models, is.null, logical(1)))} pairs from {length(vars)} predictors; val_AUC={signif(val_auc, 4)}."

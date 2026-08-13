@@ -76,12 +76,12 @@ cast_study_area <- function(occurrences,
     cli::cli_abort("Need at least 3 occurrence points (got {n_occ}).")
   }
 
-  # Ensure CRS match
-  raster_crs <- terra::crs(raster_template, describe = TRUE)$code
-  occ_crs <- sf::st_crs(occ_sf)$epsg
-  if (!is.na(raster_crs) && !is.na(occ_crs) && raster_crs != occ_crs) {
-    occ_sf <- sf::st_transform(occ_sf, terra::crs(raster_template))
-  }
+  # Ensure CRS match (idempotent when already identical; also handles
+  # non-EPSG / NA-code representations robustly).
+  occ_sf <- tryCatch(
+    sf::st_transform(occ_sf, terra::crs(raster_template)),
+    error = function(e) occ_sf
+  )
 
   # ---- Build study area polygon -----------------------------------------------
   if (method == "full") {

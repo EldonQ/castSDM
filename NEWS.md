@@ -1,5 +1,44 @@
 # castSDM 0.7.0 (development)
 
+## OpenCodeReview hardening pass
+
+Full-repository scan (alibaba/open-code-review) + fix round:
+
+* `cast_predict_tiled()`: fixed a critical double-skip bug (the NA prototype
+  written at init caused the write-back loop to skip prediction on first
+  runs, leaving all-NA outputs) and a Windows file-lock issue (final write
+  no longer re-opens the output file).
+* `cast_esm()`: the validation split now requires >= 4 observations per
+  class; below that the rare-species fallback fits on all rows and weights
+  by in-sample AUC (`val_auc = NA`).
+* `cast_run_step()`: errors raised inside the step expression now propagate
+  instead of being swallowed by the peakRAM wrapper.
+* `cast_batch()`: per-species errors inside PSOCK workers no longer abort
+  the whole batch; the metrics table now normalises columns when a batch
+  mixes CV and hold-out species (rbind mismatch fixed).
+* `cast_ensemble_raster()`: cross-model SD now counts contributors per
+  block, the mask geometry is validated before use, and empty
+  model intersections abort with a clear error.
+* `cast_project_raster()`: per-scenario statistics are now computed also
+  when the change raster already exists (`overwrite = FALSE`).
+* `make_spatial_folds()`: degenerate-safe binning (constant coordinates,
+  fewer distinct values than folds, kmeans guard).
+* `cast_vif()`, `cast_fit()`: non-finite / non-numeric predictors are
+  rejected with targeted errors instead of silent coercion.
+* `cast_background()`: the background set is topped back up when cells are
+  NA in layers other than the first.
+* `cast_report_odmap()`: null-safe screen diagnostics.
+* `cast_study_area()`: robust CRS handling (unconditional idempotent
+  transform; non-EPSG representations supported).
+* `plot.cast_screen_comparison()`: named retention counts (fixed NA
+  subscripting).
+* `.cast_digest()`: the no-`digest` fallback no longer overflows 32-bit
+  integers.
+* `bioclim-io`: exact model-token matching and deterministic (sorted)
+  recursive file matching.
+* Deduplicated the N-SDM score/weight computation into shared helpers
+  (`.cast_ensemble_scores()`, `.cast_ensemble_weights()`).
+
 ## Consensus selection across spatial folds
 
 * `cast_cv()` now stores `selection_freq`: each predictor's fold-level
