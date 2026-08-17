@@ -1,4 +1,10 @@
-# castSDM 0.8.1
+# castSDM 0.8.0
+
+Design-review release (3 critical / 19 major findings addressed, each with
+regression tests): conditional (knockoff) predictor screening with
+spatial-block inference, contiguous default spatial blocks, segfault-free
+raster batching, and consistent NA / weight semantics across all prediction
+paths.
 
 ## Breaking changes
 
@@ -11,17 +17,7 @@
   `lon`/`lat` columns; falls back to `inference = "fold"` (with a warning)
   when coordinates are absent. New argument `n_blocks` controls the block
   count (auto ~ `min(50, max(20, n/20))`). `"fold"` and `"observation"`
-  remain for comparison. CPI significance values will differ from 0.8.0.
-
-# castSDM 0.8.0
-
-Design-review release (3 critical / 19 major findings addressed, each with
-regression tests): spatially honest CPI inference, contiguous default
-spatial blocks, segfault-free raster batching, and consistent NA / weight
-semantics across all prediction paths.
-
-## Breaking changes
-
+  remain for comparison. CPI significance values will differ from 0.7.0.
 * `cast_select(method = "cpi")` now runs an in-package CPI estimator
   (`.cast_cpi_core`) with **fold-aggregated inference by default**
   (`inference = "fold"`): one log-loss difference per cross-fitting fold is
