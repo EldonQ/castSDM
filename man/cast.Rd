@@ -14,7 +14,7 @@ cast(
   select_num_trees = 300L,
   select_max_vars = 30L,
   select_alpha = 0.05,
-  select_dml_folds = 5L,
+  select_dml_folds = 10L,
   select_cor_threshold = 0.8,
   num_threads = 1L,
   do_cv = TRUE,
@@ -47,15 +47,17 @@ the same environmental columns as \code{species_data}.}
 \code{\link[=cast_select]{cast_select()}}. Default \code{"cpi"}.}
 
 \item{select_num_trees}{Integer. Trees in the RF nuisance/benchmark forests.
-Default \code{300}.}
+Default \code{300}; the CPI/DML selectors cap it at \code{200} (nuisance-forest
+tractability).}
 
 \item{select_max_vars}{Candidate ceiling for DML testing / RF output.
 Default \code{30}.}
 
 \item{select_alpha}{Numeric. FDR level for the DML selector. Default \code{0.05}.}
 
-\item{select_dml_folds}{Integer. Cross-fitting folds for the CPI/DML
-selectors. Default \code{5}.}
+\item{select_dml_folds}{Integer. Cross-fitting folds for the CPI \emph{and} DML
+selectors (despite the name it controls both). Default \code{10}; fold-level
+CPI inference needs enough folds for its t-test (df = folds - 1).}
 
 \item{select_cor_threshold}{Numeric. Absolute correlation threshold for the
 RF benchmark. Default \code{0.8}.}
@@ -68,7 +70,9 @@ Default \code{1}.}
 \item{cv_k}{Integer. Number of spatial folds. Default \code{5}.}
 
 \item{cv_block_method}{Character. Spatial blocking strategy. Default
-\code{"grid"}.}
+\code{"grid"} - grid cells grouped into spatially contiguous folds (the
+legacy interleaved packing is still available as \code{"grid_random"}; see
+\code{\link[=cast_cv]{cast_cv()}}, which also offers a \code{buffer} exclusion band).}
 
 \item{do_predict}{Logical. Generate spatial predictions. Default \code{TRUE}
 if \code{env_data} is provided.}

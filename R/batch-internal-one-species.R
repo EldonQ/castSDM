@@ -1,6 +1,75 @@
 # Standard one-species pipeline for cast_batch(); kept at package level so
 # PSOCK workers can utils::getFromNamespace() after pkgload::load_all (future::
 # multisession cannot). Dispatched from .cast_batch_run_one_species().
+
+# Stable fingerprint of a SpatRaster for cache signatures: metadata plus a
+# hash of a strided sample of cell values. Never digest()/serialize() a
+# SpatRaster itself -- its external pointers crash that code path with a
+# segfault (review C3), which tryCatch cannot contain.
+.cast_raster_fingerprint <- function(r) {
+  nc <- terra::ncell(r)
+  idx <- unique(round(seq(1, nc, length.out = min(100L, nc))))
+  vals <- tryCatch(terra::extract(r, idx), error = function(e) NULL)
+  list(
+    names = names(r), dim = dim(r),
+    ext = as.vector(terra::ext(r)), crs = terra::crs(r),
+    values_hash = .cast_digest(vals)
+  )
+}
+
+# Recursively replace every SpatRaster inside `x` (cfg slots such as
+# raster_stack / future_rasters / raster_mask, or a SpatRaster env_data)
+# with its fingerprint; everything else is returned unchanged, so the step
+# cache signature only ever digests plain R objects.
+.cast_cfg_fingerprint <- function(x) {
+  if (inherits(x, "SpatRaster")) return(.cast_raster_fingerprint(x))
+  if (inherits(x, "PackedSpatRaster")) {
+    return(.cast_raster_fingerprint(terra::unwrap(x)))
+  }
+  if (is.list(x) && !is.data.frame(x)) return(lapply(x, .cast_cfg_fingerprint))
+  x
+}
+
+# PSOCK/multisession workers receive `cfg` by serialization; raw SpatRaster
+# external pointers do not survive that either, so raster slots are wrapped
+# into PackedSpatRaster before export and unwrapped again on the worker.
+.cast_cfg_wrap <- function(cfg) {
+  wrap1 <- function(x) {
+    if (inherits(x, "SpatRaster")) return(terra::wrap(x))
+    if (is.list(x) && !is.data.frame(x)) return(lapply(x, wrap1))
+    x
+  }
+  wrap1(cfg)
+}
+
+.cast_cfg_unwrap <- function(cfg) {
+  unwrap1 <- function(x) {
+    if (inherits(x, "PackedSpatRaster")) return(terra::unwrap(x))
+    if (is.list(x) && !is.data.frame(x)) return(lapply(x, unwrap1))
+    x
+  }
+  unwrap1(cfg)
+}
+
+# Write RDS atomically (temp file + rename) so a crash mid-write cannot leave
+# a truncated cast_result.rds that `cast_batch_resume()` would mark as done.
+.cast_save_rds_atomic <- function(object, path) {
+  tmp <- tempfile(pattern = ".cast_tmp_", tmpdir = dirname(path),
+                  fileext = ".rds")
+  on.exit(unlink(tmp), add = TRUE)
+  saveRDS(object, tmp)
+  ok <- file.rename(tmp, path)
+  if (!ok) {
+    # Windows cannot rename() over an existing file.
+    ok <- tryCatch({
+      if (file.exists(path)) file.remove(path)
+      file.rename(tmp, path)
+    }, error = function(e) FALSE)
+  }
+  if (!ok) cli::cli_warn("Could not write {.path {path}} atomically.")
+  invisible(path)
+}
+
 .cast_batch_standard_route <- function(sp_name, sp_data, env_data, models,
                             output_dir, fig_dpi, seed_i,
                             cfg, fit_args, parallel_batch, dev_root) {
@@ -22,10 +91,13 @@
 
   result <- tryCatch({
     # Run signature: every step cache is keyed on this, so changing any
-    # input (data, config, seed, models) invalidates all stale caches.
+    # input (data, prediction grid, config, seed, models) invalidates all
+    # stale caches. SpatRasters are fingerprinted first: digesting their
+    # external pointers segfaults (review C3).
     sig <- .cast_digest(list(
       species = sp_name, data = sp_data, models = models,
-      seed = seed_i, cfg = cfg, fit_args = fit_args
+      seed = seed_i, cfg = .cast_cfg_fingerprint(cfg),
+      env = .cast_cfg_fingerprint(env_data), fit_args = fit_args
     ))
 
     split <- cast_run_step("prepare", output_dir, sp_name,
@@ -49,7 +121,7 @@
         min_vars = cfg$select_min_vars %||% 3L,
         num_trees = cfg$select_num_trees %||% 300L,
         max_candidates = cfg$select_max_vars %||% 30L,
-        dml_folds = cfg$select_dml_folds %||% 5L,
+        dml_folds = cfg$select_dml_folds %||% 10L,
         cor_threshold = cfg$select_cor_threshold %||% 0.8,
         num_threads = cfg$num_threads %||% 1L,
         seed = seed_i,
@@ -93,7 +165,7 @@
               min_vars = cfg$select_min_vars %||% 3L,
               max_candidates = cfg$select_max_vars %||% 30L,
               num_trees = cfg$select_num_trees %||% 300L,
-              dml_folds = cfg$select_dml_folds %||% 5L,
+              dml_folds = cfg$select_dml_folds %||% 10L,
               cor_threshold = cfg$select_cor_threshold %||% 0.8,
               num_threads = cfg$num_threads %||% 1L
             ),
@@ -252,7 +324,7 @@
     )
     sp_result$fit_full <- fit_full
     sp_result$split <- split
-    saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
+    .cast_save_rds_atomic(sp_result, file.path(sp_dir, "cast_result.rds"))
 
     sp_result
   }, error = function(e) {
@@ -292,9 +364,11 @@
   )
 
   result <- tryCatch({
+    # See the standard route for why cfg / env_data are fingerprinted.
     sig <- .cast_digest(list(
       species = sp_name, data = sp_data, models = models,
-      seed = seed_i, cfg = cfg, fit_args = fit_args
+      seed = seed_i, cfg = .cast_cfg_fingerprint(cfg),
+      env = .cast_cfg_fingerprint(env_data), fit_args = fit_args
     ))
 
     split <- cast_run_step("prepare", output_dir, sp_name,
@@ -377,7 +451,7 @@
     )
     sp_result$split <- split
     sp_result$esm_used <- TRUE
-    saveRDS(sp_result, file.path(sp_dir, "cast_result.rds"))
+    .cast_save_rds_atomic(sp_result, file.path(sp_dir, "cast_result.rds"))
     sp_result
   }, error = function(e) {
     warning(sprintf("Species '%s' (ESM route) failed: %s", sp_name, e$message))
@@ -411,6 +485,23 @@
     }
   }
 
+  # Unwrap any PackedSpatRaster slots that were wrapped for safe transport
+  # to this worker (no-op in a sequential run). Must run after the worker's
+  # pkgload::load_all() above, which is what makes this helper visible here.
+  cfg <- tryCatch(
+    .cast_cfg_unwrap(cfg),
+    error = function(e) {
+      cli::cli_warn("Could not unwrap transported rasters: {conditionMessage(e)}")
+      cfg
+    }
+  )
+
+  if (!cfg$response %in% names(sp_data)) {
+    cli::cli_warn(
+      "Skipping {.val {sp_name}}: response column {.val {cfg$response}} not found in the data."
+    )
+    return(NULL)
+  }
   n_pres <- sum(sp_data[[cfg$response]] == 1, na.rm = TRUE)
   min_occ <- as.integer(cfg$min_occ %||% 20L)
   esm_min  <- as.integer(cfg$esm_min %||% 5L)

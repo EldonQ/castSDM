@@ -32,7 +32,8 @@ A list with components:
 \describe{
 \item{\code{selected}}{Character vector of retained variable names.}
 \item{\code{removed}}{Character vector of removed variable names (in order).}
-\item{\code{vif_log}}{A \code{data.frame} with iteration-by-iteration VIF values.}
+\item{\code{vif_log}}{A \code{data.frame} with iteration-by-iteration VIF values;
+\code{removed} is \code{NA} on the converged final iteration (nothing removed).}
 \item{\code{data}}{Filtered \code{data.frame} with only retained variables.}
 }
 }

@@ -50,7 +50,9 @@ A list with class \code{"cast_esm"} containing:
 \item{weights}{AUC-derived weights on the held-out split.}
 \item{vars}{The retained predictors.}
 \item{base_algo}{\code{"glm"} or \code{"gam"}.}
-\item{val_auc}{Ensemble AUC on the held-out split.}
+\item{val_auc}{Ensemble AUC on the held-out split. Note it is computed
+on the same validation rows used to derive the sub-model \code{weights}, so
+it is optimistic - not an independent performance estimate.}
 }
 }
 \description{

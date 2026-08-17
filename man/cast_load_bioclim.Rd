@@ -11,6 +11,7 @@ cast_load_bioclim(
   sub_period = "1991_2020",
   scenario = NULL,
   model = "ensmean",
+  dataset_prefix = "cnclim1km",
   metadata_csv = NULL,
   verbose = TRUE
 )
@@ -32,6 +33,10 @@ cast_load_bioclim(
 
 \item{model}{Character or \code{NULL}. Climate model (e.g., \code{"ensmean"},
 \code{"access_cm2"}). For future periods. Default \code{"ensmean"}.}
+
+\item{dataset_prefix}{Character. Dataset-directory / metadata token prefix;
+the model filter matches the token \code{"{dataset_prefix}_{model}"}.
+Default \code{"cnclim1km"}.}
 
 \item{metadata_csv}{Character or \code{NULL}. Path to the CHNECO26 metadata
 CSV. If \code{NULL}, attempts to find it at

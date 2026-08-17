@@ -10,7 +10,9 @@
 #' Cache entries store the step's `params` next to its value. A cache hit
 #' requires the stored `params` to be identical to the current call, so
 #' changing any step input (data, configuration, seed) silently invalidates
-#' the cache instead of replaying a stale result. Bare-value cache files
+#' the cache instead of replaying a stale result. `NULL` results are cached
+#' too (as a sentinel entry with an empty value), so a step that legitimately
+#' produced nothing is not recomputed on every resume. Bare-value cache files
 #' written by castSDM < 0.7.0 are treated as misses and overwritten.
 #'
 #' @param step_name Character. Step identifier (filename-safe).
@@ -66,9 +68,9 @@ cast_run_step <- function(step_name, output_dir, species, expr,
   }
   elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
-  if (!is.null(val)) {
-    saveRDS(list(params = params, value = val), ckpt)
-  }
+  # Cache even NULL results (sentinel entry): a step that produced nothing
+  # should not be recomputed on every resume.
+  saveRDS(list(params = params, value = val), ckpt)
   cast_log_resource(output_dir, species, step_name, elapsed, peak_mb)
   if (verbose) {
     cli::cli_inform(

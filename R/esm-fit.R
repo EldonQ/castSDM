@@ -32,7 +32,9 @@
 #'   \item{weights}{AUC-derived weights on the held-out split.}
 #'   \item{vars}{The retained predictors.}
 #'   \item{base_algo}{`"glm"` or `"gam"`.}
-#'   \item{val_auc}{Ensemble AUC on the held-out split.}
+#'   \item{val_auc}{Ensemble AUC on the held-out split. Note it is computed
+#'   on the same validation rows used to derive the sub-model `weights`, so
+#'   it is optimistic - not an independent performance estimate.}
 #' }
 #'
 #' @references
@@ -153,8 +155,15 @@ cast_esm <- function(data,
     models[[j]] <- mdl
     weights[j] <- w
   }
-  if (sum(weights) <= 0) weights[] <- 1 / length(weights)
-  weights <- weights / sum(weights)
+  if (sum(weights) <= 0) {
+    # All sub-models scored <= chance (or failed): fall back to equal weights
+    # over the models that actually fit, leaving failed (NULL) models out so
+    # the surviving weights sum to 1 and the ensemble is not biased toward 0.
+    ok <- !vapply(models, is.null, logical(1))
+    weights[!ok] <- 0
+    if (sum(ok) > 0) weights[ok] <- 1 / sum(ok)
+  }
+  if (sum(weights) > 0) weights <- weights / sum(weights)
 
   # Held-out ensemble validation (skipped when the rare-species fallback
   # is active; val_auc is then NA).

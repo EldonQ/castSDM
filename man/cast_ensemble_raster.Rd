@@ -12,6 +12,9 @@ cast_ensemble_raster(
   method = c("weighted", "best", "equal"),
   models = NULL,
   mask = NULL,
+  clamp = FALSE,
+  extrapolation = TRUE,
+  max_memory_mb = 200,
   prefix = "",
   overwrite = FALSE,
   compression = "LZW",
@@ -37,6 +40,19 @@ it does not exist.}
 \item{mask}{A \code{terra::SpatRaster} or \code{NULL}. If provided, prediction
 is restricted to cells where mask is non-NA.}
 
+\item{clamp}{Logical. Clamp predictors to the training range before
+prediction. Default \code{FALSE}. The MESS layer (see \code{extrapolation}) is
+always computed on the unclamped input, so clamping never hides
+extrapolation.}
+
+\item{extrapolation}{Logical. Compute a per-cell MESS layer (Elith et
+al. 2010) block by block and write \verb{<prefix>_mess.tif}. Default
+\code{TRUE} (skipped, with \code{mess_path = NULL}, if the fit lacks a stored
+training reference).}
+
+\item{max_memory_mb}{Numeric. Approximate per-block memory budget in MB
+used to size the row blocks. Default \code{200}.}
+
 \item{prefix}{Character. Filename prefix. Default \code{""}.}
 
 \item{overwrite}{Logical. Overwrite existing output. Default \code{FALSE}.}
@@ -51,6 +67,8 @@ A list with components:
 \item{hss_path}{File path to the HSS raster.}
 \item{hss_sd_path}{File path to the cross-model uncertainty (SD) raster.}
 \item{binary_path}{File path to the binary raster.}
+\item{mess_path}{File path to the MESS raster, or \code{NULL} when
+\code{extrapolation = FALSE} or no training reference is available.}
 \item{weights}{Named numeric vector of per-model weights.}
 \item{threshold}{Binary classification threshold.}
 \item{n_valid_cells}{Number of cells predicted.}
@@ -61,7 +79,19 @@ Generates ensemble habitat suitability (HSS) and binary suitability
 rasters from a fitted model and cross-validation results. This is the
 raster-native equivalent of \code{\link[=cast_ensemble]{cast_ensemble()}}: it reads a
 \code{SpatRaster} stack, runs all models in memory, computes the weighted
-ensemble, and writes GeoTIFF outputs.
+ensemble, and writes GeoTIFF outputs. Extrapolation control is built
+in: an optional per-cell MESS layer flags out-of-envelope cells, and
+\code{clamp} can cap predictors at their training range.
+}
+\details{
+Per block, models whose predictions are not finite are excluded and the
+remaining positive weights are renormalised before averaging - the same
+convention as \code{\link[=cast_ensemble]{cast_ensemble()}}. The cross-model SD layer likewise uses
+only models with positive weight and finite predictions (\code{NA} where
+fewer than two models contribute). Cells with \code{NA} covariates (or
+masked out) stay \code{NA} in every output layer. If no model produces
+finite predictions for a block, those cells are \code{NA} and a warning is
+issued once.
 }
 \seealso{
 \code{\link[=cast_ensemble]{cast_ensemble()}}, \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_project_raster]{cast_project_raster()}}

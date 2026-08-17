@@ -1,15 +1,14 @@
-citHeader("To cite castSDM in publications use:")
-
-citEntry(
-  entry    = "Manual",
-  title    = "castSDM: Conditional Variable Selection for Species Distribution Modeling",
-  author   = personList(as.person("Liqiang Q")),
-  year     = "2025",
-  note     = "R package version 0.7.0",
+bibentry(
+  bibtype  = "Manual",
+  title    = "castSDM: Causal Variable Selection for Species Distribution Modeling",
+  author   = c(person("Liqiang", "Q")),
+  year     = "2026",
+  note     = "R package version 0.8.0",
   url      = "https://github.com/EldonQ/castSDM",
+  header   = "To cite castSDM in publications use:",
   textVersion = paste0(
-    "Q, L. (2025). castSDM: Conditional Variable Selection for Species ",
-    "Distribution Modeling. R package version 0.7.0. ",
+    "Q, L. (2026). castSDM: Causal Variable Selection for Species ",
+    "Distribution Modeling. R package version 0.8.0. ",
     "https://github.com/EldonQ/castSDM"
   )
 )

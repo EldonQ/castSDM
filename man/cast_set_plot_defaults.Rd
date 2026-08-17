@@ -4,18 +4,19 @@
 \alias{cast_set_plot_defaults}
 \title{Configure Plot Fonts}
 \usage{
-cast_set_plot_defaults(family = "Arial")
+cast_set_plot_defaults(family = "sans")
 }
 \arguments{
 \item{family}{Character. Font family passed to ggplot2. Default
-\code{"Arial"}.}
+\code{"sans"}.}
 }
 \value{
 Invisibly returns \code{family}.
 }
 \description{
-Sets the font family used by castSDM figures. The package default is
-\code{"Arial"}; on Windows the family is registered with
+Sets the font family used by castSDM figures. The package default is the
+portable \code{"sans"} family (available in every R graphics device); on
+Windows a user can switch to \code{"Arial"}, which is registered with
 \code{\link[grDevices:windowsFonts]{grDevices::windowsFont()}} when available. The choice is stored in the
 session option \code{castSDM.font_family} and read by every plot method; the
 global ggplot2 theme is never modified. Use \code{\link[=cast_safe_ggsave]{cast_safe_ggsave()}} for

@@ -40,9 +40,12 @@
 #'     replicates) per model.}
 #'   \item{selection_freq}{Data.frame with each predictor's selection
 #'     frequency across replicates.}
-#'   \item{prediction}{`data.frame` with `lon`, `lat`, `hss_mean`,
-#'     `hss_sd` aggregated from the replicate predictions (only when
-#'     `env_data` is supplied).}
+#'   \item{prediction}{`data.frame` with `lon`, `lat`, and per-model
+#'     `hss_mean_<model>` / `hss_sd_<model>` columns aggregated from the
+#'     replicate predictions (only when `env_data` is supplied). The
+#'     aggregation is per model: each fitted model gets its own mean/SD
+#'     column pair, and replicates that lack a prediction surface are
+#'     dropped replicate-wise instead of voiding the whole aggregation.}
 #'   \item{n_reps}{Number of completed replicates.}
 #' }
 #'
@@ -134,22 +137,36 @@ cast_rep <- function(occurrences, raster_stack, env_data = NULL,
   rownames(selection_freq) <- NULL
 
   # -- Aggregated prediction surface --------------------------------------
+  # Per-model aggregation: every model gets its own hss_mean_<model> /
+  # hss_sd_<model> column pair. Replicates without a prediction surface
+  # are filtered replicate-wise (they no longer void the whole surface).
   prediction <- NULL
-  if (!is.null(env_data) && all(vapply(reps, function(r) !is.null(r$predict),
-                                       logical(1)))) {
-    cols <- grep("^HSS_", names(reps[[1]]$predict$predictions), value = TRUE)
-    if (length(cols)) {
-      mat <- do.call(cbind, lapply(reps, function(r) {
-        r$predict$predictions[[cols[1]]]
-      }))
-      prediction <- data.frame(
-        lon = reps[[1]]$predict$predictions$lon,
-        lat = reps[[1]]$predict$predictions$lat,
-        hss_mean = rowMeans(mat, na.rm = TRUE),
-        hss_sd = if (ncol(mat) > 1L) apply(mat, 1L, stats::sd, na.rm = TRUE)
-                 else rep(NA_real_, nrow(mat)),
-        stringsAsFactors = FALSE
-      )
+  if (!is.null(env_data)) {
+    has_pred <- vapply(reps, function(r) !is.null(r$predict), logical(1))
+    reps_pred <- reps[has_pred]
+    if (length(reps_pred)) {
+      cols <- unique(unlist(lapply(reps_pred, function(r) {
+        grep("^HSS_", names(r$predict$predictions), value = TRUE)
+      })))
+      if (length(cols)) {
+        prediction <- data.frame(
+          lon = reps_pred[[1]]$predict$predictions$lon,
+          lat = reps_pred[[1]]$predict$predictions$lat,
+          stringsAsFactors = FALSE
+        )
+        n_cells <- nrow(prediction)
+        for (col in cols) {
+          mdl <- sub("^HSS_", "", col)
+          mat <- do.call(cbind, lapply(reps_pred, function(r) {
+            v <- r$predict$predictions[[col]]
+            if (is.null(v)) rep(NA_real_, n_cells) else v
+          }))
+          prediction[[paste0("hss_mean_", mdl)]] <- rowMeans(mat, na.rm = TRUE)
+          prediction[[paste0("hss_sd_", mdl)]] <-
+            if (ncol(mat) > 1L) apply(mat, 1L, stats::sd, na.rm = TRUE)
+            else rep(NA_real_, n_cells)
+        }
+      }
     }
   }
 
@@ -187,8 +204,10 @@ print.cast_rep <- function(x, ...) {
 #' Plot Replicate Results
 #'
 #' Two-panel figure: (left) per-model evaluation metrics with replicate
-#' spread; (right) prediction mean and uncertainty (SD) when a prediction
-#' grid was supplied.
+#' spread (axis spans -1 to 1 so negative TSS/CBI stay visible); (right)
+#' prediction mean and uncertainty (SD) of the first model's
+#' `hss_mean_<model>` / `hss_sd_<model>` columns when a prediction grid
+#' was supplied.
 #'
 #' @param x A `cast_rep` object.
 #' @param ... Ignored.
@@ -217,15 +236,21 @@ plot.cast_rep <- function(x, ...) {
     ggplot2::labs(title = "Evaluation across replicates",
                   subtitle = sprintf("%d replicates", x$n_reps),
                   x = "", y = "Score") +
-    ggplot2::coord_cartesian(ylim = c(0, 1)) +
+    ggplot2::coord_cartesian(ylim = c(-1, 1)) +
     theme_cast()
 
   if (is.null(x$prediction)) return(p1)
+  mean_cols <- grep("^hss_mean_", names(x$prediction), value = TRUE)
+  if (!length(mean_cols)) return(p1)
+  sd_col <- sub("^hss_mean_", "hss_sd_", mean_cols[1L])
 
   p2 <- ggplot2::ggplot(x$prediction,
-                        ggplot2::aes(x = .data$hss_mean, y = .data$hss_sd)) +
+                        ggplot2::aes(x = .data[[mean_cols[1L]]],
+                                     y = .data[[sd_col]])) +
     ggplot2::geom_point(size = 0.8, alpha = 0.6, color = "#256E92") +
     ggplot2::labs(title = "Prediction uncertainty across replicates",
+                  subtitle = sprintf("model: %s",
+                                     sub("^hss_mean_", "", mean_cols[1L])),
                   x = "Mean HSS", y = "HSS SD") +
     theme_cast()
 

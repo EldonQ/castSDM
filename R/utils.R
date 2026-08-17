@@ -6,6 +6,9 @@
 #'
 #' @param data A `data.frame` to validate.
 #' @param required_cols Character vector of required column names.
+#' @param response Response column name; when present in `data` its values are
+#'   checked to be binary (0/1 or logical). Rows with `NA` trigger a warning.
+#'   Default `"presence"`.
 #' @param call Caller environment for error reporting.
 #'
 #' @return `data` (invisibly), or aborts with informative error.
@@ -14,6 +17,7 @@
 #' @noRd
 validate_species_data <- function(data,
                                   required_cols = c("lon", "lat", "presence"),
+                                  response = "presence",
                                   call = parent.frame()) {
   if (!is.data.frame(data)) {
     cli::cli_abort(
@@ -28,7 +32,66 @@ validate_species_data <- function(data,
       call = call
     )
   }
+  if (length(response) && response %in% names(data)) {
+    .cast_check_response(data[[response]], response, call = call)
+  }
   invisible(data)
+}
+
+
+#' Validate a Binary Response Vector
+#'
+#' Aborts unless every non-missing value is 0/1 (logical is accepted: it
+#' coerces cleanly to 0/1). Missing rows only warn - dropping them is the
+#' caller's decision.
+#'
+#' @param y Response vector.
+#' @param response Column name used in messages.
+#' @param call Caller environment for error reporting.
+#' @keywords internal
+#' @noRd
+.cast_check_response <- function(y, response = "presence",
+                                 call = parent.frame()) {
+  n_na <- sum(is.na(y))
+  if (n_na > 0L) {
+    cli::cli_warn(
+      "Response {.val {response}} has {n_na} missing row{?s}; model fitting will fail or drop them downstream.",
+      call = call
+    )
+  }
+  if (is.logical(y)) return(invisible(y))
+  vals <- unique(y[!is.na(y)])
+  if (!is.numeric(y) || !all(vals %in% c(0, 1))) {
+    cli::cli_abort(c(
+      "Response {.val {response}} must be binary 0/1; found value{?s}: {.val {head(vals, 5)}}.",
+      i = "Recode presence/background as 1/0 before modelling."
+    ), call = call)
+  }
+  invisible(y)
+}
+
+
+#' Reject Non-Numeric Predictor Columns
+#'
+#' Shared guard for the fit / evaluate / CV / predict pathways: silently
+#' coercing a factor with `as.numeric()` would model its level codes, not its
+#' values, so non-numeric predictors are rejected everywhere.
+#'
+#' @param x A `data.frame` of predictor columns.
+#' @param arg Argument name used in messages.
+#' @param call Caller environment for error reporting.
+#' @keywords internal
+#' @noRd
+.cast_check_numeric_predictors <- function(x, arg = "data",
+                                           call = parent.frame()) {
+  bad <- names(x)[!vapply(x, is.numeric, logical(1))]
+  if (length(bad)) {
+    cli::cli_abort(c(
+      "Non-numeric predictor{?s}: {.val {bad}}.",
+      i = "{.arg {arg}} must hold numeric predictors only; convert factors/characters to numeric before modelling."
+    ), call = call)
+  }
+  invisible(x)
 }
 
 
@@ -72,11 +135,15 @@ get_env_vars <- function(data, response = "presence",
   nms <- nms[vapply(data[nms], is.numeric, logical(1))]
 
   # Exclude near-zero-variance columns (e.g., occ = all 1s, constant flags)
-  # These carry no ecological signal and often indicate metadata slippage
+  # These carry no ecological signal and often indicate metadata slippage.
+  # `length(vals) <= 1L` guards var() of a single non-NA value (which returns
+  # NA); a near-constant column is dropped instead of injecting an NA name.
   nms[vapply(nms, function(v) {
     vals <- data[[v]]
     vals <- vals[!is.na(vals)]
-    length(vals) > 0 && stats::var(vals) > 1e-10
+    if (length(vals) <= 1L) return(FALSE)
+    vv <- stats::var(vals)
+    is.finite(vv) && vv > 1e-10
   }, logical(1))]
 }
 
@@ -106,20 +173,27 @@ compute_auc <- function(y, pred) {
 #' @param pred Numeric vector of predicted probabilities [0,1].
 #' @param obs  Integer/numeric binary observed outcomes (0/1).
 #' @return Named numeric vector with AUC, TSS, CBI.
+#' @details The AUC fixes `pROC::roc(direction = "<")` so a predictor that
+#'   ranks absences above presences correctly reports AUC < 0.5 instead of
+#'   being silently flipped by `direction = "auto"`. The TSS threshold is the
+#'   max-Youden point chosen *on the evaluation set itself* (the usual
+#'   max-Youden convention for SDM evaluation), so TSS is mildly optimistic
+#'   when the same threshold is reused elsewhere.
 #' @keywords internal
 #' @noRd
 evaluate_model_full <- function(pred, obs) {
   pred <- pmin(pmax(as.numeric(pred), 1e-7), 1 - 1e-7)
   obs  <- as.integer(obs)
 
-  # -- AUC (ROC) -------------------------------------------------------------
+  # -- AUC (ROC), direction fixed: worse-than-random predictors must report
+  #    AUC < 0.5, not be mirrored to 1 - AUC by direction = "auto".
   auc_val <- tryCatch({
-    as.numeric(pROC::auc(pROC::roc(obs, pred, quiet = TRUE)))
+    as.numeric(pROC::auc(pROC::roc(obs, pred, quiet = TRUE, direction = "<")))
   }, error = function(e) NA_real_)
 
   # -- TSS (at threshold maximising sensitivity+specificity) ------------------
   tss_val <- tryCatch({
-    roc_obj <- pROC::roc(obs, pred, quiet = TRUE)
+    roc_obj <- pROC::roc(obs, pred, quiet = TRUE, direction = "<")
     coords  <- pROC::coords(roc_obj, "best",
                             ret = c("sensitivity", "specificity"))
     as.numeric(coords$sensitivity[1] + coords$specificity[1] - 1)
@@ -258,19 +332,20 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
 
 #' Configure Plot Fonts
 #'
-#' Sets the font family used by castSDM figures. The package default is
-#' \code{"Arial"}; on Windows the family is registered with
+#' Sets the font family used by castSDM figures. The package default is the
+#' portable \code{"sans"} family (available in every R graphics device); on
+#' Windows a user can switch to \code{"Arial"}, which is registered with
 #' [grDevices::windowsFont()] when available. The choice is stored in the
 #' session option `castSDM.font_family` and read by every plot method; the
 #' global ggplot2 theme is never modified. Use [cast_safe_ggsave()] for
 #' export so PNG/PDF devices handle fonts consistently.
 #'
 #' @param family Character. Font family passed to ggplot2. Default
-#'   \code{"Arial"}.
+#'   \code{"sans"}.
 #'
 #' @return Invisibly returns \code{family}.
 #' @export
-cast_set_plot_defaults <- function(family = "Arial") {
+cast_set_plot_defaults <- function(family = "sans") {
   if (.Platform$OS.type == "windows" && identical(tolower(family), "arial")) {
     tryCatch(
       grDevices::windowsFonts(Arial = grDevices::windowsFont("Arial")),
@@ -299,7 +374,7 @@ cast_set_plot_defaults <- function(family = "Arial") {
 #' @export
 cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
   check_suggested("ggplot2", "for plot export")
-  family <- getOption("castSDM.font_family", "Arial")
+  family <- getOption("castSDM.font_family", "sans")
   if (.Platform$OS.type == "windows" && identical(tolower(family), "arial")) {
     tryCatch(
       grDevices::windowsFonts(Arial = grDevices::windowsFont("Arial")),

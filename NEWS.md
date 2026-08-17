@@ -1,4 +1,118 @@
-# castSDM 0.7.0 (development)
+# castSDM 0.8.1
+
+## Breaking changes
+
+* `cast_select(method = "cpi")` gains a **spatial-block inference layer**,
+  now the default (`inference = "block"`): per-observation log-loss
+  differences are averaged within a fine spatial grid and the one-sided
+  t-test runs on the block means (`df = n_blocks - 1`, cluster-robust), so
+  spatially autocorrelated observations are no longer treated as
+  independent *and* the fold-level test's power loss is recovered. Requires
+  `lon`/`lat` columns; falls back to `inference = "fold"` (with a warning)
+  when coordinates are absent. New argument `n_blocks` controls the block
+  count (auto ~ `min(50, max(20, n/20))`). `"fold"` and `"observation"`
+  remain for comparison. CPI significance values will differ from 0.8.0.
+
+# castSDM 0.8.0
+
+Design-review release (3 critical / 19 major findings addressed, each with
+regression tests): spatially honest CPI inference, contiguous default
+spatial blocks, segfault-free raster batching, and consistent NA / weight
+semantics across all prediction paths.
+
+## Breaking changes
+
+* `cast_select(method = "cpi")` now runs an in-package CPI estimator
+  (`.cast_cpi_core`) with **fold-aggregated inference by default**
+  (`inference = "fold"`): one log-loss difference per cross-fitting fold is
+  tested (df = folds - 1) instead of treating n spatially autocorrelated
+  observations as i.i.d., so p-values and FDR control stay calibrated on
+  spatial data. The old per-observation t-test remains available as
+  `inference = "observation"`. Cross-fitting folds are now stratified by
+  the response, and rare species get automatic fold reduction with
+  actionable error messages instead of ranger crashes. The `cpi` package
+  is no longer required; `knockoff` (already used for the knockoff matrix)
+  replaces it in Suggests. CPI significance values will differ from 0.7.0.
+* `block_method = "grid"` in `cast_cv()` / `make_spatial_folds()` /
+  `cast_prepare()` now builds **spatially contiguous blocks** (connected
+  grid cells) instead of count-balanced random packing, and gains a
+  `buffer` argument that excludes training points within `buffer` distance
+  of held-out points. The legacy behaviour is available as
+  `block_method = "grid_random"`. CV metrics, ensemble weights, and
+  consensus frequencies will shift relative to 0.7.0 (generally downward,
+  removing spatial leakage).
+* AUC is now computed with a fixed `direction = "<"`: a model that ranks
+  presences *below* backgrounds reports AUC < 0.5 instead of being flipped
+  to 1 - AUC. Ensemble composite scores (`2*AUC-1 + TSS + CBI`) can now be
+  negative, so reversed models are correctly down-weighted.
+* Default `dml_folds` / `select_dml_folds` is now **10** (was 5) in
+  `cast_select()`, `cast()`, and `cast_batch()`, and the YAML template
+  follows suit.
+* `cast_ensemble()` / `cast_ensemble_raster()`: zero-weight models
+  (composite score < 0.5) no longer count towards the cross-model
+  `hss_sd`; with fewer than two contributing models `hss_sd` is `NA`
+  instead of a misleading zero or single-model value.
+* `cast_rep()` prediction surfaces are now aggregated per model as
+  `hss_mean_<model>` / `hss_sd_<model>` column pairs; the previous
+  first-model-only `hss_mean` / `hss_sd` columns are gone.
+* `cast_batch()` per-species seeds are now derived from `seed` plus a
+  stable hash of the species name, so a species gets the same seed
+  regardless of which subset of the batch it runs in. Batch results are
+  bit-identical between interrupted+resumed and uninterrupted runs, but
+  differ from 0.7.0 runs at the same `seed`.
+* `cast_background()` validates study-area/raster geometry consistency
+  (`terra::compareGeom`) and checks all layers for NA when defining valid
+  sampling cells; additional occurrence columns are preserved in the
+  output. Misaligned masks now error instead of silently mis-indexing.
+
+## Bug fixes
+
+* `cast_batch()` no longer segfaults when `raster_stack` / `future_rasters`
+  carry in-memory `SpatRaster` objects: cache signatures hash a metadata
+  fingerprint (`.cast_cfg_fingerprint`) instead of serialising external
+  pointers, and rasters cross to PSOCK workers via `terra::wrap()` /
+  `unwrap()`. Step-cache signatures now include `env_data`, so changing
+  the prediction grid no longer replays stale predictions (M13).
+* `cast_batch()` result files are written atomically (temp file + rename),
+  and resume validates the RDS instead of trusting `file.exists`, so a
+  truncated write can no longer mark a species permanently done.
+  `cast_batch(parallel = TRUE)` now actually sets a `future` plan (and
+  restores the previous plan and `CASTSDM_ROOT` on exit).
+* `cast_predict_tiled()` writes `NA` back to cells with NA covariates
+  instead of fabricating suitability via training-median imputation
+  (matching `cast_ensemble_raster()`), restores the user's `future` plan
+  on exit, and sizes workers from the intra-model thread budget.
+* `cast_ensemble_raster()` renormalises the weights of contributing
+  models per block after excluding non-finite predictions, fixing a
+  systematic downward compression of HSS towards zero.
+* `cast_project()` validates current/future environmental row alignment
+  (`.cast_align_future_env`) before differencing — length or order
+  mismatches now abort instead of silently recycling; each scenario runs
+  under its own `tryCatch`; `.save_prediction_tif()` honours the input
+  raster's `res`/`crs` instead of hard-coding 0.05°/EPSG:4326.
+* `print.cast_batch()` displays the metric columns again (field-name drift
+  between assembly `auc/tss/cbi` and printing `auc_mean/...` fixed).
+* Response columns are validated as 0/1 at all entry points
+  (`.cast_check_response`) and non-numeric predictors are rejected
+  uniformly across fit/evaluate/predict/CV paths
+  (`.cast_check_numeric_predictors`) instead of silent `as.numeric()`
+  coercion.
+* MESS computation (`.cast_mess`) is vectorised (`findInterval`/ecdf), so
+  raster-scale extrapolation flagging is now feasible.
+
+## New features
+
+* `cast_select(method = "cpi")` gains `knockoff_reps` (default 3): the
+  knockoff matrix is redrawn per replicate and per-variable statistics are
+  replicate medians, stabilising Monte-Carlo p-values.
+* `cast_ensemble_raster()` gains `clamp`, `extrapolation`, and
+  `max_memory_mb` arguments and writes a block-computed `mess.tif`
+  extrapolation layer alongside `hss.tif` / `hss_sd.tif`, bringing the
+  raster path up to the documented extrapolation-control behaviour.
+* DML selector runs `n_rep = 3` repetitions (median reported), following
+  the DoubleML recommendation instead of relying on a single fit.
+
+# castSDM 0.7.0
 
 ## OpenCodeReview hardening pass
 

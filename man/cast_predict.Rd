@@ -39,6 +39,10 @@ arbitrary presence:background prevalence set in \code{\link[=cast_background]{ca
 and threshold HSS within a projection, and avoid reading it as an absolute
 occurrence probability.
 
+Predictors must be numeric: non-numeric columns (e.g. factor or
+character) in \code{new_data} abort with an error instead of being silently
+coerced via \code{as.numeric()}.
+
 When the fit carries a training reference (it does by default), each
 prediction row is scored for \strong{extrapolation} via the multivariate
 environmental similarity surface (MESS; Elith et al. 2010). Negative MESS

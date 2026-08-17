@@ -10,7 +10,10 @@ cast_select(
   method = c("cpi", "dml", "rf"),
   alpha = 0.05,
   max_candidates = 30L,
-  dml_folds = 5L,
+  dml_folds = 10L,
+  inference = c("block", "fold", "observation"),
+  n_blocks = NULL,
+  knockoff_reps = 3L,
   num_trees = 300L,
   min_vars = 3L,
   force_include = character(),
@@ -26,7 +29,7 @@ cast_select(
 \item{response}{Binary response column.}
 
 \item{method}{\code{"cpi"} (default), \code{"dml"}, or the conventional \code{"rf"}
-benchmark.}
+benchmark. Must be specified explicitly; \code{NULL} errors.}
 
 \item{alpha}{FDR level for the CPI/DML selectors. Default \code{0.05}.}
 
@@ -34,7 +37,21 @@ benchmark.}
 pre-screened by RF importance for feasibility. Also the output ceiling for
 the RF benchmark. Default \code{30}.}
 
-\item{dml_folds}{Cross-fitting folds for the CPI/DML selectors. Default \code{5}.}
+\item{dml_folds}{Cross-fitting folds for the CPI \emph{and} DML selectors
+(despite the name it controls both). Default \code{10}; fold-level CPI
+inference needs enough folds for its t-test (df = folds - 1).}
+
+\item{inference}{CPI significance layer: \code{"block"} (default) tests
+spatial-block mean log-loss differences (cluster-robust, needs \code{lon}/\code{lat}
+columns); \code{"fold"} tests fold-mean differences; \code{"observation"} reproduces
+the reference per-observation t-test (i.i.d. assumption; anti-conservative
+under spatial autocorrelation - see the Inference assumptions section).}
+
+\item{n_blocks}{Target number of spatial blocks for \code{inference = "block"}
+(auto when \code{NULL}, roughly \code{min(50, max(20, n/20))}).}
+
+\item{knockoff_reps}{Number of knockoff draws per CPI run; per-variable
+statistics are the medians across replicates. Default \code{3}.}
 
 \item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.
 The CPI and DML selectors cap this at \code{200} with an informational message
@@ -81,6 +98,24 @@ conditional effect and is best paired with \code{\link[=cast_effect]{cast_effect
 interpretable coefficient. \code{method = "rf"} is retained as a conventional
 (associational) permutation-importance benchmark for comparison.
 }
+\section{Inference assumptions}{
+
+The CPI p-values come from a one-sided t-test on log-loss differences.
+With the default \code{inference = "block"} each spatial grid block contributes
+one mean difference (a cluster-robust t-test, \code{df = n_blocks - 1}): it does
+not treat spatially autocorrelated observations as independent, while
+retaining far more power than the fold-level test. \code{inference = "fold"}
+aggregates to one mean per cross-fitting fold (\code{df = folds - 1}), which is
+less anti-conservative than testing all n per-observation differences as if
+they were independent but also much lower-powered. \code{inference = "observation"} reproduces the reference \pkg{cpi} behaviour and assumes
+i.i.d. observations; on spatially autocorrelated data it inflates
+significance (effective sample size << n) and the FDR screen loses its
+nominal control. Note that every layer still uses random cross-fit folds, so
+train/test remain spatially adjacent inside the cross-fit; interpret
+surviving predictors as conditionally informative, not as proof of regional
+causality.
+}
+
 \seealso{
 \code{\link[=cast_effect]{cast_effect()}}, \code{\link[=cast_counterfactual]{cast_counterfactual()}}
 }

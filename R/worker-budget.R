@@ -28,7 +28,8 @@
 #' @export
 cast_worker_budget <- function(total_workers = NULL,
                                n_species     = 1L) {
-  avail <- max(1L, parallel::detectCores() - 1L)
+  # detectCores() can return NA (e.g. restricted containers): stay at 1.
+  avail <- max(1L, parallel::detectCores() - 1L, na.rm = TRUE)
   total <- if (is.null(total_workers)) avail else
     max(1L, min(as.integer(total_workers), avail))
   n_species <- max(1L, as.integer(n_species))

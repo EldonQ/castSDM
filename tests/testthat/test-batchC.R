@@ -11,11 +11,10 @@ test_that("cast_rep aggregates replicate metrics and selection frequency", {
   )
   r <- terra::rast(
     nrows = 10, ncols = 10,
-    xmin = 99, xmax = 111, ymin = 29, ymax = 41
+    xmin = 99, xmax = 111, ymin = 29, ymax = 41, nlyrs = 3
   )
-  r$x1 <- terra::setValues(r, runif(100))
-  r$x2 <- terra::setValues(r, runif(100))
-  r$x3 <- terra::setValues(r, runif(100))
+  names(r) <- c("x1", "x2", "x3")
+  terra::values(r) <- matrix(runif(3 * 100), ncol = 3)
 
   res <- cast_rep(
     occ, r, n_reps = 2, models = "rf",
@@ -48,6 +47,39 @@ test_that("ensemble predictions carry a cross-model SD column", {
   cv <- new_cast_cv(
     metrics = data.frame(
       model = c("rf", "gam"),
+      # Both composite scores >= 0.5 so both models carry positive weight.
+      auc_mean = c(0.85, 0.8), auc_sd = c(0.1, 0.1),
+      tss_mean = c(0.6, 0.5), tss_sd = c(0.1, 0.1),
+      cbi_mean = c(0.5, 0.4), cbi_sd = c(0.1, 0.1),
+      n_folds = c(3, 3), n_selected_mean = c(3, 3)
+    ),
+    fold_metrics = data.frame(), folds = integer(n), k = 3L,
+    block_method = "grid", thresholds = c(rf = 0.5, gam = 0.5)
+  )
+  ens <- cast_ensemble(fit, cv, dat, method = "weighted")
+  expect_true("hss_sd" %in% names(ens$predictions))
+  expect_true(all(is.finite(ens$predictions$hss_sd)))
+})
+
+test_that("ensemble hss_sd is NA when a single model carries the weight", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  set.seed(62)
+  n <- 120
+  dat <- data.frame(
+    lon = runif(n), lat = runif(n),
+    presence = rbinom(n, 1, 0.5), x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
+  )
+  screen <- new_cast_select(c("x1", "x2", "x3"),
+                            data.frame(variable = c("x1", "x2", "x3")),
+                            method = "manual")
+  fit <- cast_fit(dat, screen = screen, models = c("rf", "gam"),
+                  rf_ntree = 40, seed = 63, verbose = FALSE)
+  cv <- new_cast_cv(
+    metrics = data.frame(
+      model = c("rf", "gam"),
+      # gam's composite score < 0.5 -> zero weight -> excluded from the
+      # cross-model SD, which is then undefined (NA) by convention.
       auc_mean = c(0.8, 0.7), auc_sd = c(0.1, 0.1),
       tss_mean = c(0.5, 0.4), tss_sd = c(0.1, 0.1),
       cbi_mean = c(0.4, 0.3), cbi_sd = c(0.1, 0.1),
@@ -57,8 +89,10 @@ test_that("ensemble predictions carry a cross-model SD column", {
     block_method = "grid", thresholds = c(rf = 0.5, gam = 0.5)
   )
   ens <- cast_ensemble(fit, cv, dat, method = "weighted")
+  expect_equal(unname(ens$weights["gam"]), 0)
+  expect_gt(unname(ens$weights["rf"]), 0)
   expect_true("hss_sd" %in% names(ens$predictions))
-  expect_true(all(is.finite(ens$predictions$hss_sd)))
+  expect_true(all(is.na(ens$predictions$hss_sd)))
 })
 
 test_that("counterfactual carries cross-model delta SD", {

@@ -24,8 +24,13 @@ CBI (Continuous Boyce Index) for fitted models on test data.
 \details{
 \itemize{
 \item \strong{AUC}: Area Under the Receiver Operating Characteristic curve,
-measuring discrimination ability. Computed via \code{\link[pROC:roc]{pROC::roc()}}.
-\item \strong{TSS}: True Skill Statistic = Sensitivity + Specificity - 1.
+measuring discrimination ability. Computed via \code{\link[pROC:roc]{pROC::roc()}} with
+\code{direction = "<"} fixed, so a worse-than-random model correctly reports
+AUC < 0.5 instead of being mirrored by \code{direction = "auto"}.
+\item \strong{TSS}: True Skill Statistic = Sensitivity + Specificity - 1, at the
+max-Youden threshold chosen on the evaluation set itself (the usual
+SDM evaluation convention; mildly optimistic if the same threshold is
+then reused elsewhere).
 \item \strong{CBI}: Continuous Boyce Index, measuring predicted-expected ratio.
 }
 }

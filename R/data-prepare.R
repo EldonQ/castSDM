@@ -18,7 +18,8 @@
 #' \describe{
 #'   \item{`selected`}{Character vector of retained variable names.}
 #'   \item{`removed`}{Character vector of removed variable names (in order).}
-#'   \item{`vif_log`}{A `data.frame` with iteration-by-iteration VIF values.}
+#'   \item{`vif_log`}{A `data.frame` with iteration-by-iteration VIF values;
+#'   `removed` is `NA` on the converged final iteration (nothing removed).}
 #'   \item{`data`}{Filtered `data.frame` with only retained variables.}
 #' }
 #'
@@ -126,15 +127,17 @@ cast_vif <- function(data,
     max_vif <- max(vif_vals)
     max_var <- names(which.max(vif_vals))
 
+    converged <- max_vif <= threshold
     vif_log[[iteration]] <- data.frame(
       iteration = iteration,
       n_vars = length(current_vars),
       max_vif = round(max_vif, 2),
-      removed = max_var,
+      # NA on the converged final iteration: nothing was removed there.
+      removed = if (converged) NA_character_ else max_var,
       stringsAsFactors = FALSE
     )
 
-    if (max_vif <= threshold) {
+    if (converged) {
       if (verbose) {
         n_remain <- length(current_vars)
         cli::cli_inform(
@@ -204,7 +207,9 @@ cast_vif <- function(data,
 #' @param split Hold-out strategy: `"spatial"` (default), `"stratified"`, or
 #'   `"random"`. Degenerate spatial/stratified splits fall back automatically.
 #' @param block_method Spatial blocking for `split = "spatial"`: `"grid"`
-#'   (default) or `"cluster"`.
+#'   (default; grid cells grouped into spatially contiguous blocks),
+#'   `"grid_random"` (legacy count-balanced packing, ignores cell position),
+#'   or `"cluster"`.
 #' @param n_blocks Integer. Number of spatial blocks to form before assigning
 #'   whole blocks to the test set. Default `20`.
 #' @param verbose Logical. Print detected variables and excluded columns.
@@ -227,7 +232,7 @@ cast_vif <- function(data,
 cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          env_vars = NULL,
                          split = c("spatial", "stratified", "random"),
-                         block_method = c("grid", "cluster"),
+                         block_method = c("grid", "grid_random", "cluster"),
                          n_blocks = 20L, verbose = TRUE) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
@@ -368,10 +373,17 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   }
   ub <- sample(unique(blocks))
   target_test <- round((1 - train_fraction) * n)
+  # Greedy block pick minimising |test size - target|: a block is added only
+  # when it brings the running total closer to the target, so the final
+  # hold-out fraction does not overshoot the requested one.
   test_blocks <- integer(0)
+  cur_test <- 0L
   for (b in ub) {
-    if (sum(blocks %in% test_blocks) >= target_test) break
-    test_blocks <- c(test_blocks, b)
+    b_n <- sum(blocks == b)
+    if (abs((cur_test + b_n) - target_test) < abs(cur_test - target_test)) {
+      test_blocks <- c(test_blocks, b)
+      cur_test <- cur_test + b_n
+    }
   }
   test_idx <- which(blocks %in% test_blocks)
   train_idx <- setdiff(seq_len(n), test_idx)

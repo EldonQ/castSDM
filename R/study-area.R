@@ -72,7 +72,9 @@ cast_study_area <- function(occurrences,
   }
 
   n_occ <- nrow(occ_sf)
-  if (n_occ < 3) {
+  # "full" needs no occurrence geometry at all, so the >=3-point rule only
+  # applies to hull/bbox methods.
+  if (method != "full" && n_occ < 3) {
     cli::cli_abort("Need at least 3 occurrence points (got {n_occ}).")
   }
 
@@ -165,6 +167,12 @@ cast_study_area <- function(occurrences,
       n_cells <- sum(terra::values(mask_r, mat = FALSE) == 1, na.rm = TRUE)
     }
     used_buffer <- expanded_buffer
+  }
+
+  if (n_cells < min_cells) {
+    cli::cli_warn(
+      "Study area has only {n_cells} valid cell{?s} (< {.arg min_cells} = {min_cells}); proceeding anyway."
+    )
   }
 
   if (verbose) {

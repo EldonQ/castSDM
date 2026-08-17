@@ -1,25 +1,37 @@
 # castSDM
 
-`castSDM` is an end-to-end species distribution modelling toolkit for causal
-variable selection, nested spatial validation, standard SDM ensembles, raster
-prediction, and future projection.
+`castSDM` solves one problem in species distribution modelling: **separating
+true ecological drivers from collinear bystanders**. Standard variable
+selection — correlation filters, stepwise VIF, univariate tests, permutation
+importance, or the embedded `covsel` screen of N-SDM — ranks predictors by
+*marginal* association or pairwise collinearity. In the highly collinear
+environmental stacks typical of SDMs (bioclimatic layers often share R² > 0.98
+of their variance), a marginal screen cannot tell a driver from a collinear
+proxy: the proxy scores high on marginal association and is retained even
+though it carries no information once the driver is in the model. That
+misattributes ecological drivers and degrades transferability under climate
+change.
 
 Its distinguishing method is `cast_select(method = "cpi")` (the default),
-a conditional predictive impact (CPI) selector. For each candidate
-predictor it replaces the variable with a knockoff given every other
-predictor and measures the loss of predictive accuracy, then keeps the
-predictors whose conditional contribution survives Benjamini-Hochberg FDR
-control. An optional double machine-learning selector
-(`method = "dml"`) reports signed Neyman-orthogonal partial-linear effects
-with confidence intervals via [cast_effect()], and
+a conditional predictive impact (CPI) selector that asks the conditional
+question instead. For each candidate predictor it replaces the variable with
+a Gaussian knockoff given every other predictor and measures the loss of
+predictive accuracy, then keeps the predictors whose conditional contribution
+survives Benjamini-Hochberg FDR control. An optional double machine-learning
+selector (`method = "dml"`) reports signed Neyman-orthogonal partial-linear
+effects with confidence intervals via [cast_effect()], and
 [cast_counterfactual()] maps single-driver what-if shifts on the current
 climate.
 
-The only ecological choice is the FDR level (`alpha`). Cross-fitting folds and
-the random-forest nuisance learner are method defaults, so the selector avoids
-the many hand-tuned knobs of traditional screening. Selection reports adjusted
-effect sizes with confidence intervals; it targets interpretable driver
-analysis but does not claim automatic causal discovery from observational data.
+The screen is embedded in a complete workflow — nested spatial
+cross-validation, ensemble fitting, projection, and counterfactual mapping —
+so the selected set can be used end to end, and every retention decision is
+recorded in an auditable, predictor-level table. The only ecological choice is
+the FDR level (`alpha`). Cross-fitting folds and the random-forest nuisance
+learner are method defaults, so the selector avoids the many hand-tuned knobs
+of traditional screening. castSDM targets interpretable, conditional driver
+selection but does not claim automatic causal discovery from observational
+data.
 
 ## Core workflow
 

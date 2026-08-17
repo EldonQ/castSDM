@@ -43,7 +43,9 @@ cast_consensus <- function(cv, threshold = 0.5) {
   if (!is.null(cv$selection_freq) && nrow(cv$selection_freq)) {
     freq <- cv$selection_freq
   } else {
-    sets <- Filter(function(s) length(s) > 0L, cv$selections %||% list())
+    # Fallback: rebuild frequency over ALL folds (denominator = total folds;
+    # an empty/failed fold contributes zero, never shrinks the denominator).
+    sets <- cv$selections %||% list()
     if (!length(sets)) {
       cli::cli_abort(c(
         "The CV object holds no fold selections.",
@@ -52,7 +54,7 @@ cast_consensus <- function(cv, threshold = 0.5) {
     }
     all_vars <- unique(unlist(sets))
     f <- vapply(all_vars, function(v) {
-      mean(vapply(sets, function(s) v %in% s, logical(1)))
+      mean(vapply(sets, function(s) v %in% (s %||% character(0)), logical(1)))
     }, numeric(1))
     freq <- data.frame(variable = all_vars, freq = unname(f),
                        stringsAsFactors = FALSE)
@@ -62,11 +64,14 @@ cast_consensus <- function(cv, threshold = 0.5) {
 
   freq$selected <- freq$freq >= threshold
   scores <- freq[, c("variable", "freq", "selected"), drop = FALSE]
-  n_folds <- if (length(cv$selections)) {
-    sum(vapply(cv$selections, function(s) length(s) > 0L, logical(1)))
-  } else {
-    cv$k
+  if (!any(scores$selected)) {
+    cli::cli_warn(c(
+      "Empty consensus set: no predictor reached the fold-frequency threshold of {threshold}.",
+      i = "Lower {.arg threshold} or inspect {.code cv$selection_freq}; {.fun cast_fit} aborts on an empty screen."
+    ))
   }
+  n_folds <- length(cv$selections)
+  if (n_folds < 1L) n_folds <- cv$k
 
   new_cast_select(
     selected = scores$variable[scores$selected],

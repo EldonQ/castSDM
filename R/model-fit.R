@@ -54,23 +54,24 @@ cast_fit <- function(data,
 
   # ---- Determine variables ------------------------------------------------
   env_vars <- if (!is.null(screen)) {
+    if (!length(screen$selected)) {
+      cli::cli_abort(c(
+        "The supplied {.arg screen} has an empty {.field selected} set.",
+        i = "Refit {.fun cast_select} (e.g. lower {.arg alpha} or raise {.arg min_vars}) or pass {.code screen = NULL} to use all predictors."
+      ))
+    }
     screen$selected
   } else {
     get_env_vars(data, response)
   }
   cast_vars <- env_vars
 
-  Y <- data[[response]]
+  .cast_check_response(data[[response]], response)
+  Y <- as.integer(data[[response]])
   X_raw <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
   # Reject non-numeric / factor predictors explicitly: silently coercing a
   # factor with as.numeric() would model its level codes, not its values.
-  bad <- names(X_raw)[!vapply(X_raw, is.numeric, logical(1))]
-  if (length(bad)) {
-    cli::cli_abort(c(
-      "Non-numeric predictor{?s} in {.arg data}: {.val {bad}}.",
-      i = "Convert factors/characters to numeric before fitting."
-    ))
-  }
+  .cast_check_numeric_predictors(X_raw, arg = "data")
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
 
   # -- Training-set median imputation, reused by evaluate/predict/CV --
@@ -180,9 +181,13 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
     "gam" = {
       check_suggested("mgcv", "for GAM")
       df <- cbind(presence = Y, X)
+      # Backtick-quote names: non-syntactic predictor names (spaces, leading
+      # digits) otherwise break formula parsing and the error was swallowed
+      # by the caller's tryCatch, silently dropping GAM from every fold.
+      qname <- function(nm) sprintf("`%s`", gsub("`", "", nm))
       pred_terms <- vapply(seq_len(ncol(X)), function(i) {
         v <- X[, i]
-        nm <- colnames(X)[i]
+        nm <- qname(colnames(X)[i])
         if (is.numeric(v) && length(unique(v)) >= 8L)
           sprintf("s(%s, k = 5)", nm) else nm
       }, character(1))
@@ -194,7 +199,9 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                   method = "REML"),
         error = function(e) {
           flin <- stats::as.formula(
-            paste("presence ~", paste(colnames(X), collapse = " + "))
+            paste("presence ~",
+                  paste(vapply(colnames(X), qname, character(1)),
+                        collapse = " + "))
           )
           mgcv::gam(flin, data = df, family = stats::binomial())
         }

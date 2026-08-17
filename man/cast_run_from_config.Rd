@@ -34,7 +34,8 @@ Generate a starter YAML with \code{\link[=cast_config_template]{cast_config_temp
 Top-level keys recognised by \code{cast_run_from_config()}:
 \describe{
 \item{\code{run.output_dir}}{Where outputs are written.}
-\item{\code{run.seed}}{Base seed (each species gets \code{seed + i}).}
+\item{\code{run.seed}}{Base seed (each species gets a seed derived from it
+plus a stable hash of the species name).}
 \item{\code{run.parallel}}{Whether to run species in parallel.}
 \item{\code{run.worker_budget.total_workers}}{Optional integer; passed to
 \code{\link[=cast_worker_budget]{cast_worker_budget()}}. Omit to use \code{detectCores() - 1}.}
@@ -49,7 +50,12 @@ for spatial HSS prediction.}
 }
 
 All file paths are resolved relative to the directory containing the
-YAML file.
+YAML file (absolute paths are used as-is).
+
+Raster arguments (\code{\link[=cast_batch]{cast_batch()}} \code{raster_stack}, \code{future_rasters},
+\code{raster_mask}) are in-memory \code{SpatRaster} objects and therefore cannot be
+expressed in YAML; drive raster-based runs through the R API or pass them
+via \code{...}.
 }
 
 \seealso{

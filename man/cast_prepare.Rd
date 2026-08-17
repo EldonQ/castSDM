@@ -10,7 +10,7 @@ cast_prepare(
   seed = NULL,
   env_vars = NULL,
   split = c("spatial", "stratified", "random"),
-  block_method = c("grid", "cluster"),
+  block_method = c("grid", "grid_random", "cluster"),
   n_blocks = 20L,
   verbose = TRUE
 )
@@ -31,7 +31,9 @@ auto-detection picks up metadata columns (e.g., occurrence indicators).}
 \code{"random"}. Degenerate spatial/stratified splits fall back automatically.}
 
 \item{block_method}{Spatial blocking for \code{split = "spatial"}: \code{"grid"}
-(default) or \code{"cluster"}.}
+(default; grid cells grouped into spatially contiguous blocks),
+\code{"grid_random"} (legacy count-balanced packing, ignores cell position),
+or \code{"cluster"}.}
 
 \item{n_blocks}{Integer. Number of spatial blocks to form before assigning
 whole blocks to the test set. Default \code{20}.}

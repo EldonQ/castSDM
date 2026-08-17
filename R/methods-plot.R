@@ -154,10 +154,10 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
     ggplot2::labs(title = title) +
     ggplot2::theme_void(
       base_size = 10,
-      base_family = getOption("castSDM.font_family", "Arial")
+      base_family = getOption("castSDM.font_family", "sans")
     ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
       panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -237,7 +237,7 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     ggplot2::geom_text(
       ggplot2::aes(label = sprintf("%.3f", .data$value)),
       hjust = -0.3, size = 2.6,
-      family = getOption("castSDM.font_family", "Arial"),
+      family = getOption("castSDM.font_family", "sans"),
       show.legend = FALSE
     ) +
     ggplot2::scale_color_manual(values = metric_colors, name = NULL) +
@@ -520,10 +520,10 @@ plot.cast_ensemble <- function(x, basemap = "world", ...) {
     ) +
     ggplot2::theme_void(
       base_size = 10,
-      base_family = getOption("castSDM.font_family", "Arial")
+      base_family = getOption("castSDM.font_family", "sans")
     ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -618,10 +618,10 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
     ) +
     ggplot2::theme_void(
       base_size = 10,
-      base_family = getOption("castSDM.font_family", "Arial")
+      base_family = getOption("castSDM.font_family", "sans")
     ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -783,10 +783,10 @@ plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
     ) +
     ggplot2::theme_void(
       base_size = 10,
-      base_family = getOption("castSDM.font_family", "Arial")
+      base_family = getOption("castSDM.font_family", "sans")
     ) +
     ggplot2::theme(
-      text = ggplot2::element_text(family = getOption("castSDM.font_family", "Arial")),
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
       plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
       plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
       plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
@@ -824,7 +824,7 @@ plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
 theme_cast <- function(base_size = 11) {
   ggplot2::theme_minimal(
     base_size = base_size,
-    base_family = getOption("castSDM.font_family", "Arial")
+    base_family = getOption("castSDM.font_family", "sans")
   ) +
     ggplot2::theme(
       panel.grid.minor = ggplot2::element_blank(),
@@ -1067,7 +1067,7 @@ load_basemap <- function(type = "world") {
       data = dashline, fill = NA, colour = "#4E5963", linewidth = 0.22, linetype = "solid"
     ) +
     ggplot2::coord_sf(xlim = c(105, 126), ylim = c(2, 26), expand = FALSE, datum = NA) +
-    ggplot2::theme_void(base_family = getOption("castSDM.font_family", "Arial")) +
+    ggplot2::theme_void(base_family = getOption("castSDM.font_family", "sans")) +
     ggplot2::theme(
       legend.position = "none",
       panel.background = ggplot2::element_rect(fill = "transparent", colour = NA),

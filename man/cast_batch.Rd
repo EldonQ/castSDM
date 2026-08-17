@@ -20,7 +20,7 @@ cast_batch(
   select_method = "cpi",
   select_max_vars = 30L,
   select_alpha = 0.05,
-  select_dml_folds = 5L,
+  select_dml_folds = 10L,
   select_cor_threshold = 0.8,
   num_threads = 1L,
   do_cv = TRUE,
@@ -69,9 +69,15 @@ cast_batch(
 
 \item{fig_dpi}{Integer. Default \code{600}.}
 
-\item{parallel}{Logical. Default \code{TRUE}.}
+\item{parallel}{Logical. Default \code{TRUE}. When \code{TRUE} and \pkg{future.apply}
+is available, a \code{multisession} plan sized by \code{\link[=cast_worker_budget]{cast_worker_budget()}} is
+set for the duration of the call; the previous plan and the
+\code{CASTSDM_ROOT} environment variable are restored on exit.}
 
-\item{seed}{Integer or \code{NULL}.}
+\item{seed}{Integer or \code{NULL}. When set, each species is modelled with a
+seed derived from \code{seed} plus a stable hash of the species name, so
+interrupted runs resumed with \code{\link[=cast_batch_resume]{cast_batch_resume()}} are identical to an
+uninterrupted run.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
 

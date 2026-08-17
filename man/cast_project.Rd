@@ -68,9 +68,15 @@ Change categories per grid cell:
 \item \strong{stable_absent}: absent in both.
 }
 
+Every future grid must correspond row-for-row to \code{current_env}. A grid
+with a different number of rows aborts; a grid with the same rows in a
+different order is re-aligned by matching on \code{lon}/\code{lat}. A scenario whose
+prediction fails is skipped with a warning and an \code{NA} statistics row.
+
 Centroid shift is computed as the great-circle distance between the
 weighted centroid of current presence and the weighted centroid of
-future presence.
+future presence. GeoTIFF outputs infer their resolution from the
+\code{lon}/\code{lat} spacing and are written as EPSG:4326.
 }
 \seealso{
 \code{\link[=cast_ensemble]{cast_ensemble()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_cv]{cast_cv()}}

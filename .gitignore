@@ -16,8 +16,9 @@ castSDM_batch_output/
 castSDM_multi_species/
 cast_ovis_ammon_figures/
 
-inst/extdata/
+inst/extdata/*
+!inst/extdata/CAST_Alces_alces_Res9_screened.csv
 
 tools/
-extdata/
+/extdata/
 tests/testthat/_problems/

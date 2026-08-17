@@ -44,7 +44,20 @@ cast_batch_resume <- function(output_dir,
   done <- character(0)
   for (sp in names(species_list)) {
     rds <- file.path(output_dir, sp, "cast_result.rds")
-    if (file.exists(rds)) done <- c(done, sp)
+    # A species only counts as done when the file actually parses: a crash
+    # mid-write could otherwise leave a truncated file marked done forever.
+    if (file.exists(rds)) {
+      ok <- tryCatch({
+        inherits(readRDS(rds), "cast_result")
+      }, error = function(e) FALSE)
+      if (isTRUE(ok)) {
+        done <- c(done, sp)
+      } else {
+        cli::cli_warn(
+          "Ignoring unreadable {.path {rds}}; {.val {sp}} will be re-run."
+        )
+      }
+    }
   }
   pending <- if (force) names(species_list) else
     setdiff(names(species_list), done)

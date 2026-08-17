@@ -15,6 +15,7 @@ cast_project_raster(
   mask = NULL,
   overwrite = FALSE,
   compression = "LZW",
+  clamp = NULL,
   verbose = TRUE
 )
 }
@@ -42,6 +43,10 @@ each for a future scenario (e.g., \code{list(ssp126_2050 = rast1, ...)}).}
 
 \item{compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
 
+\item{clamp}{Reserved for extrapolation control: forwarded to
+\code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}} when the installed version supports a \code{clamp}
+argument; otherwise ignored with a warning. Default \code{NULL}.}
+
 \item{verbose}{Logical. Default \code{TRUE}.}
 }
 \value{
@@ -67,6 +72,9 @@ For each scenario, a change-class raster is computed:
 \item \code{2} = stable present
 \item \code{0} = stable absent
 }
+
+A scenario that fails is skipped with a warning and recorded as an \code{NA}
+row in the statistics table; remaining scenarios continue.
 
 Centroid shift is computed as the HSS-weighted great-circle distance.
 }

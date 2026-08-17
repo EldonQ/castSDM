@@ -66,7 +66,9 @@ A \code{data.frame} with columns:
 \describe{
 \item{lon, lat}{Coordinates.}
 \item{presence}{Integer (1 = presence, 0 = background).}
-\item{...}{One column per layer in \code{raster_stack} with extracted values.}
+\item{...}{One column per layer in \code{raster_stack} with extracted values,
+followed by any additional columns from \code{occurrences} (kept for
+presence rows, \code{NA} for background rows).}
 }
 Rows with any \code{NA} in environmental variables are removed.
 }

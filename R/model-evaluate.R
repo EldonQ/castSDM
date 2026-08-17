@@ -12,8 +12,13 @@
 #'
 #' @details
 #' - **AUC**: Area Under the Receiver Operating Characteristic curve,
-#'   measuring discrimination ability. Computed via [pROC::roc()].
-#' - **TSS**: True Skill Statistic = Sensitivity + Specificity - 1.
+#'   measuring discrimination ability. Computed via [pROC::roc()] with
+#'   `direction = "<"` fixed, so a worse-than-random model correctly reports
+#'   AUC < 0.5 instead of being mirrored by `direction = "auto"`.
+#' - **TSS**: True Skill Statistic = Sensitivity + Specificity - 1, at the
+#'   max-Youden threshold chosen on the evaluation set itself (the usual
+#'   SDM evaluation convention; mildly optimistic if the same threshold is
+#'   then reused elsewhere).
 #' - **CBI**: Continuous Boyce Index, measuring predicted-expected ratio.
 #'
 #' @seealso [cast_fit()], [cast_predict()]
@@ -22,10 +27,14 @@
 cast_evaluate <- function(fit, test_data, response = "presence") {
   check_suggested("pROC", "for AUC computation")
 
+  .cast_check_response(test_data[[response]], response)
   Y_test <- test_data[[response]]
   env_vars <- fit$env_vars
 
   X_test_raw <- as.data.frame(test_data[, env_vars, drop = FALSE], check.names = FALSE)
+  # Same guard as the fit path: reject non-numeric predictors instead of
+  # silently coercing factor level codes with as.numeric().
+  .cast_check_numeric_predictors(X_test_raw, arg = "test_data")
   for (col in names(X_test_raw)) {
     X_test_raw[[col]] <- as.numeric(X_test_raw[[col]])
   }

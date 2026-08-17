@@ -178,8 +178,9 @@ print.cast_batch <- function(x, ...) {
   }
   if (!is.null(x$species_metrics) && nrow(x$species_metrics) > 0) {
     cli::cli_h2("Summary metrics")
+    # Column names match the assembler in cast_batch(): auc/tss/cbi.
     print(x$species_metrics[, intersect(
-      c("species", "model", "auc_mean", "tss_mean", "cbi_mean"),
+      c("species", "model", "auc", "tss", "cbi"),
       names(x$species_metrics)
     ), drop = FALSE], row.names = FALSE)
   }

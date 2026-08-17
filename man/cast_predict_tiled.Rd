@@ -66,7 +66,15 @@ and refreshes the checkpoints.
 
 Tiles are dispatched through \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}} when a
 \code{cast_worker_budget} is given, using the Windows-friendly
-\code{multisession} (PSOCK) backend.
+\code{multisession} (PSOCK) backend with \code{budget$intra} workers (the
+per-step layer of the budget). The \code{future} plan is set once for the
+whole call and the user's original plan is restored on exit.
+
+Cells with missing (\code{NA}) covariates stay \code{NA} in the output rasters -
+they are recorded before \code{\link[=cast_predict]{cast_predict()}} imputes them and written back
+as \code{NA} afterwards, matching the NA semantics of
+\code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}. No suitability values are fabricated outside
+the data mask (e.g. ocean pixels).
 }
 \seealso{
 \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_worker_budget]{cast_worker_budget()}}

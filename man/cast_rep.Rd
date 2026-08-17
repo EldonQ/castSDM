@@ -50,9 +50,12 @@ A \code{cast_rep} object with components:
 replicates) per model.}
 \item{selection_freq}{Data.frame with each predictor's selection
 frequency across replicates.}
-\item{prediction}{\code{data.frame} with \code{lon}, \code{lat}, \code{hss_mean},
-\code{hss_sd} aggregated from the replicate predictions (only when
-\code{env_data} is supplied).}
+\item{prediction}{\code{data.frame} with \code{lon}, \code{lat}, and per-model
+\verb{hss_mean_<model>} / \verb{hss_sd_<model>} columns aggregated from the
+replicate predictions (only when \code{env_data} is supplied). The
+aggregation is per model: each fitted model gets its own mean/SD
+column pair, and replicates that lack a prediction surface are
+dropped replicate-wise instead of voiding the whole aggregation.}
 \item{n_reps}{Number of completed replicates.}
 }
 }

@@ -1,3 +1,14 @@
+# Per-species seed: `seed` plus a stable hash of the species name, so a
+# species gets the same seed no matter which subset of the batch it is run
+# in (cast_batch_resume() re-runs only the pending species). Shared by
+# cast_batch() and cast_batch_resume().
+.cast_species_seed <- function(seed, sp_name) {
+  if (is.null(seed)) return(NULL)
+  chars <- utf8ToInt(as.character(sp_name)[1L])
+  h <- sum(chars * seq_along(chars)) %% 1e6
+  as.integer((as.numeric(seed) + h) %% .Machine$integer.max)
+}
+
 #' Batch Multi-Species Modeling
 #'
 #' One-stop interface that runs the full castSDM pipeline on multiple
@@ -10,8 +21,14 @@
 #' @param train_fraction Numeric. Default `0.7`.
 #' @param output_dir Character. Default `"castSDM_batch_output"`.
 #' @param fig_dpi Integer. Default `600`.
-#' @param parallel Logical. Default `TRUE`.
-#' @param seed Integer or `NULL`.
+#' @param parallel Logical. Default `TRUE`. When `TRUE` and \pkg{future.apply}
+#'   is available, a `multisession` plan sized by [cast_worker_budget()] is
+#'   set for the duration of the call; the previous plan and the
+#'   `CASTSDM_ROOT` environment variable are restored on exit.
+#' @param seed Integer or `NULL`. When set, each species is modelled with a
+#'   seed derived from `seed` plus a stable hash of the species name, so
+#'   interrupted runs resumed with [cast_batch_resume()] are identical to an
+#'   uninterrupted run.
 #' @param verbose Logical. Default `TRUE`.
 #' @param fit_verbose Logical. Default `FALSE`.
 #' @param select_min_vars Integer. Default `3`.
@@ -83,7 +100,7 @@ cast_batch <- function(species_list,
                       select_method = "cpi",
                       select_max_vars = 30L,
                       select_alpha = 0.05,
-                      select_dml_folds = 5L,
+                      select_dml_folds = 10L,
                       select_cor_threshold = 0.8,
                       num_threads = 1L,
                       # -- CV --
@@ -124,6 +141,12 @@ cast_batch <- function(species_list,
   }
   sp_names <- names(species_list)
   n_sp <- length(sp_names)
+  # Per-species seeds are computed up front on the main process: PSOCK /
+  # multisession workers must only receive plain values, never helper calls.
+  sp_seeds <- stats::setNames(
+    lapply(sp_names, function(s) .cast_species_seed(seed, s)),
+    sp_names
+  )
 
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -132,6 +155,17 @@ cast_batch <- function(species_list,
     cli::cli_inform("Models: {.val {models}}")
     cli::cli_inform("Output: {output_dir}")
   }
+
+  # Track any CASTSDM_ROOT change so the caller's environment is restored
+  # on exit (review M15).
+  old_castsdm_root <- Sys.getenv("CASTSDM_ROOT", unset = NA_character_)
+  castsdm_root_touched <- FALSE
+  on.exit({
+    if (castsdm_root_touched) {
+      if (is.na(old_castsdm_root)) Sys.unsetenv("CASTSDM_ROOT")
+      else Sys.setenv(CASTSDM_ROOT = old_castsdm_root)
+    }
+  }, add = TRUE)
 
   dev_root_workers <- NULL
   if (!is.null(dev_package_root) && nzchar(as.character(dev_package_root)[1])) {
@@ -143,6 +177,7 @@ cast_batch <- function(species_list,
     if (!is.na(dev_root_workers) && nzchar(dev_root_workers) &&
         file.exists(file.path(dev_root_workers, "DESCRIPTION"))) {
       Sys.setenv(CASTSDM_ROOT = dev_root_workers)
+      castsdm_root_touched <- TRUE
     } else {
       dev_root_workers <- NULL
     }
@@ -165,7 +200,10 @@ cast_batch <- function(species_list,
                        error = function(e) "")
         nzchar(nl) && (identical(np, nl) || startsWith(np, paste0(nl, "/")))
       }, logical(1L)))
-      if (!isTRUE(in_lib)) Sys.setenv(CASTSDM_ROOT = root)
+      if (!isTRUE(in_lib)) {
+        Sys.setenv(CASTSDM_ROOT = root)
+        castsdm_root_touched <- TRUE
+      }
     }
   }
 
@@ -229,13 +267,27 @@ cast_batch <- function(species_list,
     overwrite_rasters = overwrite_rasters
   )
 
+  # Rasters cannot cross a PSOCK/multisession boundary as raw SpatRaster
+  # pointers (segfault on the worker, review C3); wrap them for the parallel
+  # branches and unwrap inside .cast_batch_run_one_species().
+  cfg_send <- cfg
+  if (parallel &&
+      (!is.null(raster_stack) || !is.null(future_rasters) ||
+       !is.null(raster_mask)) &&
+      requireNamespace("terra", quietly = TRUE)) {
+    cfg_send <- .cast_cfg_wrap(cfg)
+  }
+
   if (parallel && !is.null(dev_root_workers)) {
+    cfg <- cfg_send
     nwrk <- tryCatch(
       if (requireNamespace("future", quietly = TRUE)) future::nbrOfWorkers()
       else NA_integer_,
       error = function(e) NA_integer_
     )
-    if (is.na(nwrk) || nwrk < 1L) nwrk <- max(1L, parallel::detectCores() - 1L)
+    if (is.na(nwrk) || nwrk < 1L) {
+      nwrk <- max(1L, parallel::detectCores() - 1L, na.rm = TRUE)
+    }
     nwrk <- min(as.integer(nwrk), n_sp)
     if (verbose) {
       cli::cli_inform(
@@ -262,14 +314,14 @@ cast_batch <- function(species_list,
         eb <- environment()
         parallel::clusterExport(
           cl,
-          c("species_list", "sp_names", "env_data", "models", "output_dir",
-            "fig_dpi", "seed", "cfg", "fit_args"),
+          c("species_list", "sp_names", "sp_seeds", "env_data", "models",
+            "output_dir", "fig_dpi", "seed", "cfg", "fit_args"),
           envir = eb
         )
         parallel::parLapply(cl, seq_along(sp_names), function(ii) {
           sp <- sp_names[[ii]]
           sd <- species_list[[sp]]
-          seed_i <- if (!is.null(seed)) seed + ii else NULL
+          seed_i <- sp_seeds[[ii]]
           worker_run <- utils::getFromNamespace(".cast_batch_run_one_species", "castSDM")
           tryCatch(
             worker_run(sp, sd, env_data, models,
@@ -285,16 +337,40 @@ cast_batch <- function(species_list,
       finally = if (!is.null(cl)) parallel::stopCluster(cl)
     )
   } else if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
-    if (verbose) cli::cli_inform("Running in parallel (future)...")
+    cfg <- cfg_send
+    # Size and set the species-level plan ourselves, and restore the user's
+    # plan on exit (review M15).
+    budget <- cast_worker_budget(n_species = n_sp)
+    old_plan <- cast_setup_species_plan(budget)
+    if (!is.null(old_plan)) on.exit(future::plan(old_plan), add = TRUE)
+    if (verbose) {
+      if (budget$species > 1L) {
+        cli::cli_inform(
+          "Running in parallel (future multisession, {budget$species} workers)..."
+        )
+      } else {
+        cli::cli_inform("Running sequentially (worker budget allows 1 worker).")
+      }
+    }
     results <- future.apply::future_lapply(
       seq_along(sp_names),
       function(ii) {
         sp <- sp_names[[ii]]
         sd <- species_list[[sp]]
-        seed_i <- if (!is.null(seed)) seed + ii else NULL
-        .cast_batch_run_one_species(sp, sd, env_data, models,
-                                   output_dir, fig_dpi, seed_i,
-                                   cfg, fit_args, TRUE, dev_root_workers)
+        seed_i <- sp_seeds[[ii]]
+        worker_run <- .cast_batch_run_one_species
+        # Dev runs (load_all on the master, CASTSDM_ROOT set): the worker may
+        # otherwise resolve the dispatcher from an older *installed* castSDM
+        # that cannot unwrap transported rasters. Reload from source first.
+        root <- Sys.getenv("CASTSDM_ROOT", "")
+        if (nzchar(root) && file.exists(file.path(root, "DESCRIPTION")) &&
+            requireNamespace("pkgload", quietly = TRUE)) {
+          suppressPackageStartupMessages(pkgload::load_all(root, quiet = TRUE))
+          worker_run <- utils::getFromNamespace(".cast_batch_run_one_species", "castSDM")
+        }
+        worker_run(sp, sd, env_data, models,
+                   output_dir, fig_dpi, seed_i,
+                   cfg, fit_args, TRUE, dev_root_workers)
       },
       future.seed = TRUE
     )
@@ -304,7 +380,7 @@ cast_batch <- function(species_list,
     for (i in seq_along(sp_names)) {
       sp <- sp_names[i]
       if (verbose) cli::cli_inform("[{i}/{n_sp}] Processing {.val {sp}}...")
-      seed_i <- if (!is.null(seed)) seed + i else NULL
+      seed_i <- sp_seeds[[i]]
       results[i] <- list(.cast_batch_run_one_species(
         sp, species_list[[sp]], env_data, models, output_dir,
         fig_dpi, seed_i, cfg, fit_args, FALSE, dev_root_workers
@@ -355,6 +431,18 @@ cast_batch <- function(species_list,
 }
 
 
+#' Plot Per-species Metrics from a `cast_batch()` Run
+#'
+#' Boxplots (one panel per metric) of the per-species, per-model evaluation
+#' scores collected in the `cast_batch` object.
+#'
+#' @param x A `cast_batch` object returned by [cast_batch()].
+#' @param metrics Character vector. Metrics to show; any of `"auc"`,
+#'   `"tss"`, `"cbi"` present in `x$species_metrics`. Default all three.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot2` object.
+#' @seealso [cast_batch()]
 #' @export
 plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   check_suggested("ggplot2", "for plotting")
@@ -410,7 +498,7 @@ plot.cast_batch <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
     ) +
     ggplot2::theme_minimal(
       base_size = 11,
-      base_family = getOption("castSDM.font_family", "Arial")
+      base_family = getOption("castSDM.font_family", "sans")
     ) +
     ggplot2::theme(
       panel.grid.minor   = ggplot2::element_blank(),

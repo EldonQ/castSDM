@@ -41,9 +41,15 @@
 #' - **stable_present**: present in both.
 #' - **stable_absent**: absent in both.
 #'
+#' Every future grid must correspond row-for-row to `current_env`. A grid
+#' with a different number of rows aborts; a grid with the same rows in a
+#' different order is re-aligned by matching on `lon`/`lat`. A scenario whose
+#' prediction fails is skipped with a warning and an `NA` statistics row.
+#'
 #' Centroid shift is computed as the great-circle distance between the
 #' weighted centroid of current presence and the weighted centroid of
-#' future presence.
+#' future presence. GeoTIFF outputs infer their resolution from the
+#' `lon`/`lat` spacing and are written as EPSG:4326.
 #'
 #' @seealso [cast_ensemble()], [cast_fit()], [cast_cv()]
 #'
@@ -61,6 +67,13 @@ cast_project <- function(fit, cv, current_env, future_envs,
     cli::cli_abort("All elements of {.arg future_envs} must be named (scenario names).")
   }
 
+  # Align every future grid to the current grid before predicting (M16):
+  # mismatched row counts abort, re-ordered grids are matched on lon/lat.
+  for (scen in names(future_envs)) {
+    future_envs[[scen]] <- .cast_align_future_env(current_env,
+                                                  future_envs[[scen]], scen)
+  }
+
   # ---- Current prediction -------------------------------------------------
   current <- cast_ensemble(fit, cv, current_env,
                            method = method,
@@ -70,84 +83,104 @@ cast_project <- function(fit, cv, current_env, future_envs,
   future_list <- list()
   changes_list <- list()
   stats_rows <- list()
+  cur_bin <- current$predictions$binary_ensemble
+  has_coords <- all(c("lon", "lat") %in% names(current$predictions))
 
   for (scen in names(future_envs)) {
-    fut_env <- future_envs[[scen]]
+    sc_res <- tryCatch({
+      fut_env <- future_envs[[scen]]
 
-    # Predict using the same ensemble configuration
-    fut <- cast_ensemble(fit, cv, fut_env,
-                         method = method,
-                         models = models)
-    future_list[[scen]] <- fut
+      # Predict using the same ensemble configuration
+      fut <- cast_ensemble(fit, cv, fut_env,
+                           method = method,
+                           models = models)
 
-    # ---- Compute change map -----------------------------------------------
-    cur_bin <- current$predictions$binary_ensemble
-    fut_bin <- fut$predictions$binary_ensemble
+      # ---- Compute change map -----------------------------------------------
+      fut_bin <- fut$predictions$binary_ensemble
 
-    change <- .cast_change_classes(cur_bin, fut_bin)
+      change <- .cast_change_classes(cur_bin, fut_bin)
 
-    has_coords <- all(c("lon", "lat") %in% names(current$predictions))
-    change_df <- if (has_coords) {
-      data.frame(
-        lon = current$predictions$lon,
-        lat = current$predictions$lat,
-        change = change,
+      change_df <- if (has_coords) {
+        data.frame(
+          lon = current$predictions$lon,
+          lat = current$predictions$lat,
+          change = change,
+          stringsAsFactors = FALSE
+        )
+      } else {
+        data.frame(
+          site = seq_along(change),
+          change = change,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      # ---- Summary statistics -----------------------------------------------
+      n_gain   <- sum(change == "gain", na.rm = TRUE)
+      n_loss   <- sum(change == "loss", na.rm = TRUE)
+      n_stable <- sum(change == "stable_present", na.rm = TRUE)
+      n_absent <- sum(change == "stable_absent", na.rm = TRUE)
+      total_present_now <- sum(cur_bin == 1, na.rm = TRUE)
+      pct_change <- if (total_present_now > 0) {
+        100 * (n_gain - n_loss) / total_present_now
+      } else {
+        NA_real_
+      }
+
+      # Centroid shift (great-circle distance in km)
+      centroid_km <- NA_real_
+      if (has_coords) {
+        centroid_km <- tryCatch({
+          ok_cur <- !is.na(cur_bin) & cur_bin == 1
+          ok_fut <- !is.na(fut_bin) & fut_bin == 1
+          cur_pres <- current$predictions[ok_cur, ]
+          fut_pres <- fut$predictions[ok_fut, ]
+          if (nrow(cur_pres) > 0 && nrow(fut_pres) > 0) {
+            # Weight by HSS for more stable centroids
+            w_cur <- cur_pres$hss_ensemble
+            w_fut <- fut_pres$hss_ensemble
+            c_lon <- stats::weighted.mean(cur_pres$lon, w_cur)
+            c_lat <- stats::weighted.mean(cur_pres$lat, w_cur)
+            f_lon <- stats::weighted.mean(fut_pres$lon, w_fut)
+            f_lat <- stats::weighted.mean(fut_pres$lat, w_fut)
+            .haversine_km(c_lat, c_lon, f_lat, f_lon)
+          } else {
+            NA_real_
+          }
+        }, error = function(e) NA_real_)
+      }
+
+      list(
+        fut = fut,
+        change = change_df,
+        stats = data.frame(
+          scenario        = scen,
+          n_gain          = n_gain,
+          n_loss          = n_loss,
+          n_stable_present = n_stable,
+          n_stable_absent  = n_absent,
+          pct_change      = round(pct_change, 2),
+          centroid_shift_km = round(centroid_km, 1),
+          stringsAsFactors = FALSE
+        )
+      )
+    }, error = function(e) {
+      cli::cli_warn("Scenario {.val {scen}} failed: {conditionMessage(e)}")
+      NULL
+    })
+
+    if (is.null(sc_res)) {
+      stats_rows[[scen]] <- data.frame(
+        scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
+        n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
+        pct_change = NA_real_, centroid_shift_km = NA_real_,
         stringsAsFactors = FALSE
       )
     } else {
-      data.frame(
-        site = seq_along(change),
-        change = change,
-        stringsAsFactors = FALSE
-      )
+      future_list[[scen]] <- sc_res$fut
+      changes_list[[scen]] <- sc_res$change
+      stats_rows[[scen]] <- sc_res$stats
     }
-    changes_list[[scen]] <- change_df
-
-    # ---- Summary statistics -----------------------------------------------
-    n_gain   <- sum(change == "gain", na.rm = TRUE)
-    n_loss   <- sum(change == "loss", na.rm = TRUE)
-    n_stable <- sum(change == "stable_present", na.rm = TRUE)
-    n_absent <- sum(change == "stable_absent", na.rm = TRUE)
-    total_present_now <- sum(cur_bin == 1, na.rm = TRUE)
-    pct_change <- if (total_present_now > 0) {
-      100 * (n_gain - n_loss) / total_present_now
-    } else {
-      NA_real_
-    }
-
-    # Centroid shift (great-circle distance in km)
-    centroid_km <- NA_real_
-    if (has_coords) {
-      centroid_km <- tryCatch({
-        ok_cur <- !is.na(cur_bin) & cur_bin == 1
-        ok_fut <- !is.na(fut_bin) & fut_bin == 1
-        cur_pres <- current$predictions[ok_cur, ]
-        fut_pres <- fut$predictions[ok_fut, ]
-        if (nrow(cur_pres) > 0 && nrow(fut_pres) > 0) {
-          # Weight by HSS for more stable centroids
-          w_cur <- cur_pres$hss_ensemble
-          w_fut <- fut_pres$hss_ensemble
-          c_lon <- stats::weighted.mean(cur_pres$lon, w_cur)
-          c_lat <- stats::weighted.mean(cur_pres$lat, w_cur)
-          f_lon <- stats::weighted.mean(fut_pres$lon, w_fut)
-          f_lat <- stats::weighted.mean(fut_pres$lat, w_fut)
-          .haversine_km(c_lat, c_lon, f_lat, f_lon)
-        } else {
-          NA_real_
-        }
-      }, error = function(e) NA_real_)
-    }
-
-    stats_rows[[scen]] <- data.frame(
-      scenario        = scen,
-      n_gain          = n_gain,
-      n_loss          = n_loss,
-      n_stable_present = n_stable,
-      n_stable_absent  = n_absent,
-      pct_change      = round(pct_change, 2),
-      centroid_shift_km = round(centroid_km, 1),
-      stringsAsFactors = FALSE
-    )
   }
 
   stats_df <- do.call(rbind, stats_rows)
@@ -213,6 +246,53 @@ cast_project <- function(fit, cv, current_env, future_envs,
 }
 
 
+#' Validate that a future grid corresponds row-for-row to the current grid
+#'
+#' Aborts on different row counts; re-aligns a grid holding the same rows in
+#' a different order by matching on `lon`/`lat`. Silently recycling or
+#' pairing mismatched rows would corrupt every change map (review M16).
+#'
+#' @param current_env Current-grid data.frame.
+#' @param fut_env Future-grid data.frame for scenario `scen`.
+#' @param scen Scenario name (for error messages).
+#' @return The (possibly re-ordered) future grid.
+#' @keywords internal
+#' @noRd
+.cast_align_future_env <- function(current_env, fut_env, scen) {
+  if (!is.data.frame(fut_env)) {
+    cli::cli_abort("Scenario {.val {scen}}: future grid must be a data.frame.")
+  }
+  if (nrow(fut_env) != nrow(current_env)) {
+    cli::cli_abort(c(
+      "Scenario {.val {scen}}: future grid must have one row per current-grid row.",
+      "x" = "Got {nrow(fut_env)} future rows vs {nrow(current_env)} current rows."
+    ))
+  }
+  has_ll <- all(c("lon", "lat") %in% names(current_env)) &&
+    all(c("lon", "lat") %in% names(fut_env))
+  if (has_ll && (!identical(fut_env$lon, current_env$lon) ||
+                 !identical(fut_env$lat, current_env$lat))) {
+    key_cur <- paste(current_env$lon, current_env$lat)
+    key_fut <- paste(fut_env$lon, fut_env$lat)
+    if (anyDuplicated(key_cur) || anyDuplicated(key_fut)) {
+      cli::cli_abort(c(
+        "Scenario {.val {scen}}: {.val lon}/{.val lat} pairs are not unique.",
+        i = "Coordinate matching is ambiguous on duplicated cells; supply unique grid coordinates."
+      ))
+    }
+    idx <- match(key_cur, key_fut)
+    if (any(is.na(idx))) {
+      cli::cli_abort(
+        "Scenario {.val {scen}}: future {.val lon}/{.val lat} rows cannot be matched to the current grid."
+      )
+    }
+    fut_env <- fut_env[idx, , drop = FALSE]
+    rownames(fut_env) <- NULL
+  }
+  fut_env
+}
+
+
 #' Classify current vs future binary predictions into change categories
 #'
 #' Maps each cell to `"gain"`, `"loss"`, `"stable_present"`, or
@@ -224,6 +304,11 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #' @keywords internal
 #' @noRd
 .cast_change_classes <- function(cur_bin, fut_bin) {
+  if (length(fut_bin) != length(cur_bin)) {
+    cli::cli_abort(
+      "Internal: current and future binary vectors differ in length ({length(cur_bin)} vs {length(fut_bin)})."
+    )
+  }
   change <- character(length(cur_bin))
   change[cur_bin == 0 & fut_bin == 1] <- "gain"
   change[cur_bin == 1 & fut_bin == 0] <- "loss"
@@ -250,18 +335,48 @@ cast_project <- function(fit, cv, current_env, future_envs,
 
 
 #' Save a prediction data.frame as GeoTIFF via terra
+#'
+#' Resolution is inferred from the smallest `lon`/`lat` spacing (no
+#' hard-coded grid); `crs` defaults to EPSG:4326, matching the lon/lat
+#' prediction grids produced by the package. Cells receiving more than one
+#' point (duplicate coordinates) are averaged with `fun = "mean"`; the
+#' regular one-point-per-cell path writes values directly.
+#'
+#' @param df Data.frame with coordinate and value columns.
+#' @param lon_col,lat_col,val_col Column names in `df`.
+#' @param path Output `.tif` path.
+#' @param crs CRS string for the output raster. Default `"EPSG:4326"`.
+#' @param res Optional `c(xres, yres)`; inferred from the data when `NULL`.
 #' @keywords internal
 #' @noRd
-.save_prediction_tif <- function(df, lon_col, lat_col, val_col, path) {
+.save_prediction_tif <- function(df, lon_col, lat_col, val_col, path,
+                                 crs = "EPSG:4326", res = NULL) {
   tryCatch({
-    pts <- terra::vect(
-      cbind(df[[lon_col]], df[[lat_col]]),
-      type = "points",
-      atts = data.frame(value = df[[val_col]]),
-      crs = "EPSG:4326"
+    lon <- df[[lon_col]]
+    lat <- df[[lat_col]]
+    if (is.null(res)) {
+      ux <- sort(unique(lon))
+      uy <- sort(unique(lat))
+      rx <- if (length(ux) > 1L) min(diff(ux)) else 1
+      ry <- if (length(uy) > 1L) min(diff(uy)) else 1
+      res <- c(rx, ry)
+    }
+    e <- terra::ext(
+      min(lon) - res[1] / 2, max(lon) + res[1] / 2,
+      min(lat) - res[2] / 2, max(lat) + res[2] / 2
     )
-    r <- terra::rasterize(pts, terra::rast(pts, res = 0.05), field = "value",
-                          fun = "mean")
+    tmpl <- terra::rast(e, res = res, crs = crs)
+    xy <- cbind(lon, lat)
+    cell_id <- terra::cellFromXY(tmpl, xy)
+    if (anyDuplicated(cell_id)) {
+      # Several points in one cell: aggregate (mean) instead of dropping.
+      pts <- terra::vect(xy, type = "points",
+                         atts = data.frame(value = df[[val_col]]), crs = crs)
+      r <- terra::rasterize(pts, tmpl, field = "value", fun = "mean")
+    } else {
+      r <- terra::rast(tmpl)
+      r[cell_id] <- df[[val_col]]
+    }
     terra::writeRaster(r, path, overwrite = TRUE)
   }, error = function(e) {
     cli::cli_warn("Failed to save GeoTIFF {.path {path}}: {e$message}")
@@ -289,6 +404,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #' @param mask A `terra::SpatRaster` or `NULL`. Prediction mask.
 #' @param overwrite Logical. Overwrite existing outputs. Default `FALSE`.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
+#' @param clamp Reserved for extrapolation control: forwarded to
+#'   [cast_ensemble_raster()] when the installed version supports a `clamp`
+#'   argument; otherwise ignored with a warning. Default `NULL`.
 #' @param verbose Logical. Default `TRUE`.
 #'
 #' @return A list with components:
@@ -306,6 +424,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #' - `2` = stable present
 #' - `0` = stable absent
 #'
+#' A scenario that fails is skipped with a warning and recorded as an `NA`
+#' row in the statistics table; remaining scenarios continue.
+#'
 #' Centroid shift is computed as the HSS-weighted great-circle distance.
 #'
 #' @seealso [cast_ensemble_raster()], [cast_project()]
@@ -320,6 +441,7 @@ cast_project_raster <- function(fit, cv,
                                 mask = NULL,
                                 overwrite = FALSE,
                                 compression = "LZW",
+                                clamp = NULL,
                                 verbose = TRUE) {
   check_suggested("terra", "for raster projection")
   method <- match.arg(method)
@@ -337,20 +459,28 @@ cast_project_raster <- function(fit, cv,
   dir.create(raster_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 
+  # Reserved passthrough: forward `clamp` only when the installed
+  # cast_ensemble_raster() actually supports it.
+  er_formals <- names(formals(cast_ensemble_raster))
+  if (!is.null(clamp) && !("clamp" %in% er_formals)) {
+    cli::cli_warn(
+      "{.arg clamp} ignored: this {.fn cast_ensemble_raster} has no clamp support."
+    )
+  }
+  er_call <- function(r, prefix) {
+    args <- list(
+      fit = fit, cv = cv, raster_stack = r, output_dir = raster_dir,
+      method = method, models = models, mask = mask, prefix = prefix,
+      overwrite = overwrite, compression = compression, verbose = verbose
+    )
+    if (!is.null(clamp) && "clamp" %in% er_formals) args$clamp <- clamp
+    do.call(cast_ensemble_raster, args)
+  }
+
   # ---- Current prediction -----------------------------------------------------
   if (verbose) cli::cli_h2("Current prediction")
 
-  current_result <- cast_ensemble_raster(
-    fit, cv, current_raster,
-    output_dir = raster_dir,
-    method = method,
-    models = models,
-    mask = mask,
-    prefix = "current",
-    overwrite = overwrite,
-    compression = compression,
-    verbose = verbose
-  )
+  current_result <- er_call(current_raster, "current")
 
   # Read current binary for change computation
   cur_bin <- terra::rast(current_result$binary_path)
@@ -366,100 +496,111 @@ cast_project_raster <- function(fit, cv,
   for (scen in names(future_rasters)) {
     if (verbose) cli::cli_h2("Future: {scen}")
 
-    fut_raster <- future_rasters[[scen]]
-    if (is.character(fut_raster)) fut_raster <- terra::rast(fut_raster)
+    sc_res <- tryCatch({
+      fut_raster <- future_rasters[[scen]]
+      if (is.character(fut_raster)) fut_raster <- terra::rast(fut_raster)
 
-    fut_result <- cast_ensemble_raster(
-      fit, cv, fut_raster,
-      output_dir = raster_dir,
-      method = method,
-      models = models,
-      mask = mask,
-      prefix = scen,
-      overwrite = overwrite,
-      compression = compression,
-      verbose = verbose
-    )
-    future_results[[scen]] <- fut_result
+      fut_result <- er_call(fut_raster, scen)
 
-    # ---- Change map -----------------------------------------------------------
-    change_path <- file.path(raster_dir, paste0(scen, "_change_class.tif"))
+      # ---- Change map ---------------------------------------------------------
+      change_path <- file.path(raster_dir, paste0(scen, "_change_class.tif"))
 
-    if (!overwrite && file.exists(change_path)) {
-      if (verbose) cli::cli_inform("Change raster exists; skipping.")
-    } else {
-      fut_bin <- terra::rast(fut_result$binary_path)
-      fut_hss <- terra::rast(fut_result$hss_path)
+      if (!overwrite && file.exists(change_path)) {
+        if (verbose) cli::cli_inform("Change raster exists; skipping.")
+      } else {
+        fut_bin <- terra::rast(fut_result$binary_path)
+        fut_hss <- terra::rast(fut_result$hss_path)
 
-      # Change class: gain=1, loss=-1, stable_present=2, stable_absent=0
-      change_r <- terra::lapp(
-        c(cur_bin, fut_bin),
-        fun = function(cur, fut) {
-          out <- rep(NA_integer_, length(cur))
-          valid <- !is.na(cur) & !is.na(fut)
-          out[valid & cur == 0 & fut == 1] <- 1L    # gain
-          out[valid & cur == 1 & fut == 0] <- -1L   # loss
-          out[valid & cur == 1 & fut == 1] <- 2L    # stable_present
-          out[valid & cur == 0 & fut == 0] <- 0L    # stable_absent
-          out
-        }
+        # Change class: gain=1, loss=-1, stable_present=2, stable_absent=0
+        change_r <- terra::lapp(
+          c(cur_bin, fut_bin),
+          fun = function(cur, fut) {
+            out <- rep(NA_integer_, length(cur))
+            valid <- !is.na(cur) & !is.na(fut)
+            out[valid & cur == 0 & fut == 1] <- 1L    # gain
+            out[valid & cur == 1 & fut == 0] <- -1L   # loss
+            out[valid & cur == 1 & fut == 1] <- 2L    # stable_present
+            out[valid & cur == 0 & fut == 0] <- 0L    # stable_absent
+            out
+          }
+        )
+        names(change_r) <- "change_class"
+        terra::writeRaster(change_r, change_path, overwrite = TRUE,
+                           gdal = c(paste0("COMPRESS=", compression)),
+                           wopt = list(datatype = "INT2S"))
+      }
+
+      # ---- Statistics (from disk, also on the skip branch) --------------------
+      change_vals <- terra::values(terra::rast(change_path), mat = FALSE)
+      change_vals <- change_vals[!is.na(change_vals)]
+
+      n_gain   <- sum(change_vals == 1L)
+      n_loss   <- sum(change_vals == -1L)
+      n_stable <- sum(change_vals == 2L)
+      n_absent <- sum(change_vals == 0L)
+      total_present_now <- n_loss + n_stable
+
+      pct_change <- if (total_present_now > 0) {
+        100 * (n_gain - n_loss) / total_present_now
+      } else {
+        NA_real_
+      }
+
+      # Future centroid
+      fut_centroid <- .weighted_centroid_raster(
+        terra::rast(fut_result$hss_path),
+        terra::rast(fut_result$binary_path))
+
+      # Centroid shift
+      shift_km <- tryCatch(
+        .haversine_km(
+          cur_centroid$lat, cur_centroid$lon,
+          fut_centroid$lat, fut_centroid$lon
+        ),
+        error = function(e) NA_real_
       )
-      names(change_r) <- "change_class"
-      terra::writeRaster(change_r, change_path, overwrite = TRUE,
-                         gdal = c(paste0("COMPRESS=", compression)),
-                         wopt = list(datatype = "INT2S"))
-    }
 
-    # ---- Statistics (always computed, from disk, also on the skip branch) ---
-    change_vals <- terra::values(terra::rast(change_path), mat = FALSE)
-    change_vals <- change_vals[!is.na(change_vals)]
+      if (verbose) {
+        cli::cli_inform(c(
+          " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
+          " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
+        ))
+      }
 
-    n_gain   <- sum(change_vals == 1L)
-    n_loss   <- sum(change_vals == -1L)
-    n_stable <- sum(change_vals == 2L)
-    n_absent <- sum(change_vals == 0L)
-    total_present_now <- n_loss + n_stable
+      list(
+        result = fut_result,
+        stats = data.frame(
+          scenario          = scen,
+          n_gain            = n_gain,
+          n_loss            = n_loss,
+          n_stable_present  = n_stable,
+          n_stable_absent   = n_absent,
+          pct_change        = round(pct_change, 2),
+          current_centroid_lon = round(cur_centroid$lon, 4),
+          current_centroid_lat = round(cur_centroid$lat, 4),
+          future_centroid_lon  = round(fut_centroid$lon, 4),
+          future_centroid_lat  = round(fut_centroid$lat, 4),
+          centroid_shift_km = round(shift_km, 1),
+          stringsAsFactors  = FALSE
+        )
+      )
+    }, error = function(e) {
+      cli::cli_warn("Scenario {.val {scen}} failed: {conditionMessage(e)}")
+      NULL
+    })
 
-    pct_change <- if (total_present_now > 0) {
-      100 * (n_gain - n_loss) / total_present_now
+    if (is.null(sc_res)) {
+      stats_rows[[scen]] <- data.frame(
+        scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
+        n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
+        pct_change = NA_real_, current_centroid_lon = NA_real_,
+        current_centroid_lat = NA_real_, future_centroid_lon = NA_real_,
+        future_centroid_lat = NA_real_, centroid_shift_km = NA_real_,
+        stringsAsFactors = FALSE
+      )
     } else {
-      NA_real_
-    }
-
-    # Future centroid
-    fut_centroid <- .weighted_centroid_raster(
-      terra::rast(fut_result$hss_path),
-      terra::rast(fut_result$binary_path))
-
-    # Centroid shift
-    shift_km <- tryCatch(
-      .haversine_km(
-        cur_centroid$lat, cur_centroid$lon,
-        fut_centroid$lat, fut_centroid$lon
-      ),
-      error = function(e) NA_real_
-    )
-
-    stats_rows[[scen]] <- data.frame(
-      scenario          = scen,
-      n_gain            = n_gain,
-      n_loss            = n_loss,
-      n_stable_present  = n_stable,
-      n_stable_absent   = n_absent,
-      pct_change        = round(pct_change, 2),
-      current_centroid_lon = round(cur_centroid$lon, 4),
-      current_centroid_lat = round(cur_centroid$lat, 4),
-      future_centroid_lon  = round(fut_centroid$lon, 4),
-      future_centroid_lat  = round(fut_centroid$lat, 4),
-      centroid_shift_km = round(shift_km, 1),
-      stringsAsFactors  = FALSE
-    )
-
-    if (verbose) {
-      cli::cli_inform(c(
-        " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
-        " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
-      ))
+      future_results[[scen]] <- sc_res$result
+      stats_rows[[scen]] <- sc_res$stats
     }
   }
 

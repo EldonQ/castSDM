@@ -95,6 +95,10 @@ test_that("cast_project computes change classes and stats", {
   )
   current_grid <- make_syn_grid(dat)
   future_grid <- make_syn_grid(dat)
+  # cast_project() requires the future grid to share the current grid's
+  # lon/lat rows (enforced since 0.7.0, review M16); only the climate shifts.
+  future_grid$lon <- current_grid$lon
+  future_grid$lat <- current_grid$lat
   future_grid$x1 <- future_grid$x1 + 2  # strong shift
   proj <- cast_project(fit, cv, current_grid,
                        future_envs = list(ssp585_2050 = future_grid))
@@ -137,10 +141,9 @@ test_that("cast_predict_tiled writes real predictions on a fresh output dir", {
   fit <- cast_fit(dat, screen = screen, models = "rf", rf_ntree = 40,
                   seed = 91, verbose = FALSE)
   r <- terra::rast(nrows = 12, ncols = 12, xmin = 99, xmax = 106,
-                   ymin = 29, ymax = 36)
-  r$x1 <- terra::setValues(r, runif(144))
-  r$x2 <- terra::setValues(r, runif(144))
-  r$x3 <- terra::setValues(r, runif(144))
+                   ymin = 29, ymax = 36, nlyrs = 3)
+  names(r) <- c("x1", "x2", "x3")
+  terra::values(r) <- matrix(runif(3 * 144), ncol = 3)
   td <- tempfile("tiled")
   out <- cast_predict_tiled(fit, r, output_dir = td, tile_size = 6L,
                             verbose = FALSE)

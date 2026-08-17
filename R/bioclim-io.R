@@ -28,6 +28,9 @@
 #'   (e.g., `"ssp126"`). Required when `period = "future"`.
 #' @param model Character or `NULL`. Climate model (e.g., `"ensmean"`,
 #'   `"access_cm2"`). For future periods. Default `"ensmean"`.
+#' @param dataset_prefix Character. Dataset-directory / metadata token prefix;
+#'   the model filter matches the token `"{dataset_prefix}_{model}"`.
+#'   Default `"cnclim1km"`.
 #' @param metadata_csv Character or `NULL`. Path to the CHNECO26 metadata
 #'   CSV. If `NULL`, attempts to find it at
 #'   `<bioclim_root>/CHNECO26_datalayers_details_bioclim.csv`.
@@ -52,6 +55,7 @@ cast_load_bioclim <- function(bioclim_root,
                               sub_period  = "1991_2020",
                               scenario    = NULL,
                               model       = "ensmean",
+                              dataset_prefix = "cnclim1km",
                               metadata_csv = NULL,
                               verbose     = TRUE) {
 
@@ -72,7 +76,7 @@ cast_load_bioclim <- function(bioclim_root,
   if (file.exists(metadata_csv)) {
     paths <- .load_bioclim_from_metadata(
       bioclim_root, metadata_csv, variables,
-      period, sub_period, scenario, model, verbose
+      period, sub_period, scenario, model, dataset_prefix, verbose
     )
   } else {
     if (verbose) {
@@ -80,7 +84,7 @@ cast_load_bioclim <- function(bioclim_root,
     }
     paths <- .load_bioclim_recursive(
       bioclim_root, variables, period, sub_period,
-      scenario, model, verbose
+      scenario, model, dataset_prefix, verbose
     )
   }
 
@@ -109,22 +113,27 @@ cast_load_bioclim <- function(bioclim_root,
 #' @noRd
 .load_bioclim_from_metadata <- function(bioclim_root, metadata_csv, variables,
                                          period, sub_period, scenario, model,
-                                         verbose) {
+                                         dataset_prefix, verbose) {
   meta <- utils::read.csv(metadata_csv, stringsAsFactors = FALSE)
 
-  # Normalise NA strings
-  if ("scenario" %in% names(meta)) {
-    meta$scenario <- ifelse(
-      is.na(meta$scenario) | meta$scenario == "NA",
-      NA_character_, meta$scenario
+  # Fail with a clear message when the metadata lacks required columns.
+  req_cols <- c("period", "sub_period", "variable", "scenario", "model",
+                "relative_path")
+  if (period == "future") req_cols <- c(req_cols, "dataset")
+  missing_cols <- setdiff(req_cols, names(meta))
+  if (length(missing_cols)) {
+    cli::cli_abort(
+      "Metadata CSV {.path {metadata_csv}} is missing required column{?s}: {.val {missing_cols}}."
     )
   }
-  if ("model" %in% names(meta)) {
-    meta$model <- ifelse(
-      is.na(meta$model) | meta$model == "NA",
-      NA_character_, meta$model
-    )
+
+  # Normalise NA strings: "", "na", "NA" (any case) all mean "no value".
+  norm_na <- function(v) {
+    v[!is.na(v) & tolower(trimws(v)) %in% c("", "na")] <- NA_character_
+    v
   }
+  meta$scenario <- norm_na(meta$scenario)
+  meta$model <- norm_na(meta$model)
 
   # Filter rows
   if (period == "present") {
@@ -151,7 +160,7 @@ cast_load_bioclim <- function(bioclim_root,
     # Filter by model if specified: exact dataset-token match
     # (e.g. 'cnclim1km_ensmean'), never a bare substring search.
     if (!is.null(model) && nzchar(model)) {
-      token <- paste0("cnclim1km_", model)
+      token <- paste0(dataset_prefix, "_", model)
       rows <- rows[rows$dataset == token, , drop = FALSE]
     }
   }
@@ -199,16 +208,17 @@ cast_load_bioclim <- function(bioclim_root,
 #' Load Bioclim Paths via Recursive Directory Scan
 #' @noRd
 .load_bioclim_recursive <- function(bioclim_root, variables, period,
-                                     sub_period, scenario, model, verbose) {
+                                     sub_period, scenario, model,
+                                     dataset_prefix, verbose) {
   # Build expected directory path
   if (period == "present") {
-    search_dir <- file.path(bioclim_root, "bioclim", "cnclim1km",
+    search_dir <- file.path(bioclim_root, "bioclim", dataset_prefix,
                             "present", sub_period)
   } else {
     model_dir <- if (!is.null(model) && nzchar(model)) {
-      paste0("cnclim1km_", model)
+      paste0(dataset_prefix, "_", model)
     } else {
-      "cnclim1km_ensmean"
+      paste0(dataset_prefix, "_ensmean")
     }
     search_dir <- file.path(bioclim_root, "bioclim", model_dir,
                             "future", sub_period, scenario)

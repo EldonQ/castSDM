@@ -16,6 +16,8 @@ A \code{ggplot} object (or \code{patchwork} combination).
 }
 \description{
 Two-panel figure: (left) per-model evaluation metrics with replicate
-spread; (right) prediction mean and uncertainty (SD) when a prediction
-grid was supplied.
+spread (axis spans -1 to 1 so negative TSS/CBI stay visible); (right)
+prediction mean and uncertainty (SD) of the first model's
+\verb{hss_mean_<model>} / \verb{hss_sd_<model>} columns when a prediction grid
+was supplied.
 }

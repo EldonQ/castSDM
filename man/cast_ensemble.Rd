@@ -35,8 +35,11 @@ models with Score < 0.5.
 A \code{cast_ensemble} object with components:
 \describe{
 \item{predictions}{A \code{data.frame} with \code{lon}, \code{lat}, \code{hss_ensemble},
-\code{hss_sd} (cross-model standard deviation, \code{NA} for a single model),
-and \code{binary_ensemble} columns.}
+\code{hss_sd} (cross-model standard deviation over models with positive
+weight and finite predictions, \code{NA} when fewer than two such models),
+and \code{binary_ensemble} columns. When the fit carries a training
+reference, the MESS columns (\code{mess}, \code{extrapolating}) from
+\code{\link[=cast_predict]{cast_predict()}} are retained.}
 \item{weights}{Named numeric vector of per-model weights.}
 \item{method}{The ensemble method used.}
 \item{threshold}{Binary classification threshold.}
@@ -54,10 +57,11 @@ The composite score for each model is:
 \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 
 following the N-SDM nested-modelling framework (Adde et al. 2020).
-Models with Score < 0.5 are excluded from the weighted ensemble.
-Models whose predictions contain non-finite values are excluded from
-the ensemble with a warning, and the remaining weights are
-renormalised.
+Models with Score < 0.5 are excluded from the weighted ensemble (a
+warning is issued when this excludes every model and equal weights are
+used as a fallback). Models whose predictions contain non-finite values
+are excluded from the ensemble with a warning, and the remaining weights
+are renormalised.
 }
 \references{
 Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance

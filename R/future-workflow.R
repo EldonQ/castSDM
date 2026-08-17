@@ -43,8 +43,10 @@ cast_load_future_envs <- function(path) {
       cli::cli_abort("RDA future environment must contain a data.frame or named list of data.frames.")
     }
   } else if (tolower(tools::file_ext(path)) == "csv") {
-    out <- list(future = utils::read.csv(path, check.names = FALSE))
-    names(out) <- tools::file_path_sans_ext(basename(path))
+    out <- stats::setNames(
+      list(utils::read.csv(path, check.names = FALSE)),
+      tools::file_path_sans_ext(basename(path))
+    )
   } else {
     cli::cli_abort("Unsupported future environment file extension: {.val {tools::file_ext(path)}}.")
   }
@@ -97,11 +99,8 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
 
   if (requireNamespace("ggplot2", quietly = TRUE) &&
       requireNamespace("sf", quietly = TRUE)) {
-    save_plot <- if (exists("cast_safe_ggsave", mode = "function")) {
-      cast_safe_ggsave
-    } else {
-      ggplot2::ggsave
-    }
+    # cast_safe_ggsave lives in this package's namespace; no fallback needed.
+    save_plot <- cast_safe_ggsave
 
     p_cur <- tryCatch(plot(proj$current, basemap = basemap), error = function(e) NULL)
     if (!is.null(p_cur)) {

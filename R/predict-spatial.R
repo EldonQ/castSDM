@@ -10,6 +10,10 @@
 #' and threshold HSS within a projection, and avoid reading it as an absolute
 #' occurrence probability.
 #'
+#' Predictors must be numeric: non-numeric columns (e.g. factor or
+#' character) in `new_data` abort with an error instead of being silently
+#' coerced via `as.numeric()`.
+#'
 #' When the fit carries a training reference (it does by default), each
 #' prediction row is scored for **extrapolation** via the multivariate
 #' environmental similarity surface (MESS; Elith et al. 2010). Negative MESS
@@ -59,6 +63,7 @@ cast_predict <- function(fit, new_data, models = NULL,
 
   # Prepare new data
   X_raw <- as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE)
+  .cast_check_numeric_predictors(X_raw)
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
   X_raw <- .cast_impute(X_raw, fit$scaling$impute)
 
@@ -125,6 +130,12 @@ cast_predict <- function(fit, new_data, models = NULL,
 #' reference distribution (negative outside the reference min/max); the point
 #' MESS is the minimum across predictors. Negative values flag extrapolation.
 #'
+#' Vectorised implementation: per-predictor reference quantiles come from a
+#' single `findInterval()` against the sorted reference instead of a
+#' per-cell `sum(ref < pi)` loop. Branch-for-branch identical to Elith et
+#' al. (2010), including the degenerate `range <= 0` case and the
+#' `NA`-in-`newdata` -> `NA` semantics.
+#'
 #' @keywords internal
 #' @noRd
 .cast_mess <- function(reference, newdata) {
@@ -138,27 +149,33 @@ cast_predict <- function(fit, new_data, models = NULL,
     if (!length(ref)) next
     mn <- min(ref); mx <- max(ref); rng <- mx - mn
     n <- length(ref)
-    f <- vapply(p, function(pi) {
-      if (!is.finite(pi)) return(NA_real_)
-      100 * sum(ref < pi) / n
-    }, numeric(1))
-    s <- numeric(length(p))
-    for (i in seq_along(p)) {
-      pi <- p[i]; fi <- f[i]
-      if (!is.finite(pi)) { s[i] <- NA_real_; next }
+    # f = 100 * (number of reference values strictly below p) / n.
+    # left.open = TRUE makes findInterval() count ref < p (not ref <= p).
+    f <- 100 * findInterval(p, sort(ref), left.open = TRUE) / n
+    ok <- is.finite(p)
+    s <- rep(NA_real_, length(p))
+    if (any(ok)) {
+      po <- p[ok]; fo <- f[ok]
+      sj <- numeric(length(po))
       if (rng <= 0) {
-        s[i] <- if (pi == mn) 100 else -100
-      } else if (fi == 0) {
-        s[i] <- (pi - mn) / rng * 100
-      } else if (fi <= 50) {
-        s[i] <- 2 * fi
-      } else if (fi < 100) {
-        s[i] <- 2 * (100 - fi)
+        sj[] <- ifelse(po == mn, 100, -100)
       } else {
-        s[i] <- (mx - pi) / rng * 100
+        below  <- fo == 0
+        low    <- fo > 0 & fo <= 50
+        high   <- fo > 50 & fo < 100
+        above  <- fo >= 100
+        sj[below] <- (po[below] - mn) / rng * 100
+        sj[low]   <- 2 * fo[low]
+        sj[high]  <- 2 * (100 - fo[high])
+        sj[above] <- (mx - po[above]) / rng * 100
       }
+      s[ok] <- sj
     }
     sim[, j] <- s
   }
-  apply(sim, 1L, function(r) if (all(is.na(r))) NA_real_ else min(r, na.rm = TRUE))
+  # Row-wise minimum over predictors; rows with no finite similarity -> NA.
+  sim[!is.finite(sim)] <- Inf
+  mess <- do.call(pmin, lapply(seq_len(ncol(sim)), function(j) sim[, j]))
+  mess[!is.finite(mess)] <- NA_real_
+  mess
 }

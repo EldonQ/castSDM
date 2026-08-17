@@ -33,7 +33,8 @@ ensembles (N-SDM score), ESM for rare species, and CMIP6 projection.
 ## Data
 
 Species data are presence/background tables with `lon`, `lat`, `presence`
-(0/1) and environmental predictors. `inst/extdata` ships example tables:
+(0/1) and environmental predictors. `inst/extdata` ships a small example
+table (a 2000-row subset of the full screening table):
 
 ```{r data}
 library(castSDM)
@@ -83,8 +84,9 @@ plot(eff)
 ## Counterfactual what-if map
 
 ```{r counterfactual}
+# Shift the first predictor retained by the screen (guaranteed to be fitted).
 cf <- cast_counterfactual(result$fit, newdata = dat,
-                          variable = "bio01", shift = 1,
+                          variable = result$fit$env_vars[1], shift = 1,
                           shift_type = "sd")
 plot(cf, basemap = "none")
 ```

@@ -259,6 +259,13 @@ cast_counterfactual <- function(fit, newdata, variable,
   )
 
   d <- predictions$delta_hss[is.finite(predictions$delta_hss)]
+  if (!length(d)) {
+    # Every model failed on base or counterfactual: refuse to return a
+    # silent NaN summary.
+    cli::cli_abort(
+      "All model predictions failed for the {.val {variable}} counterfactual; no finite deltas to summarise."
+    )
+  }
   summary <- list(
     mean_delta = mean(d),
     median_delta = stats::median(d),

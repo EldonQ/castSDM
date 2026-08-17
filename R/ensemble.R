@@ -19,8 +19,11 @@
 #' @return A `cast_ensemble` object with components:
 #' \describe{
 #'   \item{predictions}{A `data.frame` with `lon`, `lat`, `hss_ensemble`,
-#'     `hss_sd` (cross-model standard deviation, `NA` for a single model),
-#'     and `binary_ensemble` columns.}
+#'     `hss_sd` (cross-model standard deviation over models with positive
+#'     weight and finite predictions, `NA` when fewer than two such models),
+#'     and `binary_ensemble` columns. When the fit carries a training
+#'     reference, the MESS columns (`mess`, `extrapolating`) from
+#'     [cast_predict()] are retained.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
 #'   \item{method}{The ensemble method used.}
 #'   \item{threshold}{Binary classification threshold.}
@@ -33,10 +36,11 @@
 #' \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 #'
 #' following the N-SDM nested-modelling framework (Adde et al. 2020).
-#' Models with Score < 0.5 are excluded from the weighted ensemble.
-#' Models whose predictions contain non-finite values are excluded from
-#' the ensemble with a warning, and the remaining weights are
-#' renormalised.
+#' Models with Score < 0.5 are excluded from the weighted ensemble (a
+#' warning is issued when this excludes every model and equal weights are
+#' used as a fallback). Models whose predictions contain non-finite values
+#' are excluded from the ensemble with a warning, and the remaining weights
+#' are renormalised.
 #'
 #' @references
 #' Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
@@ -71,6 +75,9 @@ cast_ensemble <- function(fit, cv, new_data,
   pred_df <- pred_obj$predictions
 
   # ---- Combine into ensemble HSS + cross-model uncertainty --------------
+  # Only models with positive weight AND finite predictions take part, in
+  # both the weighted mean (renormalised) and the cross-model SD; the
+  # raster path (cast_ensemble_raster) uses the same convention.
   hss_cols <- paste0("HSS_", mdl_names)
   include <- rep(TRUE, length(mdl_names))
   for (i in seq_along(mdl_names)) {
@@ -85,7 +92,11 @@ cast_ensemble <- function(fit, cv, new_data,
         "{.val {mdl_names[i]}} produced non-finite predictions; excluded from the ensemble."
       )
       include[i] <- FALSE
+      next
     }
+    # Zero-weight models neither average in nor count towards the
+    # cross-model SD (same convention as cast_ensemble_raster()).
+    if (weights[mdl_names[i]] <= 0) include[i] <- FALSE
   }
   if (!any(include)) {
     cli::cli_abort("No model produced finite predictions for the ensemble.")
@@ -120,6 +131,12 @@ cast_ensemble <- function(fit, cv, new_data,
   out_df$hss_ensemble <- ensemble_hss
   out_df$hss_sd <- hss_sd
   out_df$binary_ensemble <- as.integer(ensemble_hss >= threshold)
+  # Keep the MESS extrapolation flags computed by cast_predict() instead of
+  # silently dropping them.
+  if (all(c("mess", "extrapolating") %in% names(pred_df))) {
+    out_df$mess <- pred_df$mess
+    out_df$extrapolating <- pred_df$extrapolating
+  }
 
   new_cast_ensemble(
     predictions  = out_df,
@@ -156,7 +173,14 @@ cast_ensemble <- function(fit, cv, new_data,
       w <- scores
       w[is.na(w) | w < 0.5] <- 0
       total <- sum(w)
-      if (total > 0) w / total else rep(1 / length(w), length(w))
+      if (total > 0) {
+        w / total
+      } else {
+        cli::cli_warn(
+          "All model scores are below 0.5; falling back to equal ensemble weights."
+        )
+        rep(1 / length(w), length(w))
+      }
     },
     best = {
       w <- rep(0, length(mdl_names))
@@ -206,7 +230,9 @@ cast_ensemble <- function(fit, cv, new_data,
 #' rasters from a fitted model and cross-validation results. This is the
 #' raster-native equivalent of [cast_ensemble()]: it reads a
 #' `SpatRaster` stack, runs all models in memory, computes the weighted
-#' ensemble, and writes GeoTIFF outputs.
+#' ensemble, and writes GeoTIFF outputs. Extrapolation control is built
+#' in: an optional per-cell MESS layer flags out-of-envelope cells, and
+#' `clamp` can cap predictors at their training range.
 #'
 #' @param fit A [cast_fit] object.
 #' @param cv A [cast_cv] object providing per-model evaluation metrics.
@@ -219,6 +245,16 @@ cast_ensemble <- function(fit, cv, new_data,
 #' @param models Character vector or `NULL`. Models to use. Default all.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
 #'   is restricted to cells where mask is non-NA.
+#' @param clamp Logical. Clamp predictors to the training range before
+#'   prediction. Default `FALSE`. The MESS layer (see `extrapolation`) is
+#'   always computed on the unclamped input, so clamping never hides
+#'   extrapolation.
+#' @param extrapolation Logical. Compute a per-cell MESS layer (Elith et
+#'   al. 2010) block by block and write `<prefix>_mess.tif`. Default
+#'   `TRUE` (skipped, with `mess_path = NULL`, if the fit lacks a stored
+#'   training reference).
+#' @param max_memory_mb Numeric. Approximate per-block memory budget in MB
+#'   used to size the row blocks. Default `200`.
 #' @param prefix Character. Filename prefix. Default `""`.
 #' @param overwrite Logical. Overwrite existing output. Default `FALSE`.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
@@ -229,10 +265,22 @@ cast_ensemble <- function(fit, cv, new_data,
 #'   \item{hss_path}{File path to the HSS raster.}
 #'   \item{hss_sd_path}{File path to the cross-model uncertainty (SD) raster.}
 #'   \item{binary_path}{File path to the binary raster.}
+#'   \item{mess_path}{File path to the MESS raster, or `NULL` when
+#'     `extrapolation = FALSE` or no training reference is available.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
 #'   \item{threshold}{Binary classification threshold.}
 #'   \item{n_valid_cells}{Number of cells predicted.}
 #' }
+#'
+#' @details
+#' Per block, models whose predictions are not finite are excluded and the
+#' remaining positive weights are renormalised before averaging - the same
+#' convention as [cast_ensemble()]. The cross-model SD layer likewise uses
+#' only models with positive weight and finite predictions (`NA` where
+#' fewer than two models contribute). Cells with `NA` covariates (or
+#' masked out) stay `NA` in every output layer. If no model produces
+#' finite predictions for a block, those cells are `NA` and a warning is
+#' issued once.
 #'
 #' @seealso [cast_ensemble()], [cast_predict()], [cast_project_raster()]
 #'
@@ -242,6 +290,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
                                  method = c("weighted", "best", "equal"),
                                  models = NULL,
                                  mask = NULL,
+                                 clamp = FALSE,
+                                 extrapolation = TRUE,
+                                 max_memory_mb = 200,
                                  prefix = "",
                                  overwrite = FALSE,
                                  compression = "LZW",
@@ -277,12 +328,22 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     output_dir,
     paste0(prefix, if (nzchar(prefix)) "_" else "", "binary_ensemble.tif")
   )
+  mess_path <- file.path(
+    output_dir,
+    paste0(prefix, if (nzchar(prefix)) "_" else "", "mess.tif")
+  )
 
-  if (!overwrite && file.exists(hss_path) && file.exists(bin_path)) {
+  reference <- fit$scaling$reference
+  want_mess <- isTRUE(extrapolation) && !is.null(reference)
+
+  outputs_exist <- file.exists(hss_path) && file.exists(hss_sd_path) &&
+    file.exists(bin_path) && (!want_mess || file.exists(mess_path))
+  if (!overwrite && outputs_exist) {
     if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
     return(invisible(list(
       hss_path = hss_path, hss_sd_path = hss_sd_path,
       binary_path = bin_path,
+      mess_path = if (want_mess) mess_path else NULL,
       weights = NULL, threshold = NULL, n_valid_cells = NA_integer_
     )))
   }
@@ -328,7 +389,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   res_y <- terra::yres(r)
 
   bytes_per_row <- as.double(nc) * nl * 8 * 5
-  rows_per_block <- max(10L, as.integer(200e6 / bytes_per_row))
+  rows_per_block <- max(10L, as.integer(max_memory_mb * 1e6 / bytes_per_row))
   rows_per_block <- min(rows_per_block, nr)
   n_blocks <- ceiling(nr / rows_per_block)
 
@@ -343,9 +404,22 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   if (!is.null(mask)) {
     geom_ok <- tryCatch(
       terra::compareGeom(mask, r, ext = TRUE, rowcol = TRUE, res = TRUE,
-                         crs = FALSE, stopOnError = FALSE),
+                         crs = TRUE, stopOnError = FALSE),
       error = function(e) FALSE
     )
+    if (!isTRUE(geom_ok)) {
+      # A mask in a different CRS (or grid) is reprojected onto the stack
+      # geometry before giving up and predicting the full extent.
+      mask_proj <- tryCatch(terra::project(mask, r), error = function(e) NULL)
+      if (!is.null(mask_proj)) {
+        geom_ok <- tryCatch(
+          terra::compareGeom(mask_proj, r, ext = TRUE, rowcol = TRUE,
+                             res = TRUE, crs = TRUE, stopOnError = FALSE),
+          error = function(e) FALSE
+        )
+        if (isTRUE(geom_ok)) mask <- mask_proj
+      }
+    }
     if (!isTRUE(geom_ok)) {
       cli::cli_warn(
         "Mask geometry does not match the raster stack; predicting the full extent."
@@ -367,9 +441,11 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   hss_vec  <- rep(NA_real_,    n_cells_total)
   hss_sd_vec <- rep(NA_real_,  n_cells_total)
   bin_vec  <- rep(NA_integer_, n_cells_total)
+  mess_vec <- rep(NA_real_,    n_cells_total)
 
   n_valid <- 0L
   warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
+  warned_empty_block <- FALSE
 
   for (bi in seq_len(n_blocks)) {
     row_start <- (bi - 1L) * rows_per_block + 1L
@@ -383,7 +459,12 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     v <- terra::as.data.frame(block_r, na.rm = FALSE)
     rm(block_r)
 
-    if (!all(env_vars %in% names(v))) names(v)[seq_along(env_vars)] <- env_vars
+    if (!all(env_vars %in% names(v))) {
+      cli::cli_abort(c(
+        "Block values lost expected layer name{?s}: {.val {setdiff(env_vars, names(v))}}.",
+        "i" = "Refusing to match predictors by position; check that raster layer names are stable."
+      ))
+    }
     v <- v[, env_vars, drop = FALSE]
 
     cell_start <- (row_start - 1L) * nc + 1L
@@ -402,9 +483,23 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       X_raw <- as.data.frame(v[ok, , drop = FALSE])
       for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
 
-      ens_hss <- rep(0, n_ok)
+      valid_idx <- cell_start - 1L + which(ok)
+
+      # MESS on the (unclamped) block input; clamping happens afterwards and
+      # therefore never masks extrapolation.
+      if (want_mess) {
+        mess_vec[valid_idx] <- tryCatch(
+          .cast_mess(reference, X_raw),
+          error = function(e) rep(NA_real_, n_ok)
+        )
+      }
+      if (isTRUE(clamp) && !is.null(reference)) {
+        X_raw <- .cast_clamp(X_raw, reference)
+      }
+
       pred_mat <- matrix(NA_real_, nrow = n_ok, ncol = length(mdl_names),
                          dimnames = list(NULL, mdl_names))
+      contrib <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
       for (mdl_name in mdl_names) {
         if (weights[mdl_name] == 0) next
         mdl_info <- fit$models[[mdl_name]]
@@ -422,26 +517,37 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
           }
           next
         }
-        ens_hss <- ens_hss + weights[mdl_name] * preds
         pred_mat[, mdl_name] <- preds
-      }
-      # Cross-model SD only when at least two models contributed finite
-      # predictions to THIS block.
-      n_contrib <- sum(vapply(seq_len(ncol(pred_mat)),
-                              function(j) any(is.finite(pred_mat[, j])),
-                              logical(1)))
-      ens_sd <- if (n_contrib > 1L) {
-        apply(pred_mat, 1L, stats::sd, na.rm = TRUE)
-      } else {
-        rep(NA_real_, n_ok)
+        contrib[mdl_name] <- TRUE
       }
 
-      valid_idx <- cell_start - 1L + which(ok)
-      hss_vec[valid_idx] <- ens_hss
-      hss_sd_vec[valid_idx] <- ens_sd
-      bin_vec[valid_idx] <- as.integer(ens_hss >= threshold)
-      n_valid <- n_valid + n_ok
-      rm(X_raw, ens_hss, ens_sd, pred_mat, valid_idx)
+      if (any(contrib)) {
+        # Renormalise the weights of the contributing models before
+        # averaging (same convention as cast_ensemble()); the cross-model
+        # SD uses exactly those contributing models.
+        w_blk <- weights[contrib]
+        w_blk <- w_blk / sum(w_blk)
+        contrib_cols <- names(w_blk)
+        ens_hss <- as.vector(
+          pred_mat[, contrib_cols, drop = FALSE] %*% w_blk
+        )
+        ens_sd <- if (length(contrib_cols) > 1L) {
+          apply(pred_mat[, contrib_cols, drop = FALSE], 1L, stats::sd)
+        } else {
+          rep(NA_real_, n_ok)
+        }
+        hss_vec[valid_idx] <- ens_hss
+        hss_sd_vec[valid_idx] <- ens_sd
+        bin_vec[valid_idx] <- as.integer(ens_hss >= threshold)
+        n_valid <- n_valid + n_ok
+        rm(ens_hss, ens_sd, w_blk)
+      } else if (!warned_empty_block) {
+        cli::cli_warn(
+          "No model produced finite predictions for at least one block; those cells are NA."
+        )
+        warned_empty_block <- TRUE
+      }
+      rm(X_raw, pred_mat, contrib, valid_idx)
     }
 
     rm(v)
@@ -478,6 +584,16 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   rm(hss_sd_out, hss_sd_vec)
   invisible(gc())
 
+  if (want_mess) {
+    mess_out <- terra::setValues(terra::rast(template), mess_vec)
+    names(mess_out) <- "mess"
+    terra::writeRaster(mess_out, mess_path, overwrite = TRUE,
+      gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
+      wopt = list(datatype = "FLT4S"))
+    rm(mess_out)
+  }
+  rm(mess_vec)
+
   bin_out <- terra::setValues(terra::rast(template), bin_vec)
   names(bin_out) <- "binary_ensemble"
   terra::writeRaster(bin_out, bin_path, overwrite = TRUE,
@@ -486,18 +602,21 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   rm(bin_out, bin_vec)
 
   if (verbose) {
-    cli::cli_inform(c(
+    msg <- c(
       "v" = "Ensemble rasters saved ({format(n_valid, big.mark = ',')} valid cells):",
       " " = "HSS: {.path {hss_path}}",
       " " = "HSS SD: {.path {hss_sd_path}}",
       " " = "Binary: {.path {bin_path}}"
-    ))
+    )
+    if (want_mess) msg <- c(msg, " " = "MESS: {.path {mess_path}}")
+    cli::cli_inform(msg)
   }
 
   invisible(list(
     hss_path     = hss_path,
     hss_sd_path  = hss_sd_path,
     binary_path  = bin_path,
+    mess_path    = if (want_mess) mess_path else NULL,
     weights      = weights,
     threshold    = threshold,
     n_valid_cells = n_valid

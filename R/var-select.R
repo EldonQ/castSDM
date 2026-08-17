@@ -16,15 +16,43 @@
 #' interpretable coefficient. `method = "rf"` is retained as a conventional
 #' (associational) permutation-importance benchmark for comparison.
 #'
+#' @section Inference assumptions:
+#' The CPI p-values come from a one-sided t-test on log-loss differences.
+#' With the default `inference = "block"` each spatial grid block contributes
+#' one mean difference (a cluster-robust t-test, `df = n_blocks - 1`): it does
+#' not treat spatially autocorrelated observations as independent, while
+#' retaining far more power than the fold-level test. `inference = "fold"`
+#' aggregates to one mean per cross-fitting fold (`df = folds - 1`), which is
+#' less anti-conservative than testing all n per-observation differences as if
+#' they were independent but also much lower-powered. `inference =
+#' "observation"` reproduces the reference \pkg{cpi} behaviour and assumes
+#' i.i.d. observations; on spatially autocorrelated data it inflates
+#' significance (effective sample size << n) and the FDR screen loses its
+#' nominal control. Note that every layer still uses random cross-fit folds, so
+#' train/test remain spatially adjacent inside the cross-fit; interpret
+#' surviving predictors as conditionally informative, not as proof of regional
+#' causality.
+#'
 #' @param data Data frame with response, coordinates, and predictors.
 #' @param response Binary response column.
 #' @param method `"cpi"` (default), `"dml"`, or the conventional `"rf"`
-#'   benchmark.
+#'   benchmark. Must be specified explicitly; `NULL` errors.
 #' @param alpha FDR level for the CPI/DML selectors. Default `0.05`.
 #' @param max_candidates Predictors tested with CPI/DML; larger sets are
 #'   pre-screened by RF importance for feasibility. Also the output ceiling for
 #'   the RF benchmark. Default `30`.
-#' @param dml_folds Cross-fitting folds for the CPI/DML selectors. Default `5`.
+#' @param dml_folds Cross-fitting folds for the CPI *and* DML selectors
+#'   (despite the name it controls both). Default `10`; fold-level CPI
+#'   inference needs enough folds for its t-test (df = folds - 1).
+#' @param inference CPI significance layer: `"block"` (default) tests
+#'   spatial-block mean log-loss differences (cluster-robust, needs `lon`/`lat`
+#'   columns); `"fold"` tests fold-mean differences; `"observation"` reproduces
+#'   the reference per-observation t-test (i.i.d. assumption; anti-conservative
+#'   under spatial autocorrelation - see the Inference assumptions section).
+#' @param n_blocks Target number of spatial blocks for `inference = "block"`
+#'   (auto when `NULL`, roughly `min(50, max(20, n/20))`).
+#' @param knockoff_reps Number of knockoff draws per CPI run; per-variable
+#'   statistics are the medians across replicates. Default `3`.
 #' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
 #'   The CPI and DML selectors cap this at `200` with an informational message
 #'   (the nuisance forest keeps fitting tractable on large candidate sets).
@@ -51,7 +79,10 @@ cast_select <- function(data,
                         method = c("cpi", "dml", "rf"),
                         alpha = 0.05,
                         max_candidates = 30L,
-                        dml_folds = 5L,
+                        dml_folds = 10L,
+                        inference = c("block", "fold", "observation"),
+                        n_blocks = NULL,
+                        knockoff_reps = 3L,
                         num_trees = 300L,
                         min_vars = 3L,
                         force_include = character(),
@@ -59,7 +90,14 @@ cast_select <- function(data,
                         num_threads = 1L,
                         seed = NULL,
                         verbose = TRUE) {
+  if (is.null(method)) {
+    cli::cli_abort(c(
+      "{.arg method} must be specified explicitly; the silent fallback to {.val cpi} was removed.",
+      i = "Pass one of {.val cpi}, {.val dml}, or {.val rf}."
+    ))
+  }
   method <- match.arg(method)
+  inference <- match.arg(inference)
   env_vars <- get_env_vars(data, response)
   if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
 
@@ -74,11 +112,21 @@ cast_select <- function(data,
   }
 
   if (identical(method, "cpi")) {
+    lon <- if ("lon" %in% names(data)) data$lon else NULL
+    lat <- if ("lat" %in% names(data)) data$lat else NULL
+    if (identical(inference, "block") && (is.null(lon) || is.null(lat))) {
+      cli::cli_warn(c(
+        "{.code inference = \"block\"} needs {.val lon}/{.val lat}; falling back to {.code \"fold\"}."
+      ))
+      inference <- "fold"
+    }
     out <- .cast_select_cpi(
       data = data, env_vars = env_vars, response = response,
       alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
       num_trees = num_trees, min_vars = min_vars,
-      seed = seed, verbose = verbose, num_threads = num_threads
+      inference = inference, knockoff_reps = knockoff_reps,
+      seed = seed, verbose = verbose, num_threads = num_threads,
+      lon = lon, lat = lat, n_blocks = n_blocks
     )
     res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
                                      force_include, verbose)
@@ -90,6 +138,11 @@ cast_select <- function(data,
   }
 
   if (identical(method, "dml")) {
+    if (!is.null(n_blocks)) {
+      cli::cli_warn(
+        "{.arg n_blocks} applies only to CPI screening ({.code inference = \"block\"}); ignored for {.code method = \"dml\"}."
+      )
+    }
     out <- .cast_select_dml(
       data = data, env_vars = env_vars, response = response,
       alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
@@ -250,8 +303,20 @@ cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
   df <- as.data.frame(xm[, cand, drop = FALSE], check.names = FALSE)
   df[[response]] <- y
 
-  assoc_p <- function(vars) vapply(vars, function(v)
-    suppressWarnings(stats::cor.test(df[[v]], df[[response]])$p.value), numeric(1))
+  assoc_p <- function(vars) vapply(vars, function(v) {
+    p <- tryCatch(
+      suppressWarnings(stats::cor.test(df[[v]], df[[response]])$p.value),
+      error = function(e) NA_real_
+    )
+    if (!is.finite(p)) NA_real_ else p
+  }, numeric(1))
+  # BH on the finite p-values only; variables whose test failed (NA p) are
+  # explicitly dropped instead of producing dirty NA indices downstream.
+  sig_vars <- function(vars) {
+    p <- assoc_p(vars)
+    ok <- is.finite(p)
+    vars[ok][stats::p.adjust(p[ok], "BH") < alpha]
+  }
 
   # 1. Correlation filter
   a <- abs(suppressWarnings(stats::cor(df[, cand, drop = FALSE], df[[response]])))
@@ -262,7 +327,7 @@ cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
         max(abs(stats::cor(df[[v]], df[, kept, drop = FALSE]))) < cor_threshold)
       kept <- c(kept, v)
   }
-  cor_keep <- kept[stats::p.adjust(assoc_p(kept), "BH") < alpha]
+  cor_keep <- sig_vars(kept)
 
   # 2. Stepwise VIF
   keep <- cand
@@ -276,10 +341,10 @@ cast_screen_comparison <- function(data, response = "presence", cpi = NULL,
     if (max(vifs) <= vif_threshold) break
     keep <- setdiff(keep, names(which.max(vifs)))
   }
-  vif_keep <- keep[stats::p.adjust(assoc_p(keep), "BH") < alpha]
+  vif_keep <- sig_vars(keep)
 
   # 3. Univariate marginal screen
-  uni_keep <- cand[stats::p.adjust(assoc_p(cand), "BH") < alpha]
+  uni_keep <- sig_vars(cand)
 
   # CPI retentions restricted to the shared pool.
   cpi_keep <- intersect(cand, cpi$selected)

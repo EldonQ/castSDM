@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Causal Variable Selection for Species Distribution Modeling}
+\title{castSDM: Conditional Variable Selection for Species Distribution Models}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Provides an end-to-end species distribution modeling workflow built around a causal variable-selection engine. By default the conditional predictive impact (Watson & Wright 2021) tests each predictor's conditional independence from occurrence given the others with a cross-fitted random forest and knockoffs, so nonlinear (including symmetric unimodal) niche responses are detected; an optional double machine learning selector (Chernozhukov et al. 2018) estimates signed orthogonalized partial-linear effects. Predictors surviving Benjamini-Hochberg FDR control are retained. The package couples this screen with standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM), nested spatial cross-validation, ensemble prediction, future climate projection with extrapolation control, and a counterfactual what-if interpretation layer. It supports transferable prediction and interpretable driver analysis but does not claim automatic discovery of ecological causes.
+Separates true ecological drivers from collinear bystanders in species distribution modelling. The default conditional predictive impact screen (Watson & Wright 2021) replaces each predictor with a Gaussian knockoff given every other predictor and tests whether it still improves a cross-fitted random forest, so nonlinear (including symmetric unimodal) niche responses are detected while collinear proxies are rejected; an optional double machine learning selector (Chernozhukov et al. 2018) estimates signed orthogonalized partial-linear effects. Predictors whose conditional contribution survives Benjamini-Hochberg FDR control are retained. The screen is embedded in a complete workflow - standard SDM algorithms (Random Forest, BRT, MaxEnt, GAM), nested spatial cross-validation, ensemble prediction, future climate projection with extrapolation control, and a counterfactual interpretation layer - and records a predictor-level audit of every retention decision. The package targets interpretable conditional selection but does not claim automatic discovery of ecological causes.
 }
 \seealso{
 Useful links:

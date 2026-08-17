@@ -2,15 +2,17 @@
 "_PACKAGE"
 
 #' @section Overview:
-#' \pkg{castSDM} is a focused species distribution modelling toolkit. It pairs
-#' a conditional variable selector (conditional predictive impact with FDR
-#' control by default; an optional double-machine-learning effect reporter)
-#' with standard RF / BRT / MaxEnt / GAM learners, nested spatial
+#' \pkg{castSDM} separates true ecological drivers from collinear bystanders
+#' in species distribution modelling. Its conditional variable selector
+#' (conditional predictive impact with FDR control by default; an optional
+#' double-machine-learning effect reporter) tests each predictor's contribution
+#' given every other predictor, so collinear proxies are rejected where
+#' marginal screens retain them. The selector is embedded in a complete
+#' workflow — standard RF / BRT / MaxEnt / GAM learners, nested spatial
 #' cross-validation, habitat-suitability prediction, performance-weighted
-#' ensembles and future climate projection. The selector retains predictors
-#' whose conditional contribution on occurrence survives FDR control; the
-#' package supports interpretable driver analysis but does not claim
-#' automatic causal discovery.
+#' ensembles and future climate projection — with a predictor-level audit of
+#' every retention decision. The package supports interpretable driver
+#' analysis but does not claim automatic causal discovery.
 #'
 #' **Pipeline steps:**
 #'
@@ -42,8 +44,8 @@
 #' ```
 #'
 #' @importFrom cli cli_abort cli_warn cli_inform
-#' @importFrom stats predict cor sd median var na.omit lm residuals
-#' @importFrom utils head tail
+#' @importFrom stats predict cor sd median var na.omit lm
+#' @importFrom utils head
 NULL
 
 # Suppress R CMD check NOTEs for non-standard evaluation variables

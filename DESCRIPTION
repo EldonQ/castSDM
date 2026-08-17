@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
-Title: Causal Variable Selection for Species Distribution Modeling
-Version: 0.7.0
+Title: Conditional Variable Selection for Species Distribution Models
+Version: 0.8.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -10,19 +10,21 @@ Authors@R: c(
       comment = c(ORCID = "0009-0002-6966-4633")
     )
   )
-Description: Provides an end-to-end species distribution modeling workflow
-    built around a causal variable-selection engine. By default the conditional
-    predictive impact (Watson & Wright 2021) tests each predictor's conditional
-    independence from occurrence given the others with a cross-fitted random
-    forest and knockoffs, so nonlinear (including symmetric unimodal) niche
-    responses are detected; an optional double machine learning selector
-    (Chernozhukov et al. 2018) estimates signed orthogonalized partial-linear
-    effects. Predictors surviving Benjamini-Hochberg FDR control are retained.
-    The package couples this screen with standard SDM algorithms (Random
-    Forest, BRT, MaxEnt, GAM), nested spatial cross-validation, ensemble
-    prediction, future climate projection with extrapolation control, and a
-    counterfactual what-if interpretation layer. It supports transferable
-    prediction and interpretable driver analysis but does not claim automatic
+Description: Separates true ecological drivers from collinear bystanders in
+    species distribution modelling. The default conditional predictive impact
+    screen (Watson & Wright 2021) replaces each predictor with a Gaussian
+    knockoff given every other predictor and tests whether it still improves a
+    cross-fitted random forest, so nonlinear (including symmetric unimodal)
+    niche responses are detected while collinear proxies are rejected; an
+    optional double machine learning selector (Chernozhukov et al. 2018)
+    estimates signed orthogonalized partial-linear effects. Predictors whose
+    conditional contribution survives Benjamini-Hochberg FDR control are
+    retained. The screen is embedded in a complete workflow - standard SDM
+    algorithms (Random Forest, BRT, MaxEnt, GAM), nested spatial
+    cross-validation, ensemble prediction, future climate projection with
+    extrapolation control, and a counterfactual interpretation layer - and
+    records a predictor-level audit of every retention decision. The package
+    targets interpretable conditional selection but does not claim automatic
     discovery of ecological causes.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
@@ -36,7 +38,6 @@ Imports:
     cli
 Suggests:
     car,
-    cpi,
     digest,
     DoubleML,
     future,
@@ -44,6 +45,7 @@ Suggests:
     gbm,
     ggplot2,
     knitr,
+    knockoff,
     lgr,
     maxnet,
     mgcv,

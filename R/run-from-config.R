@@ -15,7 +15,8 @@
 #' Top-level keys recognised by `cast_run_from_config()`:
 #' \describe{
 #'   \item{`run.output_dir`}{Where outputs are written.}
-#'   \item{`run.seed`}{Base seed (each species gets `seed + i`).}
+#'   \item{`run.seed`}{Base seed (each species gets a seed derived from it
+#'     plus a stable hash of the species name).}
 #'   \item{`run.parallel`}{Whether to run species in parallel.}
 #'   \item{`run.worker_budget.total_workers`}{Optional integer; passed to
 #'     [cast_worker_budget()]. Omit to use `detectCores() - 1`.}
@@ -30,7 +31,12 @@
 #' }
 #'
 #' All file paths are resolved relative to the directory containing the
-#' YAML file.
+#' YAML file (absolute paths are used as-is).
+#'
+#' Raster arguments ([cast_batch()] `raster_stack`, `future_rasters`,
+#' `raster_mask`) are in-memory `SpatRaster` objects and therefore cannot be
+#' expressed in YAML; drive raster-based runs through the R API or pass them
+#' via `...`.
 #'
 #' @param config_path Path to a YAML config file.
 #' @param ... Additional named arguments that override values from the
@@ -50,10 +56,12 @@ cast_run_from_config <- function(config_path, ...) {
   cfg <- yaml::read_yaml(config_path)
   base_dir <- dirname(normalizePath(config_path, winslash = "/", mustWork = TRUE))
 
+  # Relative paths always resolve against the YAML's own directory; only
+  # absolute paths are used as-is. (No CWD shadowing.)
+  is_abs <- function(p) grepl("^([A-Za-z]:|/|\\\\\\\\)", p)
   resolve <- function(p) {
     if (is.null(p) || !nzchar(p)) return(NULL)
-    if (file.exists(p)) return(p)
-    fp <- file.path(base_dir, p)
+    fp <- if (is_abs(p)) p else file.path(base_dir, p)
     if (!file.exists(fp))
       cli::cli_abort("Cannot find file referenced in config: {.path {p}}.")
     fp
@@ -79,9 +87,8 @@ cast_run_from_config <- function(config_path, ...) {
   # Run options
   run_opts <- cfg$run %||% list()
   output_dir <- run_opts$output_dir %||% "castSDM_output"
-  output_dir <- if (file.exists(output_dir) ||
-                    grepl("^([A-Za-z]:|/)", output_dir))
-    output_dir else file.path(base_dir, output_dir)
+  output_dir <- if (is_abs(output_dir)) output_dir else
+    file.path(base_dir, output_dir)
   seed <- run_opts$seed
   parallel <- isTRUE(run_opts$parallel %||% TRUE)
 
@@ -92,8 +99,10 @@ cast_run_from_config <- function(config_path, ...) {
       total_workers = run_opts$worker_budget$total_workers,
       n_species     = length(species_list)
     )
-    if (parallel && requireNamespace("future", quietly = TRUE))
-      cast_setup_species_plan(budget)
+    if (parallel && requireNamespace("future", quietly = TRUE)) {
+      old_plan <- cast_setup_species_plan(budget)
+      if (!is.null(old_plan)) on.exit(future::plan(old_plan), add = TRUE)
+    }
   }
 
   # cast_batch args

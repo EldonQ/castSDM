@@ -38,7 +38,9 @@
 #' \describe{
 #'   \item{lon, lat}{Coordinates.}
 #'   \item{presence}{Integer (1 = presence, 0 = background).}
-#'   \item{...}{One column per layer in `raster_stack` with extracted values.}
+#'   \item{...}{One column per layer in `raster_stack` with extracted values,
+#'     followed by any additional columns from `occurrences` (kept for
+#'     presence rows, `NA` for background rows).}
 #' }
 #' Rows with any `NA` in environmental variables are removed.
 #'
@@ -93,6 +95,23 @@ cast_background <- function(occurrences,
     cli::cli_abort("{.arg study_area} must be a {.cls cast_study_area} or NULL.")
   }
 
+  # The study-area mask is indexed against raster_stack cell numbers below,
+  # so mismatched geometry would silently sample the wrong cells (M19).
+  if (!is.null(study_area)) {
+    geom_ok <- tryCatch(
+      terra::compareGeom(study_area$mask, raster_stack, lyrs = FALSE),
+      error = function(e) e
+    )
+    if (!isTRUE(geom_ok)) {
+      cli::cli_abort(c(
+        "{.arg study_area} mask and {.arg raster_stack} have incompatible geometry.",
+        "x" = if (inherits(geom_ok, "error")) conditionMessage(geom_ok) else
+          "compareGeom() mismatch",
+        "i" = "Build the study area from the same raster grid you sample from."
+      ))
+    }
+  }
+
   if (!is.null(seed)) set.seed(seed)
 
   # ---- Cell-thinning of occurrences -------------------------------------------
@@ -133,12 +152,11 @@ cast_background <- function(occurrences,
     ref_mask[ref_mask == 0] <- NA
   }
 
-  # Get all valid cell indices
-  valid_cells <- which(!is.na(terra::values(ref_mask, mat = FALSE)))
-
-  # Also require non-NA in all raster layers (at least check first layer)
-  env_vals_check <- terra::values(raster_stack[[1]], mat = FALSE)
-  valid_cells <- valid_cells[!is.na(env_vals_check[valid_cells])]
+  # Get all valid cell indices: inside the mask AND non-NA in every layer
+  # (per-cell anyNA across layers, not just the first).
+  n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
+  valid_r <- !is.na(ref_mask) & (n_na_layers == 0)
+  valid_cells <- which(as.logical(terra::values(valid_r, mat = FALSE)))
 
   # Exclude presence cells if requested
   if (exclude_presence) {
@@ -185,25 +203,19 @@ cast_background <- function(occurrences,
   out_df <- cbind(out_df, env_df)
 
   # Remove rows with NA in any environmental variable, then top the
-  # background set back up to the requested size (cells that are NA in any
-  # layer other than the first would otherwise silently shrink the sample).
-  keep_topup <- TRUE
+  # background set back up to the requested size. `used_cells` accumulates
+  # every background cell ever sampled so no cell is topped up twice.
+  used_cells <- bg_cells
   topup_rounds <- 0L
-  while (keep_topup && topup_rounds < 5L) {
+  while (topup_rounds < 5L) {
     complete <- stats::complete.cases(out_df)
     n_bg_ok <- sum(complete & out_df$presence == 0)
-    n_pres_ok <- sum(complete & out_df$presence == 1)
-    if (n_bg_ok >= n_bg || length(valid_cells) <= n_bg_ok) break
-    topup_rounds <- topup_rounds + 1L
-    extra <- min(length(valid_cells) - n_bg_ok, n_bg - n_bg_ok)
-    if (extra < 1L) break
-    used_cells <- all_cells[complete & out_df$presence == 0]
+    if (n_bg_ok >= n_bg) break
     pool <- setdiff(valid_cells, used_cells)
-    if (length(pool) < extra) {
-      add <- sample(pool, length(pool))
-    } else {
-      add <- sample(pool, extra)
-    }
+    if (!length(pool)) break
+    topup_rounds <- topup_rounds + 1L
+    add <- sample(pool, min(length(pool), n_bg - n_bg_ok))
+    used_cells <- c(used_cells, add)
     add_xy <- terra::xyFromCell(raster_stack, add)
     add_env <- as.data.frame(raster_stack[add])
     add_df <- cbind(
@@ -213,8 +225,23 @@ cast_background <- function(occurrences,
     )
     out_df <- rbind(out_df, add_df)
   }
-  out_df <- out_df[stats::complete.cases(out_df), , drop = FALSE]
+  keep_rows <- stats::complete.cases(out_df)
+  out_df <- out_df[keep_rows, , drop = FALSE]
   rownames(out_df) <- NULL
+
+  # Preserve additional occurrence columns: presence rows keep their values,
+  # background rows are padded with NA.
+  extra_cols <- setdiff(names(occurrences), c("lon", "lat"))
+  if (length(extra_cols)) {
+    pres_part <- occurrences[keep_rows[seq_len(n_pres)], extra_cols,
+                             drop = FALSE]
+    bg_part <- as.data.frame(lapply(pres_part, function(v) {
+      v[rep(NA_integer_, sum(out_df$presence == 0))]
+    }))
+    names(bg_part) <- extra_cols
+    out_df <- cbind(out_df, rbind(pres_part, bg_part))
+    rownames(out_df) <- NULL
+  }
 
   n_removed <- n_bg - sum(out_df$presence == 0)
   n_removed <- max(0L, n_removed)

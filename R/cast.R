@@ -16,12 +16,14 @@
 #' @param select_method Character. Variable screening method passed to
 #'   [cast_select()]. Default `"cpi"`.
 #' @param select_num_trees Integer. Trees in the RF nuisance/benchmark forests.
-#'   Default `300`.
+#'   Default `300`; the CPI/DML selectors cap it at `200` (nuisance-forest
+#'   tractability).
 #' @param select_max_vars Candidate ceiling for DML testing / RF output.
 #'   Default `30`.
 #' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
-#' @param select_dml_folds Integer. Cross-fitting folds for the CPI/DML
-#'   selectors. Default `5`.
+#' @param select_dml_folds Integer. Cross-fitting folds for the CPI *and* DML
+#'   selectors (despite the name it controls both). Default `10`; fold-level
+#'   CPI inference needs enough folds for its t-test (df = folds - 1).
 #' @param select_cor_threshold Numeric. Absolute correlation threshold for the
 #'   RF benchmark. Default `0.8`.
 #' @param num_threads Integer. Threads for the ranger learners/benchmark.
@@ -29,7 +31,9 @@
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
-#'   `"grid"`.
+#'   `"grid"` - grid cells grouped into spatially contiguous folds (the
+#'   legacy interleaved packing is still available as `"grid_random"`; see
+#'   [cast_cv()], which also offers a `buffer` exclusion band).
 #' @param do_predict Logical. Generate spatial predictions. Default `TRUE`
 #'   if `env_data` is provided.
 #' @param do_ensemble Logical. Generate ensemble prediction. Default `TRUE`.
@@ -58,7 +62,7 @@ cast <- function(species_data,
                  select_num_trees = 300L,
                  select_max_vars = 30L,
                  select_alpha = 0.05,
-                 select_dml_folds = 5L,
+                 select_dml_folds = 10L,
                  select_cor_threshold = 0.8,
                  num_threads = 1L,
                  do_cv = TRUE,

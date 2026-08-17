@@ -11,7 +11,8 @@ cast_cv(
   select_args = list(),
   k = 5L,
   models = c("rf"),
-  block_method = c("grid", "cluster"),
+  block_method = c("grid", "grid_random", "cluster"),
+  buffer = 0,
   response = "presence",
   rf_ntree = 300L,
   brt_n_trees = 500L,
@@ -24,7 +25,10 @@ cast_cv(
 \item{data}{Data frame with \code{lon}, \code{lat}, binary response, and predictors.}
 
 \item{screen}{Optional final-data screen. It is used only when
-\code{select_method = NULL}; it is never re-used as a nested screen.}
+\code{select_method = NULL}; it is never re-used as a nested screen. Because
+such a screen was fitted on the full data set, evaluating it here leaks
+selection into the CV metrics (a warning is issued); treat those metrics
+as optimistic.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
 \code{"cpi"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
@@ -35,7 +39,16 @@ cast_cv(
 
 \item{models}{Models passed to \code{\link[=cast_fit]{cast_fit()}}.}
 
-\item{block_method}{\code{"grid"} or \code{"cluster"}.}
+\item{block_method}{\code{"grid"} (default; grid cells grouped into spatially
+contiguous folds via k-means on cell centroids), \code{"grid_random"}
+(legacy behaviour: count-balanced greedy packing that ignores cell
+position and produces interleaved, non-contiguous folds), or \code{"cluster"}
+(k-means on point coordinates).}
+
+\item{buffer}{Non-negative number. When \verb{> 0}, training rows closer than
+\code{buffer} (in coordinate units, e.g. degrees for lon/lat) to any test row
+are dropped for that fold, thinning spatial-autocorrelation leakage at
+the fold boundary. Default \code{0} (no exclusion band).}
 
 \item{response}{Binary response column.}
 
@@ -43,7 +56,8 @@ cast_cv(
 
 \item{brt_n_trees}{BRT iterations per fold.}
 
-\item{parallel}{Run folds with \code{future.apply}.}
+\item{parallel}{Run folds with \code{future.apply}; requires the user to set a
+\code{\link[future:plan]{future::plan()}} first (a warning is issued when none is set).}
 
 \item{seed}{Random seed.}
 
