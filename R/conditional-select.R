@@ -1,11 +1,11 @@
-# Double Machine Learning (DML) variable selection ---------------------------
+# Conditional Predictive Impact (CPI) variable selection --------------------
 #
-# For each candidate predictor we estimate its Neyman-orthogonal partially
-# linear effect on occurrence while flexibly controlling for every other
-# predictor (Chernozhukov et al. 2018; DoubleML, Bach et al. 2022). Predictors
-# whose effect is significant after Benjamini-Hochberg FDR control are kept.
-# The only user choice is the FDR level; the cross-fitting folds and nuisance
-# learner are method defaults rather than hand-tuned ecological thresholds.
+# For each candidate predictor we test its conditional independence from
+# occurrence given every other predictor: a random forest is cross-fitted once,
+# each predictor is replaced by a second-order Gaussian knockoff, and the
+# increase in held-out log-loss measures its conditional contribution
+# (Watson & Wright 2021). Predictors whose one-sided test survives
+# Benjamini-Hochberg FDR control are kept.
 
 #' @keywords internal
 #' @noRd
@@ -34,32 +34,6 @@
   imp <- rf$variable.importance
   imp[!is.finite(imp)] <- 0
   names(sort(imp, decreasing = TRUE))[seq_len(min(keep, length(imp)))]
-}
-
-#' @keywords internal
-#' @noRd
-.cast_dml_effect <- function(df, treat, controls, n_folds, num_trees, seed,
-                             num_threads = 1L, n_rep = 3L) {
-  dml_data <- DoubleML::DoubleMLData$new(
-    df, y_col = ".presence", d_cols = treat, x_cols = controls
-  )
-  ml_l <- mlr3::lrn("regr.ranger", num.trees = as.integer(num_trees),
-                    num.threads = as.integer(num_threads), verbose = FALSE)
-  ml_m <- mlr3::lrn("regr.ranger", num.trees = as.integer(num_trees),
-                    num.threads = as.integer(num_threads), verbose = FALSE)
-  # n_rep > 1: DoubleML reports the median over repeated sample splits,
-  # stabilising the split randomness (official recommendation is >= 5; 3 is
-  # the package default trade-off).
-  obj <- DoubleML::DoubleMLPLR$new(
-    dml_data, ml_l = ml_l, ml_m = ml_m, n_folds = as.integer(n_folds),
-    n_rep = as.integer(n_rep)
-  )
-  if (!is.null(seed)) set.seed(seed)
-  obj$fit()
-  c(estimate = unname(obj$coef[treat]),
-    std_error = unname(obj$se[treat]),
-    statistic = unname(obj$t_stat[treat]),
-    p_value = unname(obj$pval[treat]))
 }
 
 #' Response-Stratified Fold Assignment
@@ -103,23 +77,28 @@
 
 #' In-Package CPI Core Estimator
 #'
-#' Faithfully reproduces the \pkg{cpi} (0.1.5) reference flow: one
-#' cross-fitted learner (`resample(..., store_models = TRUE)`), second-order
-#' Gaussian knockoffs from [knockoff::create.second_order()], and the
-#' per-observation log-loss difference between full and knockoff-reduced
-#' predictions (with the reference `1e-15` probability clamp). Two deliberate
-#' departures:
+#' Follows the \pkg{cpi} (0.1.5) reference flow: one cross-fitted learner
+#' (`resample(..., store_models = TRUE)`), second-order Gaussian knockoffs from
+#' [knockoff::create.second_order()], and the per-observation log-loss
+#' difference between full and knockoff-reduced predictions (with the reference
+#' `1e-15` probability clamp). Two departures from the reference:
 #'
-#' - folds are response-stratified (rare-species safety), and
-#' - `inference = "block"` (default) averages the per-observation differences
-#'   to one mean per spatial grid block and runs the one-sided t-test on those
-#'   block means (`df = n_blocks - 1`) -- a cluster-robust variance estimate on
-#'   spatial blocks, more powerful than the fold-level test while still not
-#'   treating autocorrelated observations as independent. `inference = "fold"`
-#'   aggregates to one mean per cross-fitting fold (`df = folds - 1`); the
-#'   per-observation test (`inference = "observation"`, the \pkg{cpi} default)
-#'   treats n observations as i.i.d. and is anti-conservative on spatially
-#'   autocorrelated data; both are kept for comparability.
+#' - predictors are first **Gaussian-quantile-transformed** (rank -> `qnorm`,
+#'   a monotone map) so `create.second_order`'s multivariate-Gaussian
+#'   assumption holds for skewed bioclimatic predictors; a tree learner is
+#'   invariant to this transform, so the CPI is unchanged, and
+#' - a **single** knockoff draw is used (the reference uses one draw; repeated
+#'   draws only vary the knockoff Monte-Carlo and their median p-value is not a
+#'   valid pooled p-value).
+#'
+#' Folds are response-stratified (rare-species safety). `inference = "block"`
+#' (default) averages the per-observation differences to one mean per spatial
+#' grid block and runs the one-sided t-test on those block means
+#' (`df = n_blocks - 1`) -- a cluster-robust variance estimate on spatial
+#' blocks. `inference = "fold"` aggregates to one mean per cross-fitting fold
+#' (`df = folds - 1`); `inference = "observation"` (the \pkg{cpi} default)
+#' treats n observations as i.i.d. and is anti-conservative under spatial
+#' autocorrelation; both are kept for comparability.
 #'
 #' @param x Standardized numeric predictor matrix (column names used).
 #' @param y Integer 0/1 response.
@@ -127,8 +106,6 @@
 #' @param num_trees Trees for the random-forest learner.
 #' @param num_threads Threads for the ranger learner.
 #' @param inference `"block"` (default), `"fold"`, or `"observation"`.
-#' @param knockoff_reps Knockoff replicate draws; each replicate uses a fresh
-#'   knockoff matrix and the per-variable results are the replicate medians.
 #' @param lon,lat Coordinate vectors for `inference = "block"`.
 #' @param n_blocks Target number of spatial blocks (auto if `NULL`).
 #' @param seed Random seed.
@@ -139,8 +116,8 @@
 #' @noRd
 .cast_cpi_core <- function(x, y, n_folds, num_trees, num_threads = 1L,
                            inference = c("block", "fold", "observation"),
-                           knockoff_reps = 3L, seed = NULL,
-                           lon = NULL, lat = NULL, n_blocks = NULL) {
+                           seed = NULL, lon = NULL, lat = NULL,
+                           n_blocks = NULL) {
   inference <- match.arg(inference)
   check_suggested("mlr3", "for the CPI learner backend")
   check_suggested("mlr3learners", "for the ranger learner")
@@ -165,7 +142,16 @@
   test_sets <- lapply(seq_len(k), function(f) which(fold_id == f))
   train_sets <- lapply(seq_len(k), function(f) which(fold_id != f))
 
-  task_df <- data.frame(.presence = factor(y), x, check.names = FALSE)
+  # Gaussian quantile transform (monotone per column): create.second_order
+  # assumes ~multivariate Gaussian, which skewed environmental predictors are
+  # not; the rank->qnorm map restores the assumption without changing a tree
+  # learner's fit, so the knockoff exchangeability (and hence FDR) holds.
+  xg <- apply(x, 2L, function(z) {
+    stats::qnorm(rank(z, ties.method = "average") / (length(z) + 1))
+  })
+  colnames(xg) <- vars
+
+  task_df <- data.frame(.presence = factor(y), xg, check.names = FALSE)
   task <- mlr3::TaskClassif$new("cast_cpi", task_df, target = ".presence")
   learner <- mlr3::lrn("classif.ranger", predict_type = "prob",
                        num.trees = as.integer(num_trees),
@@ -191,63 +177,57 @@
     err_full[test_sets[[f]]] <- logloss(pred$truth, pred$prob)
   }
 
-  safe_median <- function(v) {
-    v <- v[is.finite(v)]
-    if (!length(v)) NA_real_ else stats::median(v)
-  }
-  reps <- vector("list", as.integer(knockoff_reps))
-  for (r in seq_along(reps)) {
-    if (!is.null(seed)) set.seed(seed + 1000L * r)
-    x_tilde <- knockoff::create.second_order(x)
-    stat_r <- lapply(seq_along(vars), function(j) {
-      reduced_df <- task_df
-      reduced_df[[vars[j]]] <- as.numeric(x_tilde[, j])
-      reduced_task <- mlr3::TaskClassif$new(
-        sprintf("cast_cpi_reduced_%d", j), reduced_df, target = ".presence"
+  # Single knockoff draw (the reference flow).
+  if (!is.null(seed)) set.seed(seed + 1000L)
+  x_tilde <- knockoff::create.second_order(xg)
+
+  stat <- lapply(seq_along(vars), function(j) {
+    reduced_df <- task_df
+    reduced_df[[vars[j]]] <- as.numeric(x_tilde[, j])
+    reduced_task <- mlr3::TaskClassif$new(
+      sprintf("cast_cpi_reduced_%d", j), reduced_df, target = ".presence"
+    )
+    err_reduced <- numeric(n)
+    for (f in seq_len(k)) {
+      pred <- fit$learners[[f]]$predict(reduced_task,
+                                        row_ids = test_sets[[f]])
+      err_reduced[test_sets[[f]]] <- logloss(pred$truth, pred$prob)
+    }
+    dif <- err_reduced - err_full
+    dif_test <- if (identical(inference, "fold")) {
+      vapply(test_sets, function(idx) mean(dif[idx]), numeric(1))
+    } else if (identical(inference, "block")) {
+      as.numeric(tapply(dif, blk, mean))
+    } else {
+      dif
+    }
+    cpi_j <- mean(dif)
+    se_j <- stats::sd(dif_test) / sqrt(length(dif_test))
+    stat_j <- NA_real_
+    p_j <- NA_real_
+    if (length(unique(dif_test)) < 2L) {
+      # Degenerate: the aggregated differences carry no variance.
+      stat_j <- 0
+      p_j <- 1
+    } else {
+      tt <- tryCatch(
+        stats::t.test(dif_test, alternative = "greater"),
+        error = function(e) NULL
       )
-      err_reduced <- numeric(n)
-      for (f in seq_len(k)) {
-        pred <- fit$learners[[f]]$predict(reduced_task,
-                                          row_ids = test_sets[[f]])
-        err_reduced[test_sets[[f]]] <- logloss(pred$truth, pred$prob)
+      if (!is.null(tt)) {
+        stat_j <- unname(tt$statistic)
+        p_j <- tt$p.value
       }
-      dif <- err_reduced - err_full
-      dif_test <- if (identical(inference, "fold")) {
-        vapply(test_sets, function(idx) mean(dif[idx]), numeric(1))
-      } else if (identical(inference, "block")) {
-        as.numeric(tapply(dif, blk, mean))
-      } else {
-        dif
-      }
-      cpi_j <- mean(dif)
-      se_j <- stats::sd(dif_test) / sqrt(length(dif_test))
-      stat_j <- NA_real_
-      p_j <- NA_real_
-      if (cpi_j == 0) {
-        stat_j <- 0
-        p_j <- 1
-      } else {
-        tt <- tryCatch(
-          stats::t.test(dif_test, alternative = "greater"),
-          error = function(e) NULL
-        )
-        if (!is.null(tt)) {
-          stat_j <- unname(tt$statistic)
-          p_j <- tt$p.value
-        }
-      }
-      c(CPI = cpi_j, SE = se_j, statistic = stat_j, p.value = p_j)
-    })
-    reps[[r]] <- do.call(rbind, stat_r)
-  }
-  # Median across knockoff replicates stabilises the Monte-Carlo p-values.
-  med <- apply(simplify2array(reps), c(1L, 2L), safe_median)
+    }
+    c(CPI = cpi_j, SE = se_j, statistic = stat_j, p.value = p_j)
+  })
+  res <- do.call(rbind, stat)
   data.frame(
     Variable = vars,
-    CPI = med[, "CPI"],
-    SE = med[, "SE"],
-    statistic = med[, "statistic"],
-    p.value = med[, "p.value"],
+    CPI = res[, "CPI"],
+    SE = res[, "SE"],
+    statistic = res[, "statistic"],
+    p.value = res[, "p.value"],
     stringsAsFactors = FALSE
   )
 }
@@ -280,29 +260,29 @@
 #'
 #' @param data,env_vars,response Prepared inputs from [cast_select()].
 #' @param alpha FDR level for the adjusted p-values. Default `0.05`.
-#' @param max_candidates When more predictors are supplied, a single
-#'   random-forest importance pass pre-screens this many for feasibility; the
-#'   CPI conditioning set is the pre-screened set.
+#' @param max_candidates Optional candidate ceiling. `NULL` (default) tests
+#'   every non-constant predictor conditionally; a positive integer triggers a
+#'   single random-forest importance pre-screen to this many candidates (a
+#'   marginal approximation used only for computational feasibility).
 #' @param n_folds Cross-fitting folds. Default `10`; fold-level inference
 #'   needs enough folds for its t-test (`df = folds - 1`).
 #' @param num_trees Trees for the random-forest learner. Default `100`.
-#' @param min_vars Fallback floor if nothing passes FDR. Default `1`.
+#' @param min_vars Fallback floor if nothing passes FDR. Default `0` (allow an
+#'   empty selection); set a positive integer only to enforce an ecological
+#'   prior, in which case the topped-up predictors are flagged `fallback`.
 #' @param inference `"block"` (default), `"fold"`, or `"observation"`; see
 #'   [.cast_cpi_core()].
 #' @param lon,lat Coordinate vectors forwarded to the block-inference layer.
 #' @param n_blocks Target number of spatial blocks (auto if `NULL`).
-#' @param knockoff_reps Knockoff replicate draws; per-variable statistics are
-#'   the medians across replicates. Default `3`.
 #' @param seed,verbose Standard control arguments.
 #'
 #' @return A list with `selected`, `scores`, and `diagnostics`.
 #' @keywords internal
 #' @noRd
 .cast_select_cpi <- function(data, env_vars, response, alpha = 0.05,
-                             max_candidates = 30L, n_folds = 10L,
-                             num_trees = 100L, min_vars = 1L,
+                             max_candidates = NULL, n_folds = 10L,
+                             num_trees = 100L, min_vars = 0L,
                              inference = c("block", "fold", "observation"),
-                             knockoff_reps = 3L,
                              seed = NULL, verbose = TRUE,
                              num_threads = 1L,
                              lon = NULL, lat = NULL, n_blocks = NULL) {
@@ -328,7 +308,7 @@
 
   candidates <- active
   prescreen <- "none"
-  if (length(active) > max_candidates) {
+  if (!is.null(max_candidates) && length(active) > max_candidates) {
     top_safe <- .cast_prescreen_importance(x_std, y, max_candidates,
                                            num_trees, seed, num_threads)
     candidates <- active[match(top_safe, safe_names)]
@@ -347,7 +327,7 @@
   if (min_class < n_folds) {
     cli::cli_abort(c(
       "CPI needs at least {n_folds} presence{?s} and background{?s} each for {n_folds} folds; the rarer class has {min_class}.",
-      i = "Reduce {.arg dml_folds} (e.g. {max(2L, min_class)}) or use {.code method = \"rf\"} for rare species."
+      i = "Reduce {.arg n_folds} (e.g. {max(2L, min_class)}) or use {.code method = \"rf\"} for rare species."
     ))
   }
   if (identical(inference, "block")) {
@@ -364,13 +344,13 @@
     .cast_cpi_core(
       x_std[, cand_safe, drop = FALSE], y,
       n_folds = n_folds, num_trees = num_trees, num_threads = num_threads,
-      inference = inference, knockoff_reps = knockoff_reps, seed = seed,
+      inference = inference, seed = seed,
       lon = lon, lat = lat, n_blocks = n_blocks
     ),
     error = function(e) {
       cli::cli_abort(c(
         "CPI selection failed: {conditionMessage(e)}",
-        i = "On rare or highly clustered species try fewer folds ({.arg dml_folds}, currently {n_folds}) or {.code method = \"rf\"}."
+        i = "On rare or highly clustered species try fewer folds ({.arg n_folds}, currently {n_folds}) or {.code method = \"rf\"}."
       ), call = NULL)
     }
   )
@@ -442,7 +422,6 @@
     n_blocks = if (identical(inference, "block")) {
       length(unique(blk))
     } else NULL,
-    knockoff_reps = as.integer(knockoff_reps),
     n_folds = as.integer(n_folds),
     n_candidates = length(candidates),
     n_predictors = length(env_vars),
@@ -456,145 +435,3 @@
   list(selected = selected, scores = scores, diagnostics = diagnostics)
 }
 
-#' Double Machine Learning Variable Selection
-#'
-#' Estimates each predictor's orthogonalized partially linear effect on the
-#' binary response while controlling for all other predictors, then retains the
-#' predictors whose effect survives Benjamini-Hochberg FDR control.
-#'
-#' @param data,env_vars,response Prepared inputs from [cast_select()].
-#' @param alpha FDR level for the adjusted p-values. Default `0.05`.
-#' @param max_candidates Predictors tested with DML. When more predictors are
-#'   supplied, a single random-forest importance pass selects this many for
-#'   feasibility; every selected predictor is still adjusted for the full set.
-#' @param n_folds Cross-fitting folds. Default `10`.
-#' @param num_trees Trees per random-forest nuisance learner. Default `100`.
-#' @param min_vars Fallback floor if nothing passes FDR. Default `1`.
-#' @param n_rep Repeated sample splits per effect; DoubleML reports the
-#'   median over repetitions. Default `3`.
-#' @param seed,verbose Standard control arguments.
-#'
-#' @return A list with `selected`, `scores`, and `diagnostics`.
-#' @keywords internal
-#' @noRd
-.cast_select_dml <- function(data, env_vars, response, alpha = 0.05,
-                             max_candidates = 30L, n_folds = 10L,
-                             num_trees = 100L, min_vars = 1L, n_rep = 3L,
-                             seed = NULL, verbose = TRUE,
-                             num_threads = 1L) {
-  check_suggested("DoubleML", "for DML variable selection")
-  check_suggested("mlr3", "for DML nuisance learners")
-  check_suggested("mlr3learners", "for the ranger nuisance learner")
-  check_suggested("ranger", "for the ranger nuisance learner")
-  .cast_quiet_mlr3()
-
-  y <- as.integer(data[[response]])
-  x <- .cast_numeric_matrix(data, env_vars)
-  keep_var <- apply(x, 2L, stats::sd) > 1e-10
-  active <- env_vars[keep_var]
-  if (length(active) < 2L) {
-    cli::cli_abort("DML selection needs at least two non-constant predictors.")
-  }
-  x <- x[, keep_var, drop = FALSE]
-  x_std <- scale(x)
-  x_std[!is.finite(x_std)] <- 0
-  safe_names <- make.names(active, unique = TRUE)
-  colnames(x_std) <- safe_names
-
-  candidates <- active
-  prescreen <- "none"
-  if (length(active) > max_candidates) {
-    top_safe <- .cast_prescreen_importance(x_std, y, max_candidates,
-                                           num_trees, seed, num_threads)
-    candidates <- active[match(top_safe, safe_names)]
-    prescreen <- "RF importance (top candidates)"
-    if (verbose) {
-      cli::cli_inform(
-        "DML: pre-screened {length(active)} -> {length(candidates)} candidates by RF importance."
-      )
-    }
-  }
-
-  df <- data.frame(.presence = y, x_std, check.names = FALSE)
-  cand_safe <- safe_names[match(candidates, active)]
-
-  stats_list <- lapply(seq_along(candidates), function(i) {
-    treat <- cand_safe[i]
-    controls <- setdiff(safe_names, treat)
-    out <- tryCatch(
-      .cast_dml_effect(df, treat, controls, n_folds, num_trees,
-                       if (is.null(seed)) NULL else seed + i, num_threads,
-                       n_rep = n_rep),
-      error = function(e) {
-        if (verbose) cli::cli_warn("DML failed for {candidates[i]}: {e$message}")
-        c(estimate = NA_real_, std_error = NA_real_,
-          statistic = NA_real_, p_value = NA_real_)
-      }
-    )
-    out
-  })
-  est <- do.call(rbind, stats_list)
-
-  p_raw <- est[, "p_value"]
-  p_adj <- rep(NA_real_, length(p_raw))
-  ok <- is.finite(p_raw)
-  if (any(ok)) p_adj[ok] <- stats::p.adjust(p_raw[ok], method = "BH")
-
-  selected <- candidates[is.finite(p_adj) & p_adj < alpha]
-  fdr_passed <- selected
-  if (length(selected) < min_vars) {
-    # Union semantics (matching the RF benchmark): keep every FDR passer and
-    # top up with the strongest remaining candidates to reach the floor.
-    # Only candidates with a finite DML statistic may enter the fallback --
-    # a candidate whose DoubleML fit failed (statistic = NA) carries no effect
-    # estimate and must never be silently force-included.
-    finite_stat <- is.finite(est[, "statistic"])
-    ord <- order(abs(est[finite_stat, "statistic"]), decreasing = TRUE)
-    selected <- unique(c(selected, candidates[finite_stat][ord]))
-    selected <- selected[seq_len(min(min_vars, length(selected)))]
-    selected <- selected[!is.na(selected)]
-  }
-  fallback_added <- setdiff(selected, fdr_passed)
-
-  scores <- data.frame(
-    variable = candidates,
-    estimate = est[, "estimate"],
-    std_error = est[, "std_error"],
-    statistic = est[, "statistic"],
-    abs_statistic = abs(est[, "statistic"]),
-    p_value = p_raw,
-    p_adjusted = p_adj,
-    selected = candidates %in% selected,
-    fallback = candidates %in% fallback_added,
-    forced = FALSE,
-    stringsAsFactors = FALSE
-  )
-  not_tested <- setdiff(env_vars, candidates)
-  if (length(not_tested)) {
-    scores <- rbind(scores, data.frame(
-      variable = not_tested, estimate = NA_real_, std_error = NA_real_,
-      statistic = NA_real_, abs_statistic = NA_real_, p_value = NA_real_,
-      p_adjusted = NA_real_, selected = FALSE, fallback = FALSE,
-      forced = FALSE, stringsAsFactors = FALSE
-    ))
-  }
-  scores <- scores[order(!scores$selected, -scores$abs_statistic), , drop = FALSE]
-  rownames(scores) <- NULL
-
-  diagnostics <- list(
-    engine = "DoubleML PLR (random-forest nuisance)",
-    alpha = alpha,
-    fdr_method = "BH",
-    n_folds = as.integer(n_folds),
-    n_rep = as.integer(n_rep),
-    n_candidates = length(candidates),
-    n_predictors = length(env_vars),
-    prescreen = prescreen
-  )
-  if (verbose) {
-    cli::cli_inform(
-      "DML selection: {length(selected)}/{length(candidates)} predictors significant (FDR < {alpha})."
-    )
-  }
-  list(selected = selected, scores = scores, diagnostics = diagnostics)
-}

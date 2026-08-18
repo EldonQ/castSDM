@@ -108,23 +108,6 @@ test_that("cast_project computes change classes and stats", {
   expect_true(all(c("n_gain", "n_loss", "pct_change") %in% names(proj$stats)))
 })
 
-test_that("cast_esm fits bivariate sub-models for rare species", {
-  set.seed(9)
-  n <- 80
-  dat <- data.frame(
-    lon = runif(n), lat = runif(n),
-    presence = c(rep(1, 12), rep(0, n - 12)),
-    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n)
-  )
-  esm <- cast_esm(dat, top_k = 4, base_algo = "glm", seed = 10,
-                  verbose = FALSE)
-  expect_s3_class(esm, "cast_esm")
-  expect_equal(ncol(esm$pairs), choose(4, 2))
-  pred <- predict_cast_esm(esm, dat)
-  expect_true(all(is.finite(pred)))
-  expect_true(all(pred >= 0 & pred <= 1))
-})
-
 test_that("cast_predict_tiled writes real predictions on a fresh output dir", {
   skip_if_not_installed("ranger")
   skip_if_not_installed("terra")

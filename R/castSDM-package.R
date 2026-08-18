@@ -4,25 +4,24 @@
 #' @section Overview:
 #' \pkg{castSDM} separates true ecological drivers from collinear bystanders
 #' in species distribution modelling. Its conditional variable selector
-#' (conditional predictive impact with FDR control by default; an optional
-#' double-machine-learning effect reporter) tests each predictor's contribution
-#' given every other predictor, so collinear proxies are rejected where
-#' marginal screens retain them. The selector is embedded in a complete
-#' workflow — standard RF / BRT / MaxEnt / GAM learners, nested spatial
-#' cross-validation, habitat-suitability prediction, performance-weighted
-#' ensembles and future climate projection — with a predictor-level audit of
-#' every retention decision. The package supports interpretable driver
-#' analysis but does not claim automatic causal discovery.
+#' (conditional predictive impact with Benjamini-Hochberg FDR control by
+#' default) tests each predictor's contribution given every other predictor,
+#' so collinear proxies are rejected where marginal screens retain them. The
+#' selector is embedded in a complete workflow — standard RF / BRT / MaxEnt /
+#' GAM learners, nested spatial cross-validation, habitat-suitability
+#' prediction, performance-weighted ensembles and future climate projection —
+#' with a predictor-level audit of every retention decision. The package
+#' supports interpretable conditional selection but does not claim automatic
+#' discovery of ecological causes.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
 #' 2. **Variable Selection**: conditional predictive impact screening with
-#'    FDR control ([cast_select()]); effect reporting via [cast_effect()]
-#'    and counterfactual what-if maps ([cast_counterfactual()])
-#' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()]), plus ESM for
-#'    rare species ([cast_esm()])
+#'    FDR control ([cast_select()]); importance reporting via [cast_importance()]
+#'    and sensitivity what-if maps ([cast_sensitivity()])
+#' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial
 #'    cross-validation with fold-specific selection ([cast_cv()])
 #' 5. **Prediction**: In-memory ([cast_predict()]) or tile-based
@@ -31,10 +30,6 @@
 #'    ensemble prediction ([cast_ensemble()])
 #' 7. **Future Projection**: range-change analysis under climate scenarios
 #'    ([cast_project()])
-#' 8. **Batch Workflows**: multi-species runs with checkpoint/resume
-#'    ([cast_batch()], [cast_batch_resume()]), YAML-driven config
-#'    ([cast_run_from_config()]), and worker budget allocation
-#'    ([cast_worker_budget()])
 #'
 #' @section Quick Start:
 #' ```

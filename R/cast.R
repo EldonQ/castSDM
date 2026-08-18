@@ -12,18 +12,19 @@
 #' @param models Character vector of models to fit. Options: `"rf"`,
 #'   `"maxent"`, `"brt"`, `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
-#' @param select_min_vars Integer. Minimum retained variables. Default `3`.
+#' @param select_min_vars Integer. Minimum retained variables. Default `0`
+#'   (an empty selection is allowed).
 #' @param select_method Character. Variable screening method passed to
 #'   [cast_select()]. Default `"cpi"`.
 #' @param select_num_trees Integer. Trees in the RF nuisance/benchmark forests.
-#'   Default `300`; the CPI/DML selectors cap it at `200` (nuisance-forest
-#'   tractability).
-#' @param select_max_vars Candidate ceiling for DML testing / RF output.
-#'   Default `30`.
-#' @param select_alpha Numeric. FDR level for the DML selector. Default `0.05`.
-#' @param select_dml_folds Integer. Cross-fitting folds for the CPI *and* DML
-#'   selectors (despite the name it controls both). Default `10`; fold-level
-#'   CPI inference needs enough folds for its t-test (df = folds - 1).
+#'   Default `300`.
+#' @param select_max_vars Optional candidate ceiling for the CPI selector / RF
+#'   output. `NULL` tests every predictor; a positive integer pre-screens by RF
+#'   importance first. Default `NULL`.
+#' @param select_alpha Numeric. FDR level for the CPI selector. Default `0.05`.
+#' @param select_n_folds Integer. Cross-fitting folds for the CPI selector.
+#'   Default `10`; fold-level CPI inference needs enough folds for its t-test
+#'   (df = folds - 1).
 #' @param select_cor_threshold Numeric. Absolute correlation threshold for the
 #'   RF benchmark. Default `0.8`.
 #' @param num_threads Integer. Threads for the ranger learners/benchmark.
@@ -57,12 +58,12 @@ cast <- function(species_data,
                  env_data = NULL,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
-                 select_min_vars = 3L,
+                 select_min_vars = 0L,
                  select_method = "cpi",
                  select_num_trees = 300L,
-                 select_max_vars = 30L,
+                 select_max_vars = NULL,
                  select_alpha = 0.05,
-                 select_dml_folds = 10L,
+                 select_n_folds = 10L,
                  select_cor_threshold = 0.8,
                  num_threads = 1L,
                  do_cv = TRUE,
@@ -100,7 +101,7 @@ cast <- function(species_data,
     min_vars = select_min_vars,
     num_trees = select_num_trees,
     max_candidates = select_max_vars,
-    dml_folds = select_dml_folds,
+    n_folds = select_n_folds,
     cor_threshold = select_cor_threshold,
     num_threads = num_threads,
     seed = seed, verbose = verbose
@@ -130,7 +131,7 @@ cast <- function(species_data,
           min_vars = select_min_vars,
           max_candidates = select_max_vars,
           num_trees = select_num_trees,
-          dml_folds = select_dml_folds,
+          n_folds = select_n_folds,
           cor_threshold = select_cor_threshold,
           num_threads = num_threads
         ),

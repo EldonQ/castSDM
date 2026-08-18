@@ -150,8 +150,9 @@ get_env_vars <- function(data, response = "presence",
 
 #' Compute AUC via Wilcoxon-Mann-Whitney Estimator
 #'
-#' A lightweight AUC computation that does not require pROC. Used
-#' internally by [cast_esm()] for bivariate model weighting.
+#' A lightweight AUC computation that does not require pROC. Used internally
+#' where a Wilcoxon-Mann-Whitney AUC estimate is needed without the pROC
+#' dependency.
 #'
 #' @param y Binary integer vector (0/1).
 #' @param pred Numeric vector of predicted probabilities.
@@ -262,7 +263,7 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
 #'
 #' Converts the requested columns to numeric and imputes non-finite values with
 #' the column median (falling back to zero). Shared by the variable-selection
-#' and causal-effect routines.
+#' and conditional-effect routines.
 #'
 #' @param data A `data.frame`.
 #' @param vars Character vector of column names.

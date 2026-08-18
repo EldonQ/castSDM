@@ -89,8 +89,6 @@ predict_single_model <- function(mdl_info, X_raw) {
   } else if (nm == "gam") {
     return(as.numeric(stats::predict(mdl_info$model, newdata = X_raw,
                                      type = "response")))
-  } else if (nm == "esm") {
-    return(predict_cast_esm(mdl_info$model, X_raw))
   }
   rep(NA_real_, nrow(X_raw))
 }

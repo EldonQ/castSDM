@@ -59,7 +59,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   )
 
   x_lab <- if (identical(imp_col, "abs_statistic")) {
-    if (identical(x$method, "dml")) "|DML statistic|" else "|CPI statistic|"
+    "|CPI statistic|"
   } else if (identical(imp_col, "cpi")) {
     "Conditional predictive impact"
   } else if (identical(imp_col, "freq")) {
@@ -281,7 +281,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
 
   model_colors <- c(
     rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85",
-    gam = "#00A087", esm = "#E64B35"
+    gam = "#00A087"
   )
   fold_colors <- c(
     "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
@@ -645,22 +645,20 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 }
 
 
-#' Plot Causal Effects / Conditional Importance
+#' Plot Conditional Importance
 #'
-#' Forest plot of each predictor's conditional contribution. For a CPI screen
-#' this is the (non-negative) conditional predictive impact; for a DML screen it
-#' is the orthogonalized partial-linear effect on occurrence per one standard
-#' deviation, with confidence intervals. Predictors passing FDR control are
-#' highlighted.
+#' Forest plot of each predictor's conditional contribution: the (non-negative)
+#' conditional predictive impact (CPI, log-loss knockoff) with confidence
+#' intervals. Predictors passing FDR control are highlighted.
 #'
-#' @param x A `cast_effect` object (from [cast_effect()]).
+#' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.
 #' @param top Optional integer. Show only the `top` largest-magnitude effects.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
+plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   eff <- x$effects
   if (!is.null(top) && is.finite(top)) {
@@ -678,23 +676,13 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 
   sig_colors <- c(significant = "#B2182B", `not significant` = "grey70")
   n_sig <- sum(eff$selected, na.rm = TRUE)
-  is_cpi <- identical(x$diagnostics$measure, "cpi")
 
-  if (is_cpi) {
-    plot_title <- "Conditional predictive impact"
-    plot_subtitle <- sprintf(
-      "CPI (log-loss knockoff) | %d/%d significant (FDR < %.2g) | %d%% CI",
-      n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
-    )
-    x_lab <- "Conditional predictive impact"
-  } else {
-    plot_title <- "Causal effect on occurrence"
-    plot_subtitle <- sprintf(
-      "Double machine learning | %d/%d significant (FDR < %.2g) | %d%% CI",
-      n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
-    )
-    x_lab <- "Partial-linear effect (per +1 SD)"
-  }
+  plot_title <- "Conditional predictive impact"
+  plot_subtitle <- sprintf(
+    "CPI (log-loss knockoff) | %d/%d significant (FDR < %.2g) | %d%% CI",
+    n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
+  )
+  x_lab <- "Conditional predictive impact"
 
   ggplot2::ggplot(eff, ggplot2::aes(
     x = .data$estimate, y = .data$display, color = .data$sig
@@ -720,12 +708,12 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 }
 
 
-#' Plot Counterfactual What-If Map
+#' Plot Sensitivity What-If Map
 #'
 #' Diverging map of the per-cell change in habitat suitability under a
 #' single-predictor intervention on the current climate.
 #'
-#' @param x A `cast_counterfactual` object (from [cast_counterfactual()]).
+#' @param x A `cast_sensitivity` object (from [cast_sensitivity()]).
 #' @param basemap Character. `"world"`, `"china"`, or `"none"`.
 #' @param var_label Optional display label for the intervened predictor.
 #' @param title Optional plot title.
@@ -733,7 +721,7 @@ plot.cast_effect <- function(x, var_labels = NULL, top = NULL, ...) {
 #'
 #' @return A `ggplot` object.
 #' @export
-plot.cast_counterfactual <- function(x, basemap = "world", var_label = NULL,
+plot.cast_sensitivity <- function(x, basemap = "world", var_label = NULL,
                                      title = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   check_suggested("sf", "for geographic mapping")

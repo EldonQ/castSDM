@@ -1,29 +1,5 @@
 # Regression tests for defects fixed in 0.7.0 -------------------------------
 
-test_that("plot.cast_select labels the DML axis correctly", {
-  skip_if_not_installed("ggplot2")
-  scr <- new_cast_select(
-    selected = c("x1"),
-    scores = data.frame(
-      variable = c("x1", "x2"),
-      estimate = c(1.2, -0.3), std_error = c(0.3, 0.4),
-      statistic = c(4.0, -0.75), abs_statistic = c(4.0, 0.75),
-      p_value = c(0.001, 0.5), p_adjusted = c(0.002, 0.5),
-      selected = c(TRUE, FALSE)
-    ),
-    method = "dml",
-    diagnostics = list(engine = "DoubleML PLR (random-forest nuisance)",
-                       alpha = 0.05, fdr_method = "BH", n_folds = 5L)
-  )
-  p <- plot(scr)
-  expect_identical(p$labels$x, "|DML statistic|")
-
-  scr_cpi <- scr
-  scr_cpi$method <- "cpi"
-  p2 <- plot(scr_cpi)
-  expect_identical(p2$labels$x, "|CPI statistic|")
-})
-
 test_that("change classes mark non-binary cells as NA, never empty string", {
   ch <- .cast_change_classes(
     cur_bin = c(1, 0, NA, 1, 0),
@@ -74,7 +50,7 @@ test_that("CPI confidence intervals never cross below zero", {
                        alpha = 0.05, fdr_method = "BH", test = "one-sided t",
                        n_folds = 5L)
   )
-  eff <- cast_effect(scr)
+  eff <- cast_importance(scr)
   expect_true(all(eff$effects$conf_low >= 0))
 })
 
@@ -116,43 +92,6 @@ test_that("ensemble excludes models with non-finite predictions and warns", {
   expect_equal(unname(ens$weights["rf"]), 1)
 })
 
-test_that("resource logging writes one CSV per species", {
-  dir.create(td <- tempfile("reslog"), showWarnings = FALSE)
-  on.exit(unlink(td, recursive = TRUE), add = TRUE)
-  cast_log_resource(td, "species A", "fit", 1.2, 10)
-  cast_log_resource(td, "species A", "cv", 2.3, 20)
-  files <- list.files(td, pattern = "^resource_log_")
-  expect_length(files, 1)
-  expect_true(.cast_merge_resource_logs(td))
-  merged <- read.csv(file.path(td, "resource_log.csv"))
-  expect_equal(nrow(merged), 2)
-  expect_true(all(c("timestamp", "species", "step", "elapsed_sec") %in%
-                  names(merged)))
-})
-
-test_that("cast_run_step caches and replays identical steps", {
-  dir.create(td <- tempfile("ckpt"), showWarnings = FALSE)
-  on.exit(unlink(td, recursive = TRUE), add = TRUE)
-  v1 <- cast_run_step("prepare", td, "spA", { 111 },
-                      params = list(signature = "s1"), verbose = FALSE)
-  v2 <- cast_run_step("prepare", td, "spA", { 111 },
-                      params = list(signature = "s1"), verbose = FALSE)
-  expect_equal(v1, 111)
-  expect_equal(v2, 111)
-})
-
-test_that("cast_run_step invalidates the cache when params change", {
-  dir.create(td <- tempfile("ckpt"), showWarnings = FALSE)
-  on.exit(unlink(td, recursive = TRUE), add = TRUE)
-  v1 <- cast_run_step("prepare", td, "spA", { 111 },
-                      params = list(signature = "s1"), verbose = FALSE)
-  # Same step, different params: must recompute instead of replaying 111.
-  v2 <- cast_run_step("prepare", td, "spA", { 222 },
-                      params = list(signature = "s2"), verbose = FALSE)
-  expect_equal(v1, 111)
-  expect_equal(v2, 222)
-})
-
 test_that("cast_select scores carry fallback and forced flags", {
   skip_if_not_installed("ranger")
   set.seed(41)
@@ -168,21 +107,4 @@ test_that("cast_select scores carry fallback and forced flags", {
   expect_true(all(c("fallback", "forced") %in% names(out$scores)))
   expect_true(out$scores$forced[out$scores$variable == "x2"])
   expect_true("x2" %in% out$selected)
-})
-
-test_that("cast_esm accepts a screen instead of univariate ranking", {
-  set.seed(43)
-  n <- 80
-  dat <- data.frame(
-    lon = runif(n), lat = runif(n),
-    presence = c(rep(1, 12), rep(0, n - 12)),
-    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n)
-  )
-  screen <- new_cast_select(c("x1", "x2", "x3"),
-                            data.frame(variable = c("x1", "x2", "x3")),
-                            method = "manual")
-  esm <- cast_esm(dat, screen = screen, base_algo = "glm", seed = 44,
-                  verbose = FALSE)
-  expect_s3_class(esm, "cast_esm")
-  expect_setequal(esm$vars, c("x1", "x2", "x3"))
 })

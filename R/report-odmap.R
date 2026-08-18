@@ -27,7 +27,7 @@
 #' @references
 #' Zurell, D. et al. (2020). A standard protocol for reporting species
 #' distribution models. *Ecography*, 43(9), 1261-1277.
-#' @seealso [cast()], [cast_run_from_config()]
+#' @seealso [cast()]
 #' @export
 cast_report_odmap <- function(object, path = "odmap_report.md",
                               meta = list(), verbose = TRUE) {
@@ -124,7 +124,7 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     "  (`mess`, `extrapolating` columns); optional clamping",
     sprintf("- **Uncertainty layers**: ensemble `hss_sd` (cross-model SD); %s",
             if (!is.null(object$ensemble))
-              "counterfactual `delta_sd` available" else "[report]"),
+              "sensitivity `delta_sd` available" else "[report]"),
     ""
   )
 

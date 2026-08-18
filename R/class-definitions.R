@@ -3,8 +3,8 @@
 #' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable scores. For `method = "dml"`:
-#'   the orthogonalized effect estimate, standard error, statistic, and
+#' @param scores A `data.frame` with per-variable scores. For `method = "cpi"`:
+#'   the conditional predictive impact (CPI), standard error, statistic, and
 #'   FDR-adjusted p-value; for `method = "rf"`: permutation importance.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
@@ -51,18 +51,18 @@ new_cast_screen_comparison <- function(membership, methods,
   )
 }
 
-#' Create a cast_effect Object
+#' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of per-predictor causal effects with
-#'   confidence intervals and FDR-adjusted significance.
+#' @param effects A `data.frame` of per-predictor conditional importance (CPI)
+#'   estimates with confidence intervals and FDR-adjusted significance.
 #' @param conf_level Confidence level used for the intervals.
 #' @param alpha FDR level used to flag significance.
-#' @param diagnostics Named list carried over from the DML screen.
+#' @param diagnostics Named list carried over from the CPI screen.
 #'
-#' @return A `cast_effect` object.
+#' @return A `cast_importance` object.
 #' @keywords internal
 #' @export
-new_cast_effect <- function(effects, conf_level = 0.95, alpha = 0.05,
+new_cast_importance <- function(effects, conf_level = 0.95, alpha = 0.05,
                             diagnostics = list()) {
   structure(
     list(
@@ -71,11 +71,11 @@ new_cast_effect <- function(effects, conf_level = 0.95, alpha = 0.05,
       alpha = alpha,
       diagnostics = diagnostics
     ),
-    class = "cast_effect"
+    class = "cast_importance"
   )
 }
 
-#' Create a cast_counterfactual Object
+#' Create a cast_sensitivity Object
 #'
 #' @param predictions A `data.frame` with `lon`, `lat`, `baseline`,
 #'   `counterfactual`, and `delta_hss`.
@@ -85,10 +85,10 @@ new_cast_effect <- function(effects, conf_level = 0.95, alpha = 0.05,
 #' @param models Character vector of models averaged for prediction.
 #' @param summary Named list of change summaries.
 #'
-#' @return A `cast_counterfactual` object.
+#' @return A `cast_sensitivity` object.
 #' @keywords internal
 #' @export
-new_cast_counterfactual <- function(predictions, variable, shift, shift_type,
+new_cast_sensitivity <- function(predictions, variable, shift, shift_type,
                                     models, summary = list()) {
   structure(
     list(
@@ -99,7 +99,7 @@ new_cast_counterfactual <- function(predictions, variable, shift, shift_type,
       models = models,
       summary = summary
     ),
-    class = "cast_counterfactual"
+    class = "cast_sensitivity"
   )
 }
 
@@ -109,8 +109,8 @@ new_cast_counterfactual <- function(predictions, variable, shift, shift_type,
 #' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List of training-set predictor statistics reused across the
-#'   prediction stack: `means` and `sds` (for counterfactual SD-based shifts in
-#'   [cast_counterfactual()]), `impute` (per-predictor training median used by
+#'   prediction stack: `means` and `sds` (for sensitivity SD-based shifts in
+#'   [cast_sensitivity()]), `impute` (per-predictor training median used by
 #'   the internal `.cast_impute()` helper), and `reference` (the imputed
 #'   training predictor frame for MESS/clamp extrapolation control). Models are
 #'   trained on the raw predictors; `means`/`sds` are not applied to fitting
@@ -239,32 +239,6 @@ new_cast_result <- function(screen, fit, eval,
       call = call
     ),
     class = "cast_result"
-  )
-}
-
-#' Create a cast_batch Object
-#'
-#' @param species_metrics A `data.frame` with per-species per-model
-#'   evaluation metrics.
-#' @param species Character vector of species names.
-#' @param models Character vector of model names.
-#' @param results Named list of per-species pipeline results (optional).
-#' @param output_dir Character. Output directory path.
-#'
-#' @return A `cast_batch` object.
-#' @keywords internal
-#' @export
-new_cast_batch <- function(species_metrics, species, models,
-                           results = NULL, output_dir = NULL) {
-  structure(
-    list(
-      species_metrics = species_metrics,
-      species = species,
-      models = models,
-      results = results,
-      output_dir = output_dir
-    ),
-    class = "cast_batch"
   )
 }
 

@@ -10,7 +10,6 @@ cast_predict_tiled(
   output_dir,
   tile_size = 512L,
   models = NULL,
-  budget = NULL,
   overwrite = FALSE,
   compression = "LZW",
   verbose = TRUE
@@ -31,9 +30,6 @@ checkpoints are written. Created if it does not exist.}
 
 \item{models}{Character vector. Which fitted models to predict. Default
 all.}
-
-\item{budget}{A \link{cast_worker_budget} (optional). When supplied,
-\code{future_lapply()} is used to evaluate tiles in parallel.}
 
 \item{overwrite}{Logical. Overwrite existing output rasters. Default
 \code{FALSE} - existing files trigger a \code{cli_inform()} and skip.}
@@ -64,12 +60,6 @@ resumed without recomputing finished tiles, and a new fit can never
 replay tiles predicted by an older model. \code{overwrite = TRUE} bypasses
 and refreshes the checkpoints.
 
-Tiles are dispatched through \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}} when a
-\code{cast_worker_budget} is given, using the Windows-friendly
-\code{multisession} (PSOCK) backend with \code{budget$intra} workers (the
-per-step layer of the budget). The \code{future} plan is set once for the
-whole call and the user's original plan is restored on exit.
-
 Cells with missing (\code{NA}) covariates stay \code{NA} in the output rasters -
 they are recorded before \code{\link[=cast_predict]{cast_predict()}} imputes them and written back
 as \code{NA} afterwards, matching the NA semantics of
@@ -77,5 +67,5 @@ as \code{NA} afterwards, matching the NA semantics of
 the data mask (e.g. ocean pixels).
 }
 \seealso{
-\code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_worker_budget]{cast_worker_budget()}}
+\code{\link[=cast_predict]{cast_predict()}}
 }

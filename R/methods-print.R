@@ -10,54 +10,38 @@ print.cast_select <- function(x, ...) {
   ))
   d <- x$diagnostics
   if (!is.null(d$engine)) {
-    if (identical(x$method, "dml")) {
-      cli::cli_text(
-        "{d$engine} | FDR = {d$fdr_method} at alpha = {d$alpha} | {d$n_folds}-fold cross-fitting"
-      )
-    } else {
-      cli::cli_text("{d$engine}")
-    }
+    cli::cli_text("{d$engine}")
   }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)
 }
 
 #' @export
-print.cast_effect <- function(x, ...) {
+print.cast_importance <- function(x, ...) {
   eff <- x$effects
   n_sig <- sum(eff$selected, na.rm = TRUE)
-  is_cpi <- identical(x$diagnostics$measure, "cpi")
-  if (is_cpi) {
-    cli::cli_h1("castSDM Conditional Predictive Impact (CPI)")
-    cli::cli_ul(c(
-      "Conditional importance (log-loss knockoff), {round(100 * x$conf_level)}% CI",
-      "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
-    ))
-  } else {
-    cli::cli_h1("castSDM Causal Effects (DML)")
-    cli::cli_ul(c(
-      "Partial-linear effect per +1 SD, {round(100 * x$conf_level)}% CI",
-      "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
-    ))
-  }
+  cli::cli_h1("castSDM Conditional Predictive Impact (CPI)")
+  cli::cli_ul(c(
+    "Conditional importance (log-loss knockoff), {round(100 * x$conf_level)}% CI",
+    "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
+  ))
   show <- utils::head(eff, 10L)
   disp <- data.frame(
     variable = show$variable,
-    estimate = round(show$estimate, 4),
+    cpi = round(show$estimate, 4),
     ci = sprintf("[%.3f, %.3f]", show$conf_low, show$conf_high),
     p_adjusted = signif(show$p_adjusted, 3),
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
-  if (is_cpi) names(disp)[names(disp) == "estimate"] <- "cpi"
   print(disp, row.names = FALSE)
   invisible(x)
 }
 
 #' @export
-print.cast_counterfactual <- function(x, ...) {
+print.cast_sensitivity <- function(x, ...) {
   s <- x$summary
-  cli::cli_h1("castSDM Counterfactual What-If")
+  cli::cli_h1("castSDM Sensitivity What-If")
   cli::cli_ul(c(
     "Intervention: {x$variable} + {x$shift} ({x$shift_type})",
     "Models averaged: {.val {x$models}}",
@@ -163,26 +147,5 @@ print.cast_result <- function(x, ...) {
     "Predictions: {if (!is.null(x$predict)) 'Yes' else 'No'}",
     "Ensemble: {if (!is.null(x$ensemble)) 'Yes' else 'No'}"
   ))
-  invisible(x)
-}
-
-#' @export
-print.cast_batch <- function(x, ...) {
-  cli::cli_h1("castSDM Batch Results")
-  cli::cli_ul(c(
-    "Species: {.val {x$species}}",
-    "Models: {.val {x$models}}"
-  ))
-  if (!is.null(x$output_dir)) {
-    cli::cli_text("  Output: {x$output_dir}")
-  }
-  if (!is.null(x$species_metrics) && nrow(x$species_metrics) > 0) {
-    cli::cli_h2("Summary metrics")
-    # Column names match the assembler in cast_batch(): auc/tss/cbi.
-    print(x$species_metrics[, intersect(
-      c("species", "model", "auc", "tss", "cbi"),
-      names(x$species_metrics)
-    ), drop = FALSE], row.names = FALSE)
-  }
   invisible(x)
 }

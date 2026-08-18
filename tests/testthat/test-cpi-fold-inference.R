@@ -20,8 +20,8 @@ skip_cpi <- function() {
 test_that("CPI fold inference finds the true driver with fold-level t test", {
   skip_cpi()
   dat <- make_cpi_data()
-  sel <- cast_select(dat, method = "cpi", dml_folds = 5L, num_trees = 50L,
-                     knockoff_reps = 2L, inference = "fold", min_vars = 1L,
+  sel <- cast_select(dat, method = "cpi", n_folds = 5L, num_trees = 50L,
+                     inference = "fold", min_vars = 1L,
                      seed = 7, verbose = FALSE)
   expect_s3_class(sel, "cast_select")
   # Strong signal: the true driver is at least the top-ranked candidate
@@ -31,15 +31,14 @@ test_that("CPI fold inference finds the true driver with fold-level t test", {
   expect_identical(top, "x1")
   expect_identical(sel$diagnostics$inference, "fold")
   expect_equal(sel$diagnostics$n_folds, 5L)
-  expect_equal(sel$diagnostics$knockoff_reps, 2L)
   expect_true(all(is.finite(sel$scores$cpi)))
 })
 
 test_that("observation inference reproduces the reference per-observation test", {
   skip_cpi()
   dat <- make_cpi_data()
-  sel <- cast_select(dat, method = "cpi", dml_folds = 5L, num_trees = 50L,
-                     knockoff_reps = 1L, inference = "observation",
+  sel <- cast_select(dat, method = "cpi", n_folds = 5L, num_trees = 50L,
+                     inference = "observation",
                      seed = 7, verbose = FALSE)
   expect_s3_class(sel, "cast_select")
   expect_identical(sel$diagnostics$inference, "observation")
@@ -58,13 +57,13 @@ test_that("CPI aborts with an actionable message when classes are too rare", {
     x1 = rnorm(100), x2 = rnorm(100), x3 = rnorm(100)
   )
   expect_error(
-    cast_select(dat, method = "cpi", dml_folds = 5L, num_trees = 50L,
+    cast_select(dat, method = "cpi", n_folds = 5L, num_trees = 50L,
                 verbose = FALSE),
-    "dml_folds"
+    "n_folds"
   )
   # ... but succeeds once the folds are reduced below the rarer class size
-  sel <- cast_select(dat, method = "cpi", dml_folds = 2L, num_trees = 50L,
-                     knockoff_reps = 1L, seed = 3, verbose = FALSE)
+  sel <- cast_select(dat, method = "cpi", n_folds = 2L, num_trees = 50L,
+                     seed = 3, verbose = FALSE)
   expect_s3_class(sel, "cast_select")
 })
 

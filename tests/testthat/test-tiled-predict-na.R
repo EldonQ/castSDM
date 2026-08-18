@@ -43,27 +43,3 @@ test_that("cast_predict_tiled writes NA back over cells with NA covariates", {
   # ...while every fully-observed cell carries a finite prediction.
   expect_true(all(is.finite(vals[-na_cells])))
 })
-
-test_that("cast_predict_tiled restores the user's future plan", {
-  skip_if_not_installed("ranger")
-  skip_if_not_installed("terra")
-  skip_if_not_installed("future")
-  skip_if_not_installed("future.apply")
-  fit <- .make_tiled_fixture(seed = 311)
-  r <- .make_tiled_raster(seed = 313)
-
-  before <- future::plan()
-  budget <- cast_worker_budget(total_workers = 2L, n_species = 1L)
-  expect_true(budget$intra > 1L)   # parallel path really exercised
-
-  td <- tempfile("tiledplan")
-  on.exit(unlink(td, recursive = TRUE), add = TRUE)
-  out <- cast_predict_tiled(fit, r, output_dir = td, tile_size = 10L,
-                            budget = budget, verbose = FALSE)
-  after <- future::plan()
-  expect_identical(class(after), class(before))
-  expect_equal(future::nbrOfWorkers(), 1L)  # sequential default restored
-
-  vals <- terra::values(terra::rast(out$rasters[["rf"]]), mat = FALSE)
-  expect_true(all(is.finite(vals)))
-})

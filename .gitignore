@@ -3,6 +3,7 @@
 *.tgz
 castSDM.Rcheck/
 ..Rcheck/
+rcmdcheck-out*.txt
 
 .Rproj.user
 .Rhistory

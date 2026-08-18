@@ -38,5 +38,5 @@ Zurell, D. et al. (2020). A standard protocol for reporting species
 distribution models. \emph{Ecography}, 43(9), 1261-1277.
 }
 \seealso{
-\code{\link[=cast]{cast()}}, \code{\link[=cast_run_from_config]{cast_run_from_config()}}
+\code{\link[=cast]{cast()}}
 }

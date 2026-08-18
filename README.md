@@ -17,15 +17,13 @@ a conditional predictive impact (CPI) selector that asks the conditional
 question instead. For each candidate predictor it replaces the variable with
 a Gaussian knockoff given every other predictor and measures the loss of
 predictive accuracy, then keeps the predictors whose conditional contribution
-survives Benjamini-Hochberg FDR control. An optional double machine-learning
-selector (`method = "dml"`) reports signed Neyman-orthogonal partial-linear
-effects with confidence intervals via [cast_effect()], and
-[cast_counterfactual()] maps single-driver what-if shifts on the current
-climate.
+survives Benjamini-Hochberg FDR control. [cast_importance()] turns that screen
+into a tidy per-predictor table with confidence intervals, and
+[cast_sensitivity()] maps single-driver what-if shifts on the current climate.
 
 The screen is embedded in a complete workflow — nested spatial
-cross-validation, ensemble fitting, projection, and counterfactual mapping —
-so the selected set can be used end to end, and every retention decision is
+cross-validation, ensemble fitting, projection, and sensitivity mapping — so
+the selected set can be used end to end, and every retention decision is
 recorded in an auditable, predictor-level table. The only ecological choice is
 the FDR level (`alpha`). Cross-fitting folds and the random-forest nuisance
 learner are method defaults, so the selector avoids the many hand-tuned knobs
@@ -51,38 +49,27 @@ summary(result)
 plot(result$screen)          # conditional impacts, FDR-adjusted
 ```
 
-Signed effect reporting with the DML engine:
+Conditional importance and sensitivity reporting:
 
 ```r
-screen_dml <- cast_select(species_data, method = "dml")
-eff <- cast_effect(screen_dml)   # tidy DML effect table + CIs
-plot(eff)                        # coefficient (forest) plot
+eff <- cast_importance(result)                # tidy CPI table + CIs
+plot(eff)                                    # coefficient (forest) plot
+
+cf <- cast_sensitivity(result$fit,           # what-if: shift one driver,
+  newdata = current_grid,                    #   hold the rest fixed,
+  variable = "bio1", shift = 1)              #   map the change in HSS
+plot(cf, basemap = "china")                  # diverging map of change
 ```
 
 The pipeline runs:
 
 ```text
-prepare -> DML selection -> fit -> nested spatial CV
+prepare -> conditional (CPI) selection -> fit -> nested spatial CV
         -> evaluate -> predict -> ensemble -> projection
 ```
 
 Selection is repeated inside every outer spatial training fold. Held-out folds
 never influence variable choice or tuning.
-
-## Causal interpretation
-
-Two functions turn a fitted workflow into causal-flavoured evidence without a
-new estimation engine:
-```r
-eff <- cast_effect(result)               # tidy DML effect table + CIs
-plot(eff)                                # coefficient (forest) plot
-
-cf <- cast_counterfactual(result$fit_full %||% result$fit, # g-computation what-if
-  newdata = current_grid,    #   climate: shift one driver, hold
-  variable = "bio1", shift = 1   #   the rest fixed, map the change
-)
-plot(cf, basemap = "china")              # diverging map of change in HSS
-```
 
 ## Main functions
 
@@ -90,15 +77,13 @@ plot(cf, basemap = "china")              # diverging map of change in HSS
 |---|---|
 | Study design | `cast_study_area()`, `cast_background()` |
 | Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
-| Causal selection | `cast_select()` |
-| Modelling | `cast_fit()`, `cast_esm()` |
+| Conditional selection | `cast_select()` |
+| Modelling | `cast_fit()` |
 | Validation | `cast_cv()`, `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
-| Causal interpretation | `cast_effect()`, `cast_counterfactual()` |
-| Replicates & uncertainty | `cast_rep()`, `hss_sd` layers, `delta_sd` |
+| Conditional interpretation | `cast_importance()`, `cast_sensitivity()` |
 | Reporting | `cast_report_odmap()` |
-| Batch/resume | `cast_batch()`, `cast_batch_resume()` |
 
 ## Model backends
 
@@ -106,7 +91,6 @@ plot(cf, basemap = "china")              # diverging map of change in HSS
 - BRT: `gbm`
 - MaxEnt: `maxnet`
 - GAM: `mgcv`
-- DML selector: `DoubleML` + `mlr3` / `mlr3learners` (random-forest nuisance)
 
 Optional functionality is activated only when its suggested package is
 installed. Package installation is never attempted during a model run.
@@ -121,8 +105,8 @@ For the full workflow:
 
 ```r
 install.packages(c(
-  "DoubleML", "mlr3", "mlr3learners", "ranger", "gbm", "maxnet", "mgcv",
-  "pROC", "ggplot2", "sf", "terra", "future", "future.apply", "yaml"
+  "mlr3", "mlr3learners", "ranger", "gbm", "maxnet", "mgcv",
+  "pROC", "ggplot2", "sf", "terra", "future", "future.apply"
 ))
 ```
 
@@ -131,15 +115,10 @@ install.packages(c(
 - Selected variables are FDR-significant conditional drivers, adjusted for
   the remaining predictors; scores flag `fallback` (kept via the `min_vars`
   floor) and `forced` (kept via `force_include`) retentions.
-- Replicate runs (`cast_rep()`) quantify the sensitivity of metrics,
-  selection, and maps to the arbitrary choice of background points; ensemble
-  predictions carry a cross-model `hss_sd` uncertainty layer.
-- Batch runs route species with few presences to the ESM pipeline
-  automatically (`min_occ` / `esm_min` gates) and flag the result with
-  `esm_used = TRUE`.
-- The DML effect is an association purged of the measured confounders; it is
+- Ensemble predictions carry a cross-model `hss_sd` uncertainty layer.
+- The CPI estimate is an association purged of the measured predictors; it is
   not proof of a manipulable causal mechanism.
-- Counterfactual maps are purely interpretive what-if summaries on the current
+- Sensitivity maps are purely interpretive what-if summaries on the current
   climate; they do not extrapolate to future scenarios.
 - Future projections assume that the learned response relationship remains
   applicable under the projected environment.

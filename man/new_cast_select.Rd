@@ -9,8 +9,8 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 \arguments{
 \item{selected}{Character vector of selected variable names.}
 
-\item{scores}{A \code{data.frame} with per-variable scores. For \code{method = "dml"}:
-the orthogonalized effect estimate, standard error, statistic, and
+\item{scores}{A \code{data.frame} with per-variable scores. For \code{method = "cpi"}:
+the conditional predictive impact (CPI), standard error, statistic, and
 FDR-adjusted p-value; for \code{method = "rf"}: permutation importance.}
 
 \item{method}{Character screening-method identifier.}

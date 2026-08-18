@@ -21,14 +21,15 @@ associational filters:
 - `cast_select(method = "cpi")` (default) keeps predictors whose conditional
   predictive impact survives Benjamini-Hochberg FDR control, testing each
   predictor *given every other predictor*;
-- `cast_select(method = "dml")` reports signed Neyman-orthogonal
-  partial-linear effects via `cast_effect()`;
+- `cast_importance()` turns that screen into a tidy per-predictor table with
+  confidence intervals, and `cast_sensitivity()` maps single-driver what-if
+  shifts;
 - selection is re-run inside every spatial cross-validation fold, so
   held-out data never influence variable choice.
 
 The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
 learners, nested spatial CV, MESS extrapolation flags, performance-weighted
-ensembles (N-SDM score), ESM for rare species, and CMIP6 projection.
+ensembles (N-SDM score), and CMIP6 projection.
 
 ## Data
 
@@ -60,8 +61,8 @@ result <- cast(
   dat,
   models = c("rf", "gam"),
   select_method = "cpi",
-  select_min_vars = 3,
   select_num_trees = 100,
+  select_min_vars = 3,      # small example: floor the screen at 3 predictors
   do_cv = TRUE,
   cv_k = 3,
   seed = 42,
@@ -72,22 +73,20 @@ summary(result)
 plot(result$screen)
 ```
 
-## Signed effect reporting with DML
+## Conditional importance
 
-```{r effect}
-screen_dml <- cast_select(dat, method = "dml", num_trees = 100,
-                          dml_folds = 3, seed = 42, verbose = FALSE)
-eff <- cast_effect(screen_dml)
-plot(eff)
+```{r importance}
+eff <- cast_importance(result)               # tidy CPI table + CIs
+plot(eff)                                    # coefficient (forest) plot
 ```
 
-## Counterfactual what-if map
+## Sensitivity what-if map
 
-```{r counterfactual}
+```{r sensitivity}
 # Shift the first predictor retained by the screen (guaranteed to be fitted).
-cf <- cast_counterfactual(result$fit, newdata = dat,
-                          variable = result$fit$env_vars[1], shift = 1,
-                          shift_type = "sd")
+cf <- cast_sensitivity(result$fit, newdata = dat,
+                       variable = result$fit$env_vars[1], shift = 1,
+                       shift_type = "sd")
 plot(cf, basemap = "none")
 ```
 
@@ -106,27 +105,4 @@ for (v in env_vars) {
 
 pred <- cast_predict(result$fit, grid)
 plot(pred, basemap = "none")
-```
-
-## Rare species: ensemble of small models
-
-```{r esm}
-rare <- dat[1:60, ]
-rare$presence[1:50] <- 0   # 10 presences, 50 backgrounds
-esm <- cast_esm(rare, top_k = 4, base_algo = "glm", seed = 7, verbose = FALSE)
-print(esm)
-```
-
-## Batch + config
-
-```{r batch}
-template <- cast_config_template(tempfile(fileext = ".yaml"), overwrite = TRUE)
-batch <- cast_batch(
-  list("example" = dat),
-  models = "rf",
-  do_cv = TRUE, cv_k = 3,
-  select_method = "rf", select_num_trees = 100,
-  parallel = FALSE, seed = 1, verbose = FALSE
-)
-print(batch)
 ```

@@ -115,7 +115,7 @@ cast_fit <- function(data,
 #' training-set imputation vector stored in `fit$scaling$impute` (median of
 #' each predictor at fit time). Columns absent from `impute` fall back to `0`.
 #' Centralizing this keeps train, hold-out, spatial-CV, prediction, and
-#' counterfactual pathways on the same, statistically defensible fill.
+#' sensitivity pathways on the same, statistically defensible fill.
 #'
 #' @keywords internal
 #' @noRd

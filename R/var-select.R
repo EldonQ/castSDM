@@ -1,19 +1,13 @@
 #' Select Variables for Species Distribution Models
 #'
-#' `method = "cpi"` (default) is the castSDM causal selector. It tests each
+#' `method = "cpi"` (default) is castSDM's conditional selector. It tests each
 #' predictor's conditional independence from occurrence given every other
-#' predictor via the conditional predictive impact (Watson & Wright 2021):
-#' a random forest is cross-fitted once, each predictor is replaced by a
-#' Gaussian knockoff, and the increase in log-loss measures its conditional
-#' contribution. Because the learner is a random forest, symmetric unimodal
-#' (bell-shaped) niche responses are detected. Predictors surviving
-#' Benjamini-Hochberg FDR control are kept.
-#'
-#' `method = "dml"` is an alternative causal selector estimating each
-#' predictor's Neyman-orthogonal partially linear effect with
-#' [DoubleML][DoubleML::DoubleMLPLR]; it assumes an approximately linear
-#' conditional effect and is best paired with [cast_effect()] for a signed,
-#' interpretable coefficient. `method = "rf"` is retained as a conventional
+#' predictor via the conditional predictive impact (Watson & Wright 2021): a
+#' random forest is cross-fitted once, each predictor is replaced by a
+#' second-order Gaussian knockoff, and the increase in log-loss measures its
+#' conditional contribution. Because the learner is a random forest, symmetric
+#' unimodal (bell-shaped) niche responses are detected. Predictors surviving
+#' Benjamini-Hochberg FDR control are kept. `method = "rf"` is a conventional
 #' (associational) permutation-importance benchmark for comparison.
 #'
 #' @section Inference assumptions:
@@ -30,20 +24,19 @@
 #' significance (effective sample size << n) and the FDR screen loses its
 #' nominal control. Note that every layer still uses random cross-fit folds, so
 #' train/test remain spatially adjacent inside the cross-fit; interpret
-#' surviving predictors as conditionally informative, not as proof of regional
-#' causality.
+#' surviving predictors as conditionally informative.
 #'
 #' @param data Data frame with response, coordinates, and predictors.
 #' @param response Binary response column.
-#' @param method `"cpi"` (default), `"dml"`, or the conventional `"rf"`
-#'   benchmark. Must be specified explicitly; `NULL` errors.
-#' @param alpha FDR level for the CPI/DML selectors. Default `0.05`.
-#' @param max_candidates Predictors tested with CPI/DML; larger sets are
-#'   pre-screened by RF importance for feasibility. Also the output ceiling for
-#'   the RF benchmark. Default `30`.
-#' @param dml_folds Cross-fitting folds for the CPI *and* DML selectors
-#'   (despite the name it controls both). Default `10`; fold-level CPI
-#'   inference needs enough folds for its t-test (df = folds - 1).
+#' @param method `"cpi"` (default) or the conventional `"rf"` benchmark.
+#' @param alpha FDR level for the CPI selector. Default `0.05`.
+#' @param max_candidates Optional candidate ceiling. `NULL` (default) tests
+#'   every non-constant predictor conditionally; a positive integer triggers a
+#'   random-forest importance pre-screen to that many candidates first (a
+#'   marginal approximation used only for computational feasibility). Also the
+#'   output ceiling for the RF benchmark.
+#' @param n_folds Cross-fitting folds for the CPI selector. Default `10`;
+#'   fold-level inference needs enough folds for its t-test (df = folds - 1).
 #' @param inference CPI significance layer: `"block"` (default) tests
 #'   spatial-block mean log-loss differences (cluster-robust, needs `lon`/`lat`
 #'   columns); `"fold"` tests fold-mean differences; `"observation"` reproduces
@@ -51,18 +44,15 @@
 #'   under spatial autocorrelation - see the Inference assumptions section).
 #' @param n_blocks Target number of spatial blocks for `inference = "block"`
 #'   (auto when `NULL`, roughly `min(50, max(20, n/20))`).
-#' @param knockoff_reps Number of knockoff draws per CPI run; per-variable
-#'   statistics are the medians across replicates. Default `3`.
 #' @param num_trees Trees for the RF nuisance/benchmark forests. Default `300`.
-#'   The CPI and DML selectors cap this at `200` with an informational message
-#'   (the nuisance forest keeps fitting tractable on large candidate sets).
-#' @param min_vars Minimum retained variables. Default `3`.
+#' @param min_vars Minimum retained variables. Default `0` (an empty selection
+#'   is allowed when nothing passes FDR). Set a positive integer only to enforce
+#'   an ecological prior; the topped-up predictors are then flagged `fallback`.
 #' @param force_include Character vector of predictor names to always retain,
 #'   regardless of the selector's decision. Use for known niche-defining axes
 #'   (e.g. temperature, elevation) that a within-calibration conditional screen
-#'   may drop as redundant but that are essential for spatial transfer; the
-#'   selector still runs normally on every other predictor. Names absent from
-#'   the predictor pool are skipped. Default none.
+#'   may drop as redundant but that are essential for spatial transfer. Names
+#'   absent from the predictor pool are skipped. Default none.
 #' @param cor_threshold Absolute-correlation threshold for the RF benchmark.
 #' @param num_threads Threads for the ranger learners/benchmark. Default `1`.
 #' @param seed Random seed.
@@ -72,19 +62,18 @@
 #'   predictor with `selected` (retained), `fallback` (kept only through the
 #'   `min_vars` floor, i.e. it did not pass FDR), and `forced` (added via
 #'   `force_include`).
-#' @seealso [cast_effect()], [cast_counterfactual()]
+#' @seealso [cast_importance()], [cast_sensitivity()]
 #' @export
 cast_select <- function(data,
                         response = "presence",
-                        method = c("cpi", "dml", "rf"),
+                        method = c("cpi", "rf"),
                         alpha = 0.05,
-                        max_candidates = 30L,
-                        dml_folds = 10L,
+                        max_candidates = NULL,
+                        n_folds = 10L,
                         inference = c("block", "fold", "observation"),
                         n_blocks = NULL,
-                        knockoff_reps = 3L,
                         num_trees = 300L,
-                        min_vars = 3L,
+                        min_vars = 0L,
                         force_include = character(),
                         cor_threshold = 0.8,
                         num_threads = 1L,
@@ -92,8 +81,8 @@ cast_select <- function(data,
                         verbose = TRUE) {
   if (is.null(method)) {
     cli::cli_abort(c(
-      "{.arg method} must be specified explicitly; the silent fallback to {.val cpi} was removed.",
-      i = "Pass one of {.val cpi}, {.val dml}, or {.val rf}."
+      "{.arg method} must be specified explicitly.",
+      i = "Pass one of {.val cpi} or {.val rf}."
     ))
   }
   method <- match.arg(method)
@@ -102,14 +91,6 @@ cast_select <- function(data,
   if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
 
   num_trees <- as.integer(num_trees)
-  if (method %in% c("cpi", "dml") && num_trees > 200L) {
-    if (verbose) {
-      cli::cli_inform(
-        "CPI/DML: capping {.arg num_trees} at 200 (nuisance-forest tractability)."
-      )
-    }
-    num_trees <- 200L
-  }
 
   if (identical(method, "cpi")) {
     lon <- if ("lon" %in% names(data)) data$lon else NULL
@@ -122,32 +103,11 @@ cast_select <- function(data,
     }
     out <- .cast_select_cpi(
       data = data, env_vars = env_vars, response = response,
-      alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
+      alpha = alpha, max_candidates = max_candidates, n_folds = n_folds,
       num_trees = num_trees, min_vars = min_vars,
-      inference = inference, knockoff_reps = knockoff_reps,
+      inference = inference,
       seed = seed, verbose = verbose, num_threads = num_threads,
       lon = lon, lat = lat, n_blocks = n_blocks
-    )
-    res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
-                                     force_include, verbose)
-    return(new_cast_select(
-      selected = res$selected, scores = res$scores, method = method,
-      diagnostics = c(out$diagnostics,
-                      list(forced = intersect(force_include, env_vars)))
-    ))
-  }
-
-  if (identical(method, "dml")) {
-    if (!is.null(n_blocks)) {
-      cli::cli_warn(
-        "{.arg n_blocks} applies only to CPI screening ({.code inference = \"block\"}); ignored for {.code method = \"dml\"}."
-      )
-    }
-    out <- .cast_select_dml(
-      data = data, env_vars = env_vars, response = response,
-      alpha = alpha, max_candidates = max_candidates, n_folds = dml_folds,
-      num_trees = num_trees, min_vars = min_vars,
-      seed = seed, verbose = verbose, num_threads = num_threads
     )
     res <- .cast_apply_force_include(out$selected, out$scores, env_vars,
                                      force_include, verbose)
@@ -173,8 +133,11 @@ cast_select <- function(data,
   imp <- stats::setNames(as.numeric(imp), original)
   imp <- imp[env_vars]
   imp[!is.finite(imp) | is.na(imp)] <- 0
-  max_vars <- min(max(as.integer(min_vars), as.integer(max_candidates)),
-                  length(env_vars))
+  max_vars <- if (is.null(max_candidates)) {
+    length(env_vars)
+  } else {
+    min(max(as.integer(min_vars), as.integer(max_candidates)), length(env_vars))
+  }
   ranked <- env_vars[order(imp, decreasing = TRUE)]
 
   selected <- character()
@@ -216,7 +179,7 @@ cast_select <- function(data,
 }
 
 # Post-hoc guarantee that ecologically mandatory predictors survive selection.
-# Applied by cast_select() after any selector (cpi/dml/rf) so the behaviour is
+# Applied by cast_select() after any selector (cpi/rf) so the behaviour is
 # identical across methods: forced predictors are unioned into `selected` and
 # flagged in the score table. Names absent from the candidate pool are skipped.
 .cast_apply_force_include <- function(selected, scores, env_vars,

@@ -9,12 +9,12 @@ cast(
   env_data = NULL,
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
-  select_min_vars = 3L,
+  select_min_vars = 0L,
   select_method = "cpi",
   select_num_trees = 300L,
-  select_max_vars = 30L,
+  select_max_vars = NULL,
   select_alpha = 0.05,
-  select_dml_folds = 10L,
+  select_n_folds = 10L,
   select_cor_threshold = 0.8,
   num_threads = 1L,
   do_cv = TRUE,
@@ -41,23 +41,24 @@ the same environmental columns as \code{species_data}.}
 
 \item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
 
-\item{select_min_vars}{Integer. Minimum retained variables. Default \code{3}.}
+\item{select_min_vars}{Integer. Minimum retained variables. Default \code{0}
+(an empty selection is allowed).}
 
 \item{select_method}{Character. Variable screening method passed to
 \code{\link[=cast_select]{cast_select()}}. Default \code{"cpi"}.}
 
 \item{select_num_trees}{Integer. Trees in the RF nuisance/benchmark forests.
-Default \code{300}; the CPI/DML selectors cap it at \code{200} (nuisance-forest
-tractability).}
+Default \code{300}.}
 
-\item{select_max_vars}{Candidate ceiling for DML testing / RF output.
-Default \code{30}.}
+\item{select_max_vars}{Optional candidate ceiling for the CPI selector / RF
+output. \code{NULL} tests every predictor; a positive integer pre-screens by RF
+importance first. Default \code{NULL}.}
 
-\item{select_alpha}{Numeric. FDR level for the DML selector. Default \code{0.05}.}
+\item{select_alpha}{Numeric. FDR level for the CPI selector. Default \code{0.05}.}
 
-\item{select_dml_folds}{Integer. Cross-fitting folds for the CPI \emph{and} DML
-selectors (despite the name it controls both). Default \code{10}; fold-level
-CPI inference needs enough folds for its t-test (df = folds - 1).}
+\item{select_n_folds}{Integer. Cross-fitting folds for the CPI selector.
+Default \code{10}; fold-level CPI inference needs enough folds for its t-test
+(df = folds - 1).}
 
 \item{select_cor_threshold}{Numeric. Absolute correlation threshold for the
 RF benchmark. Default \code{0.8}.}

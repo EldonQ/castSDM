@@ -1,13 +1,12 @@
-# Causal interpretation layer -------------------------------------------------
+# Conditional importance + sensitivity ---------------------------------------
 #
-# Two functions turn a fitted castSDM workflow into causal-flavoured evidence:
-#   * cast_effect()         - reads the conditional-importance estimates already
-#                             produced by the causal screen (CPI impacts or DML
-#                             partial-linear effects) and returns a tidy table
-#                             with confidence intervals.
-#   * cast_counterfactual() - g-computation "what-if" on the current climate:
-#                             shift one predictor, hold the rest fixed, and map
-#                             the change in predicted habitat suitability.
+# Two functions turn a fitted castSDM workflow into interpretable evidence:
+#   * cast_importance() - reads the conditional-importance estimates already
+#                         produced by the conditional screen (CPI impacts) and
+#                         returns a tidy table with confidence intervals.
+#   * cast_sensitivity() - a "what-if" on the current climate: shift one
+#                          predictor, hold the rest fixed, and map the change in
+#                          predicted habitat suitability.
 # Both reuse existing machinery (the screen; the fitted models) so no new
 # estimation engine or hand-tuned knob is introduced.
 
@@ -31,51 +30,45 @@
   screen
 }
 
-#' Causal Effect / Conditional Importance Table from the Screen
+#' Conditional Importance Table from the Screen
 #'
-#' Turns a causal screen into a tidy per-predictor table with confidence
+#' Turns a conditional screen into a tidy per-predictor table with confidence
 #' intervals and FDR-adjusted significance.
 #'
-#' For `method = "cpi"` screens the table reports each predictor's conditional
-#' predictive impact (CPI, Watson & Wright 2021): a non-negative measure of how
-#' much predictive accuracy is lost when the predictor is replaced by a knockoff
-#' given all other predictors. CPI is a magnitude of conditional dependence and
-#' carries no sign (direction), so it should be read together with
-#' [cast_counterfactual()] or partial-dependence for the shape of the response.
+#' The table reports each predictor's conditional predictive impact (CPI,
+#' Watson & Wright 2021): a non-negative measure of how much predictive
+#' accuracy is lost when the predictor is replaced by a knockoff given all
+#' other predictors. CPI is a magnitude of conditional dependence and carries
+#' no sign (direction), so it should be read together with [cast_sensitivity()]
+#' or partial-dependence for the shape of the response.
 #'
-#' For `method = "dml"` screens the table reports each predictor's
-#' Neyman-orthogonal partial-linear effect on occurrence, expressed per one
-#' within-sample standard deviation of the predictor, so magnitudes are
-#' directly comparable and signed.
+#' @section Interpretation (read before citing):
+#' CPI quantifies a predictor's contribution *conditional on the other
+#' predictors*. It is a conditional-importance / adjusted-association measure,
+#' not a validated causal effect: a causal reading additionally requires no
+#' unobserved confounding, a correctly specified adjustment set, and no reverse
+#' causation, which observational, sampling-biased SDM data rarely satisfy
+#' (Byrnes & Dee 2025).
 #'
-#' @section Causal interpretation (read before citing effects):
-#' CPI and DML both quantify a predictor's contribution *conditional on the
-#' other predictors*. A causal reading is licensed only under the usual
-#' assumptions - no unobserved confounding, a correctly specified adjustment
-#' set, and no reverse causation - which observational, sampling-biased SDM
-#' data rarely satisfy. Absent a defensible causal design, report these as
-#' conditional-importance / adjusted-association evidence rather than validated
-#' causal effects (Byrnes & Dee 2025).
-#'
-#' @param object A `cast_select` (from `method = "cpi"` or `"dml"`), or a
-#'   `cast_fit` / `cast_result` that carries such a screen.
+#' @param object A `cast_select` (from `method = "cpi"`), or a `cast_fit` /
+#'   `cast_result` that carries such a screen.
 #' @param conf_level Confidence level for the intervals. Default `0.95`.
 #'
-#' @return A `cast_effect` object.
+#' @return A `cast_importance` object.
 #' @references
 #' Watson, D. S. & Wright, M. N. (2021). Testing conditional independence in
 #' supervised learning algorithms. *Machine Learning*, 110(8), 2107-2129.
 #'
 #' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
 #' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
-#' @seealso [cast_select()], [cast_counterfactual()]
+#' @seealso [cast_select()], [cast_sensitivity()]
 #' @export
-cast_effect <- function(object, conf_level = 0.95) {
+cast_importance <- function(object, conf_level = 0.95) {
   screen <- .cast_extract_screen(object)
-  if (!screen$method %in% c("cpi", "dml")) {
+  if (!identical(screen$method, "cpi")) {
     cli::cli_abort(c(
-      "{.fn cast_effect} needs a causal screen.",
-      i = "Run {.code cast_select(..., method = \"cpi\")} (or {.val dml}) first."
+      "{.fn cast_importance} needs a conditional (CPI) screen.",
+      i = "Run {.code cast_select(..., method = \"cpi\")} first."
     ))
   }
   if (!is.numeric(conf_level) || conf_level <= 0 || conf_level >= 1) {
@@ -84,53 +77,30 @@ cast_effect <- function(object, conf_level = 0.95) {
 
   z <- stats::qnorm(1 - (1 - conf_level) / 2)
   sc <- screen$scores
-
-  if (identical(screen$method, "cpi")) {
-    sc <- sc[is.finite(sc$cpi) & is.finite(sc$std_error), , drop = FALSE]
-    if (!nrow(sc)) {
-      cli::cli_abort("The CPI screen holds no finite impact estimates.")
-    }
-    effects <- data.frame(
-      variable    = sc$variable,
-      estimate    = sc$cpi,
-      std_error   = sc$std_error,
-      statistic   = sc$statistic,
-      p_value     = sc$p_value,
-      p_adjusted  = sc$p_adjusted,
-      # CPI is non-negative by definition; clamp the normal-approximation
-      # lower bound at 0 so error bars never cross below zero.
-      conf_low    = pmax(0, sc$cpi - z * sc$std_error),
-      conf_high   = sc$cpi + z * sc$std_error,
-      selected    = sc$selected,
-      stringsAsFactors = FALSE
-    )
-    effects <- effects[order(-effects$estimate), , drop = FALSE]
-    measure <- "cpi"
-  } else {
-    sc <- sc[is.finite(sc$estimate) & is.finite(sc$std_error), , drop = FALSE]
-    if (!nrow(sc)) {
-      cli::cli_abort("The DML screen holds no finite effect estimates.")
-    }
-    effects <- data.frame(
-      variable    = sc$variable,
-      estimate    = sc$estimate,
-      std_error   = sc$std_error,
-      statistic   = sc$statistic,
-      p_value     = sc$p_value,
-      p_adjusted  = sc$p_adjusted,
-      conf_low    = sc$estimate - z * sc$std_error,
-      conf_high   = sc$estimate + z * sc$std_error,
-      selected    = sc$selected,
-      stringsAsFactors = FALSE
-    )
-    effects <- effects[order(-abs(effects$estimate)), , drop = FALSE]
-    measure <- "dml_plr"
+  sc <- sc[is.finite(sc$cpi) & is.finite(sc$std_error), , drop = FALSE]
+  if (!nrow(sc)) {
+    cli::cli_abort("The CPI screen holds no finite impact estimates.")
   }
+  effects <- data.frame(
+    variable    = sc$variable,
+    estimate    = sc$cpi,
+    std_error   = sc$std_error,
+    statistic   = sc$statistic,
+    p_value     = sc$p_value,
+    p_adjusted  = sc$p_adjusted,
+    # CPI is non-negative by definition; clamp the normal-approximation
+    # lower bound at 0 so error bars never cross below zero.
+    conf_low    = pmax(0, sc$cpi - z * sc$std_error),
+    conf_high   = sc$cpi + z * sc$std_error,
+    selected    = sc$selected,
+    stringsAsFactors = FALSE
+  )
+  effects <- effects[order(-effects$estimate), , drop = FALSE]
   rownames(effects) <- NULL
 
   diagnostics <- screen$diagnostics
-  diagnostics$measure <- measure
-  new_cast_effect(
+  diagnostics$measure <- "cpi"
+  new_cast_importance(
     effects = effects,
     conf_level = conf_level,
     alpha = screen$diagnostics$alpha %||% 0.05,
@@ -193,13 +163,13 @@ cast_effect <- function(object, conf_level = 0.95) {
 #'   uses every successfully fitted model (an ensemble mean).
 #' @param coords Coordinate column names. Default `c("lon", "lat")`.
 #'
-#' @return A `cast_counterfactual` object. The `predictions` data.frame
+#' @return A `cast_sensitivity` object. The `predictions` data.frame
 #'   carries `baseline`, `counterfactual`, `delta_hss` (ensemble-mean change)
 #'   and `delta_sd` (cross-model standard deviation of the change; `NA` for
 #'   a single model).
-#' @seealso [cast_effect()], [cast_predict()]
+#' @seealso [cast_importance()], [cast_predict()]
 #' @export
-cast_counterfactual <- function(fit, newdata, variable,
+cast_sensitivity <- function(fit, newdata, variable,
                                 shift = 1, shift_type = c("sd", "raw", "percent"),
                                 model = NULL, coords = c("lon", "lat")) {
   if (!inherits(fit, "cast_fit")) cli::cli_abort("{.arg fit} must be a {.cls cast_fit}.")
@@ -275,7 +245,7 @@ cast_counterfactual <- function(fit, newdata, variable,
     mean_abs_delta_sd = mean(abs(predictions$delta_sd), na.rm = TRUE)
   )
 
-  new_cast_counterfactual(
+  new_cast_sensitivity(
     predictions = predictions,
     variable = variable,
     shift = shift,

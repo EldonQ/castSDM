@@ -12,12 +12,6 @@
 #' replay tiles predicted by an older model. `overwrite = TRUE` bypasses
 #' and refreshes the checkpoints.
 #'
-#' Tiles are dispatched through [future.apply::future_lapply()] when a
-#' `cast_worker_budget` is given, using the Windows-friendly
-#' `multisession` (PSOCK) backend with `budget$intra` workers (the
-#' per-step layer of the budget). The `future` plan is set once for the
-#' whole call and the user's original plan is restored on exit.
-#'
 #' Cells with missing (`NA`) covariates stay `NA` in the output rasters -
 #' they are recorded before [cast_predict()] imputes them and written back
 #' as `NA` afterwards, matching the NA semantics of
@@ -34,8 +28,6 @@
 #'   (height x width). Default `512`.
 #' @param models Character vector. Which fitted models to predict. Default
 #'   all.
-#' @param budget A [cast_worker_budget] (optional). When supplied,
-#'   `future_lapply()` is used to evaluate tiles in parallel.
 #' @param overwrite Logical. Overwrite existing output rasters. Default
 #'   `FALSE` - existing files trigger a `cli_inform()` and skip.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
@@ -48,13 +40,12 @@
 #'   \item{models}{Character vector of model names.}
 #' }
 #'
-#' @seealso [cast_predict()], [cast_worker_budget()]
+#' @seealso [cast_predict()]
 #' @export
 cast_predict_tiled <- function(fit, raster,
                                output_dir,
                                tile_size = 512L,
                                models    = NULL,
-                               budget    = NULL,
                                overwrite = FALSE,
                                compression = "LZW",
                                verbose   = TRUE) {
@@ -163,19 +154,8 @@ cast_predict_tiled <- function(fit, raster,
     matrix(vals, nr, nc, byrow = TRUE)
   }
 
-  # Tiles use the per-step (intra-species) layer of the worker budget; the
-  # plan is set ONCE here and restored on exit, not per model.
-  n_workers <- if (!is.null(budget) && inherits(budget, "cast_worker_budget")) {
-    max(1L, budget$intra %||% budget$total)
-  } else {
-    1L
-  }
-  parallel <- n_workers > 1L && requireNamespace("future.apply", quietly = TRUE)
-  if (parallel) {
-    old_plan <- future::plan(future::multisession, workers = n_workers)
-    on.exit(future::plan(old_plan), add = TRUE)
-  }
-
+  # Tiles are processed sequentially: ranger/gbm predictions dominate the
+  # cost and a serial sweep bounds peak memory to one tile at a time.
   for (mdl in mdl_names) {
     op <- out_paths[[mdl]]
     if (pre_existing[[mdl]] && !overwrite) next
@@ -194,21 +174,7 @@ cast_predict_tiled <- function(fit, raster,
       list(tile = tile, vals = predict_tile(tile, mdl, chk_root))
     }
 
-    results <- if (parallel) {
-      # SpatRaster external pointers do not survive PSOCK serialisation, so
-      # ship a wrapped copy and unwrap it inside each worker. Workers must
-      # also attach the modelling packages, otherwise S3 dispatch (e.g.
-      # predict.ranger) fails with "no applicable method".
-      raster_wrap <- terra::wrap(raster)
-      future.apply::future_lapply(
-        seq_len(n_tiles),
-        function(k) process_one(k, terra::unwrap(raster_wrap)),
-        future.seed = TRUE,
-        future.packages = c("castSDM", "terra", .cast_model_pkgs(mdl))
-      )
-    } else {
-      lapply(seq_len(n_tiles), function(k) process_one(k, raster))
-    }
+    results <- lapply(seq_len(n_tiles), function(k) process_one(k, raster))
 
     # Write tiles back to the persistent raster. Accumulate into a plain
     # vector (built on the INPUT stack's geometry, never re-opening the
@@ -241,15 +207,6 @@ cast_predict_tiled <- function(fit, raster,
   )
   class(out) <- "cast_predict_tiled"
   out
-}
-
-
-#' Packages a worker must attach to predict with the given model types
-#' @keywords internal
-#' @noRd
-.cast_model_pkgs <- function(mdl_names) {
-  pkgs <- c(rf = "ranger", gam = "mgcv", brt = "gbm", maxent = "maxnet")
-  unname(pkgs[intersect(names(pkgs), mdl_names)])
 }
 
 #' @export

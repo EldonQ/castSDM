@@ -7,15 +7,14 @@
 cast_select(
   data,
   response = "presence",
-  method = c("cpi", "dml", "rf"),
+  method = c("cpi", "rf"),
   alpha = 0.05,
-  max_candidates = 30L,
-  dml_folds = 10L,
+  max_candidates = NULL,
+  n_folds = 10L,
   inference = c("block", "fold", "observation"),
   n_blocks = NULL,
-  knockoff_reps = 3L,
   num_trees = 300L,
-  min_vars = 3L,
+  min_vars = 0L,
   force_include = character(),
   cor_threshold = 0.8,
   num_threads = 1L,
@@ -28,18 +27,18 @@ cast_select(
 
 \item{response}{Binary response column.}
 
-\item{method}{\code{"cpi"} (default), \code{"dml"}, or the conventional \code{"rf"}
-benchmark. Must be specified explicitly; \code{NULL} errors.}
+\item{method}{\code{"cpi"} (default) or the conventional \code{"rf"} benchmark.}
 
-\item{alpha}{FDR level for the CPI/DML selectors. Default \code{0.05}.}
+\item{alpha}{FDR level for the CPI selector. Default \code{0.05}.}
 
-\item{max_candidates}{Predictors tested with CPI/DML; larger sets are
-pre-screened by RF importance for feasibility. Also the output ceiling for
-the RF benchmark. Default \code{30}.}
+\item{max_candidates}{Optional candidate ceiling. \code{NULL} (default) tests
+every non-constant predictor conditionally; a positive integer triggers a
+random-forest importance pre-screen to that many candidates first (a
+marginal approximation used only for computational feasibility). Also the
+output ceiling for the RF benchmark.}
 
-\item{dml_folds}{Cross-fitting folds for the CPI \emph{and} DML selectors
-(despite the name it controls both). Default \code{10}; fold-level CPI
-inference needs enough folds for its t-test (df = folds - 1).}
+\item{n_folds}{Cross-fitting folds for the CPI selector. Default \code{10};
+fold-level inference needs enough folds for its t-test (df = folds - 1).}
 
 \item{inference}{CPI significance layer: \code{"block"} (default) tests
 spatial-block mean log-loss differences (cluster-robust, needs \code{lon}/\code{lat}
@@ -50,21 +49,17 @@ under spatial autocorrelation - see the Inference assumptions section).}
 \item{n_blocks}{Target number of spatial blocks for \code{inference = "block"}
 (auto when \code{NULL}, roughly \code{min(50, max(20, n/20))}).}
 
-\item{knockoff_reps}{Number of knockoff draws per CPI run; per-variable
-statistics are the medians across replicates. Default \code{3}.}
+\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
 
-\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.
-The CPI and DML selectors cap this at \code{200} with an informational message
-(the nuisance forest keeps fitting tractable on large candidate sets).}
-
-\item{min_vars}{Minimum retained variables. Default \code{3}.}
+\item{min_vars}{Minimum retained variables. Default \code{0} (an empty selection
+is allowed when nothing passes FDR). Set a positive integer only to enforce
+an ecological prior; the topped-up predictors are then flagged \code{fallback}.}
 
 \item{force_include}{Character vector of predictor names to always retain,
 regardless of the selector's decision. Use for known niche-defining axes
 (e.g. temperature, elevation) that a within-calibration conditional screen
-may drop as redundant but that are essential for spatial transfer; the
-selector still runs normally on every other predictor. Names absent from
-the predictor pool are skipped. Default none.}
+may drop as redundant but that are essential for spatial transfer. Names
+absent from the predictor pool are skipped. Default none.}
 
 \item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
 
@@ -81,21 +76,14 @@ predictor with \code{selected} (retained), \code{fallback} (kept only through th
 \code{force_include}).
 }
 \description{
-\code{method = "cpi"} (default) is the castSDM causal selector. It tests each
+\code{method = "cpi"} (default) is castSDM's conditional selector. It tests each
 predictor's conditional independence from occurrence given every other
-predictor via the conditional predictive impact (Watson & Wright 2021):
-a random forest is cross-fitted once, each predictor is replaced by a
-Gaussian knockoff, and the increase in log-loss measures its conditional
-contribution. Because the learner is a random forest, symmetric unimodal
-(bell-shaped) niche responses are detected. Predictors surviving
-Benjamini-Hochberg FDR control are kept.
-}
-\details{
-\code{method = "dml"} is an alternative causal selector estimating each
-predictor's Neyman-orthogonal partially linear effect with
-\link[DoubleML:DoubleMLPLR]{DoubleML}; it assumes an approximately linear
-conditional effect and is best paired with \code{\link[=cast_effect]{cast_effect()}} for a signed,
-interpretable coefficient. \code{method = "rf"} is retained as a conventional
+predictor via the conditional predictive impact (Watson & Wright 2021): a
+random forest is cross-fitted once, each predictor is replaced by a
+second-order Gaussian knockoff, and the increase in log-loss measures its
+conditional contribution. Because the learner is a random forest, symmetric
+unimodal (bell-shaped) niche responses are detected. Predictors surviving
+Benjamini-Hochberg FDR control are kept. \code{method = "rf"} is a conventional
 (associational) permutation-importance benchmark for comparison.
 }
 \section{Inference assumptions}{
@@ -112,10 +100,9 @@ i.i.d. observations; on spatially autocorrelated data it inflates
 significance (effective sample size << n) and the FDR screen loses its
 nominal control. Note that every layer still uses random cross-fit folds, so
 train/test remain spatially adjacent inside the cross-fit; interpret
-surviving predictors as conditionally informative, not as proof of regional
-causality.
+surviving predictors as conditionally informative.
 }
 
 \seealso{
-\code{\link[=cast_effect]{cast_effect()}}, \code{\link[=cast_counterfactual]{cast_counterfactual()}}
+\code{\link[=cast_importance]{cast_importance()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}
 }
