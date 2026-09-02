@@ -93,8 +93,11 @@ cast_fit <- function(data,
       fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth, seed,
                       num_threads),
       error = function(e) {
-        cli::cli_warn("{mdl} failed: {e$message}")
-        list(type = "traditional", model = NULL, name = mdl)
+        cli::cli_abort(c(
+          "Model {.val {mdl}} failed to fit.",
+          "x" = "{e$message}",
+          "i" = "Refit without this engine or inspect the training data."
+        ))
       }
     )
   }

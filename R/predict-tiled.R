@@ -166,7 +166,17 @@ cast_predict_tiled <- function(fit, raster,
       .cast_digest(fit$models[[mdl]]$model, len = 10),
       error = function(e) "unknown"
     )
-    chk_root <- file.path(output_dir, paste0(".cast_tiles_", mdl_sig))
+    # Raster fingerprint: geometry + layer names + summary stats, so a
+    # different environmental stack can never silently replay old tiles.
+    rast_sig <- tryCatch(
+      .cast_digest(list(
+        terra::ext(raster), terra::dim(raster), names(raster),
+        terra::global(raster, c("mean", "min", "max"), na.rm = TRUE)
+      ), len = 10),
+      error = function(e) "unknown"
+    )
+    chk_root <- file.path(output_dir,
+                          paste0(".cast_tiles_", mdl_sig, "_", rast_sig))
     dir.create(chk_root, showWarnings = FALSE, recursive = TRUE)
 
     process_one <- function(k, rast) {

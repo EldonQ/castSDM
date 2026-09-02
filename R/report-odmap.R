@@ -96,8 +96,9 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     "- **Transfer-critical axes (force_include)**:",
     sprintf("  %s", if (length(forced_vars)) paste(forced_vars, collapse = ", ")
             else "none"),
-    "- **Selection leakage control**: variable selection is re-run inside",
-    "  every outer spatial CV fold",
+    sprintf("- **Selection leakage control**: %s",
+            if (!is.null(cv)) "variable selection is re-run inside every outer spatial CV fold" else
+              "not applicable (no CV was run)"),
     sprintf("- **Expertise / prior knowledge used**: %s", get_meta("expertise")),
     "",
     "## 4. Assessment",

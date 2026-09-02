@@ -213,8 +213,11 @@ evaluate_model_full <- function(pred, obs) {
 
 #' Continuous Boyce Index (CBI)
 #'
-#' Moving-window Spearman correlation between predicted suitability and
-#' observed presence frequency. Implementation follows Hirzel et al. (2006).
+#' Fixed equal-width binning (101 bins): Spearman correlation between the
+#' bin centres of predicted suitability and observed presence frequency.
+#' This is a fixed-bin implementation and deliberately does NOT reproduce
+#' the moving-window variant of Hirzel et al. (2006); results are therefore
+#' comparable across implementations only approximately.
 #'
 #' @param pred Numeric predicted probabilities.
 #' @param obs  Binary 0/1 observed.

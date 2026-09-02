@@ -119,7 +119,8 @@ cast_ensemble <- function(fit, cv, new_data,
   }
 
   # ---- Binary threshold ---------------------------------------------------
-  threshold <- .ensemble_threshold(cv, mdl_names, weights, method)
+  # Use the same model set that actually contributes to the ensemble.
+  threshold <- .ensemble_threshold(cv, mdl_names[include], weights, method)
 
   # ---- Build output -------------------------------------------------------
   has_coords <- all(c("lon", "lat") %in% names(pred_df))
