@@ -1,6 +1,6 @@
-bibentry(
+﻿bibentry(
   bibtype  = "Manual",
-  title    = "castSDM: Causal Variable Selection for Species Distribution Modeling",
+  title    = "castSDM: Causal Effect Analysis for Species Distribution Modeling",
   author   = c(person("Liqiang", "Q")),
   year     = "2026",
   note     = "R package version 0.8.0",

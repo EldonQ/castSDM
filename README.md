@@ -1,11 +1,12 @@
-# castSDM
+﻿# castSDM
 
-`castSDM` solves one problem in species distribution modelling: **separating
-true ecological drivers from collinear bystanders**. Standard variable
-selection — correlation filters, stepwise VIF, univariate tests, permutation
-importance, or the embedded `covsel` screen of N-SDM — ranks predictors by
+`castSDM` solves one problem in species distribution modelling: **causal effect analysis**: for every environmental driver, an interventional
+effect size and a 1 km causal effect map that show where habitat increases or
+decreases when that driver changes and all others are held fixed. Standard variable
+selection 鈥?correlation filters, stepwise VIF, univariate tests, permutation
+importance, or the embedded `covsel` screen of N-SDM 鈥?ranks predictors by
 *marginal* association or pairwise collinearity. In the highly collinear
-environmental stacks typical of SDMs (bioclimatic layers often share R² > 0.98
+environmental stacks typical of SDMs (bioclimatic layers often share R虏 > 0.98
 of their variance), a marginal screen cannot tell a driver from a collinear
 proxy: the proxy scores high on marginal association and is retained even
 though it carries no information once the driver is in the model. That
@@ -21,8 +22,8 @@ survives Benjamini-Hochberg FDR control. [cast_importance()] turns that screen
 into a tidy per-predictor table with confidence intervals, and
 [cast_sensitivity()] maps single-driver what-if shifts on the current climate.
 
-The screen is embedded in a complete workflow — nested spatial
-cross-validation, ensemble fitting, projection, and sensitivity mapping — so
+The screen is embedded in a complete workflow 鈥?nested spatial
+cross-validation, ensemble fitting, projection, and sensitivity mapping 鈥?so
 the selected set can be used end to end, and every retention decision is
 recorded in an auditable, predictor-level table. The only ecological choice is
 the FDR level (`alpha`). Cross-fitting folds and the random-forest nuisance
