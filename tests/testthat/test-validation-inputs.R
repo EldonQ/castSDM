@@ -65,7 +65,7 @@ test_that("cast_evaluate rejects non-numeric predictors in test_data", {
   expect_error(cast_evaluate(fit, test_dat), "Non-numeric")
 })
 
-test_that("cast_select(method = NULL) errors instead of silently using cpi", {
+test_that("cast_select(method = NULL) errors instead of silently using a default", {
   dat <- make_val_data()
   expect_error(cast_select(dat, method = NULL, verbose = FALSE), "method")
 })

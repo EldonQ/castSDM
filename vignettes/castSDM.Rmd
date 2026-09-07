@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Getting started with castSDM"
 author: "castSDM authors"
 output: rmarkdown::html_vignette
@@ -21,7 +21,7 @@ associational filters:
 - `cast_select(method = "cpi")` (default) keeps predictors whose conditional
   predictive impact survives Benjamini-Hochberg FDR control, testing each
   predictor *given every other predictor*;
-- `cast_importance()` turns that screen into a tidy per-predictor table with
+- `cast_effect_table()` turns the fitted model into a per-driver causal effect table with
   confidence intervals, and `cast_sensitivity()` maps single-driver what-if
   shifts;
 - selection is re-run inside every spatial cross-validation fold, so
@@ -76,7 +76,7 @@ plot(result$screen)
 ## Conditional importance
 
 ```{r importance}
-eff <- cast_importance(result)               # tidy CPI table + CIs
+eff <- cast_effect_table(result$fit, newdata = dat)  # causal effect table
 plot(eff)                                    # coefficient (forest) plot
 ```
 

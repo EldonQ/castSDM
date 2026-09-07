@@ -7,102 +7,51 @@
 cast_select(
   data,
   response = "presence",
-  method = c("cpi", "rf"),
-  alpha = 0.05,
-  max_candidates = NULL,
-  n_folds = 10L,
-  inference = c("block", "fold", "observation"),
-  n_blocks = NULL,
+  method = c("two_stage", "full"),
   num_trees = 300L,
-  min_vars = 0L,
-  force_include = character(),
-  cor_threshold = 0.8,
-  num_threads = 1L,
   seed = NULL,
   verbose = TRUE
 )
 }
 \arguments{
-\item{data}{Data frame with response, coordinates, and predictors.}
+\item{data}{Data frame with response and predictors (coordinates allowed;
+they are never selected).}
 
-\item{response}{Binary response column.}
+\item{response}{Binary response column. Default \code{"presence"}.}
 
-\item{method}{\code{"cpi"} (default) or the conventional \code{"rf"} benchmark.}
+\item{method}{\code{"two_stage"} (default) or \code{"full"} (keep every predictor).}
 
-\item{alpha}{FDR level for the CPI selector. Default \code{0.05}.}
-
-\item{max_candidates}{Optional candidate ceiling. \code{NULL} (default) tests
-every non-constant predictor conditionally; a positive integer triggers a
-random-forest importance pre-screen to that many candidates first (a
-marginal approximation used only for computational feasibility). Also the
-output ceiling for the RF benchmark.}
-
-\item{n_folds}{Cross-fitting folds for the CPI selector. Default \code{10};
-fold-level inference needs enough folds for its t-test (df = folds - 1).}
-
-\item{inference}{CPI significance layer: \code{"block"} (default) tests
-spatial-block mean log-loss differences (cluster-robust, needs \code{lon}/\code{lat}
-columns); \code{"fold"} tests fold-mean differences; \code{"observation"} reproduces
-the reference per-observation t-test (i.i.d. assumption; anti-conservative
-under spatial autocorrelation - see the Inference assumptions section).}
-
-\item{n_blocks}{Target number of spatial blocks for \code{inference = "block"}
-(auto when \code{NULL}, roughly \code{min(50, max(20, n/20))}).}
-
-\item{num_trees}{Trees for the RF nuisance/benchmark forests. Default \code{300}.}
-
-\item{min_vars}{Minimum retained variables. Default \code{0} (an empty selection
-is allowed when nothing passes FDR). Set a positive integer only to enforce
-an ecological prior; the topped-up predictors are then flagged \code{fallback}.}
-
-\item{force_include}{Character vector of predictor names to always retain,
-regardless of the selector's decision. Use for known niche-defining axes
-(e.g. temperature, elevation) that a within-calibration conditional screen
-may drop as redundant but that are essential for spatial transfer. Names
-absent from the predictor pool are skipped. Default none.}
-
-\item{cor_threshold}{Absolute-correlation threshold for the RF benchmark.}
-
-\item{num_threads}{Threads for the ranger learners/benchmark. Default \code{1}.}
+\item{num_trees}{Trees for the stage-2 forest. Default 300.}
 
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
 }
 \value{
-A \code{cast_select} object. Its \code{scores} data.frame marks each
-predictor with \code{selected} (retained), \code{fallback} (kept only through the
-\code{min_vars} floor, i.e. it did not pass FDR), and \code{forced} (added via
-\code{force_include}).
+A \code{cast_select} object: \code{selected} (kept predictors), \code{scores}
+(per-predictor association, stage-1 status, permutation importance and
+\code{selected} flag).
 }
 \description{
-\code{method = "cpi"} (default) is castSDM's conditional selector. It tests each
-predictor's conditional independence from occurrence given every other
-predictor via the conditional predictive impact (Watson & Wright 2021): a
-random forest is cross-fitted once, each predictor is replaced by a
-second-order Gaussian knockoff, and the increase in log-loss measures its
-conditional contribution. Because the learner is a random forest, symmetric
-unimodal (bell-shaped) niche responses are detected. Predictors surviving
-Benjamini-Hochberg FDR control are kept. \code{method = "rf"} is a conventional
-(associational) permutation-importance benchmark for comparison.
+Two-stage, literature-standard, zero-knob variable selection:
+\enumerate{
+\item \strong{Stage 1 — collinearity thinning}: rank predictors by
+absolute marginal association with the response, then greedily keep
+predictors whose pairwise correlation with all kept predictors is
+\eqn{\le 0.7} (Dormann et al. 2013). This is the recipe used across
+conventional SDM pipelines (N-SDM covsel Stage 1, correlation
+filtering in biomod2/wallace), implemented natively.
+\item \strong{Stage 2 — importance filter}: fit a probability random
+forest on the stage-1 survivors and keep predictors with permutation
+importance > 0. Importance \eqn{\le 0} means the predictor does not
+improve the fitted model; the zero point is the natural, data-driven
+threshold (no tuning).
 }
-\section{Inference assumptions}{
-
-The CPI p-values come from a one-sided t-test on log-loss differences.
-With the default \code{inference = "block"} each spatial grid block contributes
-one mean difference (a cluster-robust t-test, \code{df = n_blocks - 1}): it does
-not treat spatially autocorrelated observations as independent, while
-retaining far more power than the fold-level test. \code{inference = "fold"}
-aggregates to one mean per cross-fitting fold (\code{df = folds - 1}), which is
-less anti-conservative than testing all n per-observation differences as if
-they were independent but also much lower-powered. \code{inference = "observation"} reproduces the reference \pkg{cpi} behaviour and assumes
-i.i.d. observations; on spatially autocorrelated data it inflates
-significance (effective sample size << n) and the FDR screen loses its
-nominal control. Note that every layer still uses random cross-fit folds, so
-train/test remain spatially adjacent inside the cross-fit; interpret
-surviving predictors as conditionally informative.
+Variable selection serves parsimony and projection robustness, not causal
+attribution. Causal questions belong to \code{\link[=cast_effect_table]{cast_effect_table()}} and
+\code{\link[=cast_effect_map]{cast_effect_map()}}.
 }
-
-\seealso{
-\code{\link[=cast_importance]{cast_importance()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}
+\references{
+Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
+with it in ecological studies. \emph{Ecography} 36: 27–46.
 }

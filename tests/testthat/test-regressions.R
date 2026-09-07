@@ -36,23 +36,7 @@ test_that("cast_predict reports missing predictors by name", {
   expect_error(cast_predict(fit, bad_grid), "missing fitted predictor")
 })
 
-test_that("CPI confidence intervals never cross below zero", {
-  scr <- new_cast_select(
-    selected = c("x1"),
-    scores = data.frame(
-      variable = c("x1", "x2"),
-      cpi = c(0.05, 0.001), std_error = c(0.03, 0.0005),
-      statistic = c(1.7, 2.0), p_value = c(0.05, 0.03),
-      p_adjusted = c(0.06, 0.05), selected = c(FALSE, TRUE)
-    ),
-    method = "cpi",
-    diagnostics = list(engine = "Conditional Predictive Impact",
-                       alpha = 0.05, fdr_method = "BH", test = "one-sided t",
-                       n_folds = 5L)
-  )
-  eff <- cast_importance(scr)
-  expect_true(all(eff$effects$conf_low >= 0))
-})
+
 
 test_that("ensemble excludes models with non-finite predictions and warns", {
   skip_if_not_installed("ranger")
@@ -92,19 +76,4 @@ test_that("ensemble excludes models with non-finite predictions and warns", {
   expect_equal(unname(ens$weights["rf"]), 1)
 })
 
-test_that("cast_select scores carry fallback and forced flags", {
-  skip_if_not_installed("ranger")
-  set.seed(41)
-  n <- 150
-  x1 <- rnorm(n); x2 <- rnorm(n); noise <- replicate(4, rnorm(n))
-  dat <- data.frame(
-    lon = runif(n), lat = runif(n),
-    presence = rbinom(n, 1, plogis(1.5 * x1)), x1 = x1, x2 = x2, noise
-  )
-  out <- cast_select(dat, method = "rf", min_vars = 3, max_candidates = 4,
-                     num_trees = 40, force_include = "x2", seed = 42,
-                     verbose = FALSE)
-  expect_true(all(c("fallback", "forced") %in% names(out$scores)))
-  expect_true(out$scores$forced[out$scores$variable == "x2"])
-  expect_true("x2" %in% out$selected)
-})
+
