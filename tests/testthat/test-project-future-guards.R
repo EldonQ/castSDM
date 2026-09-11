@@ -148,16 +148,13 @@ test_that("cast_project_raster skips a failed scenario and continues (M16)", {
   expect_true(is.na(st$n_gain[st$scenario == "bad"]))
   expect_false(is.na(st$n_gain[st$scenario == "ok"]))
 
-  # clamp passthrough reservation: accepted either way, warns only when the
-  # installed cast_ensemble_raster() lacks clamp support.
-  has_clamp <- "clamp" %in% names(formals(cast_ensemble_raster))
-  if (!has_clamp) {
-    expect_warning(
-      cast_project_raster(fc$fit, fc$cv, r_cur, list(ok = r_ok),
-                          output_dir = tempfile("projrast2"),
-                          clamp = TRUE, verbose = FALSE),
-      "clamp"
-    )
-  }
+  # clamp is forwarded to cast_ensemble_raster() and must not change the
+  # output contract.
+  td2 <- tempfile("projrast2")
+  out2 <- cast_project_raster(fc$fit, fc$cv, r_cur, list(ok = r_ok),
+                              output_dir = td2, clamp = TRUE, verbose = FALSE)
+  expect_true(file.exists(file.path(td2, "rasters", "ok_change_class.tif")))
+  expect_false(is.na(out2$stats$n_gain[out2$stats$scenario == "ok"]))
+  unlink(td2, recursive = TRUE)
   unlink(td, recursive = TRUE)
 })

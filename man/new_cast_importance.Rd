@@ -6,20 +6,21 @@
 \usage{
 new_cast_importance(
   effects,
-  conf_level = 0.95,
   alpha = 0.05,
+  threshold = NA_real_,
   diagnostics = list()
 )
 }
 \arguments{
-\item{effects}{A \code{data.frame} of per-predictor conditional importance (CPI)
-estimates with confidence intervals and FDR-adjusted significance.}
+\item{effects}{A \code{data.frame} of per-predictor permutation importance with
+permutation-null \code{p_value} and BH-adjusted \code{p_adjusted}.}
 
-\item{conf_level}{Confidence level used for the intervals.}
+\item{alpha}{Significance level used to flag predictors.}
 
-\item{alpha}{FDR level used to flag significance.}
+\item{threshold}{Numeric. The stage-2 permutation-null importance
+threshold, or \code{NA} when unknown.}
 
-\item{diagnostics}{Named list carried over from the CPI screen.}
+\item{diagnostics}{Named list carried over from the screen.}
 }
 \value{
 A \code{cast_importance} object.

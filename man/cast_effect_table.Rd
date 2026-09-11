@@ -8,7 +8,7 @@ cast_effect_table(
   fit,
   newdata,
   drivers = NULL,
-  shift = 1,
+  shifts = c(-2, -1, 1, 2),
   shift_type = "sd",
   steps = NULL,
   verbose = TRUE
@@ -23,20 +23,26 @@ predictors are dropped per model.}
 \item{drivers}{Character vector of drivers to intervene on. Default:
 every fitted predictor.}
 
-\item{shift}{Numeric. Intervention size. Default 1 (in SD units unless
-\code{steps} is given).}
+\item{shifts}{Numeric vector of intervention sizes, in SD units unless
+\code{shift_type = "raw"}. Default \code{c(-2, -1, 1, 2)}: the effect is averaged
+over a symmetric shift set so it does not depend on the sign or the
+magnitude of one arbitrary step.}
 
 \item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
 
-\item{steps}{Optional named numeric vector of raw-unit intervention
-sizes (overrides \code{shift}/\code{shift_type}).}
+\item{steps}{Optional raw-unit shift sets, overriding
+\code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
+or a named list of numeric vectors, one per driver.}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_effect_table} data.frame: one row per driver with mean,
-median, max, min delta suitability and the share of rows gaining
-(> +0.05) or losing (< -0.05).
+A \code{cast_effect_table} data.frame, one row per driver.
+\code{mean_abs_dHSS} is the effect magnitude (mean absolute delta over the
+shift set); \code{mean_signed_dHSS} is the direction (deltas aligned to the
+sign of their own shift, so positive means raising the driver raises
+suitability). Rank drivers by \code{mean_abs_dHSS}; read
+\code{mean_signed_dHSS} for the sign.
 }
 \description{
 Intervenes on each driver in turn (do-operator: shift the driver, hold
@@ -44,3 +50,18 @@ every other driver fixed), and summarises the resulting change in
 predicted suitability on \code{newdata}: the model-based interventional
 response of the ensemble to each driver.
 }
+\details{
+The effect is averaged over a symmetric shift set (default
+\eqn{\pm 1, \pm 2} SD) rather than read off one arbitrary step, and is
+reported as a magnitude (\code{mean_abs_dHSS}) separately from a direction
+(\code{mean_signed_dHSS}). A single signed step at one magnitude is not a
+stable driver ranking.
+}
+\section{Read with the necessity diagnostic}{
+
+Sensitivity alone does not identify a driver: a predictor with a large
+interventional effect can still be freely replaceable by a collinear
+partner. Pair this table with \code{\link[=cast_necessity]{cast_necessity()}}; where the two
+disagree, attribution to that driver is not identified.
+}
+

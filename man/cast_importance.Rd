@@ -2,48 +2,47 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_importance}
 \alias{cast_importance}
-\title{Conditional Importance Table from the Screen}
+\title{Predictor Importance Table from the Screen}
 \usage{
-cast_importance(object, conf_level = 0.95)
+cast_importance(object)
 }
 \arguments{
-\item{object}{A \code{cast_select} (from \code{method = "cpi"}), or a \code{cast_fit} /
-\code{cast_result} that carries such a screen.}
-
-\item{conf_level}{Confidence level for the intervals. Default \code{0.95}.}
+\item{object}{A \code{cast_select} from \code{method = "two_stage"}, or a
+\code{cast_fit} / \code{cast_result} that carries such a screen.}
 }
 \value{
 A \code{cast_importance} object.
 }
 \description{
-Turns a conditional screen into a tidy per-predictor table with confidence
-intervals and FDR-adjusted significance.
+Turns a two-stage screen into a tidy per-predictor table: permutation
+importance with its permutation-null p-value and BH-adjusted p-value.
 }
 \details{
-The table reports each predictor's conditional predictive impact (CPI,
-Watson & Wright 2021): a non-negative measure of how much predictive
-accuracy is lost when the predictor is replaced by a knockoff given all
-other predictors. CPI is a magnitude of conditional dependence and carries
-no sign (direction), so it should be read together with \code{\link[=cast_sensitivity]{cast_sensitivity()}}
-or partial-dependence for the shape of the response.
+The table reports each predictor's random-forest permutation importance
+from stage 2 of \code{\link[=cast_select]{cast_select()}}, together with the p-value of that
+importance under the null distribution built by refitting the forest on a
+permuted response (Altmann et al. 2010). Importance carries no sign, so
+read it together with \code{\link[=cast_effect_table]{cast_effect_table()}} for direction.
 }
 \section{Interpretation (read before citing)}{
 
-CPI quantifies a predictor's contribution \emph{conditional on the other
-predictors}. It is a conditional-importance / adjusted-association measure,
-not a validated causal effect: a causal reading additionally requires no
-unobserved confounding, a correctly specified adjustment set, and no reverse
+Permutation importance measures how much the \emph{fitted model} relies on a
+predictor. It is neither a causal effect nor a test of necessity: a
+predictor can score highly and still be freely replaceable by a collinear
+partner. A causal reading additionally requires no unobserved
+confounding, a correctly specified adjustment set, and no reverse
 causation, which observational, sampling-biased SDM data rarely satisfy
-(Byrnes & Dee 2025).
+(Byrnes & Dee 2025). Pair with \code{\link[=cast_necessity]{cast_necessity()}}.
 }
 
 \references{
-Watson, D. S. & Wright, M. N. (2021). Testing conditional independence in
-supervised learning algorithms. \emph{Machine Learning}, 110(8), 2107-2129.
+Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
+importance: a corrected feature importance measure. \emph{Bioinformatics},
+26(10), 1340-1347.
 
 Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
 data and unobserved confounding variables. \emph{Ecology Letters}, 28(1), e70023.
 }
 \seealso{
-\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}
+\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}, \code{\link[=cast_necessity]{cast_necessity()}}
 }

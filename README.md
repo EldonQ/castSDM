@@ -1,36 +1,42 @@
-﻿# castSDM
+# castSDM
 
-`castSDM` solves one problem in species distribution modelling: **causal effect analysis**: for every environmental driver, an interventional
-effect size and a 1 km causal effect map that show where habitat increases or
-decreases when that driver changes and all others are held fixed. Standard variable
-selection 鈥?correlation filters, stepwise VIF, univariate tests, permutation
-importance, or the embedded `covsel` screen of N-SDM 鈥?ranks predictors by
-*marginal* association or pairwise collinearity. In the highly collinear
-environmental stacks typical of SDMs (bioclimatic layers often share R虏 > 0.98
-of their variance), a marginal screen cannot tell a driver from a collinear
-proxy: the proxy scores high on marginal association and is retained even
-though it carries no information once the driver is in the model. That
-misattributes ecological drivers and degrades transferability under climate
-change.
+`castSDM` is a species distribution modelling package built around one
+question that conventional SDM pipelines leave unanswered: **which
+environmental drivers can the data actually support attributing habitat
+change to, and where?**
 
-Its distinguishing method is `cast_select(method = "cpi")` (the default),
-a conditional predictive impact (CPI) selector that asks the conditional
-question instead. For each candidate predictor it replaces the variable with
-a Gaussian knockoff given every other predictor and measures the loss of
-predictive accuracy, then keeps the predictors whose conditional contribution
-survives Benjamini-Hochberg FDR control. [cast_importance()] turns that screen
-into a tidy per-predictor table with confidence intervals, and
-[cast_sensitivity()] maps single-driver what-if shifts on the current climate.
+Two products carry that:
 
-The screen is embedded in a complete workflow 鈥?nested spatial
-cross-validation, ensemble fitting, projection, and sensitivity mapping 鈥?so
-the selected set can be used end to end, and every retention decision is
-recorded in an auditable, predictor-level table. The only ecological choice is
-the FDR level (`alpha`). Cross-fitting folds and the random-forest nuisance
-learner are method defaults, so the selector avoids the many hand-tuned knobs
-of traditional screening. castSDM targets interpretable, conditional driver
-selection but does not claim automatic causal discovery from observational
-data.
+- **Interventional effect analysis.** For every driver, `cast_effect_table()`
+  and `cast_effect_map()` shift the driver while holding every other driver
+  fixed (a do-intervention, evaluated by g-computation over the fitted
+  ensemble) and report the resulting change in habitat suitability, as a
+  magnitude and a direction, per driver and per 1 km cell.
+- **A necessity audit.** `cast_necessity()` refits the model without each
+  driver inside every spatial training fold and measures the held-out AUC it
+  costs. Sensitivity without necessity does not identify a driver: a
+  predictor the model responds to strongly can still be freely replaceable by
+  a collinear partner. Read the pair; where they disagree, attribution to
+  that driver is not identified and should be reported as such.
+
+Variable selection is a separate concern, handled by `cast_select()` and
+scoped to what selection can honestly deliver: **parsimony and projection
+robustness, not causal attribution.** It is a two-stage, literature-standard
+procedure:
+
+1. **Collinearity thinning.** Rank predictors by absolute marginal
+   association, then greedily keep predictors whose pairwise correlation with
+   all kept predictors is at most 0.7 (Dormann et al. 2013).
+2. **Importance filter against a permutation null.** Fit a probability random
+   forest on the survivors, refit it on permuted responses to build the null
+   distribution of permutation importance, and keep predictors above the 95th
+   percentile of that null (Altmann et al. 2010). Permutation importance
+   under the null is centred on zero, not bounded by it, so a bare
+   `importance > 0` rule retains roughly half of all uninformative
+   predictors; the null quantile is the calibrated replacement.
+
+Selection is re-run inside every outer spatial training fold, so held-out
+folds never influence variable choice or tuning.
 
 ## Core workflow
 
@@ -40,37 +46,42 @@ library(castSDM)
 result <- cast(
   species_data,
   env_data = prediction_grid,
-  select_method = "cpi",
   models = c("rf", "brt", "maxent", "gam"),
   do_cv = TRUE,
   seed = 42
 )
 
 summary(result)
-plot(result$screen)          # conditional impacts, FDR-adjusted
+plot(result$screen)          # stage-1 status and stage-2 permutation null
 ```
 
-Conditional importance and sensitivity reporting:
+Attribution: the effect/necessity pair.
 
 ```r
-eff <- cast_importance(result)                # tidy CPI table + CIs
-plot(eff)                                    # coefficient (forest) plot
+eff <- cast_effect_table(result$fit, newdata = current_grid)
+eff                                  # rank by mean_abs_dHSS, read the sign
 
-cf <- cast_sensitivity(result$fit,           # what-if: shift one driver,
-  newdata = current_grid,                    #   hold the rest fixed,
-  variable = "bio1", shift = 1)              #   map the change in HSS
-plot(cf, basemap = "china")                  # diverging map of change
+nec <- cast_necessity(species_data, screen = result$screen, k = 5)
+nec                                  # mean_dAUC lost by dropping each driver
+
+emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_*
+```
+
+Single-driver what-if maps on the current climate:
+
+```r
+cf <- cast_sensitivity(result$fit,
+  newdata = current_grid,
+  variable = "bio1", shift = 1)
+plot(cf, basemap = "china")
 ```
 
 The pipeline runs:
 
 ```text
-prepare -> conditional (CPI) selection -> fit -> nested spatial CV
-        -> evaluate -> predict -> ensemble -> projection
+prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
+        -> predict -> ensemble -> projection -> attribution audit
 ```
-
-Selection is repeated inside every outer spatial training fold. Held-out folds
-never influence variable choice or tuning.
 
 ## Main functions
 
@@ -78,12 +89,12 @@ never influence variable choice or tuning.
 |---|---|
 | Study design | `cast_study_area()`, `cast_background()` |
 | Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
-| Conditional selection | `cast_select()` |
+| Variable selection | `cast_select()`, `cast_importance()` |
 | Modelling | `cast_fit()` |
 | Validation | `cast_cv()`, `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
-| Conditional interpretation | `cast_importance()`, `cast_sensitivity()` |
+| Attribution | `cast_effect_table()`, `cast_effect_map()`, `cast_necessity()`, `cast_sensitivity()` |
 | Reporting | `cast_report_odmap()` |
 
 ## Model backends
@@ -106,25 +117,36 @@ For the full workflow:
 
 ```r
 install.packages(c(
-  "mlr3", "mlr3learners", "ranger", "gbm", "maxnet", "mgcv",
+  "ranger", "gbm", "maxnet", "mgcv",
   "pROC", "ggplot2", "sf", "terra", "future", "future.apply"
 ))
 ```
 
 ## Interpretation
 
-- Selected variables are FDR-significant conditional drivers, adjusted for
-  the remaining predictors; scores flag `fallback` (kept via the `min_vars`
-  floor) and `forced` (kept via `force_include`) retentions.
+- Selected variables are a parsimonious, projection-robust predictor set.
+  They are not a list of causes; use the effect/necessity pair for that.
+- Effect tables and maps are model-based interventional estimates. They
+  assume no unobserved confounding and are not proof of a manipulable
+  mechanism.
+- A large `mean_abs_dHSS` with `mean_dAUC` near zero means the driver is
+  substitutable: report it as unidentified rather than as a driver.
 - Ensemble predictions carry a cross-model `hss_sd` uncertainty layer.
-- The CPI estimate is an association purged of the measured predictors; it is
-  not proof of a manipulable causal mechanism.
-- Sensitivity maps are purely interpretive what-if summaries on the current
+- Sensitivity maps are interpretive what-if summaries on the current
   climate; they do not extrapolate to future scenarios.
-- Future projections assume that the learned response relationship remains
+- Future projections assume the learned response relationship remains
   applicable under the projected environment.
 - `cast_report_odmap()` renders the analysis settings as an ODMAP-aligned
   report (Zurell et al. 2020).
+
+## References
+
+Altmann, A., Tolosi, L., Sander, O. & Lengauer, T. (2010). Permutation
+importance: a corrected feature importance measure. *Bioinformatics* 26:
+1340-1347.
+
+Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal with
+it in ecological studies. *Ecography* 36: 27-46.
 
 ## License
 

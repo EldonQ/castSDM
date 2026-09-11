@@ -18,9 +18,10 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("freq", "abs_statistic", "cpi", "rf_importance",
-                      "combined_score")
-  imp_col <- imp_candidates[imp_candidates %in% names(scr)][1]
+  imp_candidates <- c("perm_importance", "freq", "assoc")
+  imp_col <- imp_candidates[imp_candidates %in% names(scr)]
+  imp_col <- imp_col[vapply(imp_col, function(nm)
+    any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
   if (is.na(imp_col) || !length(imp_col)) {
     scr$importance_plot <- as.numeric(scr$is_selected)
     imp_col <- "importance_plot"
@@ -30,9 +31,9 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   n_total <- nrow(scr)
   n_sel <- sum(scr$is_selected)
 
-  # The conditional screen tests a candidate subset, so untested predictors
-  # carry no score. Plotting all of them crushes the axis into an unreadable
-  # band; keep only the evaluated predictors, then the top-scoring slice.
+  # Stage 2 scores only the stage-1 survivors, so thinned predictors carry no
+  # score. Plotting all of them crushes the axis into an unreadable band; keep
+  # only the scored predictors, then the top-scoring slice.
   tested <- scr[is.finite(scr[[imp_col]]), , drop = FALSE]
   n_tested <- nrow(tested)
   tested <- tested[order(-tested[[imp_col]]), , drop = FALSE]
@@ -48,27 +49,24 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
     hit <- scr$variable %in% names(var_labels)
     raw_disp[hit] <- var_labels[scr$variable[hit]]
   }
+  raw_disp <- make.unique(as.character(raw_disp))
   scr$display <- factor(raw_disp, levels = rev(raw_disp))
 
   pal <- .cast_category_palette()
   scr$category <- factor(.cast_var_category(scr$variable), levels = names(pal))
 
   sub_txt <- sprintf(
-    "%d / %d predictors retained \u00b7 %d tested by %s",
-    n_sel, n_total, n_tested, toupper(x$method %||% "CPI")
+    "%d / %d predictors retained \u00b7 %d scored by %s",
+    n_sel, n_total, n_tested, x$method %||% "unknown method"
   )
 
-  x_lab <- if (identical(imp_col, "abs_statistic")) {
-    "|CPI statistic|"
-  } else if (identical(imp_col, "cpi")) {
-    "Conditional predictive impact"
-  } else if (identical(imp_col, "freq")) {
-    "Fold selection frequency"
-  } else if (identical(imp_col, "importance_plot")) {
-    "Selection indicator"
-  } else {
+  x_lab <- switch(imp_col,
+    perm_importance = "Permutation importance",
+    freq = "Fold selection frequency",
+    assoc = "|marginal association|",
+    importance_plot = "Selection indicator",
     "Predictor score"
-  }
+  )
 
   p <- ggplot2::ggplot(scr, ggplot2::aes(
     x = .data[[imp_col]], y = .data$display,
@@ -144,13 +142,24 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
       )
     }
   }
+  large_grid <- nrow(pred) > 2e5
+  if (large_grid) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[hss_col]])
+      ) +
+      .cast_suitability_scale("fill", name = "HSS")
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[hss_col]]),
+        size = 0.4, alpha = 0.85
+      ) +
+      .cast_suitability_scale("colour", name = "HSS")
+  }
   p <- p +
-    ggplot2::geom_point(
-      data = pred,
-      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[hss_col]]),
-      size = 0.4, alpha = 0.85
-    ) +
-    .cast_suitability_scale("colour", name = "HSS") +
     ggplot2::labs(title = title) +
     ggplot2::theme_void(
       base_size = 10,
@@ -172,7 +181,10 @@ plot.cast_predict <- function(x, model = NULL, basemap = "world",
   p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
   .add_china_south_sea_inset(
     p, basemap, data = pred, value_var = hss_col, bg_fill = .cast_map_bg(),
-    scale = .cast_suitability_scale("colour", guide = "none")
+    raster = large_grid,
+    scale = .cast_suitability_scale(
+      if (large_grid) "fill" else "colour", guide = "none"
+    )
   )
 }
 
@@ -390,85 +402,6 @@ plot.cast_result <- function(x, var_labels = NULL, top = 20L, ...) {
 }
 
 
-#' Plot Screening-Method Comparison
-#'
-#' Tile matrix of predictor (rows) by screening method (columns); a coloured
-#' tile marks retention, coloured by ecological class. It contrasts the
-#' conditional castSDM screen with the conventional associational baselines
-#' from [cast_screen_comparison()].
-#'
-#' @param x A `cast_screen_comparison` object.
-#' @param var_labels Optional named character vector for display labels.
-#' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
-#' @export
-plot.cast_screen_comparison <- function(x, var_labels = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
-  mem <- x$membership
-  methods <- x$methods
-  if (!nrow(mem)) cli::cli_abort("No predictor was retained by any method.")
-
-  ord <- order(-as.integer(mem[[x$cpi_method]]), -mem$n_methods)
-  mem <- mem[ord, , drop = FALSE]
-
-  raw_disp <- .cast_var_label(mem$variable)
-  if (!is.null(var_labels)) {
-    hit <- mem$variable %in% names(var_labels)
-    raw_disp[hit] <- var_labels[mem$variable[hit]]
-  }
-  disp <- factor(raw_disp, levels = rev(raw_disp))
-  pal <- .cast_category_palette()
-  cats <- as.character(.cast_var_category(mem$variable))
-
-  method_labels <- c(
-    correlation = "Correlation\nfilter", vif = "Stepwise\nVIF",
-    univariate = "Univariate\nscreen", rf = "RF\nimportance",
-    cpi = "CPI\n(castSDM)"
-  )
-
-  long <- do.call(rbind, lapply(methods, function(m) {
-    data.frame(
-      display = disp, category = cats, method = m,
-      retained = as.logical(mem[[m]]), stringsAsFactors = FALSE
-    )
-  }))
-  long$fill_cat <- ifelse(long$retained, long$category, NA_character_)
-  long$fill_cat <- factor(long$fill_cat, levels = names(pal))
-  long$method <- factor(long$method, levels = methods,
-                        labels = method_labels[methods])
-
-  cnt <- vapply(methods, function(m) sum(mem[[m]]), integer(1))
-  names(cnt) <- methods
-  sub_txt <- sprintf(
-    "Retained \u2014 correlation %d \u00b7 VIF %d \u00b7 univariate %d \u00b7 RF %d \u00b7 CPI %d",
-    cnt["correlation"], cnt["vif"], cnt["univariate"], cnt["rf"], cnt["cpi"]
-  )
-
-  ggplot2::ggplot(long, ggplot2::aes(
-    x = .data$method, y = .data$display, fill = .data$fill_cat
-  )) +
-    ggplot2::geom_tile(color = "white", linewidth = 0.5) +
-    ggplot2::scale_fill_manual(
-      values = pal, name = "Predictor class", na.value = "grey95", drop = TRUE
-    ) +
-    ggplot2::scale_x_discrete(position = "top") +
-    ggplot2::labs(
-      title = "Conditional vs conventional predictor screening",
-      subtitle = sub_txt, x = NULL, y = NULL,
-      caption = paste(
-        "Associational filters keep collinear bystanders;",
-        "CPI retains conditionally predictive drivers."
-      )
-    ) +
-    theme_cast(base_size = 11) +
-    ggplot2::theme(
-      panel.grid = ggplot2::element_blank(),
-      axis.text.x.top = ggplot2::element_text(face = "bold"),
-      legend.position = "right"
-    )
-}
-
 
 #' Plot Ensemble Prediction Map
 #'
@@ -645,11 +578,11 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 }
 
 
-#' Plot Conditional Importance
+#' Plot Predictor Importance
 #'
-#' Forest plot of each predictor's conditional contribution: the (non-negative)
-#' conditional predictive impact (CPI, log-loss knockoff) with confidence
-#' intervals. Predictors passing FDR control are highlighted.
+#' Lollipop plot of each predictor's random-forest permutation importance,
+#' with the stage-2 permutation-null threshold marked. Predictors above the
+#' null are highlighted.
 #'
 #' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.
@@ -664,7 +597,7 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   if (!is.null(top) && is.finite(top)) {
     eff <- utils::head(eff[order(-abs(eff$estimate)), , drop = FALSE], as.integer(top))
   }
-  eff$sig <- ifelse(eff$selected, "significant", "not significant")
+  eff$sig <- ifelse(eff$selected, "above null", "not above null")
   if (!is.null(var_labels)) {
     eff$display <- ifelse(eff$variable %in% names(var_labels),
                           var_labels[eff$variable], eff$variable)
@@ -672,33 +605,37 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
     eff$display <- eff$variable
   }
   eff <- eff[order(eff$estimate), ]
-  eff$display <- factor(eff$display, levels = eff$display)
+  eff$display <- factor(make.unique(eff$display), levels = make.unique(eff$display))
 
-  sig_colors <- c(significant = "#B2182B", `not significant` = "grey70")
+  sig_colors <- c(`above null` = "#B2182B", `not above null` = "grey70")
   n_sig <- sum(eff$selected, na.rm = TRUE)
 
-  plot_title <- "Conditional predictive impact"
   plot_subtitle <- sprintf(
-    "CPI (log-loss knockoff) | %d/%d significant (FDR < %.2g) | %d%% CI",
-    n_sig, nrow(eff), x$alpha, round(100 * x$conf_level)
+    "Random-forest permutation importance | %d/%d above the permuted-response null (p < %.2g)",
+    n_sig, nrow(eff), x$alpha
   )
-  x_lab <- "Conditional predictive impact"
 
-  ggplot2::ggplot(eff, ggplot2::aes(
+  p <- ggplot2::ggplot(eff, ggplot2::aes(
     x = .data$estimate, y = .data$display, color = .data$sig
   )) +
-    ggplot2::geom_vline(xintercept = 0, linetype = "dashed",
+    ggplot2::geom_vline(xintercept = 0, linetype = "solid",
                         color = "grey50", linewidth = 0.4) +
-    ggplot2::geom_errorbarh(
-      ggplot2::aes(xmin = .data$conf_low, xmax = .data$conf_high),
-      height = 0.25, linewidth = 0.6
+    ggplot2::geom_segment(
+      ggplot2::aes(x = 0, xend = .data$estimate,
+                   y = .data$display, yend = .data$display),
+      linewidth = 0.6
     ) +
-    ggplot2::geom_point(size = 2.6) +
+    ggplot2::geom_point(size = 2.6)
+  if (is.finite(x$threshold)) {
+    p <- p + ggplot2::geom_vline(xintercept = x$threshold, linetype = "dashed",
+                                 color = "grey30", linewidth = 0.4)
+  }
+  p +
     ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
     ggplot2::labs(
-      title = plot_title,
+      title = "Predictor importance",
       subtitle = plot_subtitle,
-      x = x_lab, y = ""
+      x = "Permutation importance", y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
@@ -827,6 +764,8 @@ theme_cast <- function(base_size = 11) {
     )
 }
 
+.basemap_cache <- new.env(parent = emptyenv())
+
 #' Load Basemap Shapefile from Package
 #'
 #' @param type `"world"`, `"china"`, or `"dashline"`.
@@ -844,6 +783,12 @@ load_basemap <- function(type = "world") {
   )
   if (is.null(shp_name)) return(NULL)
 
+  # A single map draws the same basemap several times; reading and validating
+  # the shapefile once per session keeps that from dominating plot time.
+  if (exists(type, envir = .basemap_cache, inherits = FALSE)) {
+    return(get(type, envir = .basemap_cache, inherits = FALSE))
+  }
+
   shp_path <- system.file("basemap", shp_name, package = "castSDM")
   if (shp_path == "") return(NULL)
 
@@ -858,10 +803,14 @@ load_basemap <- function(type = "world") {
   )
 
   if (!is.null(basemap)) {
-    if (is.na(sf::st_crs(basemap)) || sf::st_crs(basemap)$epsg != 4326L) {
+    crs <- sf::st_crs(basemap)
+    # `crs$epsg` is NA for a CRS carrying no EPSG code, so comparing it
+    # numerically would make the guard itself error.
+    if (is.na(crs) || !identical(crs, sf::st_crs(4326))) {
       basemap <- sf::st_transform(basemap, 4326)
     }
     basemap <- sf::st_make_valid(basemap)
+    assign(type, basemap, envir = .basemap_cache)
   }
   basemap
 }

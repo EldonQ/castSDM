@@ -38,7 +38,9 @@ it does not exist.}
 \item{models}{Character vector or \code{NULL}. Models to use. Default all.}
 
 \item{mask}{A \code{terra::SpatRaster} or \code{NULL}. If provided, prediction
-is restricted to cells where mask is non-NA.}
+is restricted to cells where mask is non-NA. Only the first layer is
+used; a mask whose geometry cannot be matched to \code{raster_stack} is
+ignored with a warning.}
 
 \item{clamp}{Logical. Clamp predictors to the training range before
 prediction. Default \code{FALSE}. The MESS layer (see \code{extrapolation}) is
@@ -84,14 +86,15 @@ in: an optional per-cell MESS layer flags out-of-envelope cells, and
 \code{clamp} can cap predictors at their training range.
 }
 \details{
-Per block, models whose predictions are not finite are excluded and the
-remaining positive weights are renormalised before averaging - the same
-convention as \code{\link[=cast_ensemble]{cast_ensemble()}}. The cross-model SD layer likewise uses
-only models with positive weight and finite predictions (\code{NA} where
-fewer than two models contribute). Cells with \code{NA} covariates (or
-masked out) stay \code{NA} in every output layer. If no model produces
-finite predictions for a block, those cells are \code{NA} and a warning is
-issued once.
+Models are combined cell by cell: a model that is non-finite at some cells
+of a block still contributes to the rest of that block, and the positive
+weights are renormalised per cell over the models that produced a value
+there - the same convention as \code{\link[=cast_ensemble]{cast_ensemble()}}. The cross-model SD layer
+likewise uses only the cell-level contributors (\code{NA} where fewer than two
+models contribute). Cells with \code{NA} covariates (or masked out) stay \code{NA} in
+every output layer. If no model produces a finite prediction for a block,
+those cells are \code{NA} and a warning is issued once. \code{n_valid_cells} counts
+the cells that received an ensemble value.
 }
 \seealso{
 \code{\link[=cast_ensemble]{cast_ensemble()}}, \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_project_raster]{cast_project_raster()}}

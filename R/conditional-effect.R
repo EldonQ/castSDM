@@ -1,9 +1,9 @@
-# Conditional importance + sensitivity ---------------------------------------
+# Importance reporting + sensitivity -----------------------------------------
 #
 # Two functions turn a fitted castSDM workflow into interpretable evidence:
-#   * cast_importance() - reads the conditional-importance estimates already
-#                         produced by the conditional screen (CPI impacts) and
-#                         returns a tidy table with confidence intervals.
+#   * cast_importance() - tidies the permutation-importance scores already
+#                         produced by the two-stage screen, with the
+#                         permutation p-values and the null threshold.
 #   * cast_sensitivity() - a "what-if" on the current climate: shift one
 #                          predictor, hold the rest fixed, and map the change in
 #                          predicted habitat suitability.
@@ -30,80 +30,71 @@
   screen
 }
 
-#' Conditional Importance Table from the Screen
+#' Predictor Importance Table from the Screen
 #'
-#' Turns a conditional screen into a tidy per-predictor table with confidence
-#' intervals and FDR-adjusted significance.
+#' Turns a two-stage screen into a tidy per-predictor table: permutation
+#' importance with its permutation-null p-value and BH-adjusted p-value.
 #'
-#' The table reports each predictor's conditional predictive impact (CPI,
-#' Watson & Wright 2021): a non-negative measure of how much predictive
-#' accuracy is lost when the predictor is replaced by a knockoff given all
-#' other predictors. CPI is a magnitude of conditional dependence and carries
-#' no sign (direction), so it should be read together with [cast_sensitivity()]
-#' or partial-dependence for the shape of the response.
+#' The table reports each predictor's random-forest permutation importance
+#' from stage 2 of [cast_select()], together with the p-value of that
+#' importance under the null distribution built by refitting the forest on a
+#' permuted response (Altmann et al. 2010). Importance carries no sign, so
+#' read it together with [cast_effect_table()] for direction.
 #'
 #' @section Interpretation (read before citing):
-#' CPI quantifies a predictor's contribution *conditional on the other
-#' predictors*. It is a conditional-importance / adjusted-association measure,
-#' not a validated causal effect: a causal reading additionally requires no
-#' unobserved confounding, a correctly specified adjustment set, and no reverse
+#' Permutation importance measures how much the *fitted model* relies on a
+#' predictor. It is neither a causal effect nor a test of necessity: a
+#' predictor can score highly and still be freely replaceable by a collinear
+#' partner. A causal reading additionally requires no unobserved
+#' confounding, a correctly specified adjustment set, and no reverse
 #' causation, which observational, sampling-biased SDM data rarely satisfy
-#' (Byrnes & Dee 2025).
+#' (Byrnes & Dee 2025). Pair with [cast_necessity()].
 #'
-#' @param object A `cast_select` (from `method = "cpi"`), or a `cast_fit` /
-#'   `cast_result` that carries such a screen.
-#' @param conf_level Confidence level for the intervals. Default `0.95`.
+#' @param object A `cast_select` from `method = "two_stage"`, or a
+#'   `cast_fit` / `cast_result` that carries such a screen.
 #'
 #' @return A `cast_importance` object.
 #' @references
-#' Watson, D. S. & Wright, M. N. (2021). Testing conditional independence in
-#' supervised learning algorithms. *Machine Learning*, 110(8), 2107-2129.
+#' Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
+#' importance: a corrected feature importance measure. *Bioinformatics*,
+#' 26(10), 1340-1347.
 #'
 #' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
 #' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
-#' @seealso [cast_select()], [cast_sensitivity()]
+#' @seealso [cast_select()], [cast_sensitivity()], [cast_necessity()]
 #' @export
-cast_importance <- function(object, conf_level = 0.95) {
+cast_importance <- function(object) {
   screen <- .cast_extract_screen(object)
-  if (!identical(screen$method, "cpi")) {
-    cli::cli_abort(c(
-      "{.fn cast_importance} needs a conditional (CPI) screen.",
-      i = "Run {.code cast_select(..., method = \"cpi\")} first."
-    ))
-  }
-  if (!is.numeric(conf_level) || conf_level <= 0 || conf_level >= 1) {
-    cli::cli_abort("{.arg conf_level} must be a single number in (0, 1).")
-  }
-
-  z <- stats::qnorm(1 - (1 - conf_level) / 2)
   sc <- screen$scores
-  sc <- sc[is.finite(sc$cpi) & is.finite(sc$std_error), , drop = FALSE]
+  needed <- c("perm_importance", "p_value", "p_adjusted")
+  if (!all(needed %in% names(sc))) {
+    cli::cli_abort(c(
+      "{.fn cast_importance} needs a two-stage screen carrying permutation importance.",
+      i = "Run {.code cast_select(..., method = \"two_stage\")} first."))
+  }
+  sc <- sc[is.finite(sc$perm_importance), , drop = FALSE]
   if (!nrow(sc)) {
-    cli::cli_abort("The CPI screen holds no finite impact estimates.")
+    cli::cli_abort(c(
+      "The screen holds no finite importance estimates.",
+      i = "{.code method = \"full\"} skips stage 2, so there is nothing to report."))
   }
   effects <- data.frame(
-    variable    = sc$variable,
-    estimate    = sc$cpi,
-    std_error   = sc$std_error,
-    statistic   = sc$statistic,
-    p_value     = sc$p_value,
-    p_adjusted  = sc$p_adjusted,
-    # CPI is non-negative by definition; clamp the normal-approximation
-    # lower bound at 0 so error bars never cross below zero.
-    conf_low    = pmax(0, sc$cpi - z * sc$std_error),
-    conf_high   = sc$cpi + z * sc$std_error,
-    selected    = sc$selected,
+    variable   = sc$variable,
+    estimate   = sc$perm_importance,
+    p_value    = sc$p_value,
+    p_adjusted = sc$p_adjusted,
+    selected   = sc$selected,
     stringsAsFactors = FALSE
   )
   effects <- effects[order(-effects$estimate), , drop = FALSE]
   rownames(effects) <- NULL
 
   diagnostics <- screen$diagnostics
-  diagnostics$measure <- "cpi"
+  diagnostics$measure <- "permutation_importance"
   new_cast_importance(
     effects = effects,
-    conf_level = conf_level,
     alpha = screen$diagnostics$alpha %||% 0.05,
+    threshold = screen$diagnostics$null_threshold %||% NA_real_,
     diagnostics = diagnostics
   )
 }

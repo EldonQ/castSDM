@@ -9,17 +9,19 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
     x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
   cv <- cast_cv(
-    dat, select_method = "rf",
-    select_args = list(max_candidates = 4, min_vars = 2, num_trees = 40),
+    dat, select_method = "two_stage",
+    select_args = list(num_trees = 40, n_perm = 9),
     k = 3, models = "rf", rf_ntree = 40, seed = 81, verbose = FALSE
   )
   expect_true(all(c("variable", "freq") %in% names(cv$selection_freq)))
   expect_true(all(cv$selection_freq$freq >= 0 & cv$selection_freq$freq <= 1))
+  expect_true(all(c("obs", "HSS_rf") %in% names(cv$oof)))
+  expect_identical(nrow(cv$oof), nrow(dat))
 
   cons <- cast_consensus(cv, threshold = 0.5)
   expect_s3_class(cons, "cast_select")
   expect_identical(cons$method, "consensus")
-  expect_true(all(cons$selected %in% cv$selection_freq$variable))
+  expect_true("x1" %in% cons$selected)
   # a manual cast_cv without selection_freq falls back to cv$selections
   cv_manual <- new_cast_cv(
     metrics = cv$metrics, fold_metrics = cv$fold_metrics, folds = cv$folds,

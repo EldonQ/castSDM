@@ -1,3 +1,77 @@
+# castSDM 0.9.0
+
+The package's claim is narrowed to what it can defend: **attribution as an
+audited pair**. `cast_effect_table()` / `cast_effect_map()` report the
+interventional response to each driver, and the new `cast_necessity()`
+reports what dropping that driver costs in held-out AUC. Where the two
+disagree, the driver is substitutable by a collinear partner and attribution
+to it is not identified. Variable selection is no longer presented as causal
+at all: it is a two-stage screen scoped to parsimony and projection
+robustness.
+
+## Breaking changes
+
+* `cast_select()` now takes `method = c("two_stage", "full")` only. The
+  conditional (CPI) and DML selectors, the `"rf"` benchmark, and the
+  `alpha`, `min_vars`, `max_candidates`, `dml_folds`, `force_include` and
+  `n_folds` arguments are removed. Retired arguments land in `...` and warn
+  rather than silently changing the screen.
+  - Stage 1: rank by absolute marginal association, greedily keep predictors
+    with pairwise |r| <= 0.7 (Dormann et al. 2013).
+  - Stage 2: keep predictors whose random-forest permutation importance
+    exceeds the 95th percentile of a null built by refitting on `n_perm`
+    permuted responses (Altmann et al. 2010). A bare `importance > 0` rule
+    retains roughly half of all uninformative predictors, because the null is
+    centred on zero rather than bounded by it.
+* `cast()` gains `select_n_perm` and drops `select_alpha`,
+  `select_min_vars`, `select_max_candidates` and `select_n_folds`;
+  `select_method` defaults to `"two_stage"`.
+* `cast_effect_table()` / `cast_effect_map()` average over a frozen symmetric
+  shift set (`shifts = c(-2, -1, 1, 2)` SD) instead of one arbitrary step,
+  and report magnitude (`mean_abs_dHSS`) separately from direction
+  (`mean_signed_dHSS`). Effect estimates no longer carry confidence
+  intervals; a single signed step at one magnitude was not a stable ranking.
+* `cast_screen_comparison()` and its `new_*` / `plot` methods are removed.
+* `cast_cv()` now returns `oof`, the out-of-fold prediction surface, which
+  `cast_ensemble()` needs to threshold the ensemble itself.
+
+## New
+
+* `cast_necessity()`: per-driver knockout diagnostic. Builds its own spatial
+  folds and refits both the full and the knocked-out model inside every
+  training fold, so `mean_dAUC` is an out-of-sample cost rather than an
+  in-sample importance score. `pct_folds_positive` is reported so a stricter
+  rule can be applied without refitting.
+
+## Bug fixes
+
+* `cast_ensemble()`: the N-SDM score no longer silently substitutes 0 for a
+  missing CBI or drops components with `na.rm`; a model with an incomplete
+  metric row is excluded and warned about, and an all-NA score set aborts
+  instead of producing uniform weights.
+* `cast_ensemble()`: the ensemble threshold is now optimised on the ensemble
+  out-of-fold surface rather than averaging per-model thresholds (which
+  optimised nothing). Older `cast_cv` objects without `oof` fall back to the
+  weighted mean of per-model thresholds, with a warning.
+* `cast_ensemble()`: non-finite per-model predictions renormalise the weights
+  per cell instead of poisoning the row or excluding the whole model, and a
+  multi-layer mask no longer misaligns per-block cell indexing.
+* `cast_ensemble()`: the early return when outputs already exist now carries
+  the weights and threshold instead of `NULL`.
+* `cast_cv()`: the spatial-buffer exclusion no longer builds a full n x n
+  distance matrix, which exhausted memory on national data sets.
+* `cast_predict_tiled()`: tiles are folded into the output as they are
+  produced instead of being accumulated in a list, restoring the documented
+  one-tile-at-a-time memory bound.
+* `cast_project()`: change-class tallies use `terra::freq()` instead of
+  reading the whole change raster into memory.
+* Basemaps are read, reprojected and validated once per session, and a CRS
+  carrying no EPSG code no longer errors the reprojection guard.
+* `plot.cast_predict()` switches to `geom_raster()` on large grids, matching
+  `plot.cast_ensemble()`.
+* `summary.cast_result()` no longer emits an empty "best model" line when
+  every AUC is NA.
+
 # castSDM 0.8.0
 
 Release refactor: a single, focused niche — conditional variable selection

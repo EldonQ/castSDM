@@ -47,11 +47,11 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
   ev <- object$eval
 
   diag <- scr$diagnostics %||% list()
-  engine <- diag$engine %||% "unknown"
-  alpha <- diag$alpha %||% NA_real_
+  screen_method <- scr$method %||% "unknown"
+  n_perm <- diag$n_perm %||% NA_integer_
+  null_thr <- diag$null_threshold %||% NA_real_
   n_sel <- length(scr$selected %||% character(0))
   sel_vars <- scr$selected %||% character(0)
-  forced_vars <- diag$forced %||% character(0)
   models_used <- names(fit$models)
   cv_info <- if (!is.null(cv)) {
     sprintf("%d-fold spatial (%s) nested CV, selection re-run per fold",
@@ -89,13 +89,12 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     "",
     "## 3. Model",
     "",
-    sprintf("- **Variable selection engine**: %s", engine),
-    sprintf("- **FDR level**: %s", if (is.na(alpha)) "not recorded" else alpha),
+    sprintf("- **Variable selection**: %s", screen_method),
+    sprintf("- **Stage-2 null**: %s response permutations, 95th-percentile threshold %s",
+            if (is.na(n_perm)) "not recorded" else n_perm,
+            if (is.na(null_thr)) "not recorded" else signif(null_thr, 3)),
     sprintf("- **Predictors retained**: %s (%d)",
             paste(sel_vars, collapse = ", "), n_sel),
-    "- **Transfer-critical axes (force_include)**:",
-    sprintf("  %s", if (length(forced_vars)) paste(forced_vars, collapse = ", ")
-            else "none"),
     sprintf("- **Selection leakage control**: %s",
             if (!is.null(cv)) "variable selection is re-run inside every outer spatial CV fold" else
               "not applicable (no CV was run)"),
@@ -116,7 +115,7 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     sprintf("- **Validation design**: %s", cv_info),
     "- **Assumptions and caveats**:",
     sprintf("  %s", get_meta("assumptions",
-      "Observational, sampling-biased data; conditional screening does not prove causal mechanisms.")),
+      "Observational, sampling-biased data; variable selection serves parsimony and does not identify causal mechanisms.")),
     "",
     "## 5. Prediction",
     "",

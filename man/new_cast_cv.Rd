@@ -13,7 +13,8 @@ new_cast_cv(
   thresholds,
   selections = list(),
   screens = list(),
-  selection_freq = NULL
+  selection_freq = NULL,
+  oof = NULL
 )
 }
 \arguments{
@@ -35,6 +36,10 @@ new_cast_cv(
 
 \item{selection_freq}{A \code{data.frame} with each predictor's fold-level
 selection frequency (\code{variable}, \code{freq}), sorted descending.}
+
+\item{oof}{A \code{data.frame} of out-of-fold predictions with an \code{obs} column
+and one \verb{HSS_<model>} column per model, or \code{NULL}. This is the labelled
+surface \code{\link[=cast_ensemble]{cast_ensemble()}} thresholds on.}
 }
 \value{
 A \code{cast_cv} object.

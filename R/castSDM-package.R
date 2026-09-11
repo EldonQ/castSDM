@@ -2,25 +2,25 @@
 "_PACKAGE"
 
 #' @section Overview:
-#' \pkg{castSDM} separates true ecological drivers from collinear bystanders
-#' in species distribution modelling. Its conditional variable selector
-#' (conditional predictive impact with Benjamini-Hochberg FDR control by
-#' default) tests each predictor's contribution given every other predictor,
-#' so collinear proxies are rejected where marginal screens retain them. The
-#' selector is embedded in a complete workflow — standard RF / BRT / MaxEnt /
-#' GAM learners, nested spatial cross-validation, habitat-suitability
-#' prediction, performance-weighted ensembles and future climate projection —
-#' with a predictor-level audit of every retention decision. The package
-#' supports interpretable conditional selection but does not claim automatic
-#' discovery of ecological causes.
+#' \pkg{castSDM} is a species-distribution-modelling workflow with an explicit
+#' separation between two questions that are routinely conflated. Variable
+#' selection ([cast_select()]) answers *which predictors to carry*: a
+#' conventional two-stage screen — collinearity thinning followed by an
+#' importance filter calibrated against a permutation null — serving parsimony
+#' and projection robustness. Attribution answers *which predictors matter and
+#' how*, and is handled separately by an audit that pairs interventional
+#' effects ([cast_effect_table()], [cast_effect_map()], [cast_sensitivity()])
+#' with a knockout necessity check ([cast_necessity()]). Neither product is a
+#' claim of automatic causal discovery; the pairing is a reliability audit of
+#' correlational attribution, and a driver is only reported as credible when
+#' both agree.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: conditional predictive impact screening with
-#'    FDR control ([cast_select()]); importance reporting via [cast_importance()]
-#'    and sensitivity what-if maps ([cast_sensitivity()])
+#' 2. **Variable Selection**: two-stage collinearity + permutation-null
+#'    importance screening ([cast_select()]), reported via [cast_importance()]
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial
 #'    cross-validation with fold-specific selection ([cast_cv()])
@@ -30,6 +30,9 @@
 #'    ensemble prediction ([cast_ensemble()])
 #' 7. **Future Projection**: range-change analysis under climate scenarios
 #'    ([cast_project()])
+#' 8. **Attribution audit**: interventional effect sizes and maps
+#'    ([cast_effect_table()], [cast_effect_map()]) paired with knockout
+#'    necessity ([cast_necessity()])
 #'
 #' @section Quick Start:
 #' ```

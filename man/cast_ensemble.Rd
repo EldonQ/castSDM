@@ -35,9 +35,9 @@ models with Score < 0.5.
 A \code{cast_ensemble} object with components:
 \describe{
 \item{predictions}{A \code{data.frame} with \code{lon}, \code{lat}, \code{hss_ensemble},
-\code{hss_sd} (cross-model standard deviation over models with positive
-weight and finite predictions, \code{NA} when fewer than two such models),
-and \code{binary_ensemble} columns. When the fit carries a training
+\code{hss_sd} (cross-model standard deviation over the models contributing
+to that cell, \code{NA} when fewer than two contribute), and
+\code{binary_ensemble} columns. When the fit carries a training
 reference, the MESS columns (\code{mess}, \code{extrapolating}) from
 \code{\link[=cast_predict]{cast_predict()}} are retained.}
 \item{weights}{Named numeric vector of per-model weights.}
@@ -56,12 +56,25 @@ The composite score for each model is:
 
 \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 
-following the N-SDM nested-modelling framework (Adde et al. 2020).
-Models with Score < 0.5 are excluded from the weighted ensemble (a
-warning is issued when this excludes every model and equal weights are
-used as a fallback). Models whose predictions contain non-finite values
-are excluded from the ensemble with a warning, and the remaining weights
-are renormalised.
+following the N-SDM nested-modelling framework (Adde et al. 2020). All
+three components are required: a model whose CV metrics are incomplete
+scores \code{NA} and is dropped with a warning, because averaging over
+whichever components happen to be present would rescale the score and
+make models incomparable. Models with Score < 0.5 are excluded from the
+weighted ensemble (a warning is issued when this excludes every model and
+equal weights are used as a fallback).
+
+Models are combined cell by cell. A model that is non-finite at some cells
+still contributes everywhere else, and the weights are renormalised per
+cell over the models that produced a value there; only a model that is
+non-finite everywhere is dropped outright. Cells where no model produced a
+value are \code{NA}.
+
+The binary threshold is the TSS-maximising cut of the ensemble built from
+the out-of-fold predictions stored by \code{\link[=cast_cv]{cast_cv()}}, i.e. of the surface that
+is actually thresholded. When \code{cv} carries no out-of-fold predictions the
+function falls back to a weighted mean of the per-model thresholds and
+warns that this is only an approximation.
 }
 \references{
 Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance

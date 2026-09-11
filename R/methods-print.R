@@ -20,16 +20,20 @@ print.cast_select <- function(x, ...) {
 print.cast_importance <- function(x, ...) {
   eff <- x$effects
   n_sig <- sum(eff$selected, na.rm = TRUE)
-  cli::cli_h1("castSDM Conditional Predictive Impact (CPI)")
-  cli::cli_ul(c(
-    "Conditional importance (log-loss knockoff), {round(100 * x$conf_level)}% CI",
-    "Significant (FDR < {x$alpha}): {n_sig} / {nrow(eff)}"
-  ))
+  cli::cli_h1("castSDM Permutation Importance")
+  bullets <- c(
+    "Random-forest permutation importance vs a permuted-response null",
+    "Above the null (p < {x$alpha}): {n_sig} / {nrow(eff)}"
+  )
+  if (is.finite(x$threshold)) {
+    bullets <- c(bullets, "Null threshold (95th pct): {signif(x$threshold, 3)}")
+  }
+  cli::cli_ul(bullets)
   show <- utils::head(eff, 10L)
   disp <- data.frame(
     variable = show$variable,
-    cpi = round(show$estimate, 4),
-    ci = sprintf("[%.3f, %.3f]", show$conf_low, show$conf_high),
+    importance = signif(show$estimate, 4),
+    p_value = signif(show$p_value, 3),
     p_adjusted = signif(show$p_adjusted, 3),
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE

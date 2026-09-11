@@ -8,7 +8,7 @@ cast_effect_map(
   fit,
   current_stack,
   drivers = NULL,
-  shift = 1,
+  shifts = c(-2, -1, 1, 2),
   shift_type = "sd",
   steps = NULL,
   block_rows = 512L,
@@ -25,11 +25,14 @@ cast_effect_map(
 
 \item{drivers}{Drivers to map. Default: every fitted predictor.}
 
-\item{shift, shift_type}{Intervention size and unit (SD-based unless
-\code{steps} is given).}
+\item{shifts}{Numeric vector of intervention sizes, in SD units unless
+\code{shift_type = "raw"}. Default \code{c(-2, -1, 1, 2)}.}
 
-\item{steps}{Optional named numeric vector of raw-unit intervention
-sizes per driver (overrides \code{shift}/\code{shift_type}).}
+\item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
+
+\item{steps}{Optional raw-unit shift sets, overriding
+\code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
+or a named list of numeric vectors, one per driver.}
 
 \item{block_rows}{Integer rows per processing block. Default 512.}
 
@@ -40,13 +43,14 @@ sizes per driver (overrides \code{shift}/\code{shift_type}).}
 \item{verbose}{Print block progress. Default \code{TRUE}.}
 }
 \value{
-A \code{SpatRaster} with one \verb{dHSS_<driver>} layer per driver (NA
-where predictors are missing). The per-driver summary table is
-attached as attribute \code{effect_table}.
+A \code{SpatRaster} with two layers per driver (NA where predictors
+are missing): \verb{dHSS_<driver>}, the direction (deltas aligned to the
+sign of their own shift), and \verb{absdHSS_<driver>}, the magnitude. The
+per-driver summary table is attached as attribute \code{effect_table}.
 }
 \description{
 Intervenes on each driver across every valid cell of \code{current_stack}
-(+\code{steps} raw units, all other drivers held fixed) and returns the
-spatially explicit ensemble-mean change in suitability: the causal
-effect map. Spatial counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}}.
+(all other drivers held fixed) and returns the spatially explicit
+ensemble-mean change in suitability: the causal effect map. Spatial
+counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}}, using the same symmetric shift set.
 }

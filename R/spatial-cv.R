@@ -10,7 +10,7 @@
 #'   selection into the CV metrics (a warning is issued); treat those metrics
 #'   as optimistic.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"cpi"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"two_stage"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
@@ -35,7 +35,7 @@
 #' @export
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "cpi",
+                    select_method = "two_stage",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
@@ -218,11 +218,17 @@ cast_cv <- function(data,
     find_tss_threshold(pred[ok], data[[response]][ok])
   }, numeric(1))
 
+  # Keep the out-of-fold surface: it is the only labelled ensemble-scale
+  # prediction available downstream, and cast_ensemble() needs it to threshold
+  # the ensemble rather than averaging per-model thresholds.
+  oof_df <- data.frame(obs = data[[response]])
+  for (mdl in models) oof_df[[paste0("HSS_", mdl)]] <- oof[[mdl]]
+
   new_cast_cv(
     metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
     block_method = block_method, thresholds = thresholds,
     selections = selections, screens = screens,
-    selection_freq = selection_freq
+    selection_freq = selection_freq, oof = oof_df
   )
 }
 
@@ -302,8 +308,13 @@ make_spatial_folds <- function(lon, lat, k,
 .cast_buffer_train_idx <- function(lon, lat, test_idx, buffer = 0) {
   all_idx <- seq_along(lon)
   if (buffer <= 0) return(setdiff(all_idx, test_idx))
-  d <- as.matrix(stats::dist(cbind(lon, lat)))
-  near <- apply(d[test_idx, , drop = FALSE] < buffer, 2L, any)
+  # Only distances to the test rows matter; the full n x n matrix is quadratic
+  # in the number of records and exhausts memory on national data sets.
+  near <- rep(FALSE, length(all_idx))
+  buf2 <- buffer^2
+  for (i in test_idx) {
+    near <- near | ((lon - lon[i])^2 + (lat - lat[i])^2 < buf2)
+  }
   all_idx[!near & !(all_idx %in% test_idx)]
 }
 

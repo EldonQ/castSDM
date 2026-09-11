@@ -12,23 +12,13 @@
 #' @param models Character vector of models to fit. Options: `"rf"`,
 #'   `"maxent"`, `"brt"`, `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
-#' @param select_min_vars Integer. Minimum retained variables. Default `0`
-#'   (an empty selection is allowed).
 #' @param select_method Character. Variable screening method passed to
-#'   [cast_select()]. Default `"cpi"`.
-#' @param select_num_trees Integer. Trees in the RF nuisance/benchmark forests.
-#'   Default `300`.
-#' @param select_max_vars Optional candidate ceiling for the CPI selector / RF
-#'   output. `NULL` tests every predictor; a positive integer pre-screens by RF
-#'   importance first. Default `NULL`.
-#' @param select_alpha Numeric. FDR level for the CPI selector. Default `0.05`.
-#' @param select_n_folds Integer. Cross-fitting folds for the CPI selector.
-#'   Default `10`; fold-level CPI inference needs enough folds for its t-test
-#'   (df = folds - 1).
-#' @param select_cor_threshold Numeric. Absolute correlation threshold for the
-#'   RF benchmark. Default `0.8`.
-#' @param num_threads Integer. Threads for the ranger learners/benchmark.
-#'   Default `1`.
+#'   [cast_select()]. Default `"two_stage"`.
+#' @param select_num_trees Integer. Trees per forest in the stage-2 importance
+#'   filter. Default `300`.
+#' @param select_n_perm Integer. Response permutations used to build the
+#'   stage-2 null distribution. Default `49`.
+#' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
@@ -58,13 +48,9 @@ cast <- function(species_data,
                  env_data = NULL,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
-                 select_min_vars = 0L,
-                 select_method = "cpi",
+                 select_method = "two_stage",
                  select_num_trees = 300L,
-                 select_max_vars = NULL,
-                 select_alpha = 0.05,
-                 select_n_folds = 10L,
-                 select_cor_threshold = 0.8,
+                 select_n_perm = 49L,
                  num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -75,6 +61,7 @@ cast <- function(species_data,
                  refit_full = TRUE,
                  seed = NULL,
                  verbose = TRUE) {
+  cl <- match.call()
   do_predict <- do_predict %||% !is.null(env_data)
 
   if (verbose) cli::cli_h1("castSDM Pipeline")
@@ -97,13 +84,8 @@ cast <- function(species_data,
   screen <- cast_select(
     train_data,
     method = select_method,
-    alpha = select_alpha,
-    min_vars = select_min_vars,
     num_trees = select_num_trees,
-    max_candidates = select_max_vars,
-    n_folds = select_n_folds,
-    cor_threshold = select_cor_threshold,
-    num_threads = num_threads,
+    n_perm = select_n_perm,
     seed = seed, verbose = verbose
   )
 
@@ -127,13 +109,8 @@ cast <- function(species_data,
         screen = screen,
         select_method = select_method,
         select_args = list(
-          alpha = select_alpha,
-          min_vars = select_min_vars,
-          max_candidates = select_max_vars,
           num_trees = select_num_trees,
-          n_folds = select_n_folds,
-          cor_threshold = select_cor_threshold,
-          num_threads = num_threads
+          n_perm = select_n_perm
         ),
         k = cv_k, models = models,
         block_method = cv_block_method,
@@ -207,6 +184,7 @@ cast <- function(species_data,
     cv = cv_result,
     predict = pred_result,
     ensemble = ensemble_result,
-    fit_full = fit_full
+    fit_full = fit_full,
+    call = cl
   )
 }

@@ -170,7 +170,7 @@ cast_predict_tiled <- function(fit, raster,
     # different environmental stack can never silently replay old tiles.
     rast_sig <- tryCatch(
       .cast_digest(list(
-        terra::ext(raster), terra::dim(raster), names(raster),
+        as.vector(terra::ext(raster)), dim(raster), names(raster),
         terra::global(raster, c("mean", "min", "max"), na.rm = TRUE)
       ), len = 10),
       error = function(e) "unknown"
@@ -179,29 +179,24 @@ cast_predict_tiled <- function(fit, raster,
                           paste0(".cast_tiles_", mdl_sig, "_", rast_sig))
     dir.create(chk_root, showWarnings = FALSE, recursive = TRUE)
 
-    process_one <- function(k, rast) {
-      tile <- do_tile(k, rast)
-      list(tile = tile, vals = predict_tile(tile, mdl, chk_root))
-    }
-
-    results <- lapply(seq_len(n_tiles), function(k) process_one(k, raster))
-
     # Write tiles back to the persistent raster. Accumulate into a plain
     # vector (built on the INPUT stack's geometry, never re-opening the
-    # output file, which would lock it on Windows) and write once.
+    # output file, which would lock it on Windows) and write once. Each tile
+    # is folded in as it is predicted, so only one tile is ever live.
     out_template <- terra::rast(raster, nlyrs = 1L)
     names(out_template) <- paste0("HSS_", mdl)
     n_cells_out <- as.double(nrow_r) * as.double(ncol_r)
     out_vec <- rep(NA_real_, n_cells_out)
-    for (res in results) {
-      tile <- res$tile
-      vals <- as.numeric(t(res$vals))
+    for (k in seq_len(n_tiles)) {
+      tile <- do_tile(k, raster)
+      vals <- as.numeric(t(predict_tile(tile, mdl, chk_root)))
       cells <- terra::cellFromRowColCombine(
         out_template,
         seq(tile$r0, tile$r0 + tile$nr - 1L),
         seq(tile$c0, tile$c0 + tile$nc - 1L)
       )
       out_vec[cells] <- vals
+      rm(tile, vals, cells)
     }
     terra::writeRaster(
       terra::setValues(out_template, out_vec), op, overwrite = TRUE,

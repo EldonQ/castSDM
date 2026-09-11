@@ -43,9 +43,9 @@ each for a future scenario (e.g., \code{list(ssp126_2050 = rast1, ...)}).}
 
 \item{compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
 
-\item{clamp}{Reserved for extrapolation control: forwarded to
-\code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}} when the installed version supports a \code{clamp}
-argument; otherwise ignored with a warning. Default \code{NULL}.}
+\item{clamp}{Logical or \code{NULL}. Clamp predictors to the training range
+before predicting; forwarded to \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}. \code{NULL} (the
+default) means no clamping.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
 }

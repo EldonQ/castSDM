@@ -9,13 +9,9 @@ cast(
   env_data = NULL,
   models = c("rf", "brt", "maxent", "gam"),
   train_fraction = 0.7,
-  select_min_vars = 0L,
-  select_method = "cpi",
+  select_method = "two_stage",
   select_num_trees = 300L,
-  select_max_vars = NULL,
-  select_alpha = 0.05,
-  select_n_folds = 10L,
-  select_cor_threshold = 0.8,
+  select_n_perm = 49L,
   num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
@@ -41,30 +37,16 @@ the same environmental columns as \code{species_data}.}
 
 \item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
 
-\item{select_min_vars}{Integer. Minimum retained variables. Default \code{0}
-(an empty selection is allowed).}
-
 \item{select_method}{Character. Variable screening method passed to
-\code{\link[=cast_select]{cast_select()}}. Default \code{"cpi"}.}
+\code{\link[=cast_select]{cast_select()}}. Default \code{"two_stage"}.}
 
-\item{select_num_trees}{Integer. Trees in the RF nuisance/benchmark forests.
-Default \code{300}.}
+\item{select_num_trees}{Integer. Trees per forest in the stage-2 importance
+filter. Default \code{300}.}
 
-\item{select_max_vars}{Optional candidate ceiling for the CPI selector / RF
-output. \code{NULL} tests every predictor; a positive integer pre-screens by RF
-importance first. Default \code{NULL}.}
+\item{select_n_perm}{Integer. Response permutations used to build the
+stage-2 null distribution. Default \code{49}.}
 
-\item{select_alpha}{Numeric. FDR level for the CPI selector. Default \code{0.05}.}
-
-\item{select_n_folds}{Integer. Cross-fitting folds for the CPI selector.
-Default \code{10}; fold-level CPI inference needs enough folds for its t-test
-(df = folds - 1).}
-
-\item{select_cor_threshold}{Numeric. Absolute correlation threshold for the
-RF benchmark. Default \code{0.8}.}
-
-\item{num_threads}{Integer. Threads for the ranger learners/benchmark.
-Default \code{1}.}
+\item{num_threads}{Integer. Threads for the ranger learners. Default \code{1}.}
 
 \item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 

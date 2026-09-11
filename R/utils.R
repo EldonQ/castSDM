@@ -254,35 +254,14 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
 
 #' Null-Coalescing Operator
 #'
-#' Returns `b` if `a` is `NULL`, else `a`. Defined locally to support R < 4.4.
+#' Returns `b` if `a` is `NULL` or zero-length, else `a`. Defined locally to
+#' support R < 4.4. Zero-length counts as absent because callers pass empty
+#' selections and empty character vectors where a default is wanted.
 #'
 #' @param a,b Values to compare.
 #' @keywords internal
 #' @noRd
-`%||%` <- function(a, b) if (is.null(a)) b else a
-
-
-#' Coerce Selected Columns to a Clean Numeric Matrix
-#'
-#' Converts the requested columns to numeric and imputes non-finite values with
-#' the column median (falling back to zero). Shared by the variable-selection
-#' and conditional-effect routines.
-#'
-#' @param data A `data.frame`.
-#' @param vars Character vector of column names.
-#' @return A numeric matrix with one column per `vars`.
-#' @keywords internal
-#' @noRd
-.cast_numeric_matrix <- function(data, vars) {
-  x <- as.data.frame(data[, vars, drop = FALSE])
-  for (nm in names(x)) {
-    x[[nm]] <- suppressWarnings(as.numeric(x[[nm]]))
-    med <- stats::median(x[[nm]], na.rm = TRUE)
-    if (!is.finite(med)) med <- 0
-    x[[nm]][!is.finite(x[[nm]]) | is.na(x[[nm]])] <- med
-  }
-  as.matrix(x)
-}
+`%||%` <- function(a, b) if (is.null(a) || length(a) == 0L) b else a
 
 
 #' Check and Require a Suggested Package

@@ -9,8 +9,10 @@ cast_select(
   response = "presence",
   method = c("two_stage", "full"),
   num_trees = 300L,
+  n_perm = 49L,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  ...
 )
 }
 \arguments{
@@ -21,19 +23,26 @@ they are never selected).}
 
 \item{method}{\code{"two_stage"} (default) or \code{"full"} (keep every predictor).}
 
-\item{num_trees}{Trees for the stage-2 forest. Default 300.}
+\item{num_trees}{Trees per forest. Default 300.}
+
+\item{n_perm}{Response permutations used to build the stage-2 null.}
 
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
+
+\item{...}{Ignored, with a warning. Retired selection knobs land here.}
 }
 \value{
 A \code{cast_select} object: \code{selected} (kept predictors), \code{scores}
-(per-predictor association, stage-1 status, permutation importance and
-\code{selected} flag).
+(per-predictor association, stage-1 status, permutation importance,
+permutation \code{p_value}, BH-adjusted \code{p_adjusted}, and the \code{selected}
+flag). Selection uses the raw permutation p-value, which is by
+construction the 95th-percentile null threshold; \code{p_adjusted} is
+reported for interpretation and is not the selection rule.
 }
 \description{
-Two-stage, literature-standard, zero-knob variable selection:
+Two-stage, literature-standard variable selection:
 \enumerate{
 \item \strong{Stage 1 — collinearity thinning}: rank predictors by
 absolute marginal association with the response, then greedily keep
@@ -41,17 +50,25 @@ predictors whose pairwise correlation with all kept predictors is
 \eqn{\le 0.7} (Dormann et al. 2013). This is the recipe used across
 conventional SDM pipelines (N-SDM covsel Stage 1, correlation
 filtering in biomod2/wallace), implemented natively.
-\item \strong{Stage 2 — importance filter}: fit a probability random
-forest on the stage-1 survivors and keep predictors with permutation
-importance > 0. Importance \eqn{\le 0} means the predictor does not
-improve the fitted model; the zero point is the natural, data-driven
-threshold (no tuning).
+\item \strong{Stage 2 — importance filter against a permutation null}:
+fit a probability random forest on the stage-1 survivors, then refit
+it \code{n_perm} times on a permuted response to build the null
+distribution of permutation importance. Keep predictors whose
+importance exceeds the 95th percentile of that null (Altmann et al.
+2010). Permutation importance under the null is centred on zero, not
+bounded by it, so a bare \code{importance > 0} rule retains roughly half
+of all uninformative predictors; the null quantile is the calibrated
+replacement.
 }
 Variable selection serves parsimony and projection robustness, not causal
-attribution. Causal questions belong to \code{\link[=cast_effect_table]{cast_effect_table()}} and
-\code{\link[=cast_effect_map]{cast_effect_map()}}.
+attribution. Causal questions belong to \code{\link[=cast_effect_table]{cast_effect_table()}},
+\code{\link[=cast_effect_map]{cast_effect_map()}} and \code{\link[=cast_necessity]{cast_necessity()}}.
 }
 \references{
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 with it in ecological studies. \emph{Ecography} 36: 27–46.
+
+Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
+importance: a corrected feature importance measure.
+\emph{Bioinformatics} 26: 1340–1347.
 }

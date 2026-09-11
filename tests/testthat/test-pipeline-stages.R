@@ -67,12 +67,16 @@ test_that("cast_ensemble produces HSS and binary columns", {
     ),
     fold_metrics = data.frame(), folds = integer(nrow(dat)), k = 3L,
     block_method = "grid",
-    thresholds = c(rf = 0.5, gam = 0.5)
+    thresholds = c(rf = 0.5, gam = 0.5),
+    oof = data.frame(obs = dat$presence,
+                     HSS_rf = stats::runif(nrow(dat)),
+                     HSS_gam = stats::runif(nrow(dat)))
   )
   ens <- cast_ensemble(fit, cv, make_syn_grid(dat), method = "weighted")
   expect_true(all(c("lon", "lat", "hss_ensemble", "binary_ensemble") %in%
                   names(ens$predictions)))
   expect_equal(sum(ens$weights), 1)
+  expect_true(ens$threshold > 0 && ens$threshold < 1)
 })
 
 test_that("cast_project computes change classes and stats", {
@@ -153,7 +157,7 @@ test_that("cast() refits final models on the full data set", {
   dat <- make_syn_data(n = 200)
   grid <- make_syn_grid(dat)
   res <- cast(dat, env_data = grid, models = "rf",
-              select_method = "rf", select_min_vars = 2,
+              select_method = "two_stage", select_n_perm = 9L,
               do_cv = TRUE, cv_k = 2, refit_full = TRUE,
               seed = 45, verbose = FALSE)
   expect_s3_class(res, "cast_result")
@@ -169,7 +173,7 @@ test_that("cast() reports when the ensemble is skipped (no CV)", {
   msg <- character(0)
   withCallingHandlers(
     res <- cast(dat, env_data = grid, models = "rf",
-                select_method = "rf", select_min_vars = 2,
+                select_method = "two_stage", select_n_perm = 9L,
                 do_cv = FALSE, refit_full = FALSE,
                 seed = 46, verbose = TRUE),
     message = function(m) { msg <<- c(msg, conditionMessage(m));

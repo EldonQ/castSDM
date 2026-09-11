@@ -118,24 +118,27 @@ test_that("cast_ensemble_raster skip check also covers hss_sd and mess", {
   on.exit(unlink(td, recursive = TRUE), add = TRUE)
   res1 <- cast_ensemble_raster(fx$fit, fx$cv, r, output_dir = td,
                                verbose = FALSE)
-  expect_true(!is.null(res1$weights))
+  expect_false(is.na(res1$n_valid_cells))
 
-  # All outputs present -> skipped, weights NULL.
+  # All outputs present -> skipped (n_valid_cells NA), but weights and
+  # threshold are still reported so callers can reuse them.
   res2 <- cast_ensemble_raster(fx$fit, fx$cv, r, output_dir = td,
                                verbose = FALSE)
-  expect_null(res2$weights)
+  expect_true(is.na(res2$n_valid_cells))
+  expect_equal(res2$weights, res1$weights)
+  expect_equal(res2$threshold, res1$threshold)
 
   # hss_sd removed -> must recompute instead of skipping.
   unlink(res1$hss_sd_path)
   res3 <- cast_ensemble_raster(fx$fit, fx$cv, r, output_dir = td,
                                verbose = FALSE)
-  expect_true(!is.null(res3$weights))
+  expect_false(is.na(res3$n_valid_cells))
   expect_true(file.exists(res3$hss_sd_path))
 
   # mess removed -> must recompute instead of skipping.
   unlink(res1$mess_path)
   res4 <- cast_ensemble_raster(fx$fit, fx$cv, r, output_dir = td,
                                verbose = FALSE)
-  expect_true(!is.null(res4$weights))
+  expect_false(is.na(res4$n_valid_cells))
   expect_true(file.exists(res4$mess_path))
 })

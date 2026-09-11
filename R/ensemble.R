@@ -19,9 +19,9 @@
 #' @return A `cast_ensemble` object with components:
 #' \describe{
 #'   \item{predictions}{A `data.frame` with `lon`, `lat`, `hss_ensemble`,
-#'     `hss_sd` (cross-model standard deviation over models with positive
-#'     weight and finite predictions, `NA` when fewer than two such models),
-#'     and `binary_ensemble` columns. When the fit carries a training
+#'     `hss_sd` (cross-model standard deviation over the models contributing
+#'     to that cell, `NA` when fewer than two contribute), and
+#'     `binary_ensemble` columns. When the fit carries a training
 #'     reference, the MESS columns (`mess`, `extrapolating`) from
 #'     [cast_predict()] are retained.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
@@ -35,12 +35,25 @@
 #'
 #' \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 #'
-#' following the N-SDM nested-modelling framework (Adde et al. 2020).
-#' Models with Score < 0.5 are excluded from the weighted ensemble (a
-#' warning is issued when this excludes every model and equal weights are
-#' used as a fallback). Models whose predictions contain non-finite values
-#' are excluded from the ensemble with a warning, and the remaining weights
-#' are renormalised.
+#' following the N-SDM nested-modelling framework (Adde et al. 2020). All
+#' three components are required: a model whose CV metrics are incomplete
+#' scores `NA` and is dropped with a warning, because averaging over
+#' whichever components happen to be present would rescale the score and
+#' make models incomparable. Models with Score < 0.5 are excluded from the
+#' weighted ensemble (a warning is issued when this excludes every model and
+#' equal weights are used as a fallback).
+#'
+#' Models are combined cell by cell. A model that is non-finite at some cells
+#' still contributes everywhere else, and the weights are renormalised per
+#' cell over the models that produced a value there; only a model that is
+#' non-finite everywhere is dropped outright. Cells where no model produced a
+#' value are `NA`.
+#'
+#' The binary threshold is the TSS-maximising cut of the ensemble built from
+#' the out-of-fold predictions stored by [cast_cv()], i.e. of the surface that
+#' is actually thresholded. When `cv` carries no out-of-fold predictions the
+#' function falls back to a weighted mean of the per-model thresholds and
+#' warns that this is only an approximation.
 #'
 #' @references
 #' Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
@@ -83,16 +96,26 @@ cast_ensemble <- function(fit, cv, new_data,
   for (i in seq_along(mdl_names)) {
     col <- hss_cols[i]
     if (!col %in% names(pred_df)) {
+      cli::cli_warn(
+        "No {.field {col}} column in the predictions; {.val {mdl_names[i]}} is excluded from the ensemble."
+      )
       include[i] <- FALSE
       next
     }
     vals <- pred_df[[col]]
-    if (!all(is.finite(vals))) {
+    n_bad <- sum(!is.finite(vals))
+    if (n_bad == length(vals)) {
       cli::cli_warn(
-        "{.val {mdl_names[i]}} produced non-finite predictions; excluded from the ensemble."
+        "{.val {mdl_names[i]}} is non-finite everywhere; excluded from the ensemble."
       )
       include[i] <- FALSE
       next
+    }
+    if (n_bad > 0L) {
+      cli::cli_warn(c(
+        "{.val {mdl_names[i]}} is non-finite at {n_bad} cell{?s}.",
+        i = "Those cells are averaged over the remaining models; the model still contributes elsewhere."
+      ))
     }
     # Zero-weight models neither average in nor count towards the
     # cross-model SD (same convention as cast_ensemble_raster()).
@@ -105,18 +128,9 @@ cast_ensemble <- function(fit, cv, new_data,
   if (sum(w) <= 0) w <- rep(1, sum(include))
   w <- w / sum(w)
 
-  inc_cols <- hss_cols[include]
-  ensemble_hss <- rep(0, nrow(pred_df))
-  for (j in seq_along(inc_cols)) {
-    ensemble_hss <- ensemble_hss + w[j] * pred_df[[inc_cols[j]]]
-  }
-  # Cross-model standard deviation as an uncertainty layer.
-  pred_mat <- do.call(cbind, lapply(inc_cols, function(col) pred_df[[col]]))
-  hss_sd <- if (ncol(pred_mat) > 1L) {
-    apply(pred_mat, 1L, stats::sd, na.rm = TRUE)
-  } else {
-    rep(NA_real_, nrow(pred_df))
-  }
+  pred_mat <- as.matrix(pred_df[, hss_cols[include], drop = FALSE])
+  ensemble_hss <- .ensemble_rowmean(pred_mat, w)
+  hss_sd <- .ensemble_rowsd(pred_mat)
 
   # ---- Binary threshold ---------------------------------------------------
   # Use the same model set that actually contributes to the ensemble.
@@ -149,17 +163,66 @@ cast_ensemble <- function(fit, cv, new_data,
 }
 
 
+#' Row-Wise Weighted Mean Over Model Columns
+#'
+#' Renormalises the weights per row over the models that produced a finite
+#' value there, so one model failing at one cell neither voids the cell nor
+#' costs that model its contribution to every other cell.
+#'
+#' @param pred_mat Numeric matrix, one column per model.
+#' @param w Numeric weights, one per column.
+#' @return Numeric vector of length `nrow(pred_mat)`; `NA` where no column
+#'   carries a finite value.
+#' @keywords internal
+#' @noRd
+.ensemble_rowmean <- function(pred_mat, w) {
+  if (!nrow(pred_mat)) return(numeric(0))
+  finite <- is.finite(pred_mat)
+  wt <- finite * rep(as.numeric(w), each = nrow(pred_mat))
+  denom <- rowSums(wt)
+  filled <- pred_mat
+  filled[!finite] <- 0
+  out <- rowSums(filled * wt) / denom
+  out[denom <= 0] <- NA_real_
+  out
+}
+
+#' Row-Wise Cross-Model Standard Deviation
+#'
+#' @param pred_mat Numeric matrix, one column per model.
+#' @return Numeric vector; `NA` where fewer than two models contribute.
+#' @keywords internal
+#' @noRd
+.ensemble_rowsd <- function(pred_mat) {
+  if (!nrow(pred_mat)) return(numeric(0))
+  if (ncol(pred_mat) < 2L) return(rep(NA_real_, nrow(pred_mat)))
+  apply(pred_mat, 1L, function(z) {
+    z <- z[is.finite(z)]
+    if (length(z) < 2L) NA_real_ else stats::sd(z)
+  })
+}
+
+
 #' Composite per-model scores from CV metrics (N-SDM score)
 #' @keywords internal
 #' @noRd
 .cast_ensemble_scores <- function(cv_sub, mdl_names) {
+  need <- c("auc_mean", "tss_mean", "cbi_mean")
+  miss <- setdiff(need, names(cv_sub))
+  if (length(miss)) {
+    cli::cli_abort(c(
+      "{.arg cv} metrics lack the column{?s} {.val {miss}}.",
+      i = "The N-SDM score is (2*AUC - 1 + maxTSS + CBI) / 3; no component can be dropped."
+    ))
+  }
   scores <- vapply(mdl_names, function(m) {
     row <- cv_sub[cv_sub$model == m, , drop = FALSE]
     if (nrow(row) == 0) return(NA_real_)
-    auc_val <- row$auc_mean[1]
-    tss_val <- row$tss_mean[1]
-    cbi_val <- if ("cbi_mean" %in% names(row)) row$cbi_mean[1] else 0
-    mean(c(2 * auc_val - 1, tss_val, cbi_val), na.rm = TRUE)
+    parts <- c(2 * row$auc_mean[1] - 1, row$tss_mean[1], row$cbi_mean[1])
+    # No na.rm: averaging over whichever components survived would change the
+    # divisor and make models with different missing metrics incomparable.
+    if (anyNA(parts)) return(NA_real_)
+    sum(parts) / 3
   }, numeric(1))
   stats::setNames(scores, mdl_names)
 }
@@ -169,6 +232,18 @@ cast_ensemble <- function(fit, cv, new_data,
 #' @noRd
 .cast_ensemble_weights <- function(scores, method) {
   mdl_names <- names(scores)
+  na_mdl <- mdl_names[is.na(scores)]
+  if (length(na_mdl) == length(mdl_names)) {
+    cli::cli_abort(c(
+      "No model has a complete composite score (AUC, maxTSS and CBI).",
+      i = "Check {.code cv$metrics} for missing values."
+    ))
+  }
+  if (length(na_mdl)) {
+    cli::cli_warn(
+      "Dropping {.val {na_mdl}} from the ensemble: incomplete CV metrics."
+    )
+  }
   weights <- switch(method,
     weighted = {
       w <- scores
@@ -180,7 +255,8 @@ cast_ensemble <- function(fit, cv, new_data,
         cli::cli_warn(
           "All model scores are below 0.5; falling back to equal ensemble weights."
         )
-        rep(1 / length(w), length(w))
+        w <- as.numeric(!is.na(scores))
+        w / sum(w)
       }
     },
     best = {
@@ -191,7 +267,8 @@ cast_ensemble <- function(fit, cv, new_data,
       w
     },
     equal = {
-      rep(1 / length(mdl_names), length(mdl_names))
+      w <- as.numeric(!is.na(scores))
+      w / sum(w)
     }
   )
   stats::setNames(weights, mdl_names)
@@ -199,29 +276,48 @@ cast_ensemble <- function(fit, cv, new_data,
 
 
 #' Compute Ensemble Binary Threshold
+#'
+#' Optimises TSS on the ensemble of out-of-fold CV predictions, i.e. on the
+#' surface that is actually thresholded. The mean of per-model thresholds is
+#' not the optimal cut of the averaged surface, so it is used only as a
+#' fallback when `cv` carries no out-of-fold predictions.
+#'
 #' @keywords internal
 #' @noRd
 .ensemble_threshold <- function(cv, mdl_names, weights, method) {
-  # Use weighted average of per-model optimal thresholds from CV
+  if (!length(mdl_names)) return(0.5)
+  w <- weights[mdl_names]
+  w[!is.finite(w)] <- 0
+  if (identical(method, "best")) {
+    keep <- which.max(w)
+    if (length(keep)) {
+      mdl_names <- mdl_names[keep]
+      w <- w[keep]
+    }
+  }
+
+  oof <- cv$oof
+  cols <- paste0("HSS_", mdl_names)
+  if (is.data.frame(oof) && "obs" %in% names(oof) &&
+      all(cols %in% names(oof)) && sum(w) > 0) {
+    ens <- .ensemble_rowmean(as.matrix(oof[, cols, drop = FALSE]), w / sum(w))
+    ok <- is.finite(ens) & !is.na(oof$obs)
+    if (sum(ok) >= 10L && length(unique(oof$obs[ok])) > 1L) {
+      return(find_tss_threshold(ens[ok], oof$obs[ok]))
+    }
+  }
+
   thresholds <- cv$thresholds
-  if (is.null(thresholds) || length(thresholds) == 0) return(0.5)
-
-  avail <- intersect(names(thresholds), mdl_names)
-  if (length(avail) == 0) return(0.5)
-
-  if (method == "best") {
-    best_mdl <- names(which.max(weights))
-    if (best_mdl %in% names(thresholds)) return(thresholds[best_mdl])
-    return(0.5)
-  }
-
-  w <- weights[avail]
-  t <- thresholds[avail]
-  if (sum(w) > 0) {
-    sum(w * t) / sum(w)
-  } else {
-    mean(t, na.rm = TRUE)
-  }
+  avail <- intersect(names(thresholds %||% numeric(0)), mdl_names)
+  if (!length(avail)) return(0.5)
+  cli::cli_warn(c(
+    "{.arg cv} carries no usable out-of-fold predictions for these models.",
+    i = "Thresholding on the weighted mean of per-model thresholds, which only approximates the ensemble-surface optimum."
+  ))
+  wa <- w[avail]
+  ta <- thresholds[avail]
+  out <- if (sum(wa) > 0) sum(wa * ta) / sum(wa) else mean(ta, na.rm = TRUE)
+  if (!is.finite(out)) 0.5 else unname(out)
 }
 
 
@@ -245,7 +341,9 @@ cast_ensemble <- function(fit, cv, new_data,
 #'   `"best"`, `"equal"`. See [cast_ensemble()].
 #' @param models Character vector or `NULL`. Models to use. Default all.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
-#'   is restricted to cells where mask is non-NA.
+#'   is restricted to cells where mask is non-NA. Only the first layer is
+#'   used; a mask whose geometry cannot be matched to `raster_stack` is
+#'   ignored with a warning.
 #' @param clamp Logical. Clamp predictors to the training range before
 #'   prediction. Default `FALSE`. The MESS layer (see `extrapolation`) is
 #'   always computed on the unclamped input, so clamping never hides
@@ -274,14 +372,15 @@ cast_ensemble <- function(fit, cv, new_data,
 #' }
 #'
 #' @details
-#' Per block, models whose predictions are not finite are excluded and the
-#' remaining positive weights are renormalised before averaging - the same
-#' convention as [cast_ensemble()]. The cross-model SD layer likewise uses
-#' only models with positive weight and finite predictions (`NA` where
-#' fewer than two models contribute). Cells with `NA` covariates (or
-#' masked out) stay `NA` in every output layer. If no model produces
-#' finite predictions for a block, those cells are `NA` and a warning is
-#' issued once.
+#' Models are combined cell by cell: a model that is non-finite at some cells
+#' of a block still contributes to the rest of that block, and the positive
+#' weights are renormalised per cell over the models that produced a value
+#' there - the same convention as [cast_ensemble()]. The cross-model SD layer
+#' likewise uses only the cell-level contributors (`NA` where fewer than two
+#' models contribute). Cells with `NA` covariates (or masked out) stay `NA` in
+#' every output layer. If no model produces a finite prediction for a block,
+#' those cells are `NA` and a warning is issued once. `n_valid_cells` counts
+#' the cells that received an ensemble value.
 #'
 #' @seealso [cast_ensemble()], [cast_predict()], [cast_project_raster()]
 #'
@@ -337,19 +436,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   reference <- fit$scaling$reference
   want_mess <- isTRUE(extrapolation) && !is.null(reference)
 
-  outputs_exist <- file.exists(hss_path) && file.exists(hss_sd_path) &&
-    file.exists(bin_path) && (!want_mess || file.exists(mess_path))
-  if (!overwrite && outputs_exist) {
-    if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
-    return(invisible(list(
-      hss_path = hss_path, hss_sd_path = hss_sd_path,
-      binary_path = bin_path,
-      mess_path = if (want_mess) mess_path else NULL,
-      weights = NULL, threshold = NULL, n_valid_cells = NA_integer_
-    )))
-  }
-
   # ---- Compute ensemble weights and threshold ---------------------------------
+  # Computed before the skip check so a cached run still reports the
+  # configuration its rasters were written with.
   mdl_names <- models %||% names(fit$models)
   mdl_names <- intersect(mdl_names, names(fit$models))
   if (length(mdl_names) == 0) {
@@ -364,10 +453,20 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
 
   scores <- .cast_ensemble_scores(cv_sub, mdl_names)
-
   weights <- .cast_ensemble_weights(scores, method)
-
   threshold <- .ensemble_threshold(cv, mdl_names, weights, method)
+
+  outputs_exist <- file.exists(hss_path) && file.exists(hss_sd_path) &&
+    file.exists(bin_path) && (!want_mess || file.exists(mess_path))
+  if (!overwrite && outputs_exist) {
+    if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
+    return(invisible(list(
+      hss_path = hss_path, hss_sd_path = hss_sd_path,
+      binary_path = bin_path,
+      mess_path = if (want_mess) mess_path else NULL,
+      weights = weights, threshold = threshold, n_valid_cells = NA_integer_
+    )))
+  }
 
   if (verbose) {
     w_str <- paste0(mdl_names, "=", round(weights, 3), collapse = ", ")
@@ -400,8 +499,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     ))
   }
 
-  # Pre-load mask values (single layer, safe for memory)
-  mask_vals <- NULL
+  # Validate the mask geometry once; values are read per block below so a
+  # national-scale mask never has to be held in memory as a whole.
+  mask_ok <- FALSE
   if (!is.null(mask)) {
     geom_ok <- tryCatch(
       terra::compareGeom(mask, r, ext = TRUE, rowcol = TRUE, res = TRUE,
@@ -425,15 +525,14 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       cli::cli_warn(
         "Mask geometry does not match the raster stack; predicting the full extent."
       )
-      mask_vals <- NULL
     } else {
-      mask_vals <- tryCatch(
-        terra::values(mask, mat = FALSE),
-        error = function(e) {
-          cli::cli_warn("Mask read failed ({e$message}); predicting full extent")
-          NULL
-        }
-      )
+      if (terra::nlyr(mask) > 1L) {
+        cli::cli_warn(
+          "{.arg mask} has {terra::nlyr(mask)} layers; using the first one."
+        )
+        mask <- mask[[1L]]
+      }
+      mask_ok <- TRUE
     }
   }
 
@@ -442,11 +541,12 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   hss_vec  <- rep(NA_real_,    n_cells_total)
   hss_sd_vec <- rep(NA_real_,  n_cells_total)
   bin_vec  <- rep(NA_integer_, n_cells_total)
-  mess_vec <- rep(NA_real_,    n_cells_total)
+  mess_vec <- if (want_mess) rep(NA_real_, n_cells_total) else NULL
 
   n_valid <- 0L
   warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
   warned_empty_block <- FALSE
+  warned_mask <- FALSE
 
   for (bi in seq_len(n_blocks)) {
     row_start <- (bi - 1L) * rows_per_block + 1L
@@ -469,11 +569,22 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     v <- v[, env_vars, drop = FALSE]
 
     cell_start <- (row_start - 1L) * nc + 1L
-    cell_end   <- (row_start + row_count - 1L) * nc
 
-    if (!is.null(mask_vals)) {
-      m <- mask_vals[cell_start:cell_end]
-      v[is.na(m), ] <- NA
+    if (mask_ok) {
+      m <- tryCatch(
+        terra::values(mask, mat = FALSE, row = row_start, nrows = row_count),
+        error = function(e) NULL
+      )
+      if (is.null(m) || length(m) != nrow(v)) {
+        if (!warned_mask) {
+          cli::cli_warn(
+            "Mask read failed for at least one block; those cells are predicted unmasked."
+          )
+          warned_mask <- TRUE
+        }
+      } else {
+        v[is.na(m), ] <- NA
+      }
       rm(m)
     }
 
@@ -511,37 +622,40 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
             rep(NA_real_, n_ok)
           }
         )
-        if (!all(is.finite(preds))) {
+        finite <- is.finite(preds)
+        if (!any(finite)) {
           if (!warned[mdl_name]) {
-            cli::cli_warn("{.val {mdl_name}} produced non-finite raster predictions; excluded from the ensemble.")
+            cli::cli_warn("{.val {mdl_name}} is non-finite across at least one whole block; the other models cover those cells.")
             warned[mdl_name] <- TRUE
           }
           next
         }
+        if (!all(finite) && !warned[mdl_name]) {
+          cli::cli_warn(c(
+            "{.val {mdl_name}} is non-finite at some cells.",
+            i = "Those cells are averaged over the remaining models; the model still contributes elsewhere."
+          ))
+          warned[mdl_name] <- TRUE
+        }
+        preds[!finite] <- NA_real_
         pred_mat[, mdl_name] <- preds
         contrib[mdl_name] <- TRUE
       }
 
       if (any(contrib)) {
-        # Renormalise the weights of the contributing models before
-        # averaging (same convention as cast_ensemble()); the cross-model
-        # SD uses exactly those contributing models.
+        # Weights renormalise per cell over the models that produced a value
+        # there (same convention as cast_ensemble()); the cross-model SD uses
+        # exactly those cell-level contributors.
         w_blk <- weights[contrib]
         w_blk <- w_blk / sum(w_blk)
-        contrib_cols <- names(w_blk)
-        ens_hss <- as.vector(
-          pred_mat[, contrib_cols, drop = FALSE] %*% w_blk
-        )
-        ens_sd <- if (length(contrib_cols) > 1L) {
-          apply(pred_mat[, contrib_cols, drop = FALSE], 1L, stats::sd)
-        } else {
-          rep(NA_real_, n_ok)
-        }
+        sub <- pred_mat[, names(w_blk), drop = FALSE]
+        ens_hss <- .ensemble_rowmean(sub, w_blk)
+        ens_sd <- .ensemble_rowsd(sub)
         hss_vec[valid_idx] <- ens_hss
         hss_sd_vec[valid_idx] <- ens_sd
         bin_vec[valid_idx] <- as.integer(ens_hss >= threshold)
-        n_valid <- n_valid + n_ok
-        rm(ens_hss, ens_sd, w_blk)
+        n_valid <- n_valid + sum(is.finite(ens_hss))
+        rm(ens_hss, ens_sd, w_blk, sub)
       } else if (!warned_empty_block) {
         cli::cli_warn(
           "No model produced finite predictions for at least one block; those cells are NA."
@@ -554,8 +668,6 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     rm(v)
     if (bi %% 5 == 0) invisible(gc())
   }
-
-  rm(mask_vals)
 
   if (n_valid == 0L) {
     cli::cli_abort("No valid (non-NA) cells found in raster stack.")

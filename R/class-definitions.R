@@ -3,9 +3,11 @@
 #' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable scores. For `method = "cpi"`:
-#'   the conditional predictive impact (CPI), standard error, statistic, and
-#'   FDR-adjusted p-value; for `method = "rf"`: permutation importance.
+#' @param scores A `data.frame` with per-variable scores. For
+#'   `method = "two_stage"`: marginal `assoc`, the stage-1
+#'   `collinear_thinned` flag, `perm_importance`, the permutation `p_value`,
+#'   the BH-adjusted `p_adjusted`, and the `selected` flag. For
+#'   `method = "full"` the score columns are `NA`.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
 #'
@@ -24,51 +26,25 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
   )
 }
 
-#' Create a cast_screen_comparison Object
-#'
-#' @param membership A `data.frame` with one row per predictor and a logical
-#'   column per screening method indicating retention.
-#' @param methods Character vector of method identifiers (column names in
-#'   `membership`, excluding `variable`).
-#' @param cpi_method Character. Which column holds the castSDM conditional
-#'   screen (highlighted in plots).
-#' @param diagnostics Named list of comparison diagnostics.
-#'
-#' @return A `cast_screen_comparison` object.
-#' @keywords internal
-#' @export
-new_cast_screen_comparison <- function(membership, methods,
-                                       cpi_method = "cpi",
-                                       diagnostics = list()) {
-  structure(
-    list(
-      membership = membership,
-      methods = methods,
-      cpi_method = cpi_method,
-      diagnostics = diagnostics
-    ),
-    class = "cast_screen_comparison"
-  )
-}
-
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of per-predictor conditional importance (CPI)
-#'   estimates with confidence intervals and FDR-adjusted significance.
-#' @param conf_level Confidence level used for the intervals.
-#' @param alpha FDR level used to flag significance.
-#' @param diagnostics Named list carried over from the CPI screen.
+#' @param effects A `data.frame` of per-predictor permutation importance with
+#'   permutation-null `p_value` and BH-adjusted `p_adjusted`.
+#' @param alpha Significance level used to flag predictors.
+#' @param threshold Numeric. The stage-2 permutation-null importance
+#'   threshold, or `NA` when unknown.
+#' @param diagnostics Named list carried over from the screen.
 #'
 #' @return A `cast_importance` object.
 #' @keywords internal
 #' @export
-new_cast_importance <- function(effects, conf_level = 0.95, alpha = 0.05,
-                            diagnostics = list()) {
+new_cast_importance <- function(effects, alpha = 0.05,
+                                threshold = NA_real_, diagnostics = list()) {
   structure(
     list(
       effects = effects,
-      conf_level = conf_level,
       alpha = alpha,
+      threshold = threshold,
       diagnostics = diagnostics
     ),
     class = "cast_importance"
@@ -100,6 +76,38 @@ new_cast_sensitivity <- function(predictions, variable, shift, shift_type,
       summary = summary
     ),
     class = "cast_sensitivity"
+  )
+}
+
+#' Create a cast_necessity Object
+#'
+#' @param necessity A `data.frame` with one row per driver: `mean_dAUC`,
+#'   `sd_dAUC`, `min_dAUC`, `max_dAUC`, `pct_folds_positive`, `n_folds`,
+#'   `necessary`.
+#' @param fold_dauc Numeric matrix of per-driver (rows) by per-fold
+#'   (columns) held-out AUC loss.
+#' @param auc_full Numeric vector of full-model held-out AUC per fold.
+#' @param folds Integer vector. Spatial fold assignment for each data row.
+#' @param k Integer. Number of folds actually used.
+#' @param block_method Character. Spatial blocking strategy used.
+#' @param diagnostics Named list of diagnostics.
+#'
+#' @return A `cast_necessity` object.
+#' @keywords internal
+#' @export
+new_cast_necessity <- function(necessity, fold_dauc, auc_full, folds, k,
+                               block_method, diagnostics = list()) {
+  structure(
+    list(
+      necessity = necessity,
+      fold_dauc = fold_dauc,
+      auc_full = auc_full,
+      folds = folds,
+      k = k,
+      block_method = block_method,
+      diagnostics = diagnostics
+    ),
+    class = "cast_necessity"
   )
 }
 
@@ -162,6 +170,9 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #' @param screens List of fold-specific `cast_select` objects.
 #' @param selection_freq A `data.frame` with each predictor's fold-level
 #'   selection frequency (`variable`, `freq`), sorted descending.
+#' @param oof A `data.frame` of out-of-fold predictions with an `obs` column
+#'   and one `HSS_<model>` column per model, or `NULL`. This is the labelled
+#'   surface [cast_ensemble()] thresholds on.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
@@ -169,7 +180,7 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
                         selections = list(), screens = list(),
-                        selection_freq = NULL) {
+                        selection_freq = NULL, oof = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -180,7 +191,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       thresholds   = thresholds,
       selections   = selections,
       screens      = screens,
-      selection_freq = selection_freq
+      selection_freq = selection_freq,
+      oof          = oof
     ),
     class = "cast_cv"
   )

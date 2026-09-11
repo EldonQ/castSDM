@@ -9,9 +9,11 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 \arguments{
 \item{selected}{Character vector of selected variable names.}
 
-\item{scores}{A \code{data.frame} with per-variable scores. For \code{method = "cpi"}:
-the conditional predictive impact (CPI), standard error, statistic, and
-FDR-adjusted p-value; for \code{method = "rf"}: permutation importance.}
+\item{scores}{A \code{data.frame} with per-variable scores. For
+\code{method = "two_stage"}: marginal \code{assoc}, the stage-1
+\code{collinear_thinned} flag, \code{perm_importance}, the permutation \code{p_value},
+the BH-adjusted \code{p_adjusted}, and the \code{selected} flag. For
+\code{method = "full"} the score columns are \code{NA}.}
 
 \item{method}{Character screening-method identifier.}
 

@@ -7,7 +7,7 @@
 cast_cv(
   data,
   screen = NULL,
-  select_method = "cpi",
+  select_method = "two_stage",
   select_args = list(),
   k = 5L,
   models = c("rf"),
@@ -31,7 +31,7 @@ selection into the CV metrics (a warning is issued); treat those metrics
 as optimistic.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
-\code{"cpi"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
+\code{"two_stage"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.}
 

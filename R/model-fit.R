@@ -57,7 +57,7 @@ cast_fit <- function(data,
     if (!length(screen$selected)) {
       cli::cli_abort(c(
         "The supplied {.arg screen} has an empty {.field selected} set.",
-        i = "Refit {.fun cast_select} (e.g. lower {.arg alpha} or raise {.arg min_vars}) or pass {.code screen = NULL} to use all predictors."
+        i = "Refit {.fun cast_select} with {.code method = \"full\"}, or pass {.code screen = NULL} to use all predictors."
       ))
     }
     screen$selected

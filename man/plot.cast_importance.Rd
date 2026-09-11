@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_importance}
 \alias{plot.cast_importance}
-\title{Plot Conditional Importance}
+\title{Plot Predictor Importance}
 \usage{
 \method{plot}{cast_importance}(x, var_labels = NULL, top = NULL, ...)
 }
@@ -19,7 +19,7 @@
 A \code{ggplot} object.
 }
 \description{
-Forest plot of each predictor's conditional contribution: the (non-negative)
-conditional predictive impact (CPI, log-loss knockoff) with confidence
-intervals. Predictors passing FDR control are highlighted.
+Lollipop plot of each predictor's random-forest permutation importance,
+with the stage-2 permutation-null threshold marked. Predictors above the
+null are highlighted.
 }

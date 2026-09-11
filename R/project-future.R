@@ -404,9 +404,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #' @param mask A `terra::SpatRaster` or `NULL`. Prediction mask.
 #' @param overwrite Logical. Overwrite existing outputs. Default `FALSE`.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
-#' @param clamp Reserved for extrapolation control: forwarded to
-#'   [cast_ensemble_raster()] when the installed version supports a `clamp`
-#'   argument; otherwise ignored with a warning. Default `NULL`.
+#' @param clamp Logical or `NULL`. Clamp predictors to the training range
+#'   before predicting; forwarded to [cast_ensemble_raster()]. `NULL` (the
+#'   default) means no clamping.
 #' @param verbose Logical. Default `TRUE`.
 #'
 #' @return A list with components:
@@ -459,22 +459,13 @@ cast_project_raster <- function(fit, cv,
   dir.create(raster_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 
-  # Reserved passthrough: forward `clamp` only when the installed
-  # cast_ensemble_raster() actually supports it.
-  er_formals <- names(formals(cast_ensemble_raster))
-  if (!is.null(clamp) && !("clamp" %in% er_formals)) {
-    cli::cli_warn(
-      "{.arg clamp} ignored: this {.fn cast_ensemble_raster} has no clamp support."
-    )
-  }
   er_call <- function(r, prefix) {
-    args <- list(
+    cast_ensemble_raster(
       fit = fit, cv = cv, raster_stack = r, output_dir = raster_dir,
       method = method, models = models, mask = mask, prefix = prefix,
-      overwrite = overwrite, compression = compression, verbose = verbose
+      overwrite = overwrite, compression = compression,
+      clamp = isTRUE(clamp), verbose = verbose
     )
-    if (!is.null(clamp) && "clamp" %in% er_formals) args$clamp <- clamp
-    do.call(cast_ensemble_raster, args)
   }
 
   # ---- Current prediction -----------------------------------------------------
@@ -531,13 +522,17 @@ cast_project_raster <- function(fit, cv,
       }
 
       # ---- Statistics (from disk, also on the skip branch) --------------------
-      change_vals <- terra::values(terra::rast(change_path), mat = FALSE)
-      change_vals <- change_vals[!is.na(change_vals)]
-
-      n_gain   <- sum(change_vals == 1L)
-      n_loss   <- sum(change_vals == -1L)
-      n_stable <- sum(change_vals == 2L)
-      n_absent <- sum(change_vals == 0L)
+      # terra::freq() tallies out of core; reading the whole national grid into
+      # memory just to count four classes defeats the block-wise write above.
+      class_freq <- terra::freq(terra::rast(change_path))
+      class_count <- function(v) {
+        hit <- class_freq$count[class_freq$value == v]
+        if (length(hit)) sum(hit) else 0L
+      }
+      n_gain   <- class_count(1L)
+      n_loss   <- class_count(-1L)
+      n_stable <- class_count(2L)
+      n_absent <- class_count(0L)
       total_present_now <- n_loss + n_stable
 
       pct_change <- if (total_present_now > 0) {

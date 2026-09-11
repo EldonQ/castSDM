@@ -14,18 +14,21 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 
 ## Overview
 
-`castSDM` is an end-to-end species distribution modelling (SDM) toolkit whose
-variable-selection stage is built on conditional screening rather than
-associational filters:
+`castSDM` is an end-to-end species distribution modelling (SDM) toolkit with
+two separate concerns kept separate:
 
-- `cast_select(method = "cpi")` (default) keeps predictors whose conditional
-  predictive impact survives Benjamini-Hochberg FDR control, testing each
-  predictor *given every other predictor*;
-- `cast_effect_table()` turns the fitted model into a per-driver causal effect table with
-  confidence intervals, and `cast_sensitivity()` maps single-driver what-if
-  shifts;
-- selection is re-run inside every spatial cross-validation fold, so
-  held-out data never influence variable choice.
+- **Variable selection for parsimony**, not for attribution.
+  `cast_select()` runs a two-stage screen: collinearity thinning at
+  \|r\| <= 0.7 (Dormann et al. 2013), then an importance filter against a
+  permutation null (Altmann et al. 2010). Selection is re-run inside every
+  spatial cross-validation fold, so held-out data never influence variable
+  choice.
+- **Attribution as an audited pair.** `cast_effect_table()` and
+  `cast_effect_map()` report the interventional response to each driver
+  (shift the driver, hold every other driver fixed), and `cast_necessity()`
+  reports what dropping the driver costs in held-out AUC. A driver with a
+  large effect but no knockout cost is substitutable by a collinear partner,
+  so attribution to it is not identified. Report both.
 
 The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
 learners, nested spatial CV, MESS extrapolation flags, performance-weighted
@@ -60,9 +63,9 @@ head(dat[, c("lon", "lat", "presence", "bio01", "bio12", "elevation")])
 result <- cast(
   dat,
   models = c("rf", "gam"),
-  select_method = "cpi",
+  select_method = "two_stage",
   select_num_trees = 100,
-  select_min_vars = 3,      # small example: floor the screen at 3 predictors
+  select_n_perm = 19,       # small example: a short permutation null
   do_cv = TRUE,
   cv_k = 3,
   seed = 42,
@@ -73,12 +76,24 @@ summary(result)
 plot(result$screen)
 ```
 
-## Conditional importance
+## Attribution: effect size and necessity
 
-```{r importance}
-eff <- cast_effect_table(result$fit, newdata = dat)  # causal effect table
-plot(eff)                                    # coefficient (forest) plot
+`cast_effect_table()` reports the interventional response to each driver, and
+`cast_necessity()` reports what dropping it costs out of sample. Read them
+together.
+
+```{r attribution}
+eff <- cast_effect_table(result$fit, newdata = dat, verbose = FALSE)
+eff        # rank by mean_abs_dHSS; mean_signed_dHSS gives the direction
+
+nec <- cast_necessity(dat, screen = result$screen, k = 3, num_trees = 100,
+                      seed = 42, verbose = FALSE)
+nec        # mean_dAUC: held-out AUC lost by dropping each driver
 ```
+
+A driver with a large `mean_abs_dHSS` but `mean_dAUC` near zero is
+substitutable by a collinear partner: the model responds to it, but the data
+cannot attribute habitat change to *that* driver specifically.
 
 ## Sensitivity what-if map
 
