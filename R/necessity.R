@@ -28,14 +28,15 @@
   as.character(sel)
 }
 
-.necessity_auc <- function(train, test, vars, response, num_trees, seed) {
+.necessity_auc <- function(train, test, vars, response, num_trees, seed,
+                           num_threads = 1L) {
   if (!length(vars)) return(NA_real_)
   if (length(unique(train[[response]])) < 2L) return(NA_real_)
   rf <- tryCatch(
     ranger::ranger(x = train[, vars, drop = FALSE],
                    y = factor(train[[response]]),
                    probability = TRUE, num.trees = num_trees,
-                   seed = seed, num.threads = 1L),
+                   seed = seed, num.threads = num_threads),
     error = function(e) NULL)
   if (is.null(rf)) return(NA_real_)
   pp <- stats::predict(rf, test[, vars, drop = FALSE])$predictions
@@ -76,6 +77,10 @@
 #'   `block_method`, so a caller with pre-computed or frozen spatial folds
 #'   (e.g. a pre-registered protocol) can knock out on exactly those folds.
 #' @param num_trees Trees per random forest. Default 300.
+#' @param num_threads Threads passed to `ranger` for each fit. Default 1,
+#'   which keeps results bit-for-bit reproducible. Raise it to parallelise
+#'   the many refits (one full model plus one per driver, per fold); with a
+#'   fixed `seed`, `ranger` stays deterministic across thread counts.
 #' @param seed Random seed.
 #' @param verbose Print progress. Default `TRUE`.
 #'
@@ -90,7 +95,8 @@ cast_necessity <- function(data, screen = NULL, variables = NULL,
                            response = "presence", k = 5L,
                            block_method = c("grid", "grid_random", "cluster"),
                            folds = NULL,
-                           num_trees = 300L, seed = NULL, verbose = TRUE) {
+                           num_trees = 300L, num_threads = 1L,
+                           seed = NULL, verbose = TRUE) {
   block_method <- match.arg(block_method)
   check_suggested("ranger", "for the necessity knockout diagnostic")
   validate_species_data(data, required_cols = c("lon", "lat", response),
@@ -104,6 +110,7 @@ cast_necessity <- function(data, screen = NULL, variables = NULL,
     cli::cli_abort("Knockout needs at least two predictors; got {length(vars)}.")
   }
   num_trees <- as.integer(num_trees)
+  num_threads <- as.integer(num_threads)
 
   if (!is.null(folds)) {
     if (length(folds) != nrow(data)) {
@@ -138,11 +145,11 @@ cast_necessity <- function(data, screen = NULL, variables = NULL,
     fold_seed <- if (is.null(seed)) NULL else seed + f
     if (verbose) cli::cli_inform("fold {j}/{length(fold_ids)}: full model + {length(vars)} knockouts...")
     auc_full[[j]] <- .necessity_auc(train, test, vars, response, num_trees,
-                                   fold_seed %||% 1L)
+                                   fold_seed %||% 1L, num_threads = num_threads)
     if (!is.finite(auc_full[[j]])) next
     for (v in vars) {
       a <- .necessity_auc(train, test, setdiff(vars, v), response, num_trees,
-                          fold_seed %||% 1L)
+                          fold_seed %||% 1L, num_threads = num_threads)
       dauc[v, j] <- auc_full[[j]] - a
     }
   }

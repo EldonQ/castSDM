@@ -1,3 +1,10 @@
+# castSDM 0.9.2
+
+* `cast_necessity()` gains a `num_threads=` argument passed through to
+  `ranger`. It defaults to 1 (bit-for-bit reproducible) and lets callers
+  parallelise the many refits — one full model plus one per driver, per fold —
+  which matters when knocking out a full predictor stack across many species.
+
 # castSDM 0.9.1
 
 * `cast_necessity()` gains an optional `folds=` argument: an integer vector

@@ -13,6 +13,7 @@ cast_necessity(
   block_method = c("grid", "grid_random", "cluster"),
   folds = NULL,
   num_trees = 300L,
+  num_threads = 1L,
   seed = NULL,
   verbose = TRUE
 )
@@ -41,6 +42,11 @@ row to a fold. When supplied, it overrides internal fold construction and
 (e.g. a pre-registered protocol) can knock out on exactly those folds.}
 
 \item{num_trees}{Trees per random forest. Default 300.}
+
+\item{num_threads}{Threads passed to \code{ranger} for each fit. Default 1,
+which keeps results bit-for-bit reproducible. Raise it to parallelise
+the many refits (one full model plus one per driver, per fold); with a
+fixed \code{seed}, \code{ranger} stays deterministic across thread counts.}
 
 \item{seed}{Random seed.}
 
