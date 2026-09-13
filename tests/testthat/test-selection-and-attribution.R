@@ -111,6 +111,23 @@ test_that("cast_necessity scores an out-of-sample knockout cost per driver", {
   expect_gt(d[["x1"]], d[["x4"]])
 })
 
+test_that("cast_necessity honours injected folds and rejects a wrong-length vector", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  dat <- make_collinear_data(n = 320)
+  my_folds <- rep(1:4, length.out = nrow(dat))
+  nec <- cast_necessity(dat, variables = c("x1", "x2", "x4"), folds = my_folds,
+                        num_trees = 60, seed = 29, verbose = FALSE)
+  expect_identical(nec$k, 4L)
+  expect_identical(ncol(nec$fold_dauc), 4L)
+  expect_identical(nec$block_method, "custom")
+  expect_identical(nec$folds, as.integer(my_folds))
+  expect_error(
+    cast_necessity(dat, variables = c("x1", "x2"), folds = 1:10, verbose = FALSE),
+    "one entry per row"
+  )
+})
+
 test_that("cast_necessity reads the predictor set off a screen and needs at least two", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data(n = 200)

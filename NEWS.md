@@ -1,3 +1,12 @@
+# castSDM 0.9.1
+
+* `cast_necessity()` gains an optional `folds=` argument: an integer vector
+  assigning each row of `data` to a fold. When supplied it overrides internal
+  fold construction and `block_method`, so a caller holding pre-computed or
+  frozen spatial folds (e.g. a pre-registered validation protocol) can run the
+  knockout on exactly those folds. The returned object reports
+  `block_method = "custom"` in that case.
+
 # castSDM 0.9.0
 
 The package's claim is narrowed to what it can defend: **attribution as an

@@ -11,6 +11,7 @@ cast_necessity(
   response = "presence",
   k = 5L,
   block_method = c("grid", "grid_random", "cluster"),
+  folds = NULL,
   num_trees = 300L,
   seed = NULL,
   verbose = TRUE
@@ -31,7 +32,13 @@ a character vector, or \code{NULL} to use every predictor in \code{data}.}
 \item{k}{Number of spatial folds. Default 5.}
 
 \item{block_method}{Spatial blocking passed to the fold builder:
-\code{"grid"} (default), \code{"grid_random"}, or \code{"cluster"}.}
+\code{"grid"} (default), \code{"grid_random"}, or \code{"cluster"}. Ignored when
+\code{folds} is supplied.}
+
+\item{folds}{Optional integer vector of length \code{nrow(data)} assigning each
+row to a fold. When supplied, it overrides internal fold construction and
+\code{block_method}, so a caller with pre-computed or frozen spatial folds
+(e.g. a pre-registered protocol) can knock out on exactly those folds.}
 
 \item{num_trees}{Trees per random forest. Default 300.}
 

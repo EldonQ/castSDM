@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Causal Effect Analysis for Species Distribution Models
-Version: 0.9.0
+Version: 0.9.1
 Authors@R: c(
     person(
             "Liqiang", "Q",

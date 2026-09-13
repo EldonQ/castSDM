@@ -69,7 +69,12 @@
 #' @param response Binary response column. Default `"presence"`.
 #' @param k Number of spatial folds. Default 5.
 #' @param block_method Spatial blocking passed to the fold builder:
-#'   `"grid"` (default), `"grid_random"`, or `"cluster"`.
+#'   `"grid"` (default), `"grid_random"`, or `"cluster"`. Ignored when
+#'   `folds` is supplied.
+#' @param folds Optional integer vector of length `nrow(data)` assigning each
+#'   row to a fold. When supplied, it overrides internal fold construction and
+#'   `block_method`, so a caller with pre-computed or frozen spatial folds
+#'   (e.g. a pre-registered protocol) can knock out on exactly those folds.
 #' @param num_trees Trees per random forest. Default 300.
 #' @param seed Random seed.
 #' @param verbose Print progress. Default `TRUE`.
@@ -84,6 +89,7 @@
 cast_necessity <- function(data, screen = NULL, variables = NULL,
                            response = "presence", k = 5L,
                            block_method = c("grid", "grid_random", "cluster"),
+                           folds = NULL,
                            num_trees = 300L, seed = NULL, verbose = TRUE) {
   block_method <- match.arg(block_method)
   check_suggested("ranger", "for the necessity knockout diagnostic")
@@ -97,11 +103,23 @@ cast_necessity <- function(data, screen = NULL, variables = NULL,
   if (length(vars) < 2L) {
     cli::cli_abort("Knockout needs at least two predictors; got {length(vars)}.")
   }
-  k <- as.integer(k)
-  if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
   num_trees <- as.integer(num_trees)
 
-  folds <- make_spatial_folds(data$lon, data$lat, k, block_method, seed)
+  if (!is.null(folds)) {
+    if (length(folds) != nrow(data)) {
+      cli::cli_abort("{.arg folds} must have one entry per row of {.arg data} ({nrow(data)}).")
+    }
+    folds <- as.integer(folds)
+    if (anyNA(folds) || length(unique(folds)) < 2L) {
+      cli::cli_abort("{.arg folds} must assign rows to at least two folds without missing values.")
+    }
+    block_method <- "custom"
+  } else {
+    k <- as.integer(k)
+    if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
+    folds <- make_spatial_folds(data$lon, data$lat, k, block_method, seed)
+  }
+
   fold_ids <- sort(unique(folds))
   auc_full <- stats::setNames(rep(NA_real_, length(fold_ids)), fold_ids)
   dauc <- matrix(NA_real_, nrow = length(vars), ncol = length(fold_ids),
