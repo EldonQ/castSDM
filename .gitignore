@@ -5,6 +5,10 @@ castSDM.Rcheck/
 ..Rcheck/
 rcmdcheck-out*.txt
 
+# Stray run logs from workflow scripts launched with this dir as cwd
+*.log
+*.err
+
 .Rproj.user
 .Rhistory
 .RData

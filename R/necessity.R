@@ -154,7 +154,8 @@ cast_necessity <- function(data, screen = NULL, variables = NULL,
     }
   }
   if (length(skipped)) {
-    cli::cli_warn("Fold{?s} {.val {skipped}} had a single response class and w{?as/ere} skipped.")
+    n_skipped <- length(skipped)
+    cli::cli_warn("{n_skipped} fold{?s} had a single response class and {?was/were} skipped: {.val {skipped}}.")
   }
   if (all(!is.finite(dauc))) {
     cli::cli_abort("No fold produced a usable knockout comparison; the diagnostic is undefined here.")

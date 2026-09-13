@@ -1,3 +1,12 @@
+# castSDM 0.9.3
+
+* Fixed: `cast_necessity()` aborted with `length(object) == 1 is not TRUE`
+  whenever a spatial fold had to be skipped. The skip logic was correct, but
+  the warning reporting it used two `cli` pluralisation markers with no
+  length-one quantity in scope, so the warning itself errored. This hit any
+  species sparse enough that a fold contains no presences, which is exactly
+  when the skip was needed.
+
 # castSDM 0.9.2
 
 * `cast_necessity()` gains a `num_threads=` argument passed through to
