@@ -1,3 +1,16 @@
+# castSDM 0.9.5
+
+* Fixed: `cast_project_raster()` reported a meaningless `centroid_shift_km` on
+  any projected grid. It fed the current and future centroids to a haversine
+  formula, which assumes decimal degrees, so a raster in metres (e.g. an Albers
+  or Web Mercator grid — the usual case for a national 1 km stack) produced
+  shifts inflated by orders of magnitude: a real 24.7 km range shift was
+  reported as 15915.1 km. The call site now dispatches on the raster's CRS,
+  using haversine for lon/lat grids and planar distance scaled by
+  `terra::linearUnits()` otherwise. `cast_project()`'s data-frame path is
+  unchanged; its documented contract is EPSG:4326. No other projection
+  statistic was affected, so existing suitability and range-size outputs stand.
+
 # castSDM 0.9.4
 
 * Fixed: `cast_effect_map()` aborted with `'data' must be a data.frame, not a

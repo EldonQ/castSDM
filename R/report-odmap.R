@@ -57,13 +57,13 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     sprintf("%d-fold spatial (%s) nested CV, selection re-run per fold",
             cv$k, cv$block_method)
   } else {
-    "[report] no spatial CV run"
+    "[report] (no spatial CV recorded in this object)"
   }
   eval_src <- if (!is.null(cv)) "nested spatial CV" else "spatial hold-out"
   pred_info <- if (!is.null(object$predict)) {
     sprintf("%d sites predicted", nrow(object$predict$predictions))
   } else {
-    "[report] no spatial prediction"
+    "[report] (no spatial prediction recorded in this object)"
   }
 
   lines <- c(
