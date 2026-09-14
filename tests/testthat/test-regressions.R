@@ -76,4 +76,36 @@ test_that("ensemble excludes models with non-finite predictions and warns", {
   expect_equal(unname(ens$weights["rf"]), 1)
 })
 
+test_that("cast_effect_map drives every engine, not only the matrix-tolerant one", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("gbm")
+  skip_if_not_installed("terra")
+  set.seed(5)
+  n <- 240
+  x1 <- rnorm(n); x2 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.5 * x1 - x2)), x1 = x1, x2 = x2
+  )
+  screen <- new_cast_select(c("x1", "x2"),
+                            data.frame(variable = c("x1", "x2")),
+                            method = "manual")
+  # brt and gam predict via model.frame(), which rejects a matrix; rf does not.
+  fit <- cast_fit(dat, screen = screen, models = c("rf", "brt"),
+                  rf_ntree = 40, seed = 6, verbose = FALSE)
+
+  stack <- terra::rast(nrows = 12, ncols = 12, nlyrs = 2,
+                       xmin = 70, xmax = 130, ymin = 20, ymax = 50)
+  names(stack) <- c("x1", "x2")
+  terra::values(stack) <- cbind(rnorm(terra::ncell(stack)),
+                               rnorm(terra::ncell(stack)))
+
+  em <- cast_effect_map(fit, stack, drivers = "x1", block_rows = 5L,
+                        verbose = FALSE)
+  expect_setequal(names(em), c("dHSS_x1", "absdHSS_x1"))
+  vals <- terra::values(em[["dHSS_x1"]], mat = FALSE)
+  expect_true(any(is.finite(vals)))
+  # x1 raises suitability, so the sign-aligned mean effect must be positive.
+  expect_gt(mean(vals, na.rm = TRUE), 0)
+})
 

@@ -1,3 +1,13 @@
+# castSDM 0.9.4
+
+* Fixed: `cast_effect_map()` aborted with `'data' must be a data.frame, not a
+  matrix or an array` for every engine except `rf`. It handed each raster block
+  to the engine predictors as a matrix, which `predict.gbm()` and `mgcv`'s
+  predict method reject because they route through `model.frame()`. Effect maps
+  from a `brt` or `gam` fit — or any ensemble containing one — were therefore
+  unreachable. `cast_effect_table()`, `cast_predict()` and `cast_predict_tiled()`
+  were never affected.
+
 # castSDM 0.9.3
 
 * Fixed: `cast_necessity()` aborted with `length(object) == 1 is not TRUE`

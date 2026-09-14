@@ -264,7 +264,10 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
                        nrows = r1 - r0 + 1L)[, env_vars, drop = FALSE]
     ok <- stats::complete.cases(X)
     if (!any(ok)) next
-    Xi <- X[ok, , drop = FALSE]
+    # predict.gbm() and mgcv's predict() reject a matrix, so hand every engine a
+    # data.frame. Shifting one column by name also avoids copying the whole
+    # block on each intervention step.
+    Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
     zero <- matrix(0, nrow = nrow(Xi), ncol = length(drivers),
                    dimnames = list(NULL, drivers))
     ssum <- zero
@@ -273,7 +276,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
       p0 <- .pred_num_engine(eng[[m]], mdl[[m]], Xi)
       for (v in drivers) {
         for (st in steps[[v]]) {
-          Xs <- Xi; Xs[, v] <- Xs[, v] + st
+          Xs <- Xi; Xs[[v]] <- Xs[[v]] + st
           d <- .pred_num_engine(eng[[m]], mdl[[m]], Xs) - p0
           ssum[, v] <- ssum[, v] + d * sign(st)
           asum[, v] <- asum[, v] + abs(d)
