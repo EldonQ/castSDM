@@ -158,3 +158,36 @@ test_that("cast_project_raster skips a failed scenario and continues (M16)", {
   unlink(td2, recursive = TRUE)
   unlink(td, recursive = TRUE)
 })
+
+test_that("centroid_shift_km is in kilometres on a projected metre grid", {
+  skip_if_not_installed("terra")
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  dat <- .make_grid()
+  fc <- .make_fit_cv(dat)
+
+  # Albers metres, the N-SDM grid family: a haversine on these coordinates
+  # returns a shift far larger than the extent itself.
+  mk_rast <- function(jitter = 0) {
+    base <- terra::rast(nrows = 8, ncols = 8,
+                        xmin = 0, xmax = 4e5, ymin = 2.9e6, ymax = 3.3e6,
+                        crs = "EPSG:3857")
+    r <- c(terra::setValues(base, runif(64) + jitter),
+           terra::setValues(base, runif(64)))
+    names(r) <- c("x1", "x2")
+    r
+  }
+
+  td <- tempfile("projmetre")
+  out <- cast_project_raster(fc$fit, fc$cv, mk_rast(), list(ok = mk_rast(0.5)),
+                             output_dir = td, verbose = FALSE)
+  st <- out$stats[out$stats$scenario == "ok", ]
+  skip_if(is.na(st$centroid_shift_km))
+
+  planar_km <- sqrt((st$future_centroid_lon - st$current_centroid_lon)^2 +
+                      (st$future_centroid_lat - st$current_centroid_lat)^2) / 1000
+  expect_equal(st$centroid_shift_km, round(planar_km, 1), tolerance = 1e-6)
+  # The extent is 400 km wide, so any shift must stay well inside it.
+  expect_lt(st$centroid_shift_km, 600)
+  unlink(td, recursive = TRUE)
+})

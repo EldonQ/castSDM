@@ -546,14 +546,22 @@ cast_project_raster <- function(fit, cv,
         terra::rast(fut_result$hss_path),
         terra::rast(fut_result$binary_path))
 
-      # Centroid shift
-      shift_km <- tryCatch(
-        .haversine_km(
-          cur_centroid$lat, cur_centroid$lon,
-          fut_centroid$lat, fut_centroid$lon
-        ),
-        error = function(e) NA_real_
-      )
+      # Centroid shift. The centroids carry the raster's own units, so a
+      # projected grid needs planar distance: handing metres to a haversine
+      # returns a figure larger than the whole study area.
+      shift_km <- tryCatch({
+        if (isTRUE(terra::is.lonlat(cur_hss, perhaps = TRUE, warn = FALSE))) {
+          .haversine_km(
+            cur_centroid$lat, cur_centroid$lon,
+            fut_centroid$lat, fut_centroid$lon
+          )
+        } else {
+          m <- terra::linearUnits(cur_hss)
+          if (!is.finite(m) || m <= 0) m <- 1
+          sqrt((fut_centroid$lon - cur_centroid$lon)^2 +
+                 (fut_centroid$lat - cur_centroid$lat)^2) * m / 1000
+        }
+      }, error = function(e) NA_real_)
 
       if (verbose) {
         cli::cli_inform(c(
