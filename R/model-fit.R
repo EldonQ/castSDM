@@ -176,6 +176,11 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         interaction.depth = brt_depth,
         shrinkage = 0.01,
         cv.folds = 5L,
+        # gbm() defaults n.cores to a parallel cluster. On a small CI runner
+        # (or inside an already-parallel cross-validation) spawning workers
+        # makes the fit fail outright rather than run slower, so the fold
+        # parallelism the package controls is the only one used.
+        n.cores = 1L,
         verbose = FALSE
       )
       bt <- gbm::gbm.perf(m, method = "cv", plot.it = FALSE)
