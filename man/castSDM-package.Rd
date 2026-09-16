@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Causal Effect Analysis for Species Distribution Models}
+\title{castSDM: Model Response and Interventional Effects for Species Distribution Models}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Attributes habitat change to environmental drivers in species distribution modelling, and audits when that attribution is identified. For each driver, an interventional effect size and a spatially explicit effect map are obtained by shifting the driver while holding every other driver fixed (g-computation over the fitted ensemble), and a knockout necessity diagnostic refits the model without the driver inside every spatial fold to measure the held-out discrimination it costs. A driver the model responds to but whose removal costs nothing is substitutable by a collinear partner, so the pair reports where attribution is not identified. Variable selection is a separate, two-stage screen (collinearity thinning followed by an importance filter against a permutation null) scoped to parsimony and projection robustness. Both sit in a complete workflow - Random Forest, BRT, MaxEnt and GAM learners, nested spatial cross-validation, ensemble prediction, and future climate projection with extrapolation control. The package targets interpretable attribution under stated assumptions and does not claim automatic discovery of ecological causes.
+Audits model-based environmental responses in species distribution modelling. Predictor shifts evaluated over a fitted model produce effect sizes, dose-response curves, effect heatmaps and spatial maps. Variable selection is a two-stage screen whose second stage ranks predictors by the change they cause in the fitted probability when they are shifted while every other predictor is held at its observed value - a g-computation contrast - calibrated against a response-permutation null. The permutation importance of the same forest is reported alongside as a diagnostic, because permuting a predictor breaks its correlation with the others and is therefore governed by the model's extrapolation behaviour. Effect products carry a positivity diagnostic: the fraction of observed predictor vectors still inside the training support after the shift. Both sit in a complete workflow - Random Forest, BRT, MaxEnt and GAM learners, nested spatial cross-validation, ensemble prediction, and future climate projection with extrapolation control. The package targets interpretable interventional attribution under stated assumptions and does not claim automatic discovery of ecological causes.
 }
 \seealso{
 Useful links:

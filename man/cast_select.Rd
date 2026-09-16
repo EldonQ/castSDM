@@ -10,6 +10,8 @@ cast_select(
   method = c("two_stage", "full"),
   num_trees = 300L,
   n_perm = 49L,
+  shift_size = 1,
+  max_rows = 2000L,
   seed = NULL,
   verbose = TRUE,
   ...
@@ -27,6 +29,15 @@ they are never selected).}
 
 \item{n_perm}{Response permutations used to build the stage-2 null.}
 
+\item{shift_size}{Shift applied to the intervened predictor, in training
+standard deviations. Default \code{1}. The statistic averages the absolute
+change over \code{+shift_size} and \code{-shift_size}, so it does not depend on a
+sign convention.}
+
+\item{max_rows}{Rows sampled (evenly, preserving order) for the
+g-computation contrast. Bounds stage-2 cost on large data sets.
+Default 2000.}
+
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
@@ -35,40 +46,62 @@ they are never selected).}
 }
 \value{
 A \code{cast_select} object: \code{selected} (kept predictors), \code{scores}
-(per-predictor association, stage-1 status, permutation importance,
-permutation \code{p_value}, BH-adjusted \code{p_adjusted}, and the \code{selected}
-flag). Selection uses the raw permutation p-value, which is by
-construction the 95th-percentile null threshold; \code{p_adjusted} is
-reported for interpretation and is not the selection rule.
+(per-predictor marginal \code{assoc}, the stage-1 \code{collinear_thinned} flag,
+\code{interventional_effect} -- the stage-2 selection statistic -- its
+permutation \code{p_value}, the BH-adjusted \code{p_adjusted}, the feature-wise
+\code{null_threshold}, the retained \code{perm_importance} diagnostic, and the
+\code{selected} flag). Selection uses
+\code{(1 + sum(null >= observed)) / (1 + n_perm)} for each predictor
+separately. \code{p_adjusted} adjusts over stage-1 survivors only and is not
+the selection rule. These are screening diagnostics: the
+response-dependent stage-1 screen is held fixed during permutation, so
+they do not establish confirmatory p-values or FDR control.
+\code{passed_null} distinguishes evidence from a stage-1 fallback when no
+variable passes. Fewer than 19 permutations cannot resolve p <= 0.05.
 }
 \description{
-Two-stage, literature-standard variable selection:
+Two-stage variable selection whose second stage is calibrated against an
+\emph{interventional} null rather than a permutation-importance null:
 \enumerate{
 \item \strong{Stage 1 — collinearity thinning}: rank predictors by
 absolute marginal association with the response, then greedily keep
 predictors whose pairwise correlation with all kept predictors is
-\eqn{\le 0.7} (Dormann et al. 2013). This is the recipe used across
-conventional SDM pipelines (N-SDM covsel Stage 1, correlation
-filtering in biomod2/wallace), implemented natively.
-\item \strong{Stage 2 — importance filter against a permutation null}:
-fit a probability random forest on the stage-1 survivors, then refit
-it \code{n_perm} times on a permuted response to build the null
-distribution of permutation importance. Keep predictors whose
-importance exceeds the 95th percentile of that null (Altmann et al.
-2010). Permutation importance under the null is centred on zero, not
-bounded by it, so a bare \code{importance > 0} rule retains roughly half
-of all uninformative predictors; the null quantile is the calibrated
-replacement.
+\eqn{\le 0.7} (Dormann et al. 2013).
+\item \strong{Stage 2 — interventional effect above a permutation null}:
+fit a probability random forest on the stage-1 survivors, then measure
+how far each predictor moves the fitted probability when it is
+\strong{shifted while every other predictor is held at its observed
+value} (a g-computation contrast; see \code{\link[=cast_effect_table]{cast_effect_table()}}). The same
+statistic is recomputed on forests refitted to a permuted response to
+build a feature-wise null, and predictors whose Monte Carlo tail
+probability is at most 0.05 are kept (Altmann et al. 2010).
 }
-Variable selection serves parsimony and projection robustness, not causal
-attribution. Causal questions belong to \code{\link[=cast_effect_table]{cast_effect_table()}},
-\code{\link[=cast_effect_map]{cast_effect_map()}} and \code{\link[=cast_necessity]{cast_necessity()}}.
 }
-\references{
-Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
-with it in ecological studies. \emph{Ecography} 36: 27–46.
+\section{Why the second stage is interventional}{
 
+Permutation importance permutes a predictor, which breaks its correlation
+with every other predictor. For collinear predictors the permuted rows leave
+the observed data support, so the score is governed by the model's
+extrapolation behaviour rather than by the predictor's influence
+(Hooker, Mentch & Zhou 2021). An interventional shift keeps the remaining
+predictors at their observed values, so the contrast stays inside the data
+support and answers a question that has a definition. The permutation null
+is retained, so calibration still compares like with like.
+}
+
+\references{
 Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
 importance: a corrected feature importance measure.
-\emph{Bioinformatics} 26: 1340–1347.
+\emph{Bioinformatics} 26: 1340-1347.
+
+Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
+with it in ecological studies. \emph{Ecography} 36: 27-46.
+
+Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
+extrapolation: variable importance requires at least one more model, or
+there is no free variable importance. \emph{WIREs Data Mining and Knowledge
+Discovery} 11: e1421.
+}
+\seealso{
+\code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}
 }

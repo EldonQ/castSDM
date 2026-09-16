@@ -595,7 +595,8 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   eff <- x$effects
   if (!is.null(top) && is.finite(top)) {
-    eff <- utils::head(eff[order(-abs(eff$estimate)), , drop = FALSE], as.integer(top))
+    eff <- utils::head(eff[order(-abs(eff$interventional_effect)), , drop = FALSE],
+                       as.integer(top))
   }
   eff$sig <- ifelse(eff$selected, "above null", "not above null")
   if (!is.null(var_labels)) {
@@ -604,38 +605,45 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   } else {
     eff$display <- eff$variable
   }
-  eff <- eff[order(eff$estimate), ]
+  eff <- eff[order(eff$interventional_effect), ]
   eff$display <- factor(make.unique(eff$display), levels = make.unique(eff$display))
 
   sig_colors <- c(`above null` = "#B2182B", `not above null` = "grey70")
   n_sig <- sum(eff$selected, na.rm = TRUE)
 
   plot_subtitle <- sprintf(
-    "Random-forest permutation importance | %d/%d above the permuted-response null (p < %.2g)",
+    "Interventional effect (shift 1 SD, others fixed) | %d/%d above the permuted-response null (p < %.2g)",
     n_sig, nrow(eff), x$alpha
   )
 
   p <- ggplot2::ggplot(eff, ggplot2::aes(
-    x = .data$estimate, y = .data$display, color = .data$sig
+    x = .data$interventional_effect, y = .data$display, color = .data$sig
   )) +
     ggplot2::geom_vline(xintercept = 0, linetype = "solid",
                         color = "grey50", linewidth = 0.4) +
     ggplot2::geom_segment(
-      ggplot2::aes(x = 0, xend = .data$estimate,
+      ggplot2::aes(x = 0, xend = .data$interventional_effect,
                    y = .data$display, yend = .data$display),
       linewidth = 0.6
     ) +
     ggplot2::geom_point(size = 2.6)
-  if (is.finite(x$threshold)) {
+  # A two-stage screen calibrates each predictor against its own null, so there
+  # is a vector of thresholds rather than one line to draw. `cast_importance()`
+  # carries that vector on its effects frame and it is added per predictor.
+  if (!is.null(eff$null_threshold) && any(is.finite(eff$null_threshold))) {
+    p <- p + ggplot2::geom_point(
+      ggplot2::aes(x = .data$null_threshold, y = .data$display),
+      shape = "|", size = 3.2, color = "grey25", inherit.aes = FALSE)
+  } else if (length(x$threshold) == 1L && is.finite(x$threshold)) {
     p <- p + ggplot2::geom_vline(xintercept = x$threshold, linetype = "dashed",
                                  color = "grey30", linewidth = 0.4)
   }
   p +
     ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
     ggplot2::labs(
-      title = "Predictor importance",
+      title = "Predictor interventional effect",
       subtitle = plot_subtitle,
-      x = "Permutation importance", y = ""
+      x = "Mean |change in predicted probability| per 1 SD shift", y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
@@ -736,6 +744,127 @@ plot.cast_sensitivity <- function(x, basemap = "world", var_label = NULL,
         high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
     }
   )
+}
+
+
+#' Plot a Dose-Response Curve
+#'
+#' Mean change in predicted probability against the size of the shift, with
+#' shifts that leave the observed data support drawn hollow so an
+#' extrapolated tail is never read as evidence.
+#'
+#' @param x A `cast_dose_response` object (from [cast_dose_response()]).
+#' @param var_label Optional display label for the intervened predictor.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_dose_response <- function(x, var_label = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  crv <- x$curve
+  crv$on_support <- ifelse(crv$estimable, "on support", "outside support")
+  lab <- var_label %||% x$variable
+  ggplot2::ggplot(crv, ggplot2::aes(x = .data$shift, y = .data$mean_delta)) +
+    ggplot2::geom_hline(yintercept = 0, color = "grey50", linewidth = 0.4) +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = 0, ymax = .data$mean_delta),
+                         fill = "grey85", alpha = 0.6) +
+    ggplot2::geom_line(color = "#B2182B", linewidth = 0.8) +
+    ggplot2::geom_point(ggplot2::aes(shape = .data$on_support),
+                        color = "#B2182B", size = 1.9, fill = "white") +
+    ggplot2::scale_shape_manual(values = c(`on support` = 16,
+                                           `outside support` = 1),
+                                name = NULL) +
+    ggplot2::labs(
+      title = sprintf("Dose-response of predicted suitability to %s", lab),
+      subtitle = sprintf("Shift in %s; other predictors held at their observed values", x$unit),
+      x = sprintf("Shift in %s", x$unit),
+      y = "Mean change in predicted suitability"
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(legend.position = "bottom")
+}
+
+#' Plot an Interventional Effect Heatmap
+#'
+#' Binned map of the effect across the intervened predictor (x) and an effect
+#' modifier (y). Bins whose shifted predictor vector leaves the observed data
+#' support are shown as empty cells with a cross, never as a colour, so
+#' extrapolated bins cannot be mistaken for findings.
+#'
+#' @param x A `cast_effect_heatmap` object (from [cast_effect_heatmap()]).
+#' @param var_label Optional display label for the intervened predictor.
+#' @param modifier_label Optional display label for the second axis.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_effect_heatmap <- function(x, var_label = NULL, modifier_label = NULL,
+                                     ...) {
+  check_suggested("ggplot2", "for plotting")
+  g <- x$grid
+  lim <- max(abs(g$abs_effect), na.rm = TRUE)
+  if (!is.finite(lim) || lim <= 0) lim <- 1e-6
+  g$plot_effect <- ifelse(g$supported, g$effect, NA_real_)
+  xlab <- var_label %||% x$variable
+  ylab <- modifier_label %||% x$modifier
+
+  p <- ggplot2::ggplot(g, ggplot2::aes(x = .data$x_mid, y = .data$y_mid,
+                                       fill = .data$plot_effect)) +
+    ggplot2::geom_tile(width = (max(g$x_mid) - min(g$x_mid)) /
+                         max(2, length(unique(g$x_mid))) * 1.02,
+                       height = (max(g$y_mid) - min(g$y_mid)) /
+                         max(2, length(unique(g$y_mid))) * 1.02,
+                       color = "white", linewidth = 0.2) +
+    ggplot2::scale_fill_gradient2(
+      low = "#2166AC", mid = "grey96", high = "#B2182B", midpoint = 0,
+      limits = c(-lim, lim), na.value = "transparent",
+      name = "Change in\nprobability") +
+    ggplot2::labs(
+      title = sprintf("Interventional effect of %s", xlab),
+      subtitle = sprintf("Shift %s %s; empty cells leave the observed data support",
+                         signif(x$shift, 3), x$unit),
+      x = xlab, y = ylab
+    ) +
+    theme_cast(base_size = 11)
+  if (any(!g$supported)) {
+    p <- p + ggplot2::geom_point(
+      data = g[!g$supported, , drop = FALSE],
+      shape = 4, size = 1.4, color = "grey35", inherit.aes = FALSE,
+      ggplot2::aes(x = .data$x_mid, y = .data$y_mid))
+  }
+  p
+}
+
+#' Plot Shift Support (Positivity) by Driver
+#'
+#' @param x A `cast_support` object (from [cast_effect_support()]).
+#' @param var_labels Optional named character vector of display labels.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_support <- function(x, var_labels = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  s <- x$support
+  s$shift_lab <- factor(sprintf("%+g", s$shift), levels = sprintf("%+g", sort(unique(s$shift))))
+  s$display <- if (!is.null(var_labels)) {
+    ifelse(s$driver %in% names(var_labels), var_labels[s$driver], s$driver)
+  } else s$driver
+  ggplot2::ggplot(s, ggplot2::aes(x = .data$shift_lab, y = .data$display,
+                                  fill = .data$support)) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.3) +
+    ggplot2::geom_text(ggplot2::aes(label = sprintf("%.2f", .data$support)),
+                       size = 3, color = "grey15") +
+    ggplot2::scale_fill_gradientn(
+      colours = c("#B2182B", "#F4A582", "#F7F7F7", "#92C5DE", "#2166AC"),
+      limits = c(0, 1), name = "Support") +
+    ggplot2::labs(
+      title = "Shift support by driver",
+      subtitle = "Fraction of observed predictor vectors still inside the training support",
+      x = "Shift", y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(panel.grid = ggplot2::element_blank())
 }
 
 

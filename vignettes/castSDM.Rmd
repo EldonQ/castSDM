@@ -14,21 +14,29 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 
 ## Overview
 
-`castSDM` is an end-to-end species distribution modelling (SDM) toolkit with
-two separate concerns kept separate:
+`castSDM` is an end-to-end species distribution modelling (SDM) toolkit built
+around one question: if a driver moved, what would happen to predicted
+suitability, and where is that answer supported by data?
 
-- **Variable selection for parsimony**, not for attribution.
+Two concerns stay separate:
+
+- **Selection ranks predictors by the change they cause.**
   `cast_select()` runs a two-stage screen: collinearity thinning at
-  \|r\| <= 0.7 (Dormann et al. 2013), then an importance filter against a
-  permutation null (Altmann et al. 2010). Selection is re-run inside every
-  spatial cross-validation fold, so held-out data never influence variable
-  choice.
-- **Attribution as an audited pair.** `cast_effect_table()` and
-  `cast_effect_map()` report the interventional response to each driver
-  (shift the driver, hold every other driver fixed), and `cast_necessity()`
-  reports what dropping the driver costs in held-out AUC. A driver with a
-  large effect but no knockout cost is substitutable by a collinear partner,
-  so attribution to it is not identified. Report both.
+  \|r\| <= 0.7 (Dormann et al. 2013), then a filter against a
+  permuted-response null using the **interventional effect** — how far the
+  fitted probability moves when the predictor is shifted and every other
+  predictor stays at its observed value. The same forest's permutation
+  importance is reported alongside, because permuting a predictor breaks its
+  correlation with the others and is therefore governed by the model's
+  extrapolation behaviour (Hooker, Mentch & Zhou 2021). Selection is re-run
+  inside every spatial cross-validation fold, so held-out data never influence
+  variable choice.
+- **Effects come with their response shape and their support.** The
+  interventional response to each driver is reported as a table, a spatial map,
+  a dose-response curve and a 2D heatmap, together with the fraction of
+  observed predictor vectors still inside the training support after the shift.
+  `cast_necessity()` separately reports what dropping a driver costs in
+  held-out AUC.
 
 The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
 learners, nested spatial CV, MESS extrapolation flags, performance-weighted
@@ -76,31 +84,68 @@ summary(result)
 plot(result$screen)
 ```
 
-## Attribution: effect size and necessity
+## What each stage measured
 
-`cast_effect_table()` reports the interventional response to each driver, and
-`cast_necessity()` reports what dropping it costs out of sample. Read them
-together.
+`cast_importance()` shows both attribution columns from the screen and how far
+they agree. A predictor the forest relies on but barely responds to when
+shifted is a collinear stand-in; the rank agreement summarises how much the
+choice of statistic mattered here.
+
+```{r importance}
+imp <- cast_importance(result$screen)
+imp
+plot(imp)
+```
+
+## Effect size, response shape and support
 
 ```{r attribution}
 eff <- cast_effect_table(result$fit, newdata = dat, verbose = FALSE)
 eff        # rank by mean_abs_dHSS; mean_signed_dHSS gives the direction
 
+# The driver the screen ranked first is guaranteed to be fitted.
+v1 <- result$screen$scores$variable[which.max(
+  result$screen$scores$interventional_effect)]
+
+# Shape: how the effect scales with the size of the shift.
+dr <- cast_dose_response(result$fit, v1, shift = seq(-2, 2, by = 0.5))
+plot(dr)
+
+# Support: where the shift is answerable at all.
+sp <- cast_effect_support(result$fit, variables = v1, shift = c(1, 2, 3))
+plot(sp)
+```
+
+A dose-response band drawn with hollow points is answered mostly by
+extrapolation. `cast_effect_support()` reports the same information as a
+number, and a shift that leaves the training range everywhere is refused
+rather than answered.
+
+## Effect heatmap over driver and modifier
+
+```{r heatmap}
+others <- setdiff(result$fit$env_vars, v1)
+hm <- cast_effect_heatmap(result$fit, v1, modifier = others[1], shift = 1)
+plot(hm)   # empty cells with a cross leave the observed data support
+```
+
+## Necessity audit
+
+```{r necessity}
 nec <- cast_necessity(dat, screen = result$screen, k = 3, num_trees = 100,
                       seed = 42, verbose = FALSE)
 nec        # mean_dAUC: held-out AUC lost by dropping each driver
 ```
 
-A driver with a large `mean_abs_dHSS` but `mean_dAUC` near zero is
-substitutable by a collinear partner: the model responds to it, but the data
-cannot attribute habitat change to *that* driver specifically.
+A driver with a large `mean_abs_dHSS` but `mean_dAUC` near zero shows a model
+response with limited RF knockout cost. Redundancy, limited power, AUC and
+estimator choice can all contribute. Neither diagnostic is a causal test on
+its own.
 
 ## Sensitivity what-if map
 
 ```{r sensitivity}
-# Shift the first predictor retained by the screen (guaranteed to be fitted).
-cf <- cast_sensitivity(result$fit, newdata = dat,
-                       variable = result$fit$env_vars[1], shift = 1,
+cf <- cast_sensitivity(result$fit, newdata = dat, variable = v1, shift = 1,
                        shift_type = "sd")
 plot(cf, basemap = "none")
 ```
@@ -121,3 +166,12 @@ for (v in env_vars) {
 pred <- cast_predict(result$fit, grid)
 plot(pred, basemap = "none")
 ```
+
+## What the numbers are not
+
+Every effect product is a **model-based interventional contrast**
+(g-computation / standardization) under consistency, no unobserved confounding
+given the adjustment set, and positivity. The support column reports the third
+of these; the other two are assumptions, not results. The estimator is not
+doubly robust and not TMLE. On presence/background data the scale is relative
+suitability, not occurrence probability.

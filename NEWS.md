@@ -1,3 +1,58 @@
+# castSDM 0.10.0
+
+## Stage-2 selection is now an interventional contrast
+
+* `cast_select()` selects on the **interventional effect**: the change a
+  predictor causes in the fitted probability when it is shifted while every
+  other predictor stays at its observed value, averaged over `+shift_size` and
+  `-shift_size` training SD. The permutation null is retained, so calibration
+  still compares like with like. `scores` gains
+  `interventional_effect`; `perm_importance` stays as a diagnostic.
+* Why: permutation breaks a predictor's correlation with the others, so for
+  collinear predictors the permuted rows leave the observed data support and
+  the score is governed by the model's extrapolation behaviour (Hooker, Mentch
+  & Zhou 2021). An interventional shift keeps the rest of the vector observed.
+* `diagnostics$importance_agreement` reports the Spearman agreement between the
+  two statistics; large disagreement marks predictors the forest leans on but
+  barely responds to when changed, which is the signature of a collinear
+  stand-in.
+* New arguments `shift_size` and `max_rows`. Existing selection caches and
+  downstream model/CV outputs must be recomputed.
+
+## Interventional effect products gain a positivity diagnostic
+
+* `cast_dose_response()` sweeps the size of an additive shift and reports the
+  whole curve, so a saturating or threshold response is no longer collapsed to
+  one number. `cast_effect_heatmap()` bins the observed data by the intervened
+  predictor and an effect modifier. `cast_effect_support()` reports, per driver
+  and shift size, the fraction of observed predictor vectors still inside the
+  training support.
+* The support rule makes positivity operational: a shift answered mostly by
+  extrapolation is reported and drawn as an empty cell, never silently coloured
+  in. Bins and points below the support threshold are flagged `supported =
+  FALSE` / `estimable = FALSE`.
+* A shift that leaves the training range everywhere is refused rather than
+  answered. `plot()` methods for all three objects.
+* `cast_importance()` now reports both attribution columns and the rank
+  agreement, and its plot shows the interventional effect.
+
+# castSDM 0.9.6
+
+* Effect maps now average paired changes across models before taking their
+  magnitude, matching effect tables even when model responses cancel. Both
+  products use the same prediction implementation and per-cell summaries.
+  `n` counts complete cells/rows; `n_shifts` reports the intervention count.
+* Effect tables accept predictor-only frames, reject invalid shifts explicitly,
+  and report `outside_range_fraction` (a marginal support warning, not a joint
+  positivity test). Table and map omit non-finite predictor rows consistently.
+* Stage-2 importance references are now feature-specific, rather than pooled
+  across features. `passed_null` and `fallback` distinguish null exceedance
+  from retaining the stage-1 set when nothing passes. Existing selection and
+  downstream model/CV caches must be recomputed; old results are historical.
+* Documentation separates model responses, RF predictive necessity and causal
+  identification. Agreement of the two diagnostics is not an identification
+  test. Citation metadata now follows the installed package version.
+
 # castSDM 0.9.5
 
 * Fixed: `cast_project_raster()` reported a meaningless `centroid_shift_km` on

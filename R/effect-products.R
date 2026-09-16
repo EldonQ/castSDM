@@ -1,36 +1,40 @@
 # ==========================================================================
-# Causal effect products: the interpretive core of castSDM.
+# Interventional effect products: per-driver contrast sizes and rasters.
 #   cast_effect_table(): per-driver interventional effect sizes on a table.
 #   cast_effect_map():   per-driver delta-suitability rasters over a stack.
 # Both answer one question: "if we intervene on driver X (shift it by each
 # s in a symmetric shift set, all other drivers held fixed), what happens
 # to predicted suitability?" Magnitude and direction are reported apart.
-# Model-based interventional effect (g-computation); requires the standard
-# no-unobserved-confounding assumption; not a proof of a manipulable
-# causal mechanism. Read alongside cast_necessity(): sensitivity without
-# necessity does not identify a driver.
+# Model-based interventional contrast (g-computation / standardization);
+# requires consistency, no unobserved confounding given the adjustment set,
+# and positivity. cast_effect_support() reports the third of those;
+# cast_dose_response() and cast_effect_heatmap() report the response shape.
+# Not doubly robust and not TMLE; not a proof of a manipulable mechanism.
+# Read alongside cast_necessity(): response without necessity does not
+# identify a driver.
 # ==========================================================================
 
-.pred_num_engine <- function(engine, model, X) {
-  p <- switch(engine,
-    rf = {
-      pp <- stats::predict(model, X)$predictions
-      if (is.matrix(pp)) pp <- pp[, "1"]
-      as.numeric(pp)
-    },
-    brt = as.numeric(stats::predict(model, X, n.trees = model$n.trees,
-                                    type = "response")),
-    gam = as.numeric(stats::predict(model, X, type = "response")),
-    maxent = as.numeric(stats::predict(model, X, type = "cloglog",
-                                       clamp = FALSE)),
-    cli::cli_abort("Unsupported engine {.val {engine}} for effect products.")
-  )
-  as.numeric(p)
+.effect_predictions <- function(fit, X, driver, steps, base = NULL) {
+  models <- names(fit$models)
+  if (!length(models)) cli::cli_abort("No fitted models available.")
+  if (is.null(base)) base <- .cast_predict_matrix(fit, X, models)
+  aligned <- vapply(steps, function(st) {
+    shifted <- X
+    shifted[[driver]] <- shifted[[driver]] + st
+    cf <- .cast_predict_matrix(fit, shifted, models)
+    # Average paired model changes BEFORE taking the absolute value. Taking
+    # abs per engine instead measures disagreement, not the ensemble effect.
+    delta <- cf - base
+    delta[!is.finite(cf) | !is.finite(base)] <- NA_real_
+    rowMeans(delta, na.rm = TRUE) * sign(st)
+  }, numeric(nrow(X)))
+  matrix(aligned, nrow = nrow(X), ncol = length(steps))
 }
 
 .steps_from_fit <- function(fit, drivers, shifts, shift_type) {
   shifts <- as.numeric(shifts)
-  if (!length(shifts) || anyNA(shifts) || any(shifts == 0)) {
+  shift_type <- match.arg(shift_type, c("sd", "raw"))
+  if (!length(shifts) || any(!is.finite(shifts)) || any(shifts == 0)) {
     cli::cli_abort("{.arg shifts} must be non-zero finite numbers.")
   }
   if (identical(shift_type, "raw")) {
@@ -61,7 +65,8 @@
   miss <- setdiff(drivers, names(steps))
   if (length(miss)) cli::cli_abort("{.arg steps} lacks entries for: {.val {miss}}.")
   steps <- steps[drivers]
-  bad <- vapply(steps, function(s) !length(s) || anyNA(s) || any(s == 0), logical(1))
+  bad <- vapply(steps, function(s) !is.numeric(s) || !length(s) ||
+                  any(!is.finite(s)) || any(s == 0), logical(1))
   if (any(bad)) cli::cli_abort("{.arg steps} entries must be non-zero finite numbers: {.val {drivers[bad]}}.")
   lapply(steps, as.numeric)
 }
@@ -86,7 +91,7 @@
              n = length(a), n_shifts = n_shifts)
 }
 
-#' Causal Effect Table for Species Distribution Models
+#' Model Response Table for Species Distribution Models
 #'
 #' Intervenes on each driver in turn (do-operator: shift the driver, hold
 #' every other driver fixed), and summarises the resulting change in
@@ -100,14 +105,19 @@
 #' stable driver ranking.
 #'
 #' @section Read with the necessity diagnostic:
-#' Sensitivity alone does not identify a driver: a predictor with a large
-#' interventional effect can still be freely replaceable by a collinear
-#' partner. Pair this table with [cast_necessity()]; where the two
-#' disagree, attribution to that driver is not identified.
+#' Pair this table with [cast_necessity()] to describe predictive behavior.
+#' The latter uses a separate RF estimator, whereas this table averages the
+#' fitted engines equally. Neither agreement nor disagreement identifies a
+#' causal effect. A small knockout cost can reflect redundancy, limited power,
+#' estimator choice or AUC's insensitivity to calibration changes.
+#' Causal interpretation additionally needs a justified adjustment set,
+#' consistency, joint support and an adequate response model. With presence/
+#' background data the output is relative suitability, not occurrence risk.
 #'
 #' @param fit A `cast_fit` object (from [cast_fit()] or [cast()]).
 #' @param newdata Data frame with the fitted predictors; rows with missing
-#'   predictors are dropped per model.
+#'   predictors are dropped consistently with the raster API. Coordinates
+#'   are not required.
 #' @param drivers Character vector of drivers to intervene on. Default:
 #'   every fitted predictor.
 #' @param shifts Numeric vector of intervention sizes, in SD units unless
@@ -126,6 +136,9 @@
 #'   sign of their own shift, so positive means raising the driver raises
 #'   suitability). Rank drivers by `mean_abs_dHSS`; read
 #'   `mean_signed_dHSS` for the sign.
+#'   Summaries first average over shifts per row; `n` counts complete rows.
+#'   `outside_range_fraction` is the fraction of row/shift pairs outside the
+#'   predictor's training range. It does not test multivariate support.
 #' @export
 cast_effect_table <- function(fit, newdata, drivers = NULL,
                               shifts = c(-2, -1, 1, 2), shift_type = "sd",
@@ -135,6 +148,9 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   }
   env_vars <- fit$env_vars
   drivers <- drivers %||% env_vars
+  if (!length(drivers) || anyDuplicated(drivers)) {
+    cli::cli_abort("{.arg drivers} must be non-empty and unique.")
+  }
   if (!all(drivers %in% env_vars)) {
     cli::cli_abort("Unknown drivers: {.val {setdiff(drivers, env_vars)}}.")
   }
@@ -144,22 +160,29 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   } else {
     .steps_from_fit(fit, drivers, shifts, shift_type)
   }
+  missing_vars <- setdiff(env_vars, names(newdata))
+  if (length(missing_vars)) cli::cli_abort("Missing fitted predictors: {.val {missing_vars}}.")
+  X <- as.data.frame(newdata[, env_vars, drop = FALSE])
+  .cast_check_numeric_predictors(X, arg = "newdata")
+  ok <- rowSums(!is.finite(as.matrix(X))) == 0L
+  X <- X[ok, , drop = FALSE]
+  if (!nrow(X)) cli::cli_abort("No complete finite predictor rows in {.arg newdata}.")
+  base <- .cast_predict_matrix(fit, X, names(fit$models))
   out <- vector("list", length(drivers))
   failed <- character(0)
   for (k in seq_along(drivers)) {
     v <- drivers[k]
     sv <- steps[[v]]
     if (verbose) cli::cli_inform("Intervening on {.val {v}} ({.val {sv}})...")
-    aligned <- lapply(sv, function(st) {
-      s <- tryCatch(
-        cast_sensitivity(fit, newdata = newdata, variable = v,
-                         shift = st, shift_type = "raw"),
-        error = function(e) NULL
-      )
-      if (is.null(s)) NA_real_ else s$predictions$delta_hss * sign(st)
-    })
-    aligned <- unlist(aligned, use.names = FALSE)
-    row <- .effect_summarise(aligned, length(sv))
+    aligned <- .effect_predictions(fit, X, v, sv, base)
+    row <- .effect_summarise(rowMeans(aligned, na.rm = TRUE), length(sv),
+                             rowMeans(abs(aligned), na.rm = TRUE))
+    reference <- fit$scaling$reference[[v]]
+    row$outside_range_fraction <- if (length(reference)) {
+      lim <- range(reference, finite = TRUE)
+      mean(vapply(sv, function(st) mean(X[[v]] + st < lim[1] |
+                                       X[[v]] + st > lim[2]), numeric(1)))
+    } else NA_real_
     if (row$n == 0L) failed <- c(failed, v)
     out[[k]] <- cbind(data.frame(driver = v, stringsAsFactors = FALSE), row)
   }
@@ -172,6 +195,8 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   rownames(res) <- NULL
   attr(res, "shift_type") <- if (steps_given) "raw" else shift_type
   attr(res, "steps") <- steps
+  attr(res, "rows_input") <- nrow(newdata)
+  attr(res, "rows_complete") <- nrow(X)
   attr(res, "intervention") <- sprintf(
     "do(driver += s) for s in {%s} %s, all other drivers fixed; deltas aligned to sign(s)",
     paste(if (steps_given) unique(unlist(steps)) else shifts, collapse = ", "),
@@ -185,20 +210,20 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
 
 #' @export
 print.cast_effect_table <- function(x, ...) {
-  cli::cli_text("{.strong Causal effect table} (do-intervention, others fixed)")
+  cli::cli_text("{.strong Model response table} (predictor shifts, others fixed)")
   iv <- attr(x, "intervention")
   if (!is.null(iv)) cli::cli_text("{.emph {iv}}")
   print(as.data.frame(x))
   cli::cli_text("Rank by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction.")
-  cli::cli_text("Pair with {.fn cast_necessity}: disagreement means attribution is not identified.")
+  cli::cli_text("Pair with {.fn cast_necessity} for predictive diagnostics; neither product establishes causal identification.")
   invisible(x)
 }
 
-#' Causal Effect Maps for Species Distribution Models
+#' Model Response Maps for Species Distribution Models
 #'
 #' Intervenes on each driver across every valid cell of `current_stack`
 #' (all other drivers held fixed) and returns the spatially explicit
-#' ensemble-mean change in suitability: the causal effect map. Spatial
+#' equally weighted ensemble-mean change in suitability. Spatial
 #' counterpart of [cast_effect_table()], using the same symmetric shift set.
 #'
 #' @param fit A `cast_fit` object whose predictors are all layers of
@@ -236,6 +261,13 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     cli::cli_abort("{.arg current_stack} lacks fitted predictors: {.val {setdiff(env_vars, names(current_stack))}}.")
   }
   drivers <- drivers %||% env_vars
+  if (!length(drivers) || anyDuplicated(drivers)) {
+    cli::cli_abort("{.arg drivers} must be non-empty and unique.")
+  }
+  if (length(block_rows) != 1L || !is.finite(block_rows) ||
+      block_rows < 1 || block_rows != as.integer(block_rows)) {
+    cli::cli_abort("{.arg block_rows} must be a positive integer.")
+  }
   if (!all(drivers %in% env_vars)) {
     cli::cli_abort("Unknown drivers: {.val {setdiff(drivers, env_vars)}}.")
   }
@@ -245,8 +277,6 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   } else {
     .steps_from_fit(fit, drivers, shifts, shift_type)
   }
-  eng <- vapply(fit$models, function(m) m$name, character(1))
-  mdl <- lapply(fit$models, function(m) m$model)
 
   n_cells <- terra::ncell(current_stack)
   nr <- terra::nrow(current_stack)
@@ -262,31 +292,17 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     # O(n) pass into O(n * n_blocks) on national grids.
     X <- terra::values(current_stack, mat = TRUE, row = r0,
                        nrows = r1 - r0 + 1L)[, env_vars, drop = FALSE]
-    ok <- stats::complete.cases(X)
+    ok <- rowSums(!is.finite(X)) == 0L
     if (!any(ok)) next
     # predict.gbm() and mgcv's predict() reject a matrix, so hand every engine a
     # data.frame. Shifting one column by name also avoids copying the whole
     # block on each intervention step.
     Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
-    zero <- matrix(0, nrow = nrow(Xi), ncol = length(drivers),
-                   dimnames = list(NULL, drivers))
-    ssum <- zero
-    asum <- zero
-    for (m in seq_along(eng)) {
-      p0 <- .pred_num_engine(eng[[m]], mdl[[m]], Xi)
-      for (v in drivers) {
-        for (st in steps[[v]]) {
-          Xs <- Xi; Xs[[v]] <- Xs[[v]] + st
-          d <- .pred_num_engine(eng[[m]], mdl[[m]], Xs) - p0
-          ssum[, v] <- ssum[, v] + d * sign(st)
-          asum[, v] <- asum[, v] + abs(d)
-        }
-      }
-    }
+    base <- .cast_predict_matrix(fit, Xi, names(fit$models))
     for (v in drivers) {
-      denom <- length(eng) * length(steps[[v]])
-      s <- rep(NA_real_, length(cells)); s[ok] <- ssum[, v] / denom
-      a <- rep(NA_real_, length(cells)); a[ok] <- asum[, v] / denom
+      aligned <- .effect_predictions(fit, Xi, v, steps[[v]], base)
+      s <- rep(NA_real_, length(cells)); s[ok] <- rowMeans(aligned, na.rm = TRUE)
+      a <- rep(NA_real_, length(cells)); a[ok] <- rowMeans(abs(aligned), na.rm = TRUE)
       acc_signed[[v]][cells] <- s
       acc_abs[[v]][cells] <- a
     }

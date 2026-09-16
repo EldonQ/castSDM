@@ -2,7 +2,7 @@
 % Please edit documentation in R/effect-products.R
 \name{cast_effect_map}
 \alias{cast_effect_map}
-\title{Causal Effect Maps for Species Distribution Models}
+\title{Model Response Maps for Species Distribution Models}
 \usage{
 cast_effect_map(
   fit,
@@ -51,6 +51,6 @@ per-driver summary table is attached as attribute \code{effect_table}.
 \description{
 Intervenes on each driver across every valid cell of \code{current_stack}
 (all other drivers held fixed) and returns the spatially explicit
-ensemble-mean change in suitability: the causal effect map. Spatial
+equally weighted ensemble-mean change in suitability. Spatial
 counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}}, using the same symmetric shift set.
 }

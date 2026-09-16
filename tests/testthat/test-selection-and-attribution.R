@@ -31,7 +31,7 @@ test_that("stage 2 thresholds against the permutation null, not zero", {
   dat <- make_collinear_data()
   scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 19,
                      seed = 23, verbose = FALSE)
-  expect_true(is.finite(scr$diagnostics$null_threshold))
+  expect_true(all(is.finite(scr$diagnostics$null_threshold)))
   expect_equal(scr$diagnostics$null_quantile, 0.95)
   expect_equal(scr$diagnostics$n_perm, 19L)
   # Pure noise predictors have importance above zero but not above the null.

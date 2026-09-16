@@ -14,25 +14,36 @@ cast_importance(object)
 A \code{cast_importance} object.
 }
 \description{
-Turns a two-stage screen into a tidy per-predictor table: permutation
-importance with its permutation-null p-value and BH-adjusted p-value.
+Turns a two-stage screen into a tidy per-predictor table carrying both
+attribution vocabularies: the \strong{interventional effect} that selected
+the predictor (stage 2 of \code{\link[=cast_select]{cast_select()}}), and the random-forest
+\strong{permutation importance} retained as a diagnostic, each with its
+permutation-null p-value and BH-adjusted p-value.
 }
-\details{
-The table reports each predictor's random-forest permutation importance
-from stage 2 of \code{\link[=cast_select]{cast_select()}}, together with the p-value of that
-importance under the null distribution built by refitting the forest on a
-permuted response (Altmann et al. 2010). Importance carries no sign, so
-read it together with \code{\link[=cast_effect_table]{cast_effect_table()}} for direction.
+\section{Why both columns are reported}{
+
+The two columns answer different questions. Permutation importance permutes
+a predictor, which breaks its correlation with every other predictor and
+pushes collinear rows outside the observed data support, so the score is
+governed by the model's extrapolation behaviour (Hooker, Mentch & Zhou
+2021). The interventional effect shifts one predictor and holds the rest at
+their observed values, so it stays inside the support. A predictor with high
+permutation importance but a low interventional effect is one the forest
+leans on but barely responds to when changed - the signature of a collinear
+stand-in. \code{\link[=cast_select]{cast_select()}} reports their Spearman agreement as
+\code{screen$diagnostics$importance_agreement}.
+
+Importance carries no sign, so read it together with
+\code{\link[=cast_effect_table]{cast_effect_table()}} for direction.
 }
+
 \section{Interpretation (read before citing)}{
 
-Permutation importance measures how much the \emph{fitted model} relies on a
-predictor. It is neither a causal effect nor a test of necessity: a
-predictor can score highly and still be freely replaceable by a collinear
-partner. A causal reading additionally requires no unobserved
-confounding, a correctly specified adjustment set, and no reverse
-causation, which observational, sampling-biased SDM data rarely satisfy
-(Byrnes & Dee 2025). Pair with \code{\link[=cast_necessity]{cast_necessity()}}.
+Both columns describe the \emph{fitted model}. Neither is a causal effect:
+a causal reading additionally requires no unobserved confounding, a
+correctly specified adjustment set, and no reverse causation, which
+observational, sampling-biased SDM data rarely satisfy (Byrnes & Dee 2025).
+Pair with \code{\link[=cast_necessity]{cast_necessity()}}.
 }
 
 \references{
@@ -42,6 +53,11 @@ importance: a corrected feature importance measure. \emph{Bioinformatics},
 
 Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
 data and unobserved confounding variables. \emph{Ecology Letters}, 28(1), e70023.
+
+Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
+extrapolation: variable importance requires at least one more model, or
+there is no free variable importance. \emph{WIREs Data Mining and Knowledge
+Discovery}, 11, e1421.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}, \code{\link[=cast_necessity]{cast_necessity()}}

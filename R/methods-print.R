@@ -20,25 +20,30 @@ print.cast_select <- function(x, ...) {
 print.cast_importance <- function(x, ...) {
   eff <- x$effects
   n_sig <- sum(eff$selected, na.rm = TRUE)
-  cli::cli_h1("castSDM Permutation Importance")
+  cli::cli_h1("castSDM Predictor Attribution")
   bullets <- c(
-    "Random-forest permutation importance vs a permuted-response null",
+    "Interventional effect (shift 1 SD, other predictors fixed)",
+    "Calibrated against a permuted-response null",
     "Above the null (p < {x$alpha}): {n_sig} / {nrow(eff)}"
   )
-  if (is.finite(x$threshold)) {
-    bullets <- c(bullets, "Null threshold (95th pct): {signif(x$threshold, 3)}")
+  ag <- x$diagnostics$importance_agreement
+  if (!is.null(ag) && is.finite(ag)) {
+    bullets <- c(bullets,
+                 "Spearman agreement with permutation importance: {round(ag, 3)}")
   }
   cli::cli_ul(bullets)
   show <- utils::head(eff, 10L)
   disp <- data.frame(
     variable = show$variable,
-    importance = signif(show$estimate, 4),
+    effect = signif(show$interventional_effect, 4),
+    null = signif(show$null_threshold, 4),
+    perm_imp = signif(show$perm_importance, 4),
     p_value = signif(show$p_value, 3),
-    p_adjusted = signif(show$p_adjusted, 3),
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
   print(disp, row.names = FALSE)
+  cli::cli_text("Each predictor is compared with its own permuted-response null ({.field null}).")
   invisible(x)
 }
 
@@ -54,6 +59,61 @@ print.cast_sensitivity <- function(x, ...) {
   cli::cli_text(
     "Delta HSS: mean = {round(s$mean_delta, 4)}, range = [{round(s$max_loss, 3)}, {round(s$max_gain, 3)}]"
   )
+  invisible(x)
+}
+
+#' @export
+print.cast_dose_response <- function(x, ...) {
+  cli::cli_h1("castSDM Dose-Response")
+  cli::cli_ul(c(
+    "Intervention: {x$variable} shift in {x$unit}",
+    "Models averaged: {.val {x$models}}"
+  ))
+  keep <- x$curve[x$curve$estimable, , drop = FALSE]
+  if (nrow(keep)) {
+    imax <- which.max(keep$mean_abs_delta)
+    cli::cli_text(
+      "Largest mean |delta| = {round(keep$mean_abs_delta[imax], 4)} at shift {round(keep$shift[imax], 2)} ({x$unit}); support {round(keep$support[imax], 3)}"
+    )
+  } else {
+    cli::cli_text("No shift in the requested range had adequate support.")
+  }
+  cli::cli_text("{round(100 * mean(x$curve$estimable), 0)}% of the shifted range is on support (>= {attr(x$curve, 'min_support')}).")
+  invisible(x)
+}
+
+#' @export
+print.cast_effect_heatmap <- function(x, ...) {
+  g <- x$grid
+  cli::cli_h1("castSDM Effect Heatmap")
+  cli::cli_ul(c(
+    "Intervention: {x$variable} shift {x$shift} ({x$unit})",
+    "Second axis: {x$modifier}",
+    "Bins reported: {nrow(g)} ({sum(g$supported)} on support)"
+  ))
+  disp <- data.frame(
+    x_mid = signif(g$x_mid, 3),
+    y_mid = signif(g$y_mid, 3),
+    n = g$n,
+    effect = signif(g$effect, 3),
+    support = signif(g$support, 2),
+    supported = ifelse(g$supported, "yes", "NO"),
+    stringsAsFactors = FALSE
+  )
+  disp <- disp[order(-abs(disp$effect)), , drop = FALSE]
+  print(utils::head(disp, 10L), row.names = FALSE)
+  invisible(x)
+}
+
+#' @export
+print.cast_support <- function(x, ...) {
+  cli::cli_h1("castSDM Shift Support (positivity)")
+  cli::cli_text("Fraction of observed predictor vectors still inside the training support.")
+  tab <- x$support
+  tab$support <- round(tab$support, 3)
+  tab$shift_raw <- signif(tab$shift_raw, 4)
+  print(tab, row.names = FALSE)
+  cli::cli_text("Low support means the effect is answered by extrapolation; report it or reduce the shift.")
   invisible(x)
 }
 

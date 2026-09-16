@@ -2,25 +2,41 @@
 "_PACKAGE"
 
 #' @section Overview:
-#' \pkg{castSDM} is a species-distribution-modelling workflow with an explicit
-#' separation between two questions that are routinely conflated. Variable
-#' selection ([cast_select()]) answers *which predictors to carry*: a
-#' conventional two-stage screen — collinearity thinning followed by an
-#' importance filter calibrated against a permutation null — serving parsimony
-#' and projection robustness. Attribution answers *which predictors matter and
-#' how*, and is handled separately by an audit that pairs interventional
-#' effects ([cast_effect_table()], [cast_effect_map()], [cast_sensitivity()])
-#' with a knockout necessity check ([cast_necessity()]). Neither product is a
-#' claim of automatic causal discovery; the pairing is a reliability audit of
-#' correlational attribution, and a driver is only reported as credible when
-#' both agree.
+#' \pkg{castSDM} is a species-distribution-modelling workflow built around one
+#' question: if a driver moved, what would happen to predicted suitability, and
+#' where is that answer supported by data?
+#'
+#' Variable selection ([cast_select()]) answers *which predictors to carry*.
+#' Stage 1 thins collinear predictors. Stage 2 ranks the survivors by the
+#' **interventional effect**: the change each one causes in the fitted
+#' probability when it is shifted while every other predictor stays at its
+#' observed value, calibrated against a permuted-response null. The same
+#' forest's permutation importance is reported alongside as a diagnostic,
+#' because permuting a predictor breaks its correlation with the others and is
+#' therefore governed by the model's extrapolation behaviour rather than by the
+#' predictor's influence (Hooker, Mentch & Zhou 2021).
+#'
+#' The effect products ([cast_effect_table()], [cast_effect_map()],
+#' [cast_dose_response()], [cast_effect_heatmap()], [cast_sensitivity()],
+#' [cast_effect_support()]) report the interventional response, its shape over
+#' the size of the shift, and the fraction of observed predictor vectors still
+#' inside the training support after the shift. The knockout audit
+#' ([cast_necessity()]) asks the complementary question: does the model still
+#' discriminate without this predictor?
+#'
+#' None of these is a claim of automatic causal discovery. The effect products
+#' are model-based interventional contrasts under stated assumptions, and the
+#' support column reports only the positivity assumption; the others are
+#' assumptions, not results. Even agreement between products does not establish
+#' a causal driver.
 #'
 #' **Pipeline steps:**
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: two-stage collinearity + permutation-null
-#'    importance screening ([cast_select()]), reported via [cast_importance()]
+#' 2. **Variable Selection**: collinearity thinning, then an interventional
+#'    effect filter against a permuted-response null ([cast_select()]),
+#'    reported via [cast_importance()] with both attribution columns
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial
 #'    cross-validation with fold-specific selection ([cast_cv()])
@@ -30,9 +46,11 @@
 #'    ensemble prediction ([cast_ensemble()])
 #' 7. **Future Projection**: range-change analysis under climate scenarios
 #'    ([cast_project()])
-#' 8. **Attribution audit**: interventional effect sizes and maps
-#'    ([cast_effect_table()], [cast_effect_map()]) paired with knockout
-#'    necessity ([cast_necessity()])
+#' 8. **Interventional attribution**: effect sizes and maps
+#'    ([cast_effect_table()], [cast_effect_map()]), response shape
+#'    ([cast_dose_response()], [cast_effect_heatmap()]), positivity
+#'    ([cast_effect_support()]), paired with knockout necessity
+#'    ([cast_necessity()])
 #'
 #' @section Quick Start:
 #' ```

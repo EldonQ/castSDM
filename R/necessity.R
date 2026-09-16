@@ -55,11 +55,14 @@
 #'
 #' @section Read with the sensitivity diagnostic:
 #' Necessity and sensitivity answer different questions and can disagree.
-#' A driver the model responds to strongly ([cast_effect_table()]) but whose
-#' removal costs nothing (`mean_dAUC` around zero) is freely substitutable
-#' by a correlated partner: the effect is real for the fitted model but
-#' attribution to *that* driver is not identified. Report the pair; treat
-#' disagreement as a limit on what the data can support, not as an error.
+#' This diagnostic always refits a random forest, even when the supplied
+#' screen came from a multi-engine fit. It measures RF predictive necessity,
+#' not necessity for that ensemble. A small cost can reflect redundancy,
+#' limited power, estimator choice or the discrimination metric. A positive
+#' cost does not identify a causal driver. Report effects and costs together,
+#' with their estimator and uncertainty. A fixed predictor set selected using
+#' these same rows makes this a conditional, post-selection diagnostic; use
+#' an independently specified set for confirmatory evaluation.
 #'
 #' @param data Data frame with `lon`, `lat`, the binary response and the
 #'   predictors.
@@ -89,6 +92,8 @@
 #'   `sd_dAUC`, `min_dAUC`, `max_dAUC`, `pct_folds_positive`, `n_folds`,
 #'   and `necessary` (`mean_dAUC > 0`). `pct_folds_positive` is there so a
 #'   stricter rule can be applied without refitting.
+#'   `necessary` is a legacy descriptive positive-mean flag, not a test of
+#'   statistical significance or causal identification.
 #' @seealso [cast_effect_table()], [cast_effect_map()]
 #' @export
 cast_necessity <- function(data, screen = NULL, variables = NULL,
@@ -196,6 +201,6 @@ print.cast_necessity <- function(x, ...) {
   cli::cli_text("{.strong Necessity (knockout) diagnostic}: {x$k} spatial fold{?s}, {.val {x$block_method}} blocking")
   cli::cli_text("dAUC = held-out AUC of the full model minus the model without that driver.")
   print(as.data.frame(x$necessity))
-  cli::cli_text("Pair with {.fn cast_effect_table}: a large effect with dAUC around zero means the driver is substitutable, not identified.")
+  cli::cli_text("RF predictive diagnostic; positive dAUC is not a causal identification test.")
   invisible(x)
 }

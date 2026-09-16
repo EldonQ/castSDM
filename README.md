@@ -1,42 +1,53 @@
 # castSDM
 
 `castSDM` is a species distribution modelling package built around one
-question that conventional SDM pipelines leave unanswered: **which
-environmental drivers can the data actually support attributing habitat
-change to, and where?**
+question: **if a driver moved, what would happen to predicted suitability, and
+where is that answer actually supported by data?**
 
-Two products carry that:
+Three products carry that:
 
-- **Interventional effect analysis.** For every driver, `cast_effect_table()`
-  and `cast_effect_map()` shift the driver while holding every other driver
-  fixed (a do-intervention, evaluated by g-computation over the fitted
-  ensemble) and report the resulting change in habitat suitability, as a
-  magnitude and a direction, per driver and per 1 km cell.
-- **A necessity audit.** `cast_necessity()` refits the model without each
-  driver inside every spatial training fold and measures the held-out AUC it
-  costs. Sensitivity without necessity does not identify a driver: a
-  predictor the model responds to strongly can still be freely replaceable by
-  a collinear partner. Read the pair; where they disagree, attribution to
-  that driver is not identified and should be reported as such.
+- **Interventional effects.** `cast_effect_table()` and `cast_effect_map()`
+  shift one driver while holding every other driver at its observed value, and
+  report the resulting change in predicted suitability as a magnitude and a
+  direction, per driver and per input raster cell.
+- **Response shape.** `cast_dose_response()` sweeps the size of the shift, so a
+  saturating or threshold response stays visible instead of collapsing to one
+  number; `cast_effect_heatmap()` bins the observed data by the intervened
+  driver and an effect modifier.
+- **A positivity diagnostic.** `cast_effect_support()` reports the fraction of
+  observed predictor vectors that are still inside the training support after
+  the shift. A shift answered mostly by extrapolation is reported as such and
+  drawn as an empty cell, never silently coloured in.
 
-Variable selection is a separate concern, handled by `cast_select()` and
-scoped to what selection can honestly deliver: **parsimony and projection
-robustness, not causal attribution.** It is a two-stage, literature-standard
-procedure:
+## Variable selection selects on the interventional effect
+
+`cast_select()` is a two-stage screen:
 
 1. **Collinearity thinning.** Rank predictors by absolute marginal
    association, then greedily keep predictors whose pairwise correlation with
    all kept predictors is at most 0.7 (Dormann et al. 2013).
-2. **Importance filter against a permutation null.** Fit a probability random
-   forest on the survivors, refit it on permuted responses to build the null
-   distribution of permutation importance, and keep predictors above the 95th
-   percentile of that null (Altmann et al. 2010). Permutation importance
-   under the null is centred on zero, not bounded by it, so a bare
-   `importance > 0` rule retains roughly half of all uninformative
-   predictors; the null quantile is the calibrated replacement.
+2. **Interventional effect against a permutation null.** Fit a probability
+   random forest on the survivors and measure how far each predictor moves the
+   fitted probability **when it is shifted while every other predictor stays at
+   its observed value**. Recompute the same statistic on forests refitted to a
+   permuted response to build a feature-wise null, and keep predictors with
+   Monte Carlo tail probability <= 0.05 (Altmann et al. 2010).
 
-Selection is re-run inside every outer spatial training fold, so held-out
-folds never influence variable choice or tuning.
+Why the second stage is a shift rather than a permutation: permuting a
+predictor breaks its correlation with every other predictor, so for collinear
+predictors the permuted rows leave the observed data support and the score is
+governed by the model's extrapolation behaviour rather than by the predictor's
+influence (Hooker, Mentch & Zhou 2021). Shifting one predictor and holding the
+rest at their observed values keeps the contrast inside the support and answers
+a question that has a definition.
+
+The same forest's permutation importance is still reported, as a diagnostic.
+`screen$diagnostics$importance_agreement` gives the Spearman agreement between
+the two rankings; large disagreement marks predictors the forest leans on but
+barely responds to when changed — the signature of a collinear stand-in.
+
+Selection is re-run inside every outer spatial training fold, so held-out folds
+never influence variable choice or tuning.
 
 ## Core workflow
 
@@ -52,35 +63,35 @@ result <- cast(
 )
 
 summary(result)
-plot(result$screen)          # stage-1 status and stage-2 permutation null
+plot(result$screen)          # interventional effect vs the permuted-response null
 ```
 
-Attribution: the effect/necessity pair.
+Attribution:
 
 ```r
 eff <- cast_effect_table(result$fit, newdata = current_grid)
 eff                                  # rank by mean_abs_dHSS, read the sign
 
+emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_*
+
+dr <- cast_dose_response(result$fit, "bio1", shift = seq(-3, 3, by = 0.5))
+plot(dr)                             # response shape, hollow points = off support
+
+hm <- cast_effect_heatmap(result$fit, "bio1", modifier = "bio12", shift = 1)
+plot(hm)                             # empty cells leave the observed support
+
+sp <- cast_effect_support(result$fit, shift = c(1, 2, 3))
+plot(sp)                             # positivity by driver and shift size
+
 nec <- cast_necessity(species_data, screen = result$screen, k = 5)
 nec                                  # mean_dAUC lost by dropping each driver
-
-emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_*
-```
-
-Single-driver what-if maps on the current climate:
-
-```r
-cf <- cast_sensitivity(result$fit,
-  newdata = current_grid,
-  variable = "bio1", shift = 1)
-plot(cf, basemap = "china")
 ```
 
 The pipeline runs:
 
 ```text
 prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
-        -> predict -> ensemble -> projection -> attribution audit
+        -> predict -> ensemble -> projection -> interventional attribution
 ```
 
 ## Main functions
@@ -94,7 +105,7 @@ prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
 | Validation | `cast_cv()`, `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
-| Attribution | `cast_effect_table()`, `cast_effect_map()`, `cast_necessity()`, `cast_sensitivity()` |
+| Interventional effects | `cast_effect_table()`, `cast_effect_map()`, `cast_dose_response()`, `cast_effect_heatmap()`, `cast_effect_support()`, `cast_sensitivity()`, `cast_necessity()` |
 | Reporting | `cast_report_odmap()` |
 
 ## Model backends
@@ -124,16 +135,22 @@ install.packages(c(
 
 ## Interpretation
 
-- Selected variables are a parsimonious, projection-robust predictor set.
-  They are not a list of causes; use the effect/necessity pair for that.
-- Effect tables and maps are model-based interventional estimates. They
-  assume no unobserved confounding and are not proof of a manipulable
-  mechanism.
-- A large `mean_abs_dHSS` with `mean_dAUC` near zero means the driver is
-  substitutable: report it as unidentified rather than as a driver.
-- Ensemble predictions carry a cross-model `hss_sd` uncertainty layer.
-- Sensitivity maps are interpretive what-if summaries on the current
-  climate; they do not extrapolate to future scenarios.
+- Effect tables, maps, curves and heatmaps are **model-based interventional
+  contrasts** (g-computation / standardization). They assume consistency, no
+  unobserved confounding given the adjustment set, and positivity; the support
+  column reports the third. They are not doubly robust and not TMLE.
+- The `support` column is a marginal-quantile (hyper-rectangle) approximation
+  to the joint support. It flags gross off-support shifts, not subtler holes
+  inside the observed box.
+- On presence/background data the scale is **relative suitability, not
+  occurrence probability**.
+- Selected variables are a parsimonious set ranked by interventional effect.
+  Selection is a model-based screen, not a list of causes.
+- A large `mean_abs_dHSS` with small `mean_dAUC` shows model response with
+  limited RF knockout cost. It does not prove substitutability or its cause.
+- Effect heatmap bins are built from observed rows, so they describe how the
+  fitted effect varies across sampled conditions. They cannot certify effect
+  modification that the data never sampled.
 - Future projections assume the learned response relationship remains
   applicable under the projected environment.
 - `cast_report_odmap()` renders the analysis settings as an ODMAP-aligned
@@ -147,6 +164,11 @@ importance: a corrected feature importance measure. *Bioinformatics* 26:
 
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal with
 it in ecological studies. *Ecography* 36: 27-46.
+
+Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
+extrapolation: variable importance requires at least one more model, or there
+is no free variable importance. *WIREs Data Mining and Knowledge Discovery*
+11: e1421.
 
 ## License
 

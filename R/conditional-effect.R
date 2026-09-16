@@ -1,9 +1,10 @@
 # Importance reporting + sensitivity -----------------------------------------
 #
 # Two functions turn a fitted castSDM workflow into interpretable evidence:
-#   * cast_importance() - tidies the permutation-importance scores already
-#                         produced by the two-stage screen, with the
-#                         permutation p-values and the null threshold.
+#   * cast_importance() - tidies the screen's two attribution columns: the
+#                         interventional effect that selected each predictor
+#                         and the permutation importance kept as a diagnostic,
+#                         with permutation p-values and null thresholds.
 #   * cast_sensitivity() - a "what-if" on the current climate: shift one
 #                          predictor, hold the rest fixed, and map the change in
 #                          predicted habitat suitability.
@@ -32,23 +33,33 @@
 
 #' Predictor Importance Table from the Screen
 #'
-#' Turns a two-stage screen into a tidy per-predictor table: permutation
-#' importance with its permutation-null p-value and BH-adjusted p-value.
+#' Turns a two-stage screen into a tidy per-predictor table carrying both
+#' attribution vocabularies: the \strong{interventional effect} that selected
+#' the predictor (stage 2 of [cast_select()]), and the random-forest
+#' \strong{permutation importance} retained as a diagnostic, each with its
+#' permutation-null p-value and BH-adjusted p-value.
 #'
-#' The table reports each predictor's random-forest permutation importance
-#' from stage 2 of [cast_select()], together with the p-value of that
-#' importance under the null distribution built by refitting the forest on a
-#' permuted response (Altmann et al. 2010). Importance carries no sign, so
-#' read it together with [cast_effect_table()] for direction.
+#' @section Why both columns are reported:
+#' The two columns answer different questions. Permutation importance permutes
+#' a predictor, which breaks its correlation with every other predictor and
+#' pushes collinear rows outside the observed data support, so the score is
+#' governed by the model's extrapolation behaviour (Hooker, Mentch & Zhou
+#' 2021). The interventional effect shifts one predictor and holds the rest at
+#' their observed values, so it stays inside the support. A predictor with high
+#' permutation importance but a low interventional effect is one the forest
+#' leans on but barely responds to when changed - the signature of a collinear
+#' stand-in. [cast_select()] reports their Spearman agreement as
+#' `screen$diagnostics$importance_agreement`.
+#'
+#' Importance carries no sign, so read it together with
+#' [cast_effect_table()] for direction.
 #'
 #' @section Interpretation (read before citing):
-#' Permutation importance measures how much the *fitted model* relies on a
-#' predictor. It is neither a causal effect nor a test of necessity: a
-#' predictor can score highly and still be freely replaceable by a collinear
-#' partner. A causal reading additionally requires no unobserved
-#' confounding, a correctly specified adjustment set, and no reverse
-#' causation, which observational, sampling-biased SDM data rarely satisfy
-#' (Byrnes & Dee 2025). Pair with [cast_necessity()].
+#' Both columns describe the \emph{fitted model}. Neither is a causal effect:
+#' a causal reading additionally requires no unobserved confounding, a
+#' correctly specified adjustment set, and no reverse causation, which
+#' observational, sampling-biased SDM data rarely satisfy (Byrnes & Dee 2025).
+#' Pair with [cast_necessity()].
 #'
 #' @param object A `cast_select` from `method = "two_stage"`, or a
 #'   `cast_fit` / `cast_result` that carries such a screen.
@@ -61,36 +72,44 @@
 #'
 #' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
 #' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
+#'
+#' Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
+#' extrapolation: variable importance requires at least one more model, or
+#' there is no free variable importance. *WIREs Data Mining and Knowledge
+#' Discovery*, 11, e1421.
 #' @seealso [cast_select()], [cast_sensitivity()], [cast_necessity()]
 #' @export
 cast_importance <- function(object) {
   screen <- .cast_extract_screen(object)
   sc <- screen$scores
-  needed <- c("perm_importance", "p_value", "p_adjusted")
+  needed <- c("interventional_effect", "perm_importance", "p_value", "p_adjusted")
   if (!all(needed %in% names(sc))) {
     cli::cli_abort(c(
-      "{.fn cast_importance} needs a two-stage screen carrying permutation importance.",
+      "{.fn cast_importance} needs a two-stage screen carrying a stage-2 statistic.",
       i = "Run {.code cast_select(..., method = \"two_stage\")} first."))
   }
-  sc <- sc[is.finite(sc$perm_importance), , drop = FALSE]
+  sc <- sc[is.finite(sc$interventional_effect) | is.finite(sc$perm_importance), ,
+           drop = FALSE]
   if (!nrow(sc)) {
     cli::cli_abort(c(
       "The screen holds no finite importance estimates.",
       i = "{.code method = \"full\"} skips stage 2, so there is nothing to report."))
   }
   effects <- data.frame(
-    variable   = sc$variable,
-    estimate   = sc$perm_importance,
-    p_value    = sc$p_value,
-    p_adjusted = sc$p_adjusted,
-    selected   = sc$selected,
+    variable              = sc$variable,
+    interventional_effect = sc$interventional_effect,
+    perm_importance       = sc$perm_importance,
+    null_threshold        = sc$null_threshold,
+    p_value               = sc$p_value,
+    p_adjusted            = sc$p_adjusted,
+    selected              = sc$selected,
     stringsAsFactors = FALSE
   )
-  effects <- effects[order(-effects$estimate), , drop = FALSE]
+  effects <- effects[order(-effects$interventional_effect), , drop = FALSE]
   rownames(effects) <- NULL
 
   diagnostics <- screen$diagnostics
-  diagnostics$measure <- "permutation_importance"
+  diagnostics$measure <- "interventional_effect"
   new_cast_importance(
     effects = effects,
     alpha = screen$diagnostics$alpha %||% 0.05,
@@ -136,8 +155,8 @@ cast_importance <- function(object) {
 #' The result is a *model-based* what-if conditional on the fitted models and
 #' the observed predictor distribution, reported on the relative habitat
 #' suitability scale (not calibrated occurrence probability). It is not a
-#' validated causal effect: it inherits the same no-unobserved-confounding and
-#' correct-functional-form assumptions as the screen (Byrnes & Dee 2025), and
+#' validated causal effect: causal interpretation requires a justified
+#' adjustment set, no unobserved confounding, consistency and joint support; and
 #' large shifts can push cells outside the training envelope - pair it with the
 #' MESS/extrapolation flags from [cast_predict()].
 #'
@@ -203,6 +222,7 @@ cast_sensitivity <- function(fit, newdata, variable,
   base_pred <- rowMeans(base_mat, na.rm = TRUE)
   cf_pred   <- rowMeans(cf_mat, na.rm = TRUE)
   delta_mat <- cf_mat - base_mat
+  delta_mat[!is.finite(cf_mat) | !is.finite(base_mat)] <- NA_real_
   delta_sd <- if (ncol(delta_mat) > 1L) {
     apply(delta_mat, 1L, stats::sd, na.rm = TRUE)
   } else {
@@ -214,7 +234,7 @@ cast_sensitivity <- function(fit, newdata, variable,
     lat = newdata[[coords[2]]],
     baseline = base_pred,
     counterfactual = cf_pred,
-    delta_hss = cf_pred - base_pred,
+    delta_hss = rowMeans(delta_mat, na.rm = TRUE),
     delta_sd = delta_sd,
     stringsAsFactors = FALSE
   )

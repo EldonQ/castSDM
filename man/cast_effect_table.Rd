@@ -2,7 +2,7 @@
 % Please edit documentation in R/effect-products.R
 \name{cast_effect_table}
 \alias{cast_effect_table}
-\title{Causal Effect Table for Species Distribution Models}
+\title{Model Response Table for Species Distribution Models}
 \usage{
 cast_effect_table(
   fit,
@@ -18,7 +18,8 @@ cast_effect_table(
 \item{fit}{A \code{cast_fit} object (from \code{\link[=cast_fit]{cast_fit()}} or \code{\link[=cast]{cast()}}).}
 
 \item{newdata}{Data frame with the fitted predictors; rows with missing
-predictors are dropped per model.}
+predictors are dropped consistently with the raster API. Coordinates
+are not required.}
 
 \item{drivers}{Character vector of drivers to intervene on. Default:
 every fitted predictor.}
@@ -43,6 +44,9 @@ shift set); \code{mean_signed_dHSS} is the direction (deltas aligned to the
 sign of their own shift, so positive means raising the driver raises
 suitability). Rank drivers by \code{mean_abs_dHSS}; read
 \code{mean_signed_dHSS} for the sign.
+Summaries first average over shifts per row; \code{n} counts complete rows.
+\code{outside_range_fraction} is the fraction of row/shift pairs outside the
+predictor's training range. It does not test multivariate support.
 }
 \description{
 Intervenes on each driver in turn (do-operator: shift the driver, hold
@@ -59,9 +63,13 @@ stable driver ranking.
 }
 \section{Read with the necessity diagnostic}{
 
-Sensitivity alone does not identify a driver: a predictor with a large
-interventional effect can still be freely replaceable by a collinear
-partner. Pair this table with \code{\link[=cast_necessity]{cast_necessity()}}; where the two
-disagree, attribution to that driver is not identified.
+Pair this table with \code{\link[=cast_necessity]{cast_necessity()}} to describe predictive behavior.
+The latter uses a separate RF estimator, whereas this table averages the
+fitted engines equally. Neither agreement nor disagreement identifies a
+causal effect. A small knockout cost can reflect redundancy, limited power,
+estimator choice or AUC's insensitivity to calibration changes.
+Causal interpretation additionally needs a justified adjustment set,
+consistency, joint support and an adequate response model. With presence/
+background data the output is relative suitability, not occurrence risk.
 }
 

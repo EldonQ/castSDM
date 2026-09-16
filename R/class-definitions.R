@@ -5,7 +5,8 @@
 #' @param selected Character vector of selected variable names.
 #' @param scores A `data.frame` with per-variable scores. For
 #'   `method = "two_stage"`: marginal `assoc`, the stage-1
-#'   `collinear_thinned` flag, `perm_importance`, the permutation `p_value`,
+#'   `collinear_thinned` flag, `interventional_effect` (the stage-2 selection
+#'   statistic), the `perm_importance` diagnostic, the permutation `p_value`,
 #'   the BH-adjusted `p_adjusted`, and the `selected` flag. For
 #'   `method = "full"` the score columns are `NA`.
 #' @param method Character screening-method identifier.
@@ -28,11 +29,12 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of per-predictor permutation importance with
-#'   permutation-null `p_value` and BH-adjusted `p_adjusted`.
+#' @param effects A `data.frame` of per-predictor interventional effect and
+#'   permutation importance with permutation-null `p_value` and BH-adjusted
+#'   `p_adjusted`.
 #' @param alpha Significance level used to flag predictors.
-#' @param threshold Numeric. The stage-2 permutation-null importance
-#'   threshold, or `NA` when unknown.
+#' @param threshold Numeric. The stage-2 permutation-null threshold, or `NA`
+#'   when unknown (one entry per predictor for a two-stage screen).
 #' @param diagnostics Named list carried over from the screen.
 #'
 #' @return A `cast_importance` object.
@@ -76,6 +78,87 @@ new_cast_sensitivity <- function(predictions, variable, shift, shift_type,
       summary = summary
     ),
     class = "cast_sensitivity"
+  )
+}
+
+#' Create a cast_dose_response Object
+#'
+#' @param curve A `data.frame` with `shift`, `shift_raw`, `mean_delta`,
+#'   `mean_abs_delta`, `support`, and `estimable`.
+#' @param variable Character. The intervened predictor.
+#' @param shift_type Character. How `shift` is interpreted.
+#' @param unit Character. Human-readable shift unit.
+#' @param models Character vector of models averaged.
+#' @param assumptions Character. The identification assumptions carried by the
+#'   estimate.
+#'
+#' @return A `cast_dose_response` object.
+#' @keywords internal
+#' @export
+new_cast_dose_response <- function(curve, variable, shift_type, unit, models,
+                                   assumptions = NULL) {
+  structure(
+    list(curve = curve, variable = variable, shift_type = shift_type,
+         unit = unit, models = models, assumptions = assumptions),
+    class = "cast_dose_response"
+  )
+}
+
+#' Create a cast_effect_heatmap Object
+#'
+#' @param grid A `data.frame` with one row per populated bin: `x_bin`, `y_bin`,
+#'   `x_mid`, `y_mid`, `x_lo`, `x_hi`, `y_lo`, `y_hi`, `n`, `effect`,
+#'   `abs_effect`, `support`, `supported`.
+#' @param variable Character. The intervened predictor.
+#' @param modifier Character. The predictor on the second axis.
+#' @param shift Numeric. Intervention size.
+#' @param shift_type Character. How `shift` is interpreted.
+#' @param unit Character. Human-readable shift unit.
+#' @param min_support Numeric. Support fraction below which a bin is flagged
+#'   unsupported.
+#' @param n_bins Integer. Quantile bins per axis.
+#' @param min_n Integer. Minimum rows per reported bin.
+#' @param support_probs Numeric length 2. Quantiles defining the support box.
+#' @param models Character vector of models averaged.
+#' @param assumptions Character. The identification assumptions carried.
+#'
+#' @return A `cast_effect_heatmap` object.
+#' @keywords internal
+#' @export
+new_cast_effect_heatmap <- function(grid, variable, modifier, shift, shift_type,
+                                    unit, min_support, n_bins, min_n,
+                                    support_probs, models, assumptions = NULL) {
+  structure(
+    list(grid = grid, variable = variable, modifier = modifier, shift = shift,
+         shift_type = shift_type, unit = unit, min_support = min_support,
+         n_bins = n_bins, min_n = min_n, support_probs = support_probs,
+         models = models, assumptions = assumptions),
+    class = "cast_effect_heatmap"
+  )
+}
+
+#' Create a cast_support Object
+#'
+#' @param support A `data.frame` with `driver`, `shift`, `shift_raw`, and
+#'   `support` (the fraction of observed predictor vectors still inside the
+#'   training support after the shift).
+#' @param variables Character vector of assessed predictors.
+#' @param shift Numeric vector of assessed shift sizes.
+#' @param shift_type Character. How `shift` is interpreted.
+#' @param support_probs Numeric length 2. Quantiles defining the support box.
+#' @param models Character vector of models in the fit.
+#' @param assumptions Character. The identification assumptions carried.
+#'
+#' @return A `cast_support` object.
+#' @keywords internal
+#' @export
+new_cast_support <- function(support, variables, shift, shift_type,
+                             support_probs, models, assumptions = NULL) {
+  structure(
+    list(support = support, variables = variables, shift = shift,
+         shift_type = shift_type, support_probs = support_probs,
+         models = models, assumptions = assumptions),
+    class = "cast_support"
   )
 }
 

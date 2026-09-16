@@ -11,7 +11,8 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 
 \item{scores}{A \code{data.frame} with per-variable scores. For
 \code{method = "two_stage"}: marginal \code{assoc}, the stage-1
-\code{collinear_thinned} flag, \code{perm_importance}, the permutation \code{p_value},
+\code{collinear_thinned} flag, \code{interventional_effect} (the stage-2 selection
+statistic), the \code{perm_importance} diagnostic, the permutation \code{p_value},
 the BH-adjusted \code{p_adjusted}, and the \code{selected} flag. For
 \code{method = "full"} the score columns are \code{NA}.}
 

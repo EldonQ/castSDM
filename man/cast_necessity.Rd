@@ -58,6 +58,8 @@ row per driver: \code{mean_dAUC} (mean held-out AUC lost by dropping it),
 \code{sd_dAUC}, \code{min_dAUC}, \code{max_dAUC}, \code{pct_folds_positive}, \code{n_folds},
 and \code{necessary} (\code{mean_dAUC > 0}). \code{pct_folds_positive} is there so a
 stricter rule can be applied without refitting.
+\code{necessary} is a legacy descriptive positive-mean flag, not a test of
+statistical significance or causal identification.
 }
 \description{
 Refits the model without each driver in turn and measures how much
@@ -68,11 +70,14 @@ loss is an out-of-sample cost, not an in-sample importance score.
 \section{Read with the sensitivity diagnostic}{
 
 Necessity and sensitivity answer different questions and can disagree.
-A driver the model responds to strongly (\code{\link[=cast_effect_table]{cast_effect_table()}}) but whose
-removal costs nothing (\code{mean_dAUC} around zero) is freely substitutable
-by a correlated partner: the effect is real for the fitted model but
-attribution to \emph{that} driver is not identified. Report the pair; treat
-disagreement as a limit on what the data can support, not as an error.
+This diagnostic always refits a random forest, even when the supplied
+screen came from a multi-engine fit. It measures RF predictive necessity,
+not necessity for that ensemble. A small cost can reflect redundancy,
+limited power, estimator choice or the discrimination metric. A positive
+cost does not identify a causal driver. Report effects and costs together,
+with their estimator and uncertainty. A fixed predictor set selected using
+these same rows makes this a conditional, post-selection diagnostic; use
+an independently specified set for confirmatory evaluation.
 }
 
 \seealso{
