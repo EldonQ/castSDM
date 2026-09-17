@@ -2,7 +2,7 @@ Package: castSDM
 Type: Package
 Title: Model Response and Interventional Effects for Species Distribution
     Models
-Version: 0.10.0
+Version: 0.11.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -13,8 +13,7 @@ Authors@R: c(
   )
 Description: Audits model-based environmental responses in species
     distribution modelling. Predictor shifts evaluated over a fitted model
-    produce effect sizes, dose-response curves, effect heatmaps and spatial
-    maps. Variable selection is a two-stage screen whose second stage ranks
+    produce effect sizes, dose-response curves and spatial maps. Variable selection is a two-stage screen whose second stage ranks
     predictors by the change they cause in the fitted probability when they
     are shifted while every other predictor is held at its observed value - a
     g-computation contrast - calibrated against a response-permutation null.

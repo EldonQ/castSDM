@@ -12,6 +12,8 @@ cast_select(
   n_perm = 49L,
   shift_size = 1,
   max_rows = 2000L,
+  ncov = NULL,
+  maxncov = 12L,
   seed = NULL,
   verbose = TRUE,
   ...
@@ -38,6 +40,12 @@ sign convention.}
 g-computation contrast. Bounds stage-2 cost on large data sets.
 Default 2000.}
 
+\item{ncov}{Maximum predictors retained, ordered by the interventional
+effect. Default \code{NULL} selects \code{ceiling(log2(n_presence))} where
+\code{n_presence} is the number of presences. Use \code{Inf} for no cap.}
+
+\item{maxncov}{Upper bound applied to the automatic \code{ncov}. Default \code{12}.}
+
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
@@ -46,27 +54,33 @@ Default 2000.}
 }
 \value{
 A \code{cast_select} object: \code{selected} (kept predictors), \code{scores}
-(per-predictor marginal \code{assoc}, the stage-1 \code{collinear_thinned} flag,
-\code{interventional_effect} -- the stage-2 selection statistic -- its
-permutation \code{p_value}, the BH-adjusted \code{p_adjusted}, the feature-wise
-\code{null_threshold}, the retained \code{perm_importance} diagnostic, and the
-\code{selected} flag). Selection uses
+(per-predictor marginal \code{assoc}, the \code{stage1_p} ranking signal with its
+\code{stage1_rank}, the stage-1 \code{collinear_thinned} flag,
+\code{interventional_effect} -- the stage-2 selection statistic -- with its
+\code{effect_rank}, its permutation \code{p_value}, the BH-adjusted \code{p_adjusted},
+the feature-wise \code{null_threshold}, the retained \code{perm_importance}
+diagnostic, the \code{selected_reason} (\code{"null"}, \code{"null+top-ncov"},
+\code{"fallback-top-ncov"}, \code{"full"} or \code{"excluded"}), and the \code{selected}
+flag). Selection uses
 \code{(1 + sum(null >= observed)) / (1 + n_perm)} for each predictor
 separately. \code{p_adjusted} adjusts over stage-1 survivors only and is not
 the selection rule. These are screening diagnostics: the
 response-dependent stage-1 screen is held fixed during permutation, so
 they do not establish confirmatory p-values or FDR control.
-\code{passed_null} distinguishes evidence from a stage-1 fallback when no
-variable passes. Fewer than 19 permutations cannot resolve p <= 0.05.
+\code{passed_null} distinguishes evidence from a capped or fallback set when
+the null is not the binding constraint. Fewer than 19 permutations
+cannot resolve p <= 0.05.
 }
 \description{
 Two-stage variable selection whose second stage is calibrated against an
 \emph{interventional} null rather than a permutation-importance null:
 \enumerate{
-\item \strong{Stage 1 — collinearity thinning}: rank predictors by
-absolute marginal association with the response, then greedily keep
-predictors whose pairwise correlation with all kept predictors is
-\eqn{\le 0.7} (Dormann et al. 2013).
+\item \strong{Stage 1 — collinearity thinning}: rank predictors by a
+univariate quadratic-logistic signal (the smaller p-value of the two
+\code{poly(x, 2)} terms, which sees U-shaped responses a linear correlation
+misses), then greedily keep predictors whose pairwise correlation with
+all kept predictors is \eqn{\le 0.7} (Dormann et al. 2013). Predictors
+whose GLM fails to fit fall back to the marginal-correlation rank.
 \item \strong{Stage 2 — interventional effect above a permutation null}:
 fit a probability random forest on the stage-1 survivors, then measure
 how far each predictor moves the fitted probability when it is
@@ -74,7 +88,11 @@ how far each predictor moves the fitted probability when it is
 value} (a g-computation contrast; see \code{\link[=cast_effect_table]{cast_effect_table()}}). The same
 statistic is recomputed on forests refitted to a permuted response to
 build a feature-wise null, and predictors whose Monte Carlo tail
-probability is at most 0.05 are kept (Altmann et al. 2010).
+probability is at most 0.05 are kept (Altmann et al. 2010). The kept
+set is capped at \code{ncov} predictors (default
+\code{ceiling(log2(n_presence))}, at most \code{maxncov}), ordered by the
+interventional effect, so model complexity stays tied to the number of
+presences (Adde et al. 2023).
 }
 }
 \section{Why the second stage is interventional}{
@@ -90,6 +108,10 @@ is retained, so calibration still compares like with like.
 }
 
 \references{
+Adde, A. et al. (2023). Too many candidates: embedded covariate selection
+procedure for species distribution modelling with the covsel R package.
+\emph{Ecological Informatics} 75: 102080.
+
 Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
 importance: a corrected feature importance measure.
 \emph{Bioinformatics} 26: 1340-1347.

@@ -17,7 +17,7 @@
 #' predictor's influence (Hooker, Mentch & Zhou 2021).
 #'
 #' The effect products ([cast_effect_table()], [cast_effect_map()],
-#' [cast_dose_response()], [cast_effect_heatmap()], [cast_sensitivity()],
+#' [cast_dose_response()], [cast_sensitivity()],
 #' [cast_effect_support()]) report the interventional response, its shape over
 #' the size of the shift, and the fraction of observed predictor vectors still
 #' inside the training support after the shift. The knockout audit
@@ -48,7 +48,7 @@
 #'    ([cast_project()])
 #' 8. **Interventional attribution**: effect sizes and maps
 #'    ([cast_effect_table()], [cast_effect_map()]), response shape
-#'    ([cast_dose_response()], [cast_effect_heatmap()]), positivity
+#'    ([cast_dose_response()]), positivity
 #'    ([cast_effect_support()]), paired with knockout necessity
 #'    ([cast_necessity()])
 #'

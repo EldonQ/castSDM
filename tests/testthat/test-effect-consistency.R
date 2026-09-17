@@ -21,6 +21,51 @@ test_that("ensemble cancellation is preserved between effect tables and rasters"
   expect_gt(tab$outside_range_fraction, 0)
 })
 
+test_that("effect tables carry a positivity-linked support column", {
+  skip_if_not_installed("ranger")
+  set.seed(93)
+  x <- rnorm(220); z <- rnorm(220)
+  d <- data.frame(lon = runif(220), lat = runif(220), x = x, z = z,
+                  presence = rbinom(220, 1, plogis(x - z)))
+  fit <- cast_fit(d, models = "rf", rf_ntree = 40, seed = 94, verbose = FALSE)
+  tab <- cast_effect_table(fit, d[1:60, c("x", "z")], verbose = FALSE)
+  expect_true("support" %in% names(tab))
+  expect_true(all(is.na(tab$support) |
+                    (tab$support >= 0 & tab$support <= 1)))
+})
+
+test_that("effect-table and necessity plots render as ggplots", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("pROC")
+  set.seed(95)
+  x <- rnorm(200); z <- rnorm(200)
+  d <- data.frame(lon = runif(200), lat = runif(200), x = x, z = z,
+                  presence = rbinom(200, 1, plogis(x - z)))
+  fit <- cast_fit(d, models = "rf", rf_ntree = 30, seed = 96, verbose = FALSE)
+  tab <- cast_effect_table(fit, d[1:50, c("x", "z")], verbose = FALSE)
+  expect_s3_class(plot(tab), "ggplot")
+  nec <- cast_necessity(d, variables = c("x", "z"), k = 2, num_trees = 30,
+                        seed = 97, verbose = FALSE)
+  expect_s3_class(plot(nec), "ggplot")
+})
+
+test_that("prediction registers engine methods in a bare session", {
+  skip_if_not_installed("ranger")
+  set.seed(98)
+  x <- rnorm(120)
+  d <- data.frame(lon = runif(120), lat = runif(120), x = x,
+                  presence = rbinom(120, 1, plogis(x)))
+  fit <- cast_fit(d, models = "rf", rf_ntree = 20, seed = 99, verbose = FALSE)
+  # Simulate a fresh session (e.g. a fit reloaded via readRDS): without the
+  # engine namespace, S3 dispatch has no predict method and every contrast
+  # silently degrades to NA.
+  tryCatch(unloadNamespace("ranger"), error = function(e) NULL)
+  skip_if_not_installed("ranger")  # still installed, just unloaded
+  p <- predict_single_model(fit$models[["rf"]], d[1:5, "x", drop = FALSE])
+  expect_true(all(is.finite(p)))
+})
+
 test_that("effect input failures are explicit rather than all-NA results", {
   fit <- new_cast_fit(models = list(a = list()), cast_vars = "x", env_vars = "x",
     scaling = list(sds = c(x = 1)))

@@ -18,6 +18,11 @@
 #'   filter. Default `300`.
 #' @param select_n_perm Integer. Response permutations used to build the
 #'   stage-2 null distribution. Default `49`.
+#' @param select_ncov Integer or `NULL`. Maximum predictors retained by
+#'   [cast_select()], ordered by the interventional effect. Default `NULL`
+#'   selects `ceiling(log2(n_presence))`. Use `Inf` for no cap.
+#' @param select_maxncov Integer. Upper bound on the automatic `select_ncov`.
+#'   Default `12`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
@@ -48,9 +53,11 @@ cast <- function(species_data,
                  env_data = NULL,
                  models = c("rf", "brt", "maxent", "gam"),
                  train_fraction = 0.7,
-                 select_method = "two_stage",
-                 select_num_trees = 300L,
-                 select_n_perm = 49L,
+                  select_method = "two_stage",
+                  select_num_trees = 300L,
+                  select_n_perm = 49L,
+                  select_ncov = NULL,
+                  select_maxncov = 12L,
                  num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -86,6 +93,8 @@ cast <- function(species_data,
     method = select_method,
     num_trees = select_num_trees,
     n_perm = select_n_perm,
+    ncov = select_ncov,
+    maxncov = select_maxncov,
     seed = seed, verbose = verbose
   )
 
@@ -110,7 +119,9 @@ cast <- function(species_data,
         select_method = select_method,
         select_args = list(
           num_trees = select_num_trees,
-          n_perm = select_n_perm
+          n_perm = select_n_perm,
+          ncov = select_ncov,
+          maxncov = select_maxncov
         ),
         k = cv_k, models = models,
         block_method = cv_block_method,

@@ -66,33 +66,7 @@ test_that("an absurd shift is refused rather than answered by extrapolation", {
   expect_error(cast_dose_response(fit, "x1", shift = 1e6), "training range")
 })
 
-test_that("cast_effect_heatmap bins the grid and flags unsupported bins", {
-  skip_if_not_installed("ranger")
-  d <- make_grid_data()
-  fit <- grid_fit(d)
-  hm <- cast_effect_heatmap(fit, "x1", "x2", shift = 1, n_bins = 5, min_n = 10)
-  expect_s3_class(hm, "cast_effect_heatmap")
-  g <- hm$grid
-  expect_true(all(c("x_mid", "y_mid", "n", "effect", "abs_effect",
-                    "support", "supported") %in% names(g)))
-  expect_true(all(g$n >= 10))
-  expect_true(all(g$n <= nrow(d)))
-  expect_true(is.logical(g$supported))
-  expect_true(all(g$abs_effect >= abs(g$effect) - 1e-12))
-  # A 5 x 5 binning of 900 rows must not report more cells than it built.
-  expect_lte(nrow(g), 25L)
-  # Every reported bin inherits the same joint support for one shift.
-  expect_length(unique(round(g$support, 10)), 1L)
-})
 
-test_that("the effect heatmap refuses an impossible shift and a self-modifier", {
-  skip_if_not_installed("ranger")
-  d <- make_grid_data()
-  fit <- grid_fit(d)
-  expect_error(cast_effect_heatmap(fit, "x1", "x1"), "must differ")
-  expect_error(cast_effect_heatmap(fit, "x1", "x2", shift = 0), "non-zero")
-  expect_error(cast_effect_heatmap(fit, "x1", "x2", n_bins = 1), "n_bins")
-})
 
 test_that("grid inputs are validated against the fitted predictors", {
   skip_if_not_installed("ranger")
@@ -117,7 +91,6 @@ test_that("effect grid objects plot", {
   d <- make_grid_data()
   fit <- grid_fit(d)
   expect_s3_class(plot(cast_dose_response(fit, "x1", shift = c(-1, 1))), "ggplot")
-  expect_s3_class(plot(cast_effect_heatmap(fit, "x1", "x2", n_bins = 4,
-                                           min_n = 10)), "ggplot")
+
   expect_s3_class(plot(cast_effect_support(fit, c("x1", "x2"))), "ggplot")
 })

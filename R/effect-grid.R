@@ -3,15 +3,13 @@
 # claimed to hold, instead of collapsing it to one number.
 #
 #   cast_dose_response()   - how the effect scales with the size of the shift
-#   cast_effect_heatmap()  - where in (driver, effect modifier) space the
-#                            effect is large, and which cells are even
-#                            answerable given the observed data support
+#   cast_effect_support()  - which shifts the observed data can answer at all
 #
 # The support rule is the positivity assumption of causal inference made
 # operational: a shift is on support when the shifted predictor vector stays
-# inside the observed data. Cells outside the support are reported, never
-# silently coloured in. See Petersen et al. (2012) for the diagnostic
-# prescription this follows.
+# inside the observed data. A shift the data cannot answer is reported, never
+# silently answered by extrapolation. See Petersen et al. (2012) for the
+# diagnostic prescription this follows.
 # ==========================================================================
 
 .cast_check_fit <- function(fit) {
@@ -163,7 +161,7 @@
 #' @return A `cast_dose_response` object with `curve` (data frame: `shift`,
 #'   `shift_raw`, `mean_delta`, `mean_abs_delta`, `support`, `estimable`),
 #'   `shift_type`, `variable`, `unit`, `models`, and `assumptions`.
-#' @seealso [cast_effect_heatmap()], [cast_effect_table()]
+#' @seealso [cast_effect_support()], [cast_effect_table()]
 #' @export
 cast_dose_response <- function(fit, variable, shift = seq(-3, 3, by = 0.25),
                                shift_type = c("sd", "raw"), newdata = NULL,
@@ -213,121 +211,6 @@ cast_dose_response <- function(fit, variable, shift = seq(-3, 3, by = 0.25),
     assumptions = .cast_effect_assumptions())
 }
 
-#' Effect Heatmap over Driver and Effect-Modifier Space
-#'
-#' Bins the observed data by the intervened predictor and one effect modifier,
-#' and reports the mean interventional effect and the data support in every
-#' bin. The result answers two questions at once: where the shift matters, and
-#' where it is answerable at all.
-#'
-#' @section Reading the grid:
-#' `effect` is the mean shift in predicted probability inside the bin.
-#' `support` is the fraction of rows in the bin whose shifted predictor vector
-#' stays inside the observed multivariable support. Bins flagged
-#' `supported = FALSE` are answered mostly by extrapolation and should be left
-#' blank in a figure rather than coloured in.
-#'
-#' The grid is retrospective: bins are built from observed rows, so it shows
-#' how the fitted effect varies across the conditions actually sampled. It is
-#' not a model-free response surface and it cannot certify effect modification
-#' that the data never sampled.
-#'
-#' @param fit A `cast_fit` object.
-#' @param variable Single predictor to intervene on.
-#' @param modifier Single predictor defining the second axis.
-#' @param shift Shift size, in training standard deviations unless
-#'   `shift_type = "raw"`. Default `1`.
-#' @param shift_type `"sd"` (default) or `"raw"`.
-#' @param n_bins Number of quantile bins per axis. Default 8.
-#' @param min_n Minimum rows per bin to report. Default 20.
-#' @param newdata Optional observed predictor frame. Defaults to training data.
-#' @param support_probs Length-2 numeric. Default `c(0.01, 0.99)`.
-#' @param max_rows Rows sampled (evenly). Default 20000.
-#'
-#' @return A `cast_effect_heatmap` object with `grid` (data frame: `x_mid`,
-#'   `y_mid`, `x_lo`, `x_hi`, `y_lo`, `y_hi`, `n`, `effect`, `abs_effect`,
-#'   `support`, `supported`), plus `variable`, `modifier`, `shift`,
-#'   `shift_type`, `unit`, `min_support`, and `assumptions`.
-#' @seealso [cast_dose_response()], [cast_effect_map()]
-#' @export
-cast_effect_heatmap <- function(fit, variable, modifier, shift = 1,
-                                shift_type = c("sd", "raw"), n_bins = 8L,
-                                min_n = 20L, newdata = NULL,
-                                support_probs = c(0.01, 0.99),
-                                max_rows = 20000L) {
-  .cast_check_fit(fit)
-  shift_type <- match.arg(shift_type)
-  env_vars <- fit$env_vars
-  for (nm in c("variable", "modifier")) {
-    v <- get(nm)
-    if (length(v) != 1L || !v %in% env_vars) {
-      cli::cli_abort(c("{.arg {nm}} must be one fitted predictor.",
-                       "i" = "Available: {.val {env_vars}}."))
-    }
-  }
-  if (identical(variable, modifier)) {
-    cli::cli_abort("{.arg modifier} must differ from {.arg variable}.")
-  }
-  shift <- as.numeric(shift)
-  if (length(shift) != 1L || !is.finite(shift) || shift == 0) {
-    cli::cli_abort("{.arg shift} must be one non-zero finite number.")
-  }
-  n_bins <- as.integer(n_bins)
-  if (is.na(n_bins) || n_bins < 2L) cli::cli_abort("{.arg n_bins} must be >= 2.")
-  min_n <- as.integer(min_n)
-  if (is.na(min_n) || min_n < 1L) cli::cli_abort("{.arg min_n} must be >= 1.")
-  min_support <- 0.5
-
-  shift_raw <- if (identical(shift_type, "raw")) shift else
-    shift * .cast_driver_sd(fit, variable)
-  .cast_check_shift_reachable_ref(fit, variable, shift_raw, "raw")
-
-  ref <- .cast_reference(fit, env_vars)
-  X <- .cast_reference_rows(fit, newdata, env_vars, max_rows)
-  eff <- .cast_shift_effects(fit, X, variable, shift_raw)[, 1L]
-  sup <- .cast_support_fraction(ref, variable, shift_raw,
-                                probs = support_probs)[variable, 1L]
-
-  bx <- .cast_bin_index(X[[variable]], n_bins)
-  by <- .cast_bin_index(X[[modifier]], n_bins)
-  key <- (bx - 1L) * n_bins + by
-  n_bin <- tabulate(key, nbins = n_bins * n_bins)
-
-  rows <- lapply(seq_len(n_bins * n_bins), function(k) {
-    sel <- which(key == k)
-    if (!length(sel)) return(NULL)
-    xb <- bx[sel[1L]]; yb <- by[sel[1L]]
-    data.frame(
-      x_bin = xb, y_bin = yb,
-      x_mid = stats::median(X[[variable]][sel]),
-      y_mid = stats::median(X[[modifier]][sel]),
-      x_lo = min(X[[variable]][sel]), x_hi = max(X[[variable]][sel]),
-      y_lo = min(X[[modifier]][sel]), y_hi = max(X[[modifier]][sel]),
-      n = length(sel),
-      effect = mean(eff[sel], na.rm = TRUE),
-      abs_effect = mean(abs(eff[sel]), na.rm = TRUE),
-      support = sup,
-      stringsAsFactors = FALSE)
-  })
-  grid <- do.call(rbind, rows)
-  if (is.null(grid)) cli::cli_abort("No usable bins in {.arg newdata}.")
-  grid <- grid[grid$n >= min_n, , drop = FALSE]
-  if (!nrow(grid)) {
-    cli::cli_abort(c("Every bin holds fewer than {.arg min_n} rows.",
-                     "i" = "Lower {.arg min_n} or raise {.arg n_bins} span."))
-  }
-  grid$supported <- is.finite(grid$support) & grid$support >= min_support
-  rownames(grid) <- NULL
-
-  new_cast_effect_heatmap(
-    grid = grid, variable = variable, modifier = modifier,
-    shift = shift, shift_type = shift_type,
-    unit = if (identical(shift_type, "raw")) "raw predictor units" else
-      "training SD",
-    min_support = min_support, n_bins = n_bins, min_n = min_n,
-    support_probs = support_probs, models = names(fit$models),
-    assumptions = .cast_effect_assumptions())
-}
 
 #' Support Fraction of an Interventional Shift
 #'

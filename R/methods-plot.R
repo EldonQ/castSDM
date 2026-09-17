@@ -18,7 +18,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("perm_importance", "freq", "assoc")
+  imp_candidates <- c("interventional_effect", "perm_importance", "freq", "assoc")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)]
   imp_col <- imp_col[vapply(imp_col, function(nm)
     any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
@@ -61,6 +61,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   )
 
   x_lab <- switch(imp_col,
+    interventional_effect = "Interventional effect",
     perm_importance = "Permutation importance",
     freq = "Fold selection frequency",
     assoc = "|marginal association|",
@@ -784,56 +785,6 @@ plot.cast_dose_response <- function(x, var_label = NULL, ...) {
     ggplot2::theme(legend.position = "bottom")
 }
 
-#' Plot an Interventional Effect Heatmap
-#'
-#' Binned map of the effect across the intervened predictor (x) and an effect
-#' modifier (y). Bins whose shifted predictor vector leaves the observed data
-#' support are shown as empty cells with a cross, never as a colour, so
-#' extrapolated bins cannot be mistaken for findings.
-#'
-#' @param x A `cast_effect_heatmap` object (from [cast_effect_heatmap()]).
-#' @param var_label Optional display label for the intervened predictor.
-#' @param modifier_label Optional display label for the second axis.
-#' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
-#' @export
-plot.cast_effect_heatmap <- function(x, var_label = NULL, modifier_label = NULL,
-                                     ...) {
-  check_suggested("ggplot2", "for plotting")
-  g <- x$grid
-  lim <- max(abs(g$abs_effect), na.rm = TRUE)
-  if (!is.finite(lim) || lim <= 0) lim <- 1e-6
-  g$plot_effect <- ifelse(g$supported, g$effect, NA_real_)
-  xlab <- var_label %||% x$variable
-  ylab <- modifier_label %||% x$modifier
-
-  p <- ggplot2::ggplot(g, ggplot2::aes(x = .data$x_mid, y = .data$y_mid,
-                                       fill = .data$plot_effect)) +
-    ggplot2::geom_tile(width = (max(g$x_mid) - min(g$x_mid)) /
-                         max(2, length(unique(g$x_mid))) * 1.02,
-                       height = (max(g$y_mid) - min(g$y_mid)) /
-                         max(2, length(unique(g$y_mid))) * 1.02,
-                       color = "white", linewidth = 0.2) +
-    ggplot2::scale_fill_gradient2(
-      low = "#2166AC", mid = "grey96", high = "#B2182B", midpoint = 0,
-      limits = c(-lim, lim), na.value = "transparent",
-      name = "Change in\nprobability") +
-    ggplot2::labs(
-      title = sprintf("Interventional effect of %s", xlab),
-      subtitle = sprintf("Shift %s %s; empty cells leave the observed data support",
-                         signif(x$shift, 3), x$unit),
-      x = xlab, y = ylab
-    ) +
-    theme_cast(base_size = 11)
-  if (any(!g$supported)) {
-    p <- p + ggplot2::geom_point(
-      data = g[!g$supported, , drop = FALSE],
-      shape = 4, size = 1.4, color = "grey35", inherit.aes = FALSE,
-      ggplot2::aes(x = .data$x_mid, y = .data$y_mid))
-  }
-  p
-}
 
 #' Plot Shift Support (Positivity) by Driver
 #'
@@ -865,6 +816,97 @@ plot.cast_support <- function(x, var_labels = NULL, ...) {
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(panel.grid = ggplot2::element_blank())
+}
+
+
+#' Plot an Effect Table: Magnitude, Direction and Support
+#'
+#' Lollipop chart of per-driver interventional effects: position shows the
+#' magnitude (`mean_abs_dHSS`), colour shows the direction
+#' (`mean_signed_dHSS`), and drivers whose shift is answered mostly by
+#' extrapolation (`support < 0.5`) are drawn hollow.
+#'
+#' @param x A `cast_effect_table` object (from [cast_effect_table()]).
+#' @param var_labels Optional named character vector of display labels.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  d <- as.data.frame(x)
+  d <- d[order(d$mean_abs_dHSS), , drop = FALSE]
+  d$display <- if (!is.null(var_labels)) {
+    ifelse(d$driver %in% names(var_labels), var_labels[d$driver], d$driver)
+  } else d$driver
+  d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
+  d$direction <- ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
+                        "lowers suitability")
+  sup <- if ("support" %in% names(d)) d$support else rep(1, nrow(d))
+  d$answerable <- ifelse(is.finite(sup) & sup < 0.5,
+                         "low support (< 0.5)", "on support")
+  ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
+                                  color = .data$direction)) +
+    ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data$mean_abs_dHSS,
+                                       y = .data$display, yend = .data$display),
+                          linewidth = 0.6) +
+    ggplot2::geom_point(ggplot2::aes(shape = .data$answerable), size = 2.8,
+                        fill = "white") +
+    ggplot2::scale_shape_manual(values = c(`on support` = 16,
+                                           `low support (< 0.5)` = 1),
+                                name = NULL) +
+    ggplot2::scale_color_manual(values = c(`raises suitability` = "#B2182B",
+                                           `lowers suitability` = "#2166AC"),
+                                name = NULL) +
+    ggplot2::labs(
+      title = "Interventional effect by driver",
+      subtitle = "Magnitude with direction; hollow = shift answered mostly by extrapolation",
+      x = "Mean |change in suitability| over the shift set", y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(legend.position = "bottom")
+}
+
+
+#' Plot Knockout Necessity (Held-Out AUC Cost)
+#'
+#' Bars show the mean held-out AUC lost by dropping each driver; whiskers
+#' span the observed fold range. Read beside [cast_effect_table()]: a driver
+#' the model responds to but costs nothing to drop is substitutable by a
+#' collinear partner, so attribution to it is not identified.
+#'
+#' @param x A `cast_necessity` object (from [cast_necessity()]).
+#' @param var_labels Optional named character vector of display labels.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_necessity <- function(x, var_labels = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  d <- as.data.frame(x$necessity)
+  d <- d[order(d$mean_dAUC), , drop = FALSE]
+  d$display <- if (!is.null(var_labels)) {
+    ifelse(d$variable %in% names(var_labels), var_labels[d$variable],
+           d$variable)
+  } else d$variable
+  d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
+  ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_dAUC, y = .data$display)) +
+    ggplot2::geom_vline(xintercept = 0, color = "grey50", linewidth = 0.4) +
+    ggplot2::geom_segment(ggplot2::aes(x = .data$min_dAUC,
+                                      xend = .data$max_dAUC,
+                                      y = .data$display, yend = .data$display),
+                          color = "grey40", linewidth = 0.8) +
+    ggplot2::geom_point(ggplot2::aes(x = .data$min_dAUC, y = .data$display),
+                        color = "grey40", size = 1.6) +
+    ggplot2::geom_point(ggplot2::aes(x = .data$max_dAUC, y = .data$display),
+                        color = "grey40", size = 1.6) +
+    ggplot2::geom_point(size = 2.8, color = "#B2182B") +
+    ggplot2::labs(
+      title = "Knockout necessity by driver",
+      subtitle = "Mean held-out AUC lost by dropping the driver (whiskers = fold range)",
+      x = "Mean dAUC (full minus knocked-out)", y = ""
+    ) +
+    theme_cast(base_size = 11)
 }
 
 

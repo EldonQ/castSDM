@@ -1,3 +1,31 @@
+# castSDM 0.11.0 (unreleased)
+
+## Stage-1 ranking sees curvature; stage-2 output is capped by sample size
+
+* `cast_select()` stage 1 now ranks by a univariate quadratic-logistic
+  signal (the smaller p-value of the two `poly(x, 2)` terms), so U-shaped
+  drivers outrank noise that a linear correlation would tie with.
+  Predictors whose GLM fails fall back to the marginal-correlation order.
+* The retained set is capped at `ncov` predictors (new argument, default
+  `ceiling(log2(n_presence))`, at most `maxncov = 12`), ordered by the
+  interventional effect. When nothing clears the null, the fallback keeps
+  the top `ncov` by effect instead of the whole stage-1 set.
+* `scores` gains `stage1_p`, `stage1_rank`, `effect_rank` and
+  `selected_reason` (`"null"`, `"null+top-ncov"`, `"fallback-top-ncov"`,
+  `"full"`, `"excluded"`); `plot.cast_select()` now draws the
+  interventional effect. `cast()` gains `select_ncov` / `select_maxncov`.
+* `cast_effect_table()` gains a `support` column (worst 1-99% support
+  fraction over the driver's shift set, the positivity diagnostic
+  `cast_effect_support()` reports per shift), and two paired plots:
+  `plot.cast_effect_table()` (magnitude, direction, hollow = low support)
+  and `plot.cast_necessity()` (held-out AUC cost with fold range).
+* Fixed: predicting from a fit object reloaded in a fresh session (e.g. via
+  `readRDS`) silently returned all-`NA` contrasts, because the engine
+  namespaces that register the `predict` S3 methods were never loaded.
+  `predict_single_model()` now loads the engine namespace before predicting.
+* Existing selection caches and downstream model/CV outputs must be
+  recomputed.
+
 # castSDM 0.10.0
 
 ## Stage-2 selection is now an interventional contrast
@@ -22,17 +50,13 @@
 ## Interventional effect products gain a positivity diagnostic
 
 * `cast_dose_response()` sweeps the size of an additive shift and reports the
-  whole curve, so a saturating or threshold response is no longer collapsed to
-  one number. `cast_effect_heatmap()` bins the observed data by the intervened
-  predictor and an effect modifier. `cast_effect_support()` reports, per driver
-  and shift size, the fraction of observed predictor vectors still inside the
-  training support.
+  whole curve, so a saturating or asymmetric response is no longer collapsed to
+  one number. `cast_effect_support()` reports, per driver and shift size, the
+  fraction of observed predictor vectors still inside the training support.
 * The support rule makes positivity operational: a shift answered mostly by
-  extrapolation is reported and drawn as an empty cell, never silently coloured
-  in. Bins and points below the support threshold are flagged `supported =
-  FALSE` / `estimable = FALSE`.
+  extrapolation is flagged `estimable = FALSE`, never silently answered anyway.
 * A shift that leaves the training range everywhere is refused rather than
-  answered. `plot()` methods for all three objects.
+  answered. `plot()` methods for both objects.
 * `cast_importance()` now reports both attribution columns and the rank
   agreement, and its plot shows the interventional effect.
 

@@ -79,6 +79,16 @@ predict_single_model <- function(mdl_info, X_raw) {
   if (is.null(mdl_info$model)) return(rep(NA_real_, nrow(X_raw)))
 
   nm <- mdl_info$name
+  # Engine namespaces are Suggests: fitting loads them, but a fit object
+  # reloaded in a fresh session (e.g. readRDS) predicts into bare
+  # stats::predict() with no S3 method registered. Loading the namespace
+  # here registers the methods; without the package there is nothing to
+  # predict with, so NA preserves the per-model robustness contract.
+  engine_pkg <- switch(nm, rf = "ranger", maxent = "maxnet", brt = "gbm",
+                       gam = "mgcv", NULL)
+  if (!is.null(engine_pkg) && !requireNamespace(engine_pkg, quietly = TRUE)) {
+    return(rep(NA_real_, nrow(X_raw)))
+  }
   if (nm == "rf") {
     return(stats::predict(mdl_info$model, data = X_raw)$predictions[, "1"])
   } else if (nm == "maxent") {

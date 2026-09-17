@@ -12,26 +12,28 @@ Three products carry that:
   direction, per driver and per input raster cell.
 - **Response shape.** `cast_dose_response()` sweeps the size of the shift, so a
   saturating or threshold response stays visible instead of collapsing to one
-  number; `cast_effect_heatmap()` bins the observed data by the intervened
-  driver and an effect modifier.
+  number.
 - **A positivity diagnostic.** `cast_effect_support()` reports the fraction of
   observed predictor vectors that are still inside the training support after
-  the shift. A shift answered mostly by extrapolation is reported as such and
-  drawn as an empty cell, never silently coloured in.
+  the shift. A shift answered mostly by extrapolation is reported as such,
+  never silently answered anyway.
 
 ## Variable selection selects on the interventional effect
 
 `cast_select()` is a two-stage screen:
 
-1. **Collinearity thinning.** Rank predictors by absolute marginal
-   association, then greedily keep predictors whose pairwise correlation with
-   all kept predictors is at most 0.7 (Dormann et al. 2013).
-2. **Interventional effect against a permutation null.** Fit a probability
-   random forest on the survivors and measure how far each predictor moves the
-   fitted probability **when it is shifted while every other predictor stays at
-   its observed value**. Recompute the same statistic on forests refitted to a
-   permuted response to build a feature-wise null, and keep predictors with
-   Monte Carlo tail probability <= 0.05 (Altmann et al. 2010).
+1. **Collinearity thinning.** Rank predictors by a univariate
+   quadratic-logistic signal, then greedily keep predictors whose pairwise
+   correlation with all kept predictors is at most 0.7 (Dormann et al. 2013).
+2. **Interventional effect against a permutation null, capped by sample
+   size.** Fit a probability random forest on the survivors and measure how
+   far each predictor moves the fitted probability **when it is shifted
+   while every other predictor stays at its observed value**. Recompute the
+   same statistic on forests refitted to a permuted response to build a
+   feature-wise null, keep predictors with Monte Carlo tail probability
+   <= 0.05 (Altmann et al. 2010), and cap the set at
+   `ceiling(log2(n_presence))` predictors (at most 12), ordered by the
+   effect.
 
 Why the second stage is a shift rather than a permutation: permuting a
 predictor breaks its correlation with every other predictor, so for collinear
@@ -77,9 +79,6 @@ emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_*
 dr <- cast_dose_response(result$fit, "bio1", shift = seq(-3, 3, by = 0.5))
 plot(dr)                             # response shape, hollow points = off support
 
-hm <- cast_effect_heatmap(result$fit, "bio1", modifier = "bio12", shift = 1)
-plot(hm)                             # empty cells leave the observed support
-
 sp <- cast_effect_support(result$fit, shift = c(1, 2, 3))
 plot(sp)                             # positivity by driver and shift size
 
@@ -105,7 +104,7 @@ prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
 | Validation | `cast_cv()`, `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
 | Ensemble/projection | `cast_ensemble()`, `cast_project()` |
-| Interventional effects | `cast_effect_table()`, `cast_effect_map()`, `cast_dose_response()`, `cast_effect_heatmap()`, `cast_effect_support()`, `cast_sensitivity()`, `cast_necessity()` |
+| Interventional effects | `cast_effect_table()`, `cast_effect_map()`, `cast_dose_response()`, `cast_effect_support()`, `cast_sensitivity()`, `cast_necessity()` |
 | Reporting | `cast_report_odmap()` |
 
 ## Model backends
@@ -135,7 +134,7 @@ install.packages(c(
 
 ## Interpretation
 
-- Effect tables, maps, curves and heatmaps are **model-based interventional
+- Effect tables, maps and curves are **model-based interventional
   contrasts** (g-computation / standardization). They assume consistency, no
   unobserved confounding given the adjustment set, and positivity; the support
   column reports the third. They are not doubly robust and not TMLE.
@@ -148,9 +147,6 @@ install.packages(c(
   Selection is a model-based screen, not a list of causes.
 - A large `mean_abs_dHSS` with small `mean_dAUC` shows model response with
   limited RF knockout cost. It does not prove substitutability or its cause.
-- Effect heatmap bins are built from observed rows, so they describe how the
-  fitted effect varies across sampled conditions. They cannot certify effect
-  modification that the data never sampled.
 - Future projections assume the learned response relationship remains
   applicable under the projected environment.
 - `cast_report_odmap()` renders the analysis settings as an ODMAP-aligned

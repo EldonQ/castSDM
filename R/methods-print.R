@@ -82,28 +82,6 @@ print.cast_dose_response <- function(x, ...) {
   invisible(x)
 }
 
-#' @export
-print.cast_effect_heatmap <- function(x, ...) {
-  g <- x$grid
-  cli::cli_h1("castSDM Effect Heatmap")
-  cli::cli_ul(c(
-    "Intervention: {x$variable} shift {x$shift} ({x$unit})",
-    "Second axis: {x$modifier}",
-    "Bins reported: {nrow(g)} ({sum(g$supported)} on support)"
-  ))
-  disp <- data.frame(
-    x_mid = signif(g$x_mid, 3),
-    y_mid = signif(g$y_mid, 3),
-    n = g$n,
-    effect = signif(g$effect, 3),
-    support = signif(g$support, 2),
-    supported = ifelse(g$supported, "yes", "NO"),
-    stringsAsFactors = FALSE
-  )
-  disp <- disp[order(-abs(disp$effect)), , drop = FALSE]
-  print(utils::head(disp, 10L), row.names = FALSE)
-  invisible(x)
-}
 
 #' @export
 print.cast_support <- function(x, ...) {

@@ -61,5 +61,5 @@ answered mostly by extrapolation; report it as such or reduce it.
 }
 
 \seealso{
-\code{\link[=cast_effect_heatmap]{cast_effect_heatmap()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}
+\code{\link[=cast_effect_support]{cast_effect_support()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}
 }

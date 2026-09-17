@@ -8,7 +8,8 @@
 # Model-based interventional contrast (g-computation / standardization);
 # requires consistency, no unobserved confounding given the adjustment set,
 # and positivity. cast_effect_support() reports the third of those;
-# cast_dose_response() and cast_effect_heatmap() report the response shape.
+# cast_dose_response() reports the response shape; cast_effect_support()
+# reports how much of the shifted range the observed data can answer.
 # Not doubly robust and not TMLE; not a proof of a manipulable mechanism.
 # Read alongside cast_necessity(): response without necessity does not
 # identify a driver.
@@ -128,6 +129,10 @@
 #' @param steps Optional raw-unit shift sets, overriding
 #'   `shifts`/`shift_type`. Either a numeric vector (used for every driver)
 #'   or a named list of numeric vectors, one per driver.
+#' @param support_probs Length-2 numeric. Training quantiles treated as the
+#'   supported range of each predictor. Default `c(0.01, 0.99)`. The `support`
+#'   column reports the worst (minimum) such fraction over the driver's shift
+#'   set; drivers with `support < 0.5` are answered mostly by extrapolation.
 #' @param verbose Print progress. Default `TRUE`.
 #'
 #' @return A `cast_effect_table` data.frame, one row per driver.
@@ -139,10 +144,13 @@
 #'   Summaries first average over shifts per row; `n` counts complete rows.
 #'   `outside_range_fraction` is the fraction of row/shift pairs outside the
 #'   predictor's training range. It does not test multivariate support.
+#'   `support` is the minimum 1-99% support fraction over the shift set, the
+#'   same positivity diagnostic [cast_effect_support()] reports per shift.
 #' @export
 cast_effect_table <- function(fit, newdata, drivers = NULL,
                               shifts = c(-2, -1, 1, 2), shift_type = "sd",
-                              steps = NULL, verbose = TRUE) {
+                              steps = NULL, support_probs = c(0.01, 0.99),
+                              verbose = TRUE) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
@@ -168,6 +176,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   X <- X[ok, , drop = FALSE]
   if (!nrow(X)) cli::cli_abort("No complete finite predictor rows in {.arg newdata}.")
   base <- .cast_predict_matrix(fit, X, names(fit$models))
+  ref <- tryCatch(.cast_reference(fit, env_vars), error = function(e) NULL)
   out <- vector("list", length(drivers))
   failed <- character(0)
   for (k in seq_along(drivers)) {
@@ -183,6 +192,15 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
       mean(vapply(sv, function(st) mean(X[[v]] + st < lim[1] |
                                        X[[v]] + st > lim[2]), numeric(1)))
     } else NA_real_
+    # Positivity linkage: worst 1-99% support fraction over this driver's
+    # own shift set, on the same scale cast_effect_support() reports.
+    row$support <- if (!is.null(ref)) {
+      frac <- suppressWarnings(tryCatch(
+        .cast_support_fraction(ref, v, sv, probs = support_probs)[v, ],
+        error = function(e) NA_real_))
+      suppressWarnings(min(frac, na.rm = TRUE))
+    } else NA_real_
+    if (!is.finite(row$support)) row$support <- NA_real_
     if (row$n == 0L) failed <- c(failed, v)
     out[[k]] <- cbind(data.frame(driver = v, stringsAsFactors = FALSE), row)
   }
@@ -214,7 +232,7 @@ print.cast_effect_table <- function(x, ...) {
   iv <- attr(x, "intervention")
   if (!is.null(iv)) cli::cli_text("{.emph {iv}}")
   print(as.data.frame(x))
-  cli::cli_text("Rank by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction.")
+  cli::cli_text("Rank by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction; {.field support} < 0.5 means the shift is answered mostly by extrapolation.")
   cli::cli_text("Pair with {.fn cast_necessity} for predictive diagnostics; neither product establishes causal identification.")
   invisible(x)
 }

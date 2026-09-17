@@ -32,9 +32,9 @@ Two concerns stay separate:
   inside every spatial cross-validation fold, so held-out data never influence
   variable choice.
 - **Effects come with their response shape and their support.** The
-  interventional response to each driver is reported as a table, a spatial map,
-  a dose-response curve and a 2D heatmap, together with the fraction of
-  observed predictor vectors still inside the training support after the shift.
+  interventional response to each driver is reported as a table, a spatial map
+  and a dose-response curve, together with the fraction of observed predictor
+  vectors still inside the training support after the shift.
   `cast_necessity()` separately reports what dropping a driver costs in
   held-out AUC.
 
@@ -102,6 +102,7 @@ plot(imp)
 ```{r attribution}
 eff <- cast_effect_table(result$fit, newdata = dat, verbose = FALSE)
 eff        # rank by mean_abs_dHSS; mean_signed_dHSS gives the direction
+plot(eff)  # hollow = shift answered mostly by extrapolation (support < 0.5)
 
 # The driver the screen ranked first is guaranteed to be fitted.
 v1 <- result$screen$scores$variable[which.max(
@@ -116,18 +117,9 @@ sp <- cast_effect_support(result$fit, variables = v1, shift = c(1, 2, 3))
 plot(sp)
 ```
 
-A dose-response band drawn with hollow points is answered mostly by
-extrapolation. `cast_effect_support()` reports the same information as a
-number, and a shift that leaves the training range everywhere is refused
-rather than answered.
-
-## Effect heatmap over driver and modifier
-
-```{r heatmap}
-others <- setdiff(result$fit$env_vars, v1)
-hm <- cast_effect_heatmap(result$fit, v1, modifier = others[1], shift = 1)
-plot(hm)   # empty cells with a cross leave the observed data support
-```
+A dose-response point drawn hollow is answered mostly by extrapolation.
+`cast_effect_support()` reports the same information as a number, and a shift
+that leaves the training range everywhere is refused rather than answered.
 
 ## Necessity audit
 
@@ -135,6 +127,7 @@ plot(hm)   # empty cells with a cross leave the observed data support
 nec <- cast_necessity(dat, screen = result$screen, k = 3, num_trees = 100,
                       seed = 42, verbose = FALSE)
 nec        # mean_dAUC: held-out AUC lost by dropping each driver
+plot(nec)  # whiskers = fold range; read beside plot(eff)
 ```
 
 A driver with a large `mean_abs_dHSS` but `mean_dAUC` near zero shows a model

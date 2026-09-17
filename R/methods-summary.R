@@ -28,8 +28,11 @@ summary.cast_result <- function(object, ...) {
     cli::cli_text("Screening method: {object$screen$method}")
   }
   thr <- object$screen$diagnostics$null_threshold
-  if (!is.null(thr) && is.finite(thr)) {
-    cli::cli_text("Permutation-null threshold: {signif(thr, 3)}")
+  thr <- suppressWarnings(as.numeric(thr))
+  thr <- thr[is.finite(thr)]
+  if (length(thr)) {
+    cli::cli_text(paste0("Permutation-null threshold (median over {length(thr)} ",
+                         "predictor{?s}): {signif(stats::median(thr), 3)}"))
   }
   cli::cli_h2("Models")
   if (!is.null(object$eval)) {

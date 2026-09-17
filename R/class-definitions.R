@@ -104,39 +104,6 @@ new_cast_dose_response <- function(curve, variable, shift_type, unit, models,
   )
 }
 
-#' Create a cast_effect_heatmap Object
-#'
-#' @param grid A `data.frame` with one row per populated bin: `x_bin`, `y_bin`,
-#'   `x_mid`, `y_mid`, `x_lo`, `x_hi`, `y_lo`, `y_hi`, `n`, `effect`,
-#'   `abs_effect`, `support`, `supported`.
-#' @param variable Character. The intervened predictor.
-#' @param modifier Character. The predictor on the second axis.
-#' @param shift Numeric. Intervention size.
-#' @param shift_type Character. How `shift` is interpreted.
-#' @param unit Character. Human-readable shift unit.
-#' @param min_support Numeric. Support fraction below which a bin is flagged
-#'   unsupported.
-#' @param n_bins Integer. Quantile bins per axis.
-#' @param min_n Integer. Minimum rows per reported bin.
-#' @param support_probs Numeric length 2. Quantiles defining the support box.
-#' @param models Character vector of models averaged.
-#' @param assumptions Character. The identification assumptions carried.
-#'
-#' @return A `cast_effect_heatmap` object.
-#' @keywords internal
-#' @export
-new_cast_effect_heatmap <- function(grid, variable, modifier, shift, shift_type,
-                                    unit, min_support, n_bins, min_n,
-                                    support_probs, models, assumptions = NULL) {
-  structure(
-    list(grid = grid, variable = variable, modifier = modifier, shift = shift,
-         shift_type = shift_type, unit = unit, min_support = min_support,
-         n_bins = n_bins, min_n = min_n, support_probs = support_probs,
-         models = models, assumptions = assumptions),
-    class = "cast_effect_heatmap"
-  )
-}
-
 #' Create a cast_support Object
 #'
 #' @param support A `data.frame` with `driver`, `shift`, `shift_raw`, and

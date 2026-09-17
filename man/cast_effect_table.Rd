@@ -11,6 +11,7 @@ cast_effect_table(
   shifts = c(-2, -1, 1, 2),
   shift_type = "sd",
   steps = NULL,
+  support_probs = c(0.01, 0.99),
   verbose = TRUE
 )
 }
@@ -35,6 +36,11 @@ magnitude of one arbitrary step.}
 \code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
 or a named list of numeric vectors, one per driver.}
 
+\item{support_probs}{Length-2 numeric. Training quantiles treated as the
+supported range of each predictor. Default \code{c(0.01, 0.99)}. The \code{support}
+column reports the worst (minimum) such fraction over the driver's shift
+set; drivers with \code{support < 0.5} are answered mostly by extrapolation.}
+
 \item{verbose}{Print progress. Default \code{TRUE}.}
 }
 \value{
@@ -47,6 +53,8 @@ suitability). Rank drivers by \code{mean_abs_dHSS}; read
 Summaries first average over shifts per row; \code{n} counts complete rows.
 \code{outside_range_fraction} is the fraction of row/shift pairs outside the
 predictor's training range. It does not test multivariate support.
+\code{support} is the minimum 1-99\% support fraction over the shift set, the
+same positivity diagnostic \code{\link[=cast_effect_support]{cast_effect_support()}} reports per shift.
 }
 \description{
 Intervenes on each driver in turn (do-operator: shift the driver, hold

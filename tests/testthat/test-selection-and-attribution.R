@@ -41,6 +41,33 @@ test_that("stage 2 thresholds against the permutation null, not zero", {
   expect_true(all(scr$selected %in% scr$diagnostics$stage1_kept))
 })
 
+test_that("stage 1 ranks a U-shaped driver above noise (poly2 signal)", {
+  skip_if_not_installed("ranger")
+  set.seed(31)
+  n <- 400
+  xu <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(-1 + 2.2 * xu^2)),
+    xu = xu, noise = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
+  )
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 9,
+                     seed = 32, verbose = FALSE)
+  rnk <- stats::setNames(scr$scores$stage1_rank, scr$scores$variable)
+  expect_lt(rnk[["xu"]], rnk[["noise"]])
+})
+
+test_that("ncov caps the retained set and records the reason", {
+  skip_if_not_installed("ranger")
+  dat <- make_collinear_data(n = 400)
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 9,
+                     ncov = 1L, seed = 33, verbose = FALSE)
+  expect_lte(length(scr$selected), 1L)
+  expect_true(scr$diagnostics$ncov == 1L)
+  expect_true(all(scr$scores$selected_reason[scr$scores$selected] %in%
+                    c("null+top-ncov", "fallback-top-ncov")))
+})
+
 test_that("method = 'full' keeps every predictor and skips both stages", {
   dat <- make_collinear_data(n = 120)
   scr <- cast_select(dat, method = "full", verbose = FALSE)

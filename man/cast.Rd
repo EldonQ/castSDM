@@ -12,6 +12,8 @@ cast(
   select_method = "two_stage",
   select_num_trees = 300L,
   select_n_perm = 49L,
+  select_ncov = NULL,
+  select_maxncov = 12L,
   num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
@@ -45,6 +47,13 @@ filter. Default \code{300}.}
 
 \item{select_n_perm}{Integer. Response permutations used to build the
 stage-2 null distribution. Default \code{49}.}
+
+\item{select_ncov}{Integer or \code{NULL}. Maximum predictors retained by
+\code{\link[=cast_select]{cast_select()}}, ordered by the interventional effect. Default \code{NULL}
+selects \code{ceiling(log2(n_presence))}. Use \code{Inf} for no cap.}
+
+\item{select_maxncov}{Integer. Upper bound on the automatic \code{select_ncov}.
+Default \code{12}.}
 
 \item{num_threads}{Integer. Threads for the ranger learners. Default \code{1}.}
 
