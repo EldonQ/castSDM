@@ -11,7 +11,8 @@ cast_sensitivity(
   shift = 1,
   shift_type = c("sd", "raw", "percent"),
   model = NULL,
-  coords = c("lon", "lat")
+  coords = c("lon", "lat"),
+  backend = c("native", "marginaleffects")
 )
 }
 \arguments{
@@ -33,19 +34,26 @@ each cell's value).}
 uses every successfully fitted model (an ensemble mean).}
 
 \item{coords}{Coordinate column names. Default \code{c("lon", "lat")}.}
+
+\item{backend}{Contrast implementation: \code{"native"} (default) or
+\code{"marginaleffects"}. The latter requires the optional marginaleffects
+package and exactly one explicitly selected GAM (\code{model = "gam"}). It
+compares observed (training-imputed) values with values plus the signed
+shift on the response scale, without standard errors or a native fallback.}
 }
 \value{
 A \code{cast_sensitivity} object. The \code{predictions} data.frame
 carries \code{baseline}, \code{counterfactual}, \code{delta_hss} (ensemble-mean change)
 and \code{delta_sd} (cross-model standard deviation of the change; \code{NA} for
-a single model).
+a single model, not a standard error). Both backends describe fitted-model
+scenario contrasts, not validated causal effects.
 }
 \description{
 Performs a g-computation intervention: one predictor is shifted while every
 other predictor is held at its observed value, and the change in predicted
-habitat suitability is mapped cell by cell. This isolates the modelled effect
-of a single driver on today's landscape - a clean, purely interpretive
-"what-if", with no future-climate extrapolation.
+habitat suitability is mapped cell by cell. This isolates the modelled
+contrast for one driver on the supplied landscape without requiring a
+future-climate dataset; the shift itself may still require extrapolation.
 }
 \section{Interpretation}{
 

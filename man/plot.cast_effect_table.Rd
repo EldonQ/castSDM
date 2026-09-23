@@ -19,6 +19,6 @@ A \code{ggplot} object.
 \description{
 Lollipop chart of per-driver interventional effects: position shows the
 magnitude (\code{mean_abs_dHSS}), colour shows the direction
-(\code{mean_signed_dHSS}), and drivers whose shift is answered mostly by
-extrapolation (\code{support < 0.5}) are drawn hollow.
+(\code{mean_signed_dHSS}), hollow points mark minimum quantile-box coverage below
+0.5, and crosses mark unknown coverage. Coverage is not joint positivity.
 }

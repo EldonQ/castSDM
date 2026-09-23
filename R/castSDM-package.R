@@ -12,23 +12,27 @@
 #' probability when it is shifted while every other predictor stays at its
 #' observed value, calibrated against a permuted-response null. The same
 #' forest's permutation importance is reported alongside as a diagnostic,
-#' because permuting a predictor breaks its correlation with the others and is
-#' therefore governed by the model's extrapolation behaviour rather than by the
-#' predictor's influence (Hooker, Mentch & Zhou 2021).
+#' because permutation breaks predictor associations and the resulting score
+#' can be influenced by model extrapolation (Hooker, Mentch & Zhou 2021).
+#' Additive shifts can also leave joint support; neither statistic establishes
+#' causality, and selection does not identify a valid adjustment set.
+#' Alternatively, `method = "tramicp"` tests cross-environment invariance using
+#' supplied scientific group labels, without stage-1 screening. Its intersection
+#' can be empty and is not a verified ecological cause or adjustment set.
 #'
 #' The effect products ([cast_effect_table()], [cast_effect_map()],
 #' [cast_dose_response()], [cast_sensitivity()],
 #' [cast_effect_support()]) report the interventional response, its shape over
-#' the size of the shift, and the fraction of observed predictor vectors still
-#' inside the training support after the shift. The knockout audit
+#' the size of the shift, and the fraction of evaluated rows inside the training
+#' quantile box before and after shifting. The knockout audit
 #' ([cast_necessity()]) asks the complementary question: does the model still
 #' discriminate without this predictor?
 #'
-#' None of these is a claim of automatic causal discovery. The effect products
-#' are model-based interventional contrasts under stated assumptions, and the
-#' support column reports only the positivity assumption; the others are
-#' assumptions, not results. Even agreement between products does not establish
-#' a causal driver.
+#' None of these is a claim of automatic causal discovery. Causal interpretation
+#' requires consistency, a justified adjustment set, no uncontrolled confounding,
+#' joint positivity, and adequate response and observation models. Quantile-box
+#' coverage flags range extrapolation but cannot establish joint positivity.
+#' Even agreement between products does not establish a causal driver.
 #'
 #' **Pipeline steps:**
 #'
@@ -48,7 +52,7 @@
 #'    ([cast_project()])
 #' 8. **Interventional attribution**: effect sizes and maps
 #'    ([cast_effect_table()], [cast_effect_map()]), response shape
-#'    ([cast_dose_response()]), positivity
+#'    ([cast_dose_response()]), range-extrapolation diagnostics
 #'    ([cast_effect_support()]), paired with knockout necessity
 #'    ([cast_necessity()])
 #'

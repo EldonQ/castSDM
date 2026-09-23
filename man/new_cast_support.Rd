@@ -16,8 +16,8 @@ new_cast_support(
 }
 \arguments{
 \item{support}{A \code{data.frame} with \code{driver}, \code{shift}, \code{shift_raw}, and
-\code{support} (the fraction of observed predictor vectors still inside the
-training support after the shift).}
+\code{support} (the fraction of evaluated rows inside the training quantile
+box both before and after the shift).}
 
 \item{variables}{Character vector of assessed predictors.}
 

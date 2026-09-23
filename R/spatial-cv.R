@@ -12,6 +12,9 @@
 #' @param select_method Selection method passed to [cast_select()]. Default
 #'   `"two_stage"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
+#'   Cannot override `data`, `response`, or `method`. For `"tramicp"`, pass
+#'   `environment` as a column name; its values follow the buffered training
+#'   rows and are never inferred from CV folds.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
 #' @param block_method `"grid"` (default; grid cells grouped into spatially
@@ -31,7 +34,10 @@
 #' @param seed Random seed.
 #' @param verbose Print progress.
 #'
-#' @return A `cast_cv` object including fold-level selections.
+#' @return A `cast_cv` object including fold-level selections and `fold_status`.
+#'   Empty or failed folds do not contribute predictive metrics. When no fold
+#'   is evaluable, the `cast_cv_no_evaluable_folds` error carries `screens` and
+#'   `fold_status` for inspection.
 #' @export
 cast_cv <- function(data,
                     screen = NULL,
@@ -48,6 +54,15 @@ cast_cv <- function(data,
                     seed = NULL,
                     verbose = TRUE) {
   block_method <- match.arg(block_method)
+  if (!is.list(select_args) ||
+      (length(select_args) && (is.null(names(select_args)) ||
+       anyNA(names(select_args)) || any(!nzchar(names(select_args))) ||
+       anyDuplicated(names(select_args))))) {
+    cli::cli_abort("{.arg select_args} must be a uniquely named list.")
+  }
+  if (any(c("data", "response", "method") %in% names(select_args))) {
+    cli::cli_abort("{.arg select_args} cannot override data, response, or method; selection must use the outer training fold.")
+  }
   check_suggested("pROC", "for fold evaluation metrics")
   k <- as.integer(k)
   if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
@@ -90,7 +105,11 @@ cast_cv <- function(data,
     } else {
       screen
     }
-    if (is.null(fold_screen) || !length(fold_screen$selected)) return(NULL)
+    if (is.null(fold_screen)) return(list(status = "selection_error"))
+    if (!length(fold_screen$selected)) {
+      return(list(status = fold_screen$diagnostics$status %||% "empty_selection",
+                  selected = character(0), screen = fold_screen))
+    }
 
     fit <- tryCatch(
       cast_fit(
@@ -99,9 +118,15 @@ cast_cv <- function(data,
         seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
         verbose = FALSE
       ),
-      error = function(e) NULL
+      error = function(e) {
+        warning(sprintf("Model fitting failed in fold %d: %s", fold_i, conditionMessage(e)))
+        NULL
+      }
     )
-    if (is.null(fit)) return(NULL)
+    if (is.null(fit)) {
+      return(list(status = "model_error", selected = fold_screen$selected,
+                  screen = fold_screen))
+    }
 
     rows <- list()
     updates <- list()
@@ -128,7 +153,7 @@ cast_cv <- function(data,
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
     list(rows = rows, updates = updates, selected = fold_screen$selected,
-         screen = fold_screen)
+         screen = fold_screen, status = if (length(rows)) "evaluated" else "no_predictions")
   }
 
   if (verbose) {
@@ -155,17 +180,20 @@ cast_cv <- function(data,
   oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
   selections <- vector("list", k)
   screens <- vector("list", k)
+  fold_status <- rep("failed", k)
   skipped_single <- integer(0)
   for (i in seq_along(results)) {
     res <- results[[i]]
     if (is.null(res)) next
     if (isTRUE(res$skipped_single_class)) {
       skipped_single <- c(skipped_single, i)
+      fold_status[i] <- "single_class"
       next
     }
     row_list <- c(row_list, res$rows)
-    selections[[i]] <- res$selected
-    screens[[i]] <- res$screen
+    selections[i] <- list(res$selected)
+    screens[i] <- list(res$screen)
+    fold_status[i] <- res$status
     for (mdl in names(res$updates)) {
       upd <- res$updates[[mdl]]
       oof[[mdl]][upd$idx] <- upd$pred
@@ -196,7 +224,11 @@ cast_cv <- function(data,
       "Skipped {length(skipped_single)}/{k} fold{?s} ({skipped_single}): a single response class in the train or test split."
     )
   }
-  if (!nrow(fold_df)) cli::cli_abort("All spatial CV folds failed.")
+  if (!nrow(fold_df)) {
+    cli::cli_abort("All spatial CV folds failed.",
+                   class = "cast_cv_no_evaluable_folds",
+                   screens = screens, fold_status = fold_status)
+  }
 
   agg <- lapply(models, function(mdl) {
     z <- fold_df[fold_df$model == mdl, , drop = FALSE]
@@ -228,7 +260,7 @@ cast_cv <- function(data,
     metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
     block_method = block_method, thresholds = thresholds,
     selections = selections, screens = screens,
-    selection_freq = selection_freq, oof = oof_df
+    selection_freq = selection_freq, oof = oof_df, fold_status = fold_status
   )
 }
 

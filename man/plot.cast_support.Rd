@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_support}
 \alias{plot.cast_support}
-\title{Plot Shift Support (Positivity) by Driver}
+\title{Plot Shift Quantile-Box Coverage by Driver}
 \usage{
 \method{plot}{cast_support}(x, var_labels = NULL, ...)
 }
@@ -17,5 +17,5 @@
 A \code{ggplot} object.
 }
 \description{
-Plot Shift Support (Positivity) by Driver
+Plot Shift Quantile-Box Coverage by Driver
 }

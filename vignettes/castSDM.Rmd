@@ -20,7 +20,7 @@ suitability, and where is that answer supported by data?
 
 Two concerns stay separate:
 
-- **Selection ranks predictors by the change they cause.**
+- **Default selection ranks predictors by changes in the fitted response.**
   `cast_select()` runs a two-stage screen: collinearity thinning at
   \|r\| <= 0.7 (Dormann et al. 2013), then a filter against a
   permuted-response null using the **interventional effect** — how far the
@@ -37,6 +37,20 @@ Two concerns stay separate:
   vectors still inside the training support after the shift.
   `cast_necessity()` separately reports what dropping a driver costs in
   held-out AUC.
+
+For prespecified, scientifically justified environment groups,
+`cast_select(method = "tramicp", environment = "environment_group")` instead
+uses the optional tramicp package to test all candidate subsets for invariance.
+It does not apply the two-stage screen first, fabricate groups from CV folds,
+or replace an empty intersection with a ranked set. Valid environments and
+model/sampling assumptions remain necessary; the result is not a verified
+causal adjustment set.
+
+For a single fitted GAM, `cast_sensitivity(backend = "marginaleffects",
+model = "gam", ...)` provides explicit baseline-versus-shifted comparisons.
+The native backend remains available for multiple models. Neither backend turns
+presence/background suitability into occurrence probability or identifies a
+causal effect merely by holding the other predictors fixed.
 
 The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
 learners, nested spatial CV, MESS extrapolation flags, performance-weighted
@@ -163,8 +177,12 @@ plot(pred, basemap = "none")
 ## What the numbers are not
 
 Every effect product is a **model-based interventional contrast**
-(g-computation / standardization) under consistency, no unobserved confounding
-given the adjustment set, and positivity. The support column reports the third
-of these; the other two are assumptions, not results. The estimator is not
-doubly robust and not TMLE. On presence/background data the scale is relative
-suitability, not occurrence probability.
+(g-computation / standardization). A causal interpretation requires consistency,
+a justified adjustment set, no uncontrolled confounding, joint positivity,
+and adequate response and observation models. The support column checks only
+training-quantile-box coverage of baseline and shifted rows: it cannot detect
+unobserved combinations inside the box or establish positivity. The
+`range_supported` flag is a descriptive coverage threshold, not causal
+estimability. Automatic predictor selection does not identify an adjustment
+set. The estimator is not doubly robust. On presence/background data the scale
+is relative suitability, not occurrence probability.

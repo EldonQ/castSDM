@@ -7,7 +7,7 @@
 cast_select(
   data,
   response = "presence",
-  method = c("two_stage", "full"),
+  method = c("two_stage", "full", "tramicp"),
   num_trees = 300L,
   n_perm = 49L,
   shift_size = 1,
@@ -16,7 +16,10 @@ cast_select(
   maxncov = 12L,
   seed = NULL,
   verbose = TRUE,
-  ...
+  keep = character(0),
+  environment = NULL,
+  icp_alpha = 0.05,
+  icp_max_predictors = 12L
 )
 }
 \arguments{
@@ -25,7 +28,8 @@ they are never selected).}
 
 \item{response}{Binary response column. Default \code{"presence"}.}
 
-\item{method}{\code{"two_stage"} (default) or \code{"full"} (keep every predictor).}
+\item{method}{\code{"two_stage"} (default), \code{"full"} (keep every predictor), or
+\code{"tramicp"} (opt-in full-subset binomial invariant causal prediction).}
 
 \item{num_trees}{Trees per forest. Default 300.}
 
@@ -50,18 +54,44 @@ effect. Default \code{NULL} selects \code{ceiling(log2(n_presence))} where
 
 \item{verbose}{Print progress.}
 
-\item{...}{Ignored, with a warning. Retired selection knobs land here.}
+\item{keep}{Character vector of predictors specified before screening, such
+as an exposure and a scientifically justified adjustment set. These bypass
+collinearity thinning and the null threshold, count toward \code{ncov}, and
+cannot be removed by the cap. The cap must accommodate them. This does not
+identify a sufficient adjustment set; candidate covariates must also be
+scientifically admissible (not colliders or mediators of a total effect).}
+
+\item{environment}{For \code{"tramicp"}, the name of a supplied environment column
+in \code{data}, never a vector or automatically generated CV grouping. Excluded
+from predictors; must have at least two levels after shared complete-row
+filtering. Not supported for other methods.}
+
+\item{icp_alpha}{Invariance-test level for \code{"tramicp"}. Sets are accepted only
+when their p-value is strictly greater than this value. Default \code{0.05}.}
+
+\item{icp_max_predictors}{Computational guard for the full \code{2^p} subset search.
+Default \code{12L}; exceeding it stops, without prescreening or top-K truncation.
+\code{"tramicp"} rejects nonempty \code{keep} and non-NULL \code{ncov}, and never augments or
+caps the accepted-set intersection. Scores report selection, not effects;
+diagnostics retain all subset tests and distinguish empty-result statuses.}
 }
 \value{
-A \code{cast_select} object: \code{selected} (kept predictors), \code{scores}
+A \code{cast_select} object. For \code{"tramicp"}, \code{selected} is the unaltered
+accepted-set intersection; \code{scores} contains \code{variable}, \code{selected} and
+\code{selected_reason}. Diagnostics retain \code{tested_sets}, \code{accepted_sets},
+\code{intersection}, retained/excluded row indices and \code{status}: \code{"selected"},
+\code{"empty_set_accepted"}, \code{"empty_intersection"} or \code{"no_accepted_sets"}.
+Invalid subset tests raise an error rather than imply nonselection.
+For the two-stage method: \code{selected} (kept predictors), \code{scores}
 (per-predictor marginal \code{assoc}, the \code{stage1_p} ranking signal with its
 \code{stage1_rank}, the stage-1 \code{collinear_thinned} flag,
 \code{interventional_effect} -- the stage-2 selection statistic -- with its
 \code{effect_rank}, its permutation \code{p_value}, the BH-adjusted \code{p_adjusted},
 the feature-wise \code{null_threshold}, the retained \code{perm_importance}
 diagnostic, the \code{selected_reason} (\code{"null"}, \code{"null+top-ncov"},
-\code{"fallback-top-ncov"}, \code{"full"} or \code{"excluded"}), and the \code{selected}
-flag). Selection uses
+\code{"fallback-top-ncov"}, \code{"prespecified"}, \code{"full"} or \code{"excluded"}), the
+\code{kept_by_design} indicator for \code{keep}, and the \code{selected} flag).
+Prespecified retention is not evidence of an effect. Optional selection uses
 \code{(1 + sum(null >= observed)) / (1 + n_perm)} for each predictor
 separately. \code{p_adjusted} adjusts over stage-1 survivors only and is not
 the selection rule. These are screening diagnostics: the
@@ -101,13 +131,29 @@ Permutation importance permutes a predictor, which breaks its correlation
 with every other predictor. For collinear predictors the permuted rows leave
 the observed data support, so the score is governed by the model's
 extrapolation behaviour rather than by the predictor's influence
-(Hooker, Mentch & Zhou 2021). An interventional shift keeps the remaining
-predictors at their observed values, so the contrast stays inside the data
-support and answers a question that has a definition. The permutation null
-is retained, so calibration still compares like with like.
+(Hooker, Mentch & Zhou 2021). An additive shift also can leave the joint
+data support; holding other predictors fixed does not prevent extrapolation.
+Its benefit is an explicitly defined contrast, not guaranteed causal
+identification or superiority. Selection does not find an adjustment set;
+use a scientifically justified set directly when estimating causal effects.
+}
+
+\section{Optional invariant selection}{
+
+\code{method = "tramicp"} delegates binary-logistic invariant selection to
+\code{tramicp::glmICP()}. It requires scientifically justified environment labels,
+a correctly specified response model, adequate measured causes/confounders,
+and the method's sampling assumptions. Spatial CV does not establish these
+assumptions. The resulting intersection is neither a verified list of
+ecological causes nor a sufficient adjustment set. Presence/background
+labels do not become true occurrence observations through this method.
 }
 
 \references{
+Kook, L. et al. (2024). Model-based causal feature selection for general
+response types. \emph{Journal of the American Statistical Association}.
+\doi{10.1080/01621459.2024.2395588}.
+
 Adde, A. et al. (2023). Too many candidates: embedded covariate selection
 procedure for species distribution modelling with the covsel R package.
 \emph{Ecological Informatics} 75: 102080.
@@ -121,8 +167,8 @@ with it in ecological studies. \emph{Ecography} 36: 27-46.
 
 Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
 extrapolation: variable importance requires at least one more model, or
-there is no free variable importance. \emph{WIREs Data Mining and Knowledge
-Discovery} 11: e1421.
+there is no free variable importance. \emph{Statistics and Computing} 31: 82.
+\doi{10.1007/s11222-021-10057-z}.
 }
 \seealso{
 \code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}

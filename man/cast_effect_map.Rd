@@ -14,7 +14,8 @@ cast_effect_map(
   block_rows = 512L,
   filename = NULL,
   overwrite = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  support_probs = c(0.01, 0.99)
 )
 }
 \arguments{
@@ -36,17 +37,33 @@ or a named list of numeric vectors, one per driver.}
 
 \item{block_rows}{Integer rows per processing block. Default 512.}
 
-\item{filename}{Optional GeoTIFF path for the delta stack (LZW).}
+\item{filename}{Optional GeoTIFF path for the effect and coverage stack (LZW).}
 
 \item{overwrite}{Logical. Overwrite \code{filename}. Default \code{FALSE}.}
 
 \item{verbose}{Print block progress. Default \code{TRUE}.}
+
+\item{support_probs}{Length-2 numeric. Increasing training quantiles in
+\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
 }
 \value{
-A \code{SpatRaster} with two layers per driver (NA where predictors
-are missing): \verb{dHSS_<driver>}, the direction (deltas aligned to the
-sign of their own shift), and \verb{absdHSS_<driver>}, the magnitude. The
-per-driver summary table is attached as attribute \code{effect_table}.
+A \code{SpatRaster} with three layers per driver (NA where any fitted
+predictor is missing or non-finite): \verb{dHSS_<driver>}, the direction
+(deltas aligned to the sign of their own shift); \verb{absdHSS_<driver>}, the
+magnitude; and \verb{support_<driver>}, the fraction of requested shifts for
+which that cell's baseline and shifted full predictor vectors both lie
+inside the training quantile box (0 to 1).
+
+The per-driver summary table is attached as attribute \code{effect_table}.
+Its \code{support} column is the minimum, over shifts, of covered complete
+cells divided by all complete cells, as in \code{\link[=cast_effect_table]{cast_effect_table()}} on the
+same grid. It is not the spatial mean of the support layer, which
+averages over shifts instead. The quantiles are attached to the raster
+as attribute \code{support_probs}. Coverage is NA when the training reference
+or its bounds are unavailable, or when no complete cells can be evaluated.
+This is a range-extrapolation diagnostic, not a test of conditional
+positivity or causal identification; holes inside the box are not
+detected. Effects are not masked or dropped for low or unknown coverage.
 }
 \description{
 Intervenes on each driver across every valid cell of \code{current_stack}

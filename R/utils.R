@@ -186,15 +186,15 @@ evaluate_model_full <- function(pred, obs) {
   pred <- pmin(pmax(as.numeric(pred), 1e-7), 1 - 1e-7)
   obs  <- as.integer(obs)
 
-  # -- AUC (ROC), direction fixed: worse-than-random predictors must report
-  #    AUC < 0.5, not be mirrored to 1 - AUC by direction = "auto".
+  # Fixed direction keeps worse-than-random AUC below 0.5.
+  roc_obj <- tryCatch(
+    pROC::roc(obs, pred, quiet = TRUE, direction = "<"),
+    error = function(e) NULL)
   auc_val <- tryCatch({
-    as.numeric(pROC::auc(pROC::roc(obs, pred, quiet = TRUE, direction = "<")))
+    as.numeric(pROC::auc(roc_obj))
   }, error = function(e) NA_real_)
 
-  # -- TSS (at threshold maximising sensitivity+specificity) ------------------
   tss_val <- tryCatch({
-    roc_obj <- pROC::roc(obs, pred, quiet = TRUE, direction = "<")
     coords  <- pROC::coords(roc_obj, "best",
                             ret = c("sensitivity", "specificity"))
     as.numeric(coords$sensitivity[1] + coords$specificity[1] - 1)
@@ -221,7 +221,7 @@ evaluate_model_full <- function(pred, obs) {
 #'
 #' @param pred Numeric predicted probabilities.
 #' @param obs  Binary 0/1 observed.
-#' @param n_bins Integer. Number of moving window bins. Default 101.
+#' @param n_bins Integer. Number of fixed equal-width bins. Default 101.
 #' @return Scalar CBI in [-1, 1].
 #' @keywords internal
 #' @noRd
@@ -230,7 +230,6 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
   if (length(pres_pred) < 5) return(NA_real_)
 
   bins  <- seq(0, 1, length.out = n_bins + 1L)
-  width <- bins[2] - bins[1]
   mids  <- (bins[-1] + bins[-(n_bins + 1L)]) / 2
 
   # Expected: fraction of all predictions in bin (random expectation)

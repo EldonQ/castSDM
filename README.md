@@ -13,10 +13,10 @@ Three products carry that:
 - **Response shape.** `cast_dose_response()` sweeps the size of the shift, so a
   saturating or threshold response stays visible instead of collapsing to one
   number.
-- **A positivity diagnostic.** `cast_effect_support()` reports the fraction of
-  observed predictor vectors that are still inside the training support after
-  the shift. A shift answered mostly by extrapolation is reported as such,
-  never silently answered anyway.
+- **A range-extrapolation diagnostic.** `cast_effect_support()` reports the
+  fraction of evaluated rows inside the training quantile box both before and
+  after shifting. Effects are still returned outside this box. High coverage
+  does not establish joint positivity or causal identification.
 
 ## Variable selection selects on the interventional effect
 
@@ -35,21 +35,112 @@ Three products carry that:
    `ceiling(log2(n_presence))` predictors (at most 12), ordered by the
    effect.
 
-Why the second stage is a shift rather than a permutation: permuting a
-predictor breaks its correlation with every other predictor, so for collinear
-predictors the permuted rows leave the observed data support and the score is
-governed by the model's extrapolation behaviour rather than by the predictor's
-influence (Hooker, Mentch & Zhou 2021). Shifting one predictor and holding the
-rest at their observed values keeps the contrast inside the support and answers
-a question that has a definition.
+Permutation can create unobserved predictor combinations, making importance
+sensitive to model extrapolation (Hooker, Mentch & Zhou 2021). Additive shifts
+can also leave joint support. Their purpose here is to evaluate a specified
+change in a predictor, not to guarantee support, causality or superiority.
+The response-dependent stage-1 filter is not rerun under the null; the reported
+p-values are exploratory scores, not confirmatory tests with guaranteed error
+control. This screen does not identify a causal adjustment set.
 
-The same forest's permutation importance is still reported, as a diagnostic.
+The same forest's permutation importance is reported as a diagnostic.
 `screen$diagnostics$importance_agreement` gives the Spearman agreement between
-the two rankings; large disagreement marks predictors the forest leans on but
-barely responds to when changed — the signature of a collinear stand-in.
+the two rankings. Disagreement does not establish that a predictor is a proxy.
 
 Selection is re-run inside every outer spatial training fold, so held-out folds
 never influence variable choice or tuning.
+
+## Optional invariant selection and scenario contrasts
+
+`method = "tramicp"` uses the optional `tramicp` package's binary-logistic
+invariant causal prediction. Supply an environment **column name**, based on
+study design rather than arbitrary partitions or CV folds. The column is never
+a predictor. Correct model specification, valid environments, adequate measured
+causes/confounders and the method's sampling assumptions remain necessary;
+spatial blocking alone does not establish them.
+
+```r
+screen <- cast_select(
+  training_data, method = "tramicp", environment = "environment_group", seed = 42
+)
+print(screen)
+screen$diagnostics
+
+cv <- cast_cv(
+  training_data, select_method = "tramicp",
+  select_args = list(environment = "environment_group"),
+  models = "gam", k = 5, seed = 42
+)
+
+if (!length(screen$selected)) stop("No invariant predictors identified; inspect diagnostics.")
+fit <- cast_fit(training_data, screen = screen, models = "gam")
+scenario <- cast_sensitivity(
+  fit, prediction_grid, variable = "bio01",
+  shift = 1, shift_type = "raw", model = "gam", backend = "marginaleffects"
+)
+scenario$predictions
+plot(scenario, basemap = "none")
+```
+
+`environment_group` is a placeholder for user-supplied scientific group labels;
+no such column is generated automatically. The example's `bio01` must be a
+retained predictor in your data. Choose the scenario variable and its raw-unit
+change for ecological reasons, after checking its measurement units.
+The high-level `cast()` accepts `select_method = "tramicp"` and
+`select_environment = "environment_group"` with the same semantics.
+
+Selection tests all predictor subsets, with no response-based prescreen or
+fallback ranking. `icp_max_predictors = 12` is a computational guard, not a
+selection cap. `ncov` and `keep` are not supported for this method. Empty
+intersections, accepted empty sets, and no accepted sets are reported separately;
+an empty screen stops fitting instead of silently using other predictors.
+These results do not prove absence of ecological causes or provide a sufficient
+causal adjustment set. Failed/empty CV folds remain in the fold diagnostics and
+selection-frequency denominator; they do not contribute predictive metrics.
+When all invariant-selection CV folds are unevaluable, `cast()` stops with the
+same diagnostic error instead of substituting hold-out evaluation. Retired
+selection arguments and unknown method names raise errors, not replacement runs.
+
+The optional `marginaleffects` backend currently supports one explicitly chosen
+GAM only. It returns baseline, shifted prediction and their rowwise difference
+without standard errors. `delta_sd` is not a confidence interval. Native
+multi-model contrasts remain available. Both are model-based scenario responses,
+not automatically causal effects or calibrated occurrence probabilities.
+Install optional backends yourself when needed; model runs never install them.
+
+For Windows R 4.4, run the following in R to install the optional backends and
+required dependencies from CRAN binaries, without compiling source packages:
+
+```r
+install.packages(
+  c("tramicp", "marginaleffects"),
+  repos = "https://cloud.r-project.org", type = "binary"
+)
+```
+
+To verify the local source checkout, run this separately after installation
+(adjust the checkout path if needed):
+
+```r
+stopifnot(
+  requireNamespace("tramicp", quietly = TRUE),
+  requireNamespace("marginaleffects", quietly = TRUE),
+  utils::packageVersion("tramicp") >= "0.1-0",
+  utils::packageVersion("marginaleffects") >= "0.31.0"
+)
+results <- testthat::test_local(
+  "E:/Package/cast",
+  filter = "selection-and-attribution|effect-consistency|regressions",
+  reporter = "summary", stop_on_failure = TRUE
+)
+checks <- as.data.frame(results)
+stopifnot(!any(checks$skipped), !any(checks$failed), !any(checks$error))
+```
+
+The dependency checks deliberately stop rather than silently skipping the real
+backend test. These tests check software agreement and training-fold isolation,
+not ecological cause recovery. They do not run a species workflow or modify
+raw data or previous validation outputs.
 
 ## Core workflow
 
@@ -74,13 +165,13 @@ Attribution:
 eff <- cast_effect_table(result$fit, newdata = current_grid)
 eff                                  # rank by mean_abs_dHSS, read the sign
 
-emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_*
+emap <- cast_effect_map(result$fit, current_stack)   # dHSS_* / absdHSS_* / support_*
 
 dr <- cast_dose_response(result$fit, "bio1", shift = seq(-3, 3, by = 0.5))
-plot(dr)                             # response shape, hollow points = off support
+plot(dr)                             # hollow points = box coverage below 0.5
 
 sp <- cast_effect_support(result$fit, shift = c(1, 2, 3))
-plot(sp)                             # positivity by driver and shift size
+plot(sp)                             # quantile-box coverage by driver and shift
 
 nec <- cast_necessity(species_data, screen = result$screen, k = 5)
 nec                                  # mean_dAUC lost by dropping each driver
@@ -135,15 +226,30 @@ install.packages(c(
 ## Interpretation
 
 - Effect tables, maps and curves are **model-based interventional
-  contrasts** (g-computation / standardization). They assume consistency, no
-  unobserved confounding given the adjustment set, and positivity; the support
-  column reports the third. They are not doubly robust and not TMLE.
-- The `support` column is a marginal-quantile (hyper-rectangle) approximation
-  to the joint support. It flags gross off-support shifts, not subtler holes
-  inside the observed box.
+  contrasts** (g-computation / standardization). A causal interpretation needs
+  consistency, a justified adjustment set, no uncontrolled confounding, joint
+  positivity, and adequate response and observation models. These assumptions
+  are not established by the software. The estimator is not doubly robust.
+- The `support` column reports the fraction of evaluated rows whose baseline
+  and shifted predictor vectors both fall inside the training quantile box.
+  This range diagnostic cannot detect holes inside the box or establish joint
+  positivity. `range_supported` marks box coverage of at least 0.5, not causal
+  estimability. Contrasts are not filtered by this threshold.
+- Holding other predictors fixed does not guarantee a feasible intervention.
+  In particular, mediators, colliders and deterministically linked predictors
+  need scientific treatment rather than automatic inclusion or selection.
 - On presence/background data the scale is **relative suitability, not
   occurrence probability**.
-- Selected variables are a parsimonious set ranked by interventional effect.
+- `cast_select(keep = c("exposure", "confounder"))` protects a prespecified
+  exposure/adjustment set from thinning, null screening and the predictor cap;
+  `ncov` must accommodate that set. `cast(select_keep = ...)` also protects it
+  inside nested CV. Optional candidates must still be scientifically admissible.
+  `kept_by_design` is not statistical evidence, and screening does not identify
+  a sufficient adjustment set.
+- The `support_<driver>` raster averages coverage across shifts at each cell;
+  table support is the minimum across shifts of spatial coverage. Neither is
+  a conditional-support test. Low-coverage effects are still returned.
+- Selected optional variables are ranked by interventional effect.
   Selection is a model-based screen, not a list of causes.
 - A large `mean_abs_dHSS` with small `mean_dAUC` shows model response with
   limited RF knockout cost. It does not prove substitutability or its cause.
@@ -163,8 +269,8 @@ it in ecological studies. *Ecography* 36: 27-46.
 
 Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
 extrapolation: variable importance requires at least one more model, or there
-is no free variable importance. *WIREs Data Mining and Knowledge Discovery*
-11: e1421.
+is no free variable importance. *Statistics and Computing*
+31: 82. DOI: 10.1007/s11222-021-10057-z.
 
 ## License
 

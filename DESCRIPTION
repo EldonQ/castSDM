@@ -18,15 +18,18 @@ Description: Audits model-based environmental responses in species
     are shifted while every other predictor is held at its observed value - a
     g-computation contrast - calibrated against a response-permutation null.
     The permutation importance of the same forest is reported alongside as a
-    diagnostic, because permuting a predictor breaks its correlation with the
-    others and is therefore governed by the model's extrapolation behaviour.
-    Effect products carry a positivity diagnostic: the fraction of observed
-    predictor vectors still inside the training support after the shift. Both
+    diagnostic; both permutation and additive shifts can leave joint data
+    support. Effect products carry a range diagnostic: the fraction of evaluated
+    rows inside the training quantile box before and after shifting. This does
+    not establish conditional positivity or causal identification. Both
     sit in a complete workflow - Random Forest, BRT, MaxEnt and GAM learners,
     nested spatial cross-validation, ensemble prediction, and future climate
     projection with extrapolation control. The package targets interpretable
-    interventional attribution under stated assumptions and does not claim
-    automatic discovery of ecological causes.
+    interventional attribution under stated assumptions. Optional invariant
+    selection uses 'tramicp' with supplied environment groups; its assumptions
+    are not verified by the software. Scenario contrasts for GAMs can use
+    'marginaleffects'. Outputs do not establish ecological causality or convert
+    presence-background suitability to occurrence probability.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
 BugReports: https://github.com/EldonQ/castSDM/issues
@@ -45,6 +48,7 @@ Suggests:
     gbm,
     ggplot2,
     knitr,
+    marginaleffects (>= 0.31.0),
     maxnet,
     mgcv,
     patchwork,
@@ -55,6 +59,8 @@ Suggests:
     sf,
     terra,
     testthat (>= 3.0.0),
-    viridisLite
+    tramicp (>= 0.1-0),
+    viridisLite,
+    withr
 Config/testthat/edition: 3
 VignetteBuilder: knitr

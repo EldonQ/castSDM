@@ -12,6 +12,9 @@ print.cast_select <- function(x, ...) {
   if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")
   }
+  if (identical(x$method, "tramicp")) {
+    cli::cli_text("Invariance status: {d$status}; not a verified ecological cause or adjustment set.")
+  }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)
 }
@@ -69,29 +72,29 @@ print.cast_dose_response <- function(x, ...) {
     "Intervention: {x$variable} shift in {x$unit}",
     "Models averaged: {.val {x$models}}"
   ))
-  keep <- x$curve[x$curve$estimable, , drop = FALSE]
+  keep <- x$curve[x$curve$range_supported, , drop = FALSE]
   if (nrow(keep)) {
     imax <- which.max(keep$mean_abs_delta)
     cli::cli_text(
-      "Largest mean |delta| = {round(keep$mean_abs_delta[imax], 4)} at shift {round(keep$shift[imax], 2)} ({x$unit}); support {round(keep$support[imax], 3)}"
+      "Largest mean |delta| among range-screened shifts = {round(keep$mean_abs_delta[imax], 4)} at shift {round(keep$shift[imax], 2)} ({x$unit}); box coverage {round(keep$support[imax], 3)}"
     )
   } else {
-    cli::cli_text("No shift in the requested range had adequate support.")
+    cli::cli_text("No shift met the quantile-box coverage threshold.")
   }
-  cli::cli_text("{round(100 * mean(x$curve$estimable), 0)}% of the shifted range is on support (>= {attr(x$curve, 'min_support')}).")
+  cli::cli_text("{round(100 * mean(x$curve$range_supported), 0)}% of evaluated shifts meet box coverage >= {attr(x$curve, 'min_support')}; this does not establish joint positivity.")
   invisible(x)
 }
 
 
 #' @export
 print.cast_support <- function(x, ...) {
-  cli::cli_h1("castSDM Shift Support (positivity)")
-  cli::cli_text("Fraction of observed predictor vectors still inside the training support.")
+  cli::cli_h1("castSDM Shift Range Diagnostic")
+  cli::cli_text("Fraction of evaluated rows inside the training quantile box before and after shifting.")
   tab <- x$support
   tab$support <- round(tab$support, 3)
   tab$shift_raw <- signif(tab$shift_raw, 4)
   print(tab, row.names = FALSE)
-  cli::cli_text("Low support means the effect is answered by extrapolation; report it or reduce the shift.")
+  cli::cli_text("Low coverage flags range extrapolation; high coverage does not establish joint positivity.")
   invisible(x)
 }
 

@@ -17,7 +17,7 @@
 A \code{ggplot} object.
 }
 \description{
-Mean change in predicted probability against the size of the shift, with
-shifts that leave the observed data support drawn hollow so an
-extrapolated tail is never read as evidence.
+Mean change in predicted suitability against the size of the shift. Hollow
+points indicate quantile-box coverage below 0.5, not causal estimability.
+High coverage does not establish joint positivity.
 }

@@ -159,9 +159,20 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
     },
     "maxent" = {
       check_suggested("maxnet", "for MaxEnt")
+      f <- maxnet::maxnet.formula(p = Y, data = X)
+      single_predictor <- ncol(X) == 1L
+      if (single_predictor) {
+        # maxnet's background augmentation drops one-column data frames to vectors.
+        pres <- X[Y == 1L, , drop = FALSE]
+        add <- !pres[[1]] %in% X[[1]][Y == 0L]
+        X <- rbind(X, pres[add, , drop = FALSE])
+        Y <- c(Y, rep(0L, sum(add)))
+        # glmnet requires two columns; its excluded constant leaves the feature set unchanged.
+        if (ncol(stats::model.matrix(f, X)) == 1L) f <- stats::update(f, ~ . + 1)
+      }
       m <- maxnet::maxnet(
-        p = Y, data = X,
-        maxnet::maxnet.formula(p = Y, data = X)
+        p = Y, data = X, f = f,
+        addsamplestobackground = !single_predictor
       )
       list(type = "traditional", model = m, name = "maxent")
     },

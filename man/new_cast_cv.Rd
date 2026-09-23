@@ -14,7 +14,8 @@ new_cast_cv(
   selections = list(),
   screens = list(),
   selection_freq = NULL,
-  oof = NULL
+  oof = NULL,
+  fold_status = NULL
 )
 }
 \arguments{
@@ -40,6 +41,9 @@ selection frequency (\code{variable}, \code{freq}), sorted descending.}
 \item{oof}{A \code{data.frame} of out-of-fold predictions with an \code{obs} column
 and one \verb{HSS_<model>} column per model, or \code{NULL}. This is the labelled
 surface \code{\link[=cast_ensemble]{cast_ensemble()}} thresholds on.}
+
+\item{fold_status}{Character vector of evaluation, empty-selection or failure
+statuses, one per scheduled fold.}
 }
 \value{
 A \code{cast_cv} object.

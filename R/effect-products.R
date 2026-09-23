@@ -1,19 +1,4 @@
-# ==========================================================================
-# Interventional effect products: per-driver contrast sizes and rasters.
-#   cast_effect_table(): per-driver interventional effect sizes on a table.
-#   cast_effect_map():   per-driver delta-suitability rasters over a stack.
-# Both answer one question: "if we intervene on driver X (shift it by each
-# s in a symmetric shift set, all other drivers held fixed), what happens
-# to predicted suitability?" Magnitude and direction are reported apart.
-# Model-based interventional contrast (g-computation / standardization);
-# requires consistency, no unobserved confounding given the adjustment set,
-# and positivity. cast_effect_support() reports the third of those;
-# cast_dose_response() reports the response shape; cast_effect_support()
-# reports how much of the shifted range the observed data can answer.
-# Not doubly robust and not TMLE; not a proof of a manipulable mechanism.
-# Read alongside cast_necessity(): response without necessity does not
-# identify a driver.
-# ==========================================================================
+# Fitted response contrasts require additional assumptions for causal interpretation.
 
 .effect_predictions <- function(fit, X, driver, steps, base = NULL) {
   models <- names(fit$models)
@@ -129,10 +114,11 @@
 #' @param steps Optional raw-unit shift sets, overriding
 #'   `shifts`/`shift_type`. Either a numeric vector (used for every driver)
 #'   or a named list of numeric vectors, one per driver.
-#' @param support_probs Length-2 numeric. Training quantiles treated as the
-#'   supported range of each predictor. Default `c(0.01, 0.99)`. The `support`
-#'   column reports the worst (minimum) such fraction over the driver's shift
-#'   set; drivers with `support < 0.5` are answered mostly by extrapolation.
+#' @param support_probs Length-2 numeric. Increasing training quantiles in
+#'   `[0, 1]` defining a box across all predictors. Default `c(0.01, 0.99)`.
+#'   `support` is the minimum, over shifts, of the fraction of complete rows
+#'   whose baseline and shifted vectors both lie in that box. This diagnostic
+#'   cannot detect holes inside the box and does not establish joint positivity.
 #' @param verbose Print progress. Default `TRUE`.
 #'
 #' @return A `cast_effect_table` data.frame, one row per driver.
@@ -144,8 +130,9 @@
 #'   Summaries first average over shifts per row; `n` counts complete rows.
 #'   `outside_range_fraction` is the fraction of row/shift pairs outside the
 #'   predictor's training range. It does not test multivariate support.
-#'   `support` is the minimum 1-99% support fraction over the shift set, the
-#'   same positivity diagnostic [cast_effect_support()] reports per shift.
+#'   `support` is the minimum quantile-box coverage over the shift set, using
+#'   the same range diagnostic as [cast_effect_support()]. All complete rows
+#'   contribute to the effects, including those outside the box.
 #' @export
 cast_effect_table <- function(fit, newdata, drivers = NULL,
                               shifts = c(-2, -1, 1, 2), shift_type = "sd",
@@ -192,13 +179,8 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
       mean(vapply(sv, function(st) mean(X[[v]] + st < lim[1] |
                                        X[[v]] + st > lim[2]), numeric(1)))
     } else NA_real_
-    # Positivity linkage: worst 1-99% support fraction over this driver's
-    # own shift set, on the same scale cast_effect_support() reports.
     row$support <- if (!is.null(ref)) {
-      frac <- suppressWarnings(tryCatch(
-        .cast_support_fraction(ref, v, sv, probs = support_probs)[v, ],
-        error = function(e) NA_real_))
-      suppressWarnings(min(frac, na.rm = TRUE))
+      min(.cast_support_fraction(ref, v, sv, probs = support_probs, newdata = X))
     } else NA_real_
     if (!is.finite(row$support)) row$support <- NA_real_
     if (row$n == 0L) failed <- c(failed, v)
@@ -219,9 +201,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
     "do(driver += s) for s in {%s} %s, all other drivers fixed; deltas aligned to sign(s)",
     paste(if (steps_given) unique(unlist(steps)) else shifts, collapse = ", "),
     if (steps_given || identical(shift_type, "raw")) "raw units" else "SD")
-  attr(res, "assumptions") <- paste(
-    "Model-based interventional effect (g-computation). Assumes no",
-    "unobserved confounding; not a proof of a manipulable mechanism.")
+  attr(res, "assumptions") <- .cast_effect_assumptions()
   class(res) <- c("cast_effect_table", "data.frame")
   res
 }
@@ -232,7 +212,7 @@ print.cast_effect_table <- function(x, ...) {
   iv <- attr(x, "intervention")
   if (!is.null(iv)) cli::cli_text("{.emph {iv}}")
   print(as.data.frame(x))
-  cli::cli_text("Rank by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction; {.field support} < 0.5 means the shift is answered mostly by extrapolation.")
+  cli::cli_text("Rank by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction; {.field support} < 0.5 flags low quantile-box coverage for at least one shift.")
   cli::cli_text("Pair with {.fn cast_necessity} for predictive diagnostics; neither product establishes causal identification.")
   invisible(x)
 }
@@ -255,19 +235,35 @@ print.cast_effect_table <- function(x, ...) {
 #'   `shifts`/`shift_type`. Either a numeric vector (used for every driver)
 #'   or a named list of numeric vectors, one per driver.
 #' @param block_rows Integer rows per processing block. Default 512.
-#' @param filename Optional GeoTIFF path for the delta stack (LZW).
+#' @param filename Optional GeoTIFF path for the effect and coverage stack (LZW).
 #' @param overwrite Logical. Overwrite `filename`. Default `FALSE`.
 #' @param verbose Print block progress. Default `TRUE`.
+#' @param support_probs Length-2 numeric. Increasing training quantiles in
+#'   `[0, 1]` defining a box across all predictors. Default `c(0.01, 0.99)`.
 #'
-#' @return A `SpatRaster` with two layers per driver (NA where predictors
-#'   are missing): `dHSS_<driver>`, the direction (deltas aligned to the
-#'   sign of their own shift), and `absdHSS_<driver>`, the magnitude. The
-#'   per-driver summary table is attached as attribute `effect_table`.
+#' @return A `SpatRaster` with three layers per driver (NA where any fitted
+#'   predictor is missing or non-finite): `dHSS_<driver>`, the direction
+#'   (deltas aligned to the sign of their own shift); `absdHSS_<driver>`, the
+#'   magnitude; and `support_<driver>`, the fraction of requested shifts for
+#'   which that cell's baseline and shifted full predictor vectors both lie
+#'   inside the training quantile box (0 to 1).
+#'
+#'   The per-driver summary table is attached as attribute `effect_table`.
+#'   Its `support` column is the minimum, over shifts, of covered complete
+#'   cells divided by all complete cells, as in [cast_effect_table()] on the
+#'   same grid. It is not the spatial mean of the support layer, which
+#'   averages over shifts instead. The quantiles are attached to the raster
+#'   as attribute `support_probs`. Coverage is NA when the training reference
+#'   or its bounds are unavailable, or when no complete cells can be evaluated.
+#'   This is a range-extrapolation diagnostic, not a test of conditional
+#'   positivity or causal identification; holes inside the box are not
+#'   detected. Effects are not masked or dropped for low or unknown coverage.
 #' @export
 cast_effect_map <- function(fit, current_stack, drivers = NULL,
                             shifts = c(-2, -1, 1, 2), shift_type = "sd",
                             steps = NULL, block_rows = 512L, filename = NULL,
-                            overwrite = FALSE, verbose = TRUE) {
+                            overwrite = FALSE, verbose = TRUE,
+                            support_probs = c(0.01, 0.99)) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
@@ -296,12 +292,18 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     .steps_from_fit(fit, drivers, shifts, shift_type)
   }
 
+  ref <- tryCatch(.cast_reference(fit, env_vars), error = function(e) NULL)
+  # Validate even without a reference; reuse the training bounds in every block.
+  bounds <- .cast_support_bounds(ref, support_probs)
   n_cells <- terra::ncell(current_stack)
   nr <- terra::nrow(current_stack)
   ncl <- terra::ncol(current_stack)
   blank <- stats::setNames(rep(list(rep(NA_real_, n_cells)), length(drivers)), drivers)
   acc_signed <- blank
   acc_abs <- blank
+  acc_support <- blank
+  support_counts <- lapply(steps, function(sv) numeric(length(sv)))
+  n_complete <- 0
   starts <- seq(1L, nr, by = block_rows)
   for (b in seq_along(starts)) {
     r0 <- starts[b]; r1 <- min(nr, r0 + block_rows - 1L)
@@ -316,6 +318,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     # data.frame. Shifting one column by name also avoids copying the whole
     # block on each intervention step.
     Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
+    n_complete <- n_complete + nrow(Xi)
     base <- .cast_predict_matrix(fit, Xi, names(fit$models))
     for (v in drivers) {
       aligned <- .effect_predictions(fit, Xi, v, steps[[v]], base)
@@ -323,6 +326,12 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
       a <- rep(NA_real_, length(cells)); a[ok] <- rowMeans(abs(aligned), na.rm = TRUE)
       acc_signed[[v]][cells] <- s
       acc_abs[[v]][cells] <- a
+      if (!is.null(ref)) {
+        covered <- .cast_support_rows(Xi, v, steps[[v]], bounds)
+        acc_support[[v]][cells[ok]] <- rowMeans(covered)
+        # Keep shift totals, not block means or the mean of the support raster.
+        support_counts[[v]] <- support_counts[[v]] + colSums(covered)
+      }
     }
     if (verbose) cli::cli_inform("block {b}/{length(starts)} done")
   }
@@ -331,13 +340,18 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     terra::values(r) <- d
     r
   }
-  out <- c(lapply(acc_signed, to_rast), lapply(acc_abs, to_rast))
-  names(out) <- c(sprintf("dHSS_%s", drivers), sprintf("absdHSS_%s", drivers))
+  out <- c(lapply(acc_signed, to_rast), lapply(acc_abs, to_rast),
+           lapply(acc_support, to_rast))
+  names(out) <- c(sprintf("dHSS_%s", drivers), sprintf("absdHSS_%s", drivers),
+                  sprintf("support_%s", drivers))
   res <- terra::rast(out)
   tab <- do.call(rbind, lapply(drivers, function(v) {
-    cbind(data.frame(driver = v, stringsAsFactors = FALSE),
-          .effect_summarise(acc_signed[[v]], length(steps[[v]]),
-                            abs_values = acc_abs[[v]]))
+    row <- .effect_summarise(acc_signed[[v]], length(steps[[v]]),
+                             abs_values = acc_abs[[v]])
+    row$support <- if (!is.null(ref) && n_complete > 0) {
+      min(support_counts[[v]] / n_complete)
+    } else NA_real_
+    cbind(data.frame(driver = v, stringsAsFactors = FALSE), row)
   }))
   rownames(tab) <- NULL
   if (!is.null(filename)) {
@@ -346,12 +360,11 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   }
   attr(res, "effect_table") <- tab
   attr(res, "steps") <- steps
+  attr(res, "support_probs") <- support_probs
   attr(res, "intervention") <- sprintf(
     "do(driver += s) for s in {%s} %s, all other drivers fixed; deltas aligned to sign(s)",
     paste(if (steps_given) unique(unlist(steps)) else shifts, collapse = ", "),
     if (steps_given || identical(shift_type, "raw")) "raw units" else "SD")
-  attr(res, "assumptions") <- paste(
-    "Model-based interventional effect (g-computation). Assumes no",
-    "unobserved confounding; not a proof of a manipulable mechanism.")
+  attr(res, "assumptions") <- .cast_effect_assumptions()
   res
 }

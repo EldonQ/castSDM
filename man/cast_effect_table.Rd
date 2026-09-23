@@ -36,10 +36,11 @@ magnitude of one arbitrary step.}
 \code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
 or a named list of numeric vectors, one per driver.}
 
-\item{support_probs}{Length-2 numeric. Training quantiles treated as the
-supported range of each predictor. Default \code{c(0.01, 0.99)}. The \code{support}
-column reports the worst (minimum) such fraction over the driver's shift
-set; drivers with \code{support < 0.5} are answered mostly by extrapolation.}
+\item{support_probs}{Length-2 numeric. Increasing training quantiles in
+\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.
+\code{support} is the minimum, over shifts, of the fraction of complete rows
+whose baseline and shifted vectors both lie in that box. This diagnostic
+cannot detect holes inside the box and does not establish joint positivity.}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
 }
@@ -53,8 +54,9 @@ suitability). Rank drivers by \code{mean_abs_dHSS}; read
 Summaries first average over shifts per row; \code{n} counts complete rows.
 \code{outside_range_fraction} is the fraction of row/shift pairs outside the
 predictor's training range. It does not test multivariate support.
-\code{support} is the minimum 1-99\% support fraction over the shift set, the
-same positivity diagnostic \code{\link[=cast_effect_support]{cast_effect_support()}} reports per shift.
+\code{support} is the minimum quantile-box coverage over the shift set, using
+the same range diagnostic as \code{\link[=cast_effect_support]{cast_effect_support()}}. All complete rows
+contribute to the effects, including those outside the box.
 }
 \description{
 Intervenes on each driver in turn (do-operator: shift the driver, hold

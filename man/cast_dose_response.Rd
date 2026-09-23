@@ -25,17 +25,19 @@ dropped from the scan. Default scans -3 to 3 SD.}
 
 \item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
 
-\item{newdata}{Optional data frame of observed predictor values used as the
-reference population. Defaults to the training data stored in \code{fit}.}
+\item{newdata}{Optional data frame defining the reference population.
+Defaults to training predictors stored in \code{fit}. Incomplete or non-finite
+rows are excluded from both effects and coverage.}
 
-\item{support_probs}{Length-2 numeric. Training quantiles treated as the
-supported range of each predictor. Default \code{c(0.01, 0.99)}.}
+\item{support_probs}{Length-2 numeric. Increasing training quantiles in
+\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
 
-\item{max_rows}{Rows sampled (evenly) from \code{newdata}. Default 5000.}
+\item{max_rows}{Positive integer limiting rows sampled evenly from the
+complete reference population, or \code{Inf} for all rows. Default 5000.}
 }
 \value{
 A \code{cast_dose_response} object with \code{curve} (data frame: \code{shift},
-\code{shift_raw}, \code{mean_delta}, \code{mean_abs_delta}, \code{support}, \code{estimable}),
+\code{shift_raw}, \code{mean_delta}, \code{mean_abs_delta}, \code{support}, \code{range_supported}),
 \code{shift_type}, \code{variable}, \code{unit}, \code{models}, and \code{assumptions}.
 }
 \description{
@@ -55,9 +57,12 @@ lowers it in others. Both are contrasts of the \emph{fitted} model on the
 scale it predicts. On presence/background data that scale is relative
 suitability, not occurrence probability.
 
-\code{support} is the fraction of rows whose shifted predictor vector remains
-inside the observed multivariable support. A shift with low \code{support} is
-answered mostly by extrapolation; report it as such or reduce it.
+\code{support} is the fraction of evaluated rows whose baseline and shifted
+vectors both lie inside every predictor's training quantile bounds. This
+box can contain unobserved combinations, so high coverage does not establish
+conditional positivity. \code{range_supported} marks coverage of at least 0.5:
+a descriptive range screen, not causal estimability. Contrasts are computed
+over all complete evaluated rows, including those outside the box.
 }
 
 \seealso{

@@ -84,7 +84,7 @@ new_cast_sensitivity <- function(predictions, variable, shift, shift_type,
 #' Create a cast_dose_response Object
 #'
 #' @param curve A `data.frame` with `shift`, `shift_raw`, `mean_delta`,
-#'   `mean_abs_delta`, `support`, and `estimable`.
+#'   `mean_abs_delta`, `support`, and `range_supported`.
 #' @param variable Character. The intervened predictor.
 #' @param shift_type Character. How `shift` is interpreted.
 #' @param unit Character. Human-readable shift unit.
@@ -107,8 +107,8 @@ new_cast_dose_response <- function(curve, variable, shift_type, unit, models,
 #' Create a cast_support Object
 #'
 #' @param support A `data.frame` with `driver`, `shift`, `shift_raw`, and
-#'   `support` (the fraction of observed predictor vectors still inside the
-#'   training support after the shift).
+#'   `support` (the fraction of evaluated rows inside the training quantile
+#'   box both before and after the shift).
 #' @param variables Character vector of assessed predictors.
 #' @param shift Numeric vector of assessed shift sizes.
 #' @param shift_type Character. How `shift` is interpreted.
@@ -223,6 +223,8 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #' @param oof A `data.frame` of out-of-fold predictions with an `obs` column
 #'   and one `HSS_<model>` column per model, or `NULL`. This is the labelled
 #'   surface [cast_ensemble()] thresholds on.
+#' @param fold_status Character vector of evaluation, empty-selection or failure
+#'   statuses, one per scheduled fold.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
@@ -230,7 +232,7 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
                         selections = list(), screens = list(),
-                        selection_freq = NULL, oof = NULL) {
+                        selection_freq = NULL, oof = NULL, fold_status = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -242,7 +244,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       selections   = selections,
       screens      = screens,
       selection_freq = selection_freq,
-      oof          = oof
+      oof          = oof,
+      fold_status  = fold_status
     ),
     class = "cast_cv"
   )

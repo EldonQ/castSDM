@@ -15,7 +15,7 @@ new_cast_dose_response(
 }
 \arguments{
 \item{curve}{A \code{data.frame} with \code{shift}, \code{shift_raw}, \code{mean_delta},
-\code{mean_abs_delta}, \code{support}, and \code{estimable}.}
+\code{mean_abs_delta}, \code{support}, and \code{range_supported}.}
 
 \item{variable}{Character. The intervened predictor.}
 

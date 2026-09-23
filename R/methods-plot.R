@@ -750,9 +750,9 @@ plot.cast_sensitivity <- function(x, basemap = "world", var_label = NULL,
 
 #' Plot a Dose-Response Curve
 #'
-#' Mean change in predicted probability against the size of the shift, with
-#' shifts that leave the observed data support drawn hollow so an
-#' extrapolated tail is never read as evidence.
+#' Mean change in predicted suitability against the size of the shift. Hollow
+#' points indicate quantile-box coverage below 0.5, not causal estimability.
+#' High coverage does not establish joint positivity.
 #'
 #' @param x A `cast_dose_response` object (from [cast_dose_response()]).
 #' @param var_label Optional display label for the intervened predictor.
@@ -763,17 +763,18 @@ plot.cast_sensitivity <- function(x, basemap = "world", var_label = NULL,
 plot.cast_dose_response <- function(x, var_label = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   crv <- x$curve
-  crv$on_support <- ifelse(crv$estimable, "on support", "outside support")
+  crv$box_coverage <- ifelse(crv$range_supported, "box coverage >= 0.5",
+                             "box coverage < 0.5")
   lab <- var_label %||% x$variable
   ggplot2::ggplot(crv, ggplot2::aes(x = .data$shift, y = .data$mean_delta)) +
     ggplot2::geom_hline(yintercept = 0, color = "grey50", linewidth = 0.4) +
     ggplot2::geom_ribbon(ggplot2::aes(ymin = 0, ymax = .data$mean_delta),
                          fill = "grey85", alpha = 0.6) +
     ggplot2::geom_line(color = "#B2182B", linewidth = 0.8) +
-    ggplot2::geom_point(ggplot2::aes(shape = .data$on_support),
+    ggplot2::geom_point(ggplot2::aes(shape = .data$box_coverage),
                         color = "#B2182B", size = 1.9, fill = "white") +
-    ggplot2::scale_shape_manual(values = c(`on support` = 16,
-                                           `outside support` = 1),
+    ggplot2::scale_shape_manual(values = c(`box coverage >= 0.5` = 16,
+                                           `box coverage < 0.5` = 1),
                                 name = NULL) +
     ggplot2::labs(
       title = sprintf("Dose-response of predicted suitability to %s", lab),
@@ -786,7 +787,7 @@ plot.cast_dose_response <- function(x, var_label = NULL, ...) {
 }
 
 
-#' Plot Shift Support (Positivity) by Driver
+#' Plot Shift Quantile-Box Coverage by Driver
 #'
 #' @param x A `cast_support` object (from [cast_effect_support()]).
 #' @param var_labels Optional named character vector of display labels.
@@ -808,11 +809,11 @@ plot.cast_support <- function(x, var_labels = NULL, ...) {
                        size = 3, color = "grey15") +
     ggplot2::scale_fill_gradientn(
       colours = c("#B2182B", "#F4A582", "#F7F7F7", "#92C5DE", "#2166AC"),
-      limits = c(0, 1), name = "Support") +
+      limits = c(0, 1), name = "Box coverage") +
     ggplot2::labs(
-      title = "Shift support by driver",
-      subtitle = "Fraction of observed predictor vectors still inside the training support",
-      x = "Shift", y = ""
+      title = "Shift range diagnostic by driver",
+      subtitle = "Fraction inside the training quantile box before and after shifting",
+      x = sprintf("Shift (%s)", if (x$shift_type == "sd") "training SD" else "raw units"), y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(panel.grid = ggplot2::element_blank())
@@ -823,8 +824,8 @@ plot.cast_support <- function(x, var_labels = NULL, ...) {
 #'
 #' Lollipop chart of per-driver interventional effects: position shows the
 #' magnitude (`mean_abs_dHSS`), colour shows the direction
-#' (`mean_signed_dHSS`), and drivers whose shift is answered mostly by
-#' extrapolation (`support < 0.5`) are drawn hollow.
+#' (`mean_signed_dHSS`), hollow points mark minimum quantile-box coverage below
+#' 0.5, and crosses mark unknown coverage. Coverage is not joint positivity.
 #'
 #' @param x A `cast_effect_table` object (from [cast_effect_table()]).
 #' @param var_labels Optional named character vector of display labels.
@@ -842,25 +843,27 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
   d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
   d$direction <- ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
                         "lowers suitability")
-  sup <- if ("support" %in% names(d)) d$support else rep(1, nrow(d))
-  d$answerable <- ifelse(is.finite(sup) & sup < 0.5,
-                         "low support (< 0.5)", "on support")
+  sup <- if ("support" %in% names(d)) d$support else rep(NA_real_, nrow(d))
+  d$box_coverage <- ifelse(!is.finite(sup), "box coverage unknown",
+                           ifelse(sup < 0.5, "box coverage < 0.5",
+                                  "box coverage >= 0.5"))
   ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
                                   color = .data$direction)) +
     ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data$mean_abs_dHSS,
                                        y = .data$display, yend = .data$display),
                           linewidth = 0.6) +
-    ggplot2::geom_point(ggplot2::aes(shape = .data$answerable), size = 2.8,
+    ggplot2::geom_point(ggplot2::aes(shape = .data$box_coverage), size = 2.8,
                         fill = "white") +
-    ggplot2::scale_shape_manual(values = c(`on support` = 16,
-                                           `low support (< 0.5)` = 1),
+    ggplot2::scale_shape_manual(values = c(`box coverage >= 0.5` = 16,
+                                           `box coverage < 0.5` = 1,
+                                           `box coverage unknown` = 4),
                                 name = NULL) +
     ggplot2::scale_color_manual(values = c(`raises suitability` = "#B2182B",
                                            `lowers suitability` = "#2166AC"),
                                 name = NULL) +
     ggplot2::labs(
       title = "Interventional effect by driver",
-      subtitle = "Magnitude with direction; hollow = shift answered mostly by extrapolation",
+      subtitle = "Magnitude with direction; hollow = low box coverage, cross = unknown",
       x = "Mean |change in suitability| over the shift set", y = ""
     ) +
     theme_cast(base_size = 11) +
@@ -871,9 +874,9 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
 #' Plot Knockout Necessity (Held-Out AUC Cost)
 #'
 #' Bars show the mean held-out AUC lost by dropping each driver; whiskers
-#' span the observed fold range. Read beside [cast_effect_table()]: a driver
-#' the model responds to but costs nothing to drop is substitutable by a
-#' collinear partner, so attribution to it is not identified.
+#' span the observed fold range. Read beside [cast_effect_table()] as a
+#' predictive diagnostic. Small knockout costs can reflect redundancy, limited
+#' power or metric insensitivity; agreement does not establish causality.
 #'
 #' @param x A `cast_necessity` object (from [cast_necessity()]).
 #' @param var_labels Optional named character vector of display labels.

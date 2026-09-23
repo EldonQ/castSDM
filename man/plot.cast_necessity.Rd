@@ -18,7 +18,7 @@ A \code{ggplot} object.
 }
 \description{
 Bars show the mean held-out AUC lost by dropping each driver; whiskers
-span the observed fold range. Read beside \code{\link[=cast_effect_table]{cast_effect_table()}}: a driver
-the model responds to but costs nothing to drop is substitutable by a
-collinear partner, so attribution to it is not identified.
+span the observed fold range. Read beside \code{\link[=cast_effect_table]{cast_effect_table()}} as a
+predictive diagnostic. Small knockout costs can reflect redundancy, limited
+power or metric insensitivity; agreement does not establish causality.
 }

@@ -24,22 +24,26 @@ unless \code{shift_type = "raw"}.}
 
 \item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
 
-\item{newdata}{Optional observed predictor frame. Defaults to training data.}
+\item{newdata}{Optional data frame defining the reference population.
+Defaults to training predictors stored in \code{fit}. Incomplete or non-finite
+rows are excluded from both effects and coverage.}
 
-\item{support_probs}{Length-2 numeric. Default \code{c(0.01, 0.99)}.}
+\item{support_probs}{Length-2 numeric. Increasing training quantiles in
+\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
 
-\item{max_rows}{Rows sampled (evenly). Default 20000.}
+\item{max_rows}{Positive integer limiting complete rows sampled evenly, or
+\code{Inf} for all rows. Default 20000.}
 }
 \value{
 A \code{cast_support} object with \code{support}: a data frame of
-\code{driver}, \code{shift}, \code{shift_raw}, \code{support}, and \code{per_variable} (a named
-list of per-predictor support fractions behind each joint number).
+\code{driver}, \code{shift}, \code{shift_raw}, and \code{support}.
 }
 \description{
-Reports, per driver and shift size, the fraction of observed predictor
-vectors that remain inside the training support after the shift. This is the
-positivity diagnostic that belongs beside any interventional effect
-product: where it is low, the effect is answered by extrapolation.
+Reports, per driver and shift, the fraction of complete evaluated rows whose
+baseline and shifted vectors both lie inside every predictor's training
+quantile bounds. Low coverage flags range extrapolation. Unobserved predictor
+combinations inside this box remain undetected, so even full coverage does
+not establish conditional positivity or causal identification.
 }
 \seealso{
 \code{\link[=cast_effect_map]{cast_effect_map()}}, \code{\link[=cast_dose_response]{cast_dose_response()}}

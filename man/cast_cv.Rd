@@ -33,7 +33,10 @@ as optimistic.}
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
 \code{"two_stage"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
-\item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.}
+\item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.
+Cannot override \code{data}, \code{response}, or \code{method}. For \code{"tramicp"}, pass
+\code{environment} as a column name; its values follow the buffered training
+rows and are never inferred from CV folds.}
 
 \item{k}{Number of outer spatial folds.}
 
@@ -64,7 +67,10 @@ the fold boundary. Default \code{0} (no exclusion band).}
 \item{verbose}{Print progress.}
 }
 \value{
-A \code{cast_cv} object including fold-level selections.
+A \code{cast_cv} object including fold-level selections and \code{fold_status}.
+Empty or failed folds do not contribute predictive metrics. When no fold
+is evaluable, the \code{cast_cv_no_evaluable_folds} error carries \code{screens} and
+\code{fold_status} for inspection.
 }
 \description{
 Variable selection is re-fitted inside every outer training fold. This

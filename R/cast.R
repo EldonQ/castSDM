@@ -41,9 +41,20 @@
 #'   the training split. Default `TRUE`.
 #' @param seed Integer or `NULL`.
 #' @param verbose Logical. Print progress. Default `TRUE`.
+#' @param select_keep Character vector passed to `keep` in [cast_select()],
+#'   retained in the training screen and every nested CV fold. Prespecify these
+#'   variables before evaluating outcomes; retention does not verify adjustment.
+#' @param select_environment Column name containing scientifically justified
+#'   environment groups for `select_method = "tramicp"`, not spatial CV folds.
+#' @param select_icp_alpha Invariance-test level passed to [cast_select()].
+#' @param select_icp_max_predictors Computational guard for exhaustive subset
+#'   testing, not a cap on the inferred intersection.
 #'
 #' @return A `cast_result` object (S3 class) containing pipeline outputs.
-#'   Use [print()], [summary()], [plot()].
+#'   Use [print()], [summary()], [plot()]. When every spatial CV fold is
+#'   unevaluable with `select_method = "tramicp"`, the
+#'   `cast_cv_no_evaluable_folds` error retains `screens` and `fold_status`;
+#'   the pipeline stops instead of substituting hold-out evaluation.
 #'
 #' @seealso [cast_select()], [cast_fit()], [cast_ensemble()],
 #'   [cast_predict()]
@@ -67,7 +78,11 @@ cast <- function(species_data,
                  ensemble_method = "weighted",
                  refit_full = TRUE,
                  seed = NULL,
-                 verbose = TRUE) {
+                 verbose = TRUE,
+                 select_keep = character(0),
+                 select_environment = NULL,
+                 select_icp_alpha = 0.05,
+                 select_icp_max_predictors = 12L) {
   cl <- match.call()
   do_predict <- do_predict %||% !is.null(env_data)
 
@@ -76,7 +91,10 @@ cast <- function(species_data,
   # === Step 1: Data Preparation ===
   if (verbose) cli::cli_h2("Step 1: Data Preparation")
   split <- cast_prepare(
-    species_data, train_fraction = train_fraction, seed = seed
+    species_data, train_fraction = train_fraction, seed = seed,
+    env_vars = if (is.null(select_environment)) NULL else
+      get_env_vars(species_data, meta = select_environment),
+    verbose = verbose
   )
   train_data <- split$train
   test_data  <- split$test
@@ -95,6 +113,10 @@ cast <- function(species_data,
     n_perm = select_n_perm,
     ncov = select_ncov,
     maxncov = select_maxncov,
+    keep = select_keep,
+    environment = select_environment,
+    icp_alpha = select_icp_alpha,
+    icp_max_predictors = select_icp_max_predictors,
     seed = seed, verbose = verbose
   )
 
@@ -121,13 +143,19 @@ cast <- function(species_data,
           num_trees = select_num_trees,
           n_perm = select_n_perm,
           ncov = select_ncov,
-          maxncov = select_maxncov
+          maxncov = select_maxncov,
+          keep = select_keep,
+          environment = select_environment,
+          icp_alpha = select_icp_alpha,
+          icp_max_predictors = select_icp_max_predictors
         ),
         k = cv_k, models = models,
         block_method = cv_block_method,
         seed = seed, verbose = verbose
       ),
       error = function(e) {
+        if (identical(select_method, "tramicp") &&
+            inherits(e, "cast_cv_no_evaluable_folds")) stop(e)
         cli::cli_warn(
           "Spatial CV failed ({e$message}). Falling back to hold-out eval."
         )

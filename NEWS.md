@@ -1,5 +1,58 @@
 # castSDM 0.11.0 (unreleased)
 
+## Optional invariant selection and scenario comparisons
+
+* `cast_select(method = "tramicp", environment = ...)` delegates exhaustive
+  binary-logistic invariant selection to the optional tramicp package. It uses
+  supplied environment groups, not automatic spatial partitions, and preserves
+  empty/no-accepted-set results without fallback selection. The output does not
+  establish ecological causality or identify an adjustment set.
+* `cast()` forwards the environment column and ICP settings to each training
+  screen. `cast_cv()` protects training-data arguments and retains empty/failed
+  fold statuses, including diagnostics on all-fold failure conditions.
+  For invariant selection, `cast()` propagates all-fold failure rather than
+  discarding its diagnostics and substituting hold-out evaluation.
+* Retired selection arguments and unknown methods now raise errors instead
+  of being ignored or replaced with `two_stage`. Removed an unused binning
+  helper and unused internal arguments; AUC and TSS now share one ROC
+  calculation, and GAM scenario comparisons avoid an unused data copy.
+* `cast_sensitivity(backend = "marginaleffects", model = "gam")` provides
+  signed rowwise scenario contrasts through marginaleffects without changing
+  the native default. It reports suitability contrasts, not causal effects or
+  calibrated occurrence probabilities; no standard errors are computed.
+
+## Correct support evaluation and causal interpretation
+
+* Single-predictor MaxEnt fits preserve data-frame dimensions and support the
+  linear-only feature set without changing the default background augmentation.
+  Nested spatial CV now reports fold-level fitting errors rather than silently
+  discarding failed folds.
+* `cast_select(keep = ...)` protects prespecified predictors during thinning,
+  null screening and the complexity cap; they count toward `ncov` and cannot
+  be silently dropped. `kept_by_design` and `selected_reason = "prespecified"`
+  distinguish this decision from statistical evidence. `cast(select_keep = ...)`
+  passes the same set to the training screen and every nested CV fold. This
+  safeguard does not discover or verify a causal adjustment set.
+* `cast_effect_map()` adds `support_<driver>` layers and `support_probs`.
+  Each layer reports the fraction of requested shifts inside the training
+  quantile box per cell. Attached-table support remains the minimum per-shift
+  coverage across cells, not the mean of the new layer. Effects remain unmasked.
+* Dose-response curves now average paired engine deltas, matching tables and
+  maps when a model prediction is missing for only one member of a pair.
+* Corrected the Hooker, Mentch and Zhou (2021) journal and DOI.
+* Support fractions now evaluate `newdata`, not just the training population,
+  and require both baseline and shifted rows to lie inside all predictors'
+  training quantile bounds. Table and curve diagnostics use the same complete
+  rows as their effect estimates; `max_rows` and `support_probs` are validated.
+* `range_supported` replaces the misleading `estimable` curve column. Coverage
+  of at least 0.5 is a descriptive range screen, not causal estimability.
+  Missing coverage is displayed as unknown, not as supported.
+* Correction to the 0.10.0 description below: a quantile box does not establish
+  joint positivity, and additive shifts can leave joint support. Contrasts
+  outside the box are still returned, not filtered out. Disagreement with
+  permutation importance does not identify proxies; selection does not find
+  a valid causal adjustment set. Existing support outputs must be recomputed.
+
 ## Stage-1 ranking sees curvature; stage-2 output is capped by sample size
 
 * `cast_select()` stage 1 now ranks by a univariate quadratic-logistic
@@ -15,7 +68,7 @@
   `"full"`, `"excluded"`); `plot.cast_select()` now draws the
   interventional effect. `cast()` gains `select_ncov` / `select_maxncov`.
 * `cast_effect_table()` gains a `support` column (worst 1-99% support
-  fraction over the driver's shift set, the positivity diagnostic
+  fraction over the driver's shift set, the range diagnostic
   `cast_effect_support()` reports per shift), and two paired plots:
   `plot.cast_effect_table()` (magnitude, direction, hollow = low support)
   and `plot.cast_necessity()` (held-out AUC cost with fold range).
