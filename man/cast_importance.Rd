@@ -2,7 +2,7 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_importance}
 \alias{cast_importance}
-\title{Predictor Importance Table from the Screen}
+\title{Conditional Effect Table from the Screen}
 \usage{
 cast_importance(object)
 }
@@ -14,52 +14,31 @@ cast_importance(object)
 A \code{cast_importance} object.
 }
 \description{
-Turns a two-stage screen into a tidy per-predictor table carrying both
-attribution vocabularies: the \strong{interventional effect} that selected
-the predictor (stage 2 of \code{\link[=cast_select]{cast_select()}}), and the random-forest
-\strong{permutation importance} retained as a diagnostic. Response-permutation
-p-values and BH-adjusted p-values refer only to the interventional effect.
-Response-dependent stage-1 filtering is not repeated under the null, so these
-are exploratory scores, not confirmatory tests with guaranteed error control.
+Turns a two-stage screen into a tidy per-predictor table carrying the
+single \strong{conditional effect} that selected the predictor (stage 2 of
+\code{\link[=cast_select]{cast_select()}}). Within-stratum permutation p-values refer only to this
+statistic. Response-dependent stage-1 filtering is not repeated under the
+null, so these are exploratory scores, not confirmatory tests with
+guaranteed error control.
 }
-\section{Why both columns are reported}{
+\section{Interpretation (read before citing)}{
 
-The two columns answer different questions. Permutation importance permutes
-a predictor, which breaks its correlation with every other predictor and
-pushes collinear rows outside the observed data support, so the score is
-governed by the model's extrapolation behaviour (Hooker, Mentch & Zhou
-2021). The interventional effect instead evaluates a specified additive
-shift, but it too can leave joint support. Disagreement between these
-statistics does not identify a proxy or establish causality.
-\code{\link[=cast_select]{cast_select()}} reports their Spearman agreement as
-\code{screen$diagnostics$importance_agreement}.
+The column describes the \emph{fitted model}. It is not a causal effect:
+a causal reading additionally requires a justified adjustment set, no
+uncontrolled confounding, consistency, joint support and adequate response
+and observation models. These assumptions are not verified by the ranking
+(Byrnes & Dee 2025).
 
 Importance carries no sign, so read it together with
 \code{\link[=cast_effect_table]{cast_effect_table()}} for direction.
 }
 
-\section{Interpretation (read before citing)}{
-
-Both columns describe the \emph{fitted model}. Neither is a causal effect:
-a causal reading additionally requires a justified adjustment set, no
-uncontrolled confounding, consistency, joint support and adequate response
-and observation models. These assumptions are not verified by the two
-rankings or by \code{\link[=cast_necessity]{cast_necessity()}} (Byrnes & Dee 2025).
-}
-
 \references{
-Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
-importance: a corrected feature importance measure. \emph{Bioinformatics},
-26(10), 1340-1347.
-
-Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
-data and unobserved confounding variables. \emph{Ecology Letters}, 28(1), e70023.
-
 Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
 extrapolation: variable importance requires at least one more model, or
 there is no free variable importance. \emph{Statistics and Computing}, 31, 82.
 \doi{10.1007/s11222-021-10057-z}.
 }
 \seealso{
-\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_sensitivity]{cast_sensitivity()}}, \code{\link[=cast_necessity]{cast_necessity()}}
+\code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}
 }

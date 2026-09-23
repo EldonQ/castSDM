@@ -2,20 +2,20 @@
 % Please edit documentation in R/effect-products.R
 \name{cast_effect_map}
 \alias{cast_effect_map}
-\title{Model Response Maps for Species Distribution Models}
+\title{Shift Effect Maps for Species Distribution Models}
 \usage{
 cast_effect_map(
   fit,
   current_stack,
   drivers = NULL,
-  shifts = c(-2, -1, 1, 2),
-  shift_type = "sd",
-  steps = NULL,
+  shift = 1,
+  shift_type = "raw",
   block_rows = 512L,
   filename = NULL,
   overwrite = FALSE,
   verbose = TRUE,
-  support_probs = c(0.01, 0.99)
+  support_probs = c(0.01, 0.99),
+  min_support = 0.5
 )
 }
 \arguments{
@@ -26,14 +26,11 @@ cast_effect_map(
 
 \item{drivers}{Drivers to map. Default: every fitted predictor.}
 
-\item{shifts}{Numeric vector of intervention sizes, in SD units unless
-\code{shift_type = "raw"}. Default \code{c(-2, -1, 1, 2)}.}
+\item{shift}{Single raw-unit shift per driver. Either one unnamed numeric
+value applied to every driver, or a named numeric vector / named list
+with one value per driver. Default \code{1}.}
 
-\item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
-
-\item{steps}{Optional raw-unit shift sets, overriding
-\code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
-or a named list of numeric vectors, one per driver.}
+\item{shift_type}{\code{"raw"} (default) or \code{"sd"}.}
 
 \item{block_rows}{Integer rows per processing block. Default 512.}
 
@@ -45,29 +42,29 @@ or a named list of numeric vectors, one per driver.}
 
 \item{support_probs}{Length-2 numeric. Increasing training quantiles in
 \verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
+
+\item{min_support}{Numeric in \verb{[0, 1]}. Drivers with grid coverage below
+this threshold report \code{NA} in the attached table. Default \code{0.5}.}
 }
 \value{
 A \code{SpatRaster} with three layers per driver (NA where any fitted
-predictor is missing or non-finite): \verb{dHSS_<driver>}, the direction
-(deltas aligned to the sign of their own shift); \verb{absdHSS_<driver>}, the
-magnitude; and \verb{support_<driver>}, the fraction of requested shifts for
-which that cell's baseline and shifted full predictor vectors both lie
-inside the training quantile box (0 to 1).
+predictor is missing or non-finite, or where the cell is masked):
+\verb{dHSS_<driver>} (signed change), \verb{absdHSS_<driver>} (magnitude), and
+\verb{support_<driver>} (1 where the cell's baseline and shifted vectors both
+lie inside the training quantile box, 0 otherwise).
 
-The per-driver summary table is attached as attribute \code{effect_table}.
-Its \code{support} column is the minimum, over shifts, of covered complete
-cells divided by all complete cells, as in \code{\link[=cast_effect_table]{cast_effect_table()}} on the
-same grid. It is not the spatial mean of the support layer, which
-averages over shifts instead. The quantiles are attached to the raster
-as attribute \code{support_probs}. Coverage is NA when the training reference
-or its bounds are unavailable, or when no complete cells can be evaluated.
-This is a range-extrapolation diagnostic, not a test of conditional
+The per-driver summary table is attached as attribute \code{effect_table}
+with the same columns as \code{\link[=cast_effect_table]{cast_effect_table()}} evaluated on the grid.
+Masking is hard: masked cells never contribute to the table means.
+Coverage is a range-extrapolation diagnostic, not a test of conditional
 positivity or causal identification; holes inside the box are not
-detected. Effects are not masked or dropped for low or unknown coverage.
+detected.
 }
 \description{
-Intervenes on each driver across every valid cell of \code{current_stack}
-(all other drivers held fixed) and returns the spatially explicit
-equally weighted ensemble-mean change in suitability. Spatial
-counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}}, using the same symmetric shift set.
+Intervenes on each driver with a single raw-unit shift across every valid
+cell of \code{current_stack} (all other drivers held fixed) and returns the
+spatially explicit equally weighted ensemble-mean change in suitability.
+Spatial counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}} with the same hard
+range-masking: cells outside the training quantile box - at baseline or
+after shifting - carry \code{NA} effects.
 }

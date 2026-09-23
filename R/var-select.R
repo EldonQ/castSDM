@@ -1,7 +1,7 @@
 #' Select Variables for Species Distribution Models
 #'
-#' Two-stage variable selection whose second stage is calibrated against an
-#' \emph{interventional} null rather than a permutation-importance null:
+#' Two-stage variable selection whose second stage is calibrated against a
+#' \emph{conditional} permutation null:
 #' \enumerate{
 #'   \item \strong{Stage 1 — collinearity thinning}: rank predictors by a
 #'     univariate quadratic-logistic signal (the smaller p-value of the two
@@ -9,58 +9,37 @@
 #'     misses), then greedily keep predictors whose pairwise correlation with
 #'     all kept predictors is \eqn{\le 0.7} (Dormann et al. 2013). Predictors
 #'     whose GLM fails to fit fall back to the marginal-correlation rank.
-#'   \item \strong{Stage 2 — interventional effect above a permutation null}:
+#'   \item \strong{Stage 2 — conditional effect above a conditional null}:
 #'     fit a probability random forest on the stage-1 survivors, then measure
 #'     how far each predictor moves the fitted probability when it is
 #'     \strong{shifted while every other predictor is held at its observed
 #'     value} (a g-computation contrast; see [cast_effect_table()]). The same
-#'     statistic is recomputed on forests refitted to a permuted response to
-#'     build a feature-wise null, and predictors whose Monte Carlo tail
-#'     probability is at most 0.05 are kept (Altmann et al. 2010). The kept
-#'     set is capped at `ncov` predictors (default
+#'     statistic is recomputed on forests refitted to within-stratum
+#'     permuted predictors (strata from k-means on the survivors), and
+#'     predictors whose Monte Carlo tail probability is at most 0.05 are
+#'     kept. The kept set is capped at `ncov` predictors (default
 #'     `ceiling(log2(n_presence))`, at most `maxncov`), ordered by the
-#'     interventional effect, so model complexity stays tied to the number of
+#'     conditional effect, so model complexity stays tied to the number of
 #'     presences (Adde et al. 2023).
 #' }
 #'
-#' @section Why the second stage is interventional:
-#' Permutation importance permutes a predictor, which breaks its correlation
+#' @section Why the second stage is conditional:
+#' Marginal permutation breaks a predictor's correlation
 #' with every other predictor. For collinear predictors the permuted rows leave
 #' the observed data support, so the score is governed by the model's
 #' extrapolation behaviour rather than by the predictor's influence
-#' (Hooker, Mentch & Zhou 2021). An additive shift also can leave the joint
-#' data support; holding other predictors fixed does not prevent extrapolation.
-#' Its benefit is an explicitly defined contrast, not guaranteed causal
-#' identification or superiority. Selection does not find an adjustment set;
+#' (Hooker, Mentch & Zhou 2021). A within-stratum permutation instead shuffles
+#' each predictor only among rows with similar values on the other survivors
+#' (k-means strata), so the null respects the observed joint distribution.
+#' Selection does not find an adjustment set;
 #' use a scientifically justified set directly when estimating causal effects.
-#'
-#' @section Optional invariant selection:
-#' `method = "tramicp"` delegates binary-logistic invariant selection to
-#' `tramicp::glmICP()`. It requires scientifically justified environment labels,
-#' a correctly specified response model, adequate measured causes/confounders,
-#' and the method's sampling assumptions. Spatial CV does not establish these
-#' assumptions. The resulting intersection is neither a verified list of
-#' ecological causes nor a sufficient adjustment set. Presence/background
-#' labels do not become true occurrence observations through this method.
 #'
 #' @param data Data frame with response and predictors (coordinates allowed;
 #'   they are never selected).
 #' @param response Binary response column. Default `"presence"`.
-#' @param method `"two_stage"` (default), `"full"` (keep every predictor), or
-#'   `"tramicp"` (opt-in full-subset binomial invariant causal prediction).
-#' @param environment For `"tramicp"`, the name of a supplied environment column
-#'   in `data`, never a vector or automatically generated CV grouping. Excluded
-#'   from predictors; must have at least two levels after shared complete-row
-#'   filtering. Not supported for other methods.
-#' @param icp_alpha Invariance-test level for `"tramicp"`. Sets are accepted only
-#'   when their p-value is strictly greater than this value. Default `0.05`.
-#' @param icp_max_predictors Computational guard for the full `2^p` subset search.
-#'   Default `12L`; exceeding it stops, without prescreening or top-K truncation.
-#'   `"tramicp"` rejects nonempty `keep` and non-NULL `ncov`, and never augments or
-#'   caps the accepted-set intersection. Scores report selection, not effects;
-#'   diagnostics retain all subset tests and distinguish empty-result statuses.
+#' @param method `"two_stage"` (default) or `"full"` (keep every predictor).
 #' @param num_trees Trees per forest. Default 300.
-#' @param n_perm Response permutations used to build the stage-2 null.
+#' @param n_perm Conditional permutations used to build the stage-2 null.
 #' @param shift_size Shift applied to the intervened predictor, in training
 #'   standard deviations. Default `1`. The statistic averages the absolute
 #'   change over `+shift_size` and `-shift_size`, so it does not depend on a
@@ -81,25 +60,18 @@
 #'   identify a sufficient adjustment set; candidate covariates must also be
 #'   scientifically admissible (not colliders or mediators of a total effect).
 #'
-#' @return A `cast_select` object. For `"tramicp"`, `selected` is the unaltered
-#'   accepted-set intersection; `scores` contains `variable`, `selected` and
-#'   `selected_reason`. Diagnostics retain `tested_sets`, `accepted_sets`,
-#'   `intersection`, retained/excluded row indices and `status`: `"selected"`,
-#'   `"empty_set_accepted"`, `"empty_intersection"` or `"no_accepted_sets"`.
-#'   Invalid subset tests raise an error rather than imply nonselection.
-#'   For the two-stage method: `selected` (kept predictors), `scores`
+#' @return A `cast_select` object with `selected` (kept predictors), `scores`
 #'   (per-predictor marginal `assoc`, the `stage1_p` ranking signal with its
 #'   `stage1_rank`, the stage-1 `collinear_thinned` flag,
 #'   `interventional_effect` -- the stage-2 selection statistic -- with its
-#'   `effect_rank`, its permutation `p_value`, the BH-adjusted `p_adjusted`,
-#'   the feature-wise `null_threshold`, the retained `perm_importance`
-#'   diagnostic, the `selected_reason` (`"null"`, `"null+top-ncov"`,
+#'   `effect_rank`, its conditional-permutation `p_value`,
+#'   the feature-wise `null_threshold`,
+#'   the `selected_reason` (`"null"`, `"null+top-ncov"`,
 #'   `"fallback-top-ncov"`, `"prespecified"`, `"full"` or `"excluded"`), the
 #'   `kept_by_design` indicator for `keep`, and the `selected` flag).
-#'   Prespecified retention is not evidence of an effect. Optional selection uses
+#'   Prespecified retention is not evidence of an effect. Selection uses
 #'   `(1 + sum(null >= observed)) / (1 + n_perm)` for each predictor
-#'   separately. `p_adjusted` adjusts over stage-1 survivors only and is not
-#'   the selection rule. These are screening diagnostics: the
+#'   separately. These are screening diagnostics: the
 #'   response-dependent stage-1 screen is held fixed during permutation, so
 #'   they do not establish confirmatory p-values or FDR control.
 #'   `passed_null` distinguishes evidence from a capped or fallback set when
@@ -107,17 +79,9 @@
 #'   cannot resolve p <= 0.05.
 #'
 #' @references
-#' Kook, L. et al. (2024). Model-based causal feature selection for general
-#' response types. \emph{Journal of the American Statistical Association}.
-#' \doi{10.1080/01621459.2024.2395588}.
-#'
 #' Adde, A. et al. (2023). Too many candidates: embedded covariate selection
 #' procedure for species distribution modelling with the covsel R package.
 #' \emph{Ecological Informatics} 75: 102080.
-#'
-#' Altmann, A., Toloşi, L., Sander, O. & Lengauer, T. (2010). Permutation
-#' importance: a corrected feature importance measure.
-#' \emph{Bioinformatics} 26: 1340-1347.
 #'
 #' Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 #' with it in ecological studies. \emph{Ecography} 36: 27-46.
@@ -129,24 +93,15 @@
 #' @seealso [cast_effect_table()], [cast_importance()]
 #' @export
 cast_select <- function(data, response = "presence",
-                         method = c("two_stage", "full", "tramicp"),
+                         method = c("two_stage", "full"),
                          num_trees = 300L, n_perm = 49L, shift_size = 1,
                          max_rows = 2000L, ncov = NULL, maxncov = 12L,
-                         seed = NULL, verbose = TRUE, keep = character(0),
-                         environment = NULL, icp_alpha = 0.05,
-                         icp_max_predictors = 12L) {
+                         seed = NULL, verbose = TRUE, keep = character(0)) {
   if (!missing(method) && (!is.character(method) || length(method) != 1L ||
-                          is.na(method) || !method %in% c("two_stage", "full", "tramicp"))) {
-    cli::cli_abort("{.arg method} must be one of 'two_stage', 'full' or 'tramicp'.")
+                          is.na(method) || !method %in% c("two_stage", "full"))) {
+    cli::cli_abort("{.arg method} must be one of 'two_stage' or 'full'.")
   }
   method <- match.arg(method)
-  if (identical(method, "tramicp")) {
-    return(.cast_select_tramicp(data, response, environment, icp_alpha,
-                               icp_max_predictors, keep, ncov, seed, verbose))
-  }
-  if (!is.null(environment)) {
-    cli::cli_abort("{.arg environment} is only supported for method = 'tramicp'; remove environment metadata from data for other methods.")
-  }
   env_vars <- get_env_vars(data, response)
   if (!is.character(keep) || anyNA(keep) || anyDuplicated(keep) ||
       !all(keep %in% env_vars)) {
@@ -192,8 +147,7 @@ cast_select <- function(data, response = "presence",
                          collinear_thinned = FALSE,
                          interventional_effect = NA_real_,
                          effect_rank = NA_integer_,
-                         perm_importance = NA_real_,
-                         p_value = NA_real_, p_adjusted = NA_real_,
+                         p_value = NA_real_,
                          null_threshold = NA_real_,
                          passed_null = FALSE, fallback = FALSE,
                          kept_by_design = env_vars %in% keep,
@@ -237,13 +191,13 @@ cast_select <- function(data, response = "presence",
   }
   if (verbose) cli::cli_inform("Stage 1: {length(env_vars)} -> {length(kept)} after collinearity thinning.")
 
-  # ---- Stage 2: interventional effect above the permutation null -----------
-  imp <- stats::setNames(rep(NA_real_, length(kept)), kept)
-  effect <- imp
-  p_value <- imp
+  # ---- Stage 2: conditional effect above a conditional null ---------------
+  effect <- stats::setNames(rep(NA_real_, length(kept)), kept)
+  p_value <- effect
   threshold <- NA_real_
+  n_strata <- NA_integer_
   if (length(kept) >= 1L) {
-    check_suggested("ranger", "for stage-2 interventional screening")
+    check_suggested("ranger", "for stage-2 conditional screening")
     X <- data[, kept, drop = FALSE]
     for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
     ok <- rowSums(!is.finite(as.matrix(X))) == 0L
@@ -266,19 +220,25 @@ cast_select <- function(data, response = "presence",
     if (!is.null(seed)) set.seed(seed)
     base_seed <- seed %||% 1L
     fit_obs <- .cast_importance_fit(X, y, num_trees, base_seed)
-    imp <- fit_obs$importance
     effect <- .cast_shift_effect(fit_obs$model, X, sds, shift_size)
 
-    if (verbose) cli::cli_inform("Stage 2: building the interventional null from {n_perm} response permutation{?s}...")
+    if (verbose) cli::cli_inform("Stage 2: building the conditional null from {n_perm} within-stratum permutation{?s}...")
+    # Strata group rows with similar values on the OTHER survivors, so each
+    # null replicate shuffles a predictor only among rows that match on the
+    # rest. The null forests see the same joint X support as the observed
+    # forest; only the conditional links to the response are broken. With one
+    # stratum this degrades gracefully to a full permutation.
+    strata_list <- .cast_perm_strata_list(X, base_seed)
+    n_strata <- max(vapply(strata_list, function(s) length(unique(s)),
+                           integer(1)))
     # Each feature has its own null scale; unrelated predictors are not
-    # exchangeable null replicates for this predictor. The null forests carry
-    # no importance, which the statistic does not use.
+    # exchangeable null replicates for this predictor.
     null_draws <- vapply(seq_len(n_perm), function(i) {
-      y_p <- sample(y)
-      m <- ranger::ranger(x = X, y = y_p, probability = TRUE,
+      X_p <- .cast_stratum_permute_list(X, strata_list)
+      m <- ranger::ranger(x = X_p, y = y, probability = TRUE,
                           num.trees = num_trees, seed = base_seed + i,
                           num.threads = 1L, write.forest = TRUE)
-      .cast_shift_effect(m, X, sds, shift_size)
+      .cast_shift_effect(m, X_p, sds, shift_size)
     }, numeric(length(kept)))
     if (is.null(dim(null_draws))) {
       null_draws <- matrix(null_draws, nrow = length(kept))
@@ -288,9 +248,6 @@ cast_select <- function(data, response = "presence",
     p_value <- vapply(kept, function(v)
       (1 + sum(null_draws[v, ] >= effect[[v]])) / (1 + n_perm), numeric(1))
   }
-  p_adjusted <- if (length(kept) >= 2L) {
-    stats::p.adjust(p_value, method = "BH")
-  } else p_value
   effect_rank <- stats::setNames(rep(NA_integer_, length(kept)), kept)
   effect_rank[names(sort(effect, decreasing = TRUE))] <- seq_along(kept)
   cap <- min(ncov, length(kept))
@@ -312,7 +269,7 @@ cast_select <- function(data, response = "presence",
     selected <- c(keep, utils::head(optional, optional_cap))
     reason[selected] <- "fallback-top-ncov"
     cli::cli_warn(c(
-      "No predictor exceeded the interventional null; retaining {length(keep)} prespecified and keeping the top {optional_cap} optional predictors.",
+      "No predictor exceeded the conditional null; retaining {length(keep)} prespecified and keeping the top {optional_cap} optional predictors.",
       "i" = "Read this as weak evidence for any single predictor, not as a clean screen."))
   } else {
     selected <- c(keep, utils::head(optional_pass, optional_cap))
@@ -322,11 +279,6 @@ cast_select <- function(data, response = "presence",
   reason[keep] <- "prespecified"
   passed_null <- pass
 
-  agreement <- if (length(kept) >= 3L &&
-                   all(is.finite(imp)) && all(is.finite(effect))) {
-    suppressWarnings(stats::cor(imp, effect, method = "spearman"))
-  } else NA_real_
-
   scores <- data.frame(
     variable = env_vars,
     assoc = unname(assoc[env_vars]),
@@ -335,9 +287,7 @@ cast_select <- function(data, response = "presence",
     collinear_thinned = unname(thinned[env_vars]),
     interventional_effect = unname(effect[env_vars]),
     effect_rank = unname(effect_rank[env_vars]),
-    perm_importance = unname(imp[env_vars]),
     p_value = unname(p_value[env_vars]),
-    p_adjusted = unname(p_adjusted[env_vars]),
     null_threshold = unname(threshold[match(env_vars, names(threshold))]),
     passed_null = env_vars %in% passed_null,
     fallback = fallback & env_vars %in% selected & !env_vars %in% keep,
@@ -355,172 +305,16 @@ cast_select <- function(data, response = "presence",
                     n_perm = n_perm, shift_size = shift_size,
                     max_rows = max_rows, null_quantile = 0.95,
                     null_threshold = threshold,
-                    null_method = paste("feature-wise response permutation of",
-                                        "the interventional effect"),
+                    null_method = paste("feature-wise within-stratum",
+                                        "permutation of the shift effect"),
+                    null_strata = n_strata,
                     statistic = "interventional_effect",
-                    importance_agreement = agreement,
                     n_presence = n_presence, ncov = cap, maxncov = maxncov,
                     keep = keep, capped = capped,
                     fallback = fallback, alpha = 0.05))
 }
 
 # ---- internal helpers -----------------------------------------------------
-
-# Full-subset ICP: no response-dependent screening or post-selection cap.
-.cast_select_tramicp <- function(data, response, environment, icp_alpha,
-                                 icp_max_predictors, keep, ncov, seed, verbose) {
-  if (!is.data.frame(data) || is.null(names(data)) || anyNA(names(data)) ||
-      any(!nzchar(trimws(names(data)))) || anyDuplicated(names(data))) {
-    cli::cli_abort("{.arg data} must be a data frame with unique, nonempty column names.")
-  }
-  if (!is.character(response) || length(response) != 1L || is.na(response) ||
-      !response %in% names(data)) {
-    cli::cli_abort("{.arg response} must name one column in data.")
-  }
-  if (!is.character(environment) || length(environment) != 1L ||
-      is.na(environment) || !environment %in% names(data) ||
-      environment == response) {
-    cli::cli_abort("{.arg environment} must name one supplied column in data, distinct from the response; vectors and automatic CV environments are not supported.")
-  }
-  if (length(keep)) {
-    cli::cli_abort("Nonempty {.arg keep} is not supported for tramicp: the invariant intersection must not be altered.")
-  }
-  if (!is.null(ncov)) {
-    cli::cli_abort("{.arg ncov} must be NULL for tramicp: the invariant intersection must not be capped.")
-  }
-  if (!is.numeric(icp_alpha) || length(icp_alpha) != 1L ||
-      !is.finite(icp_alpha) || icp_alpha <= 0 || icp_alpha >= 1) {
-    cli::cli_abort("{.arg icp_alpha} must be one finite number strictly between 0 and 1.")
-  }
-  if (!is.numeric(icp_max_predictors) || length(icp_max_predictors) != 1L ||
-      !is.finite(icp_max_predictors) || icp_max_predictors < 1 ||
-      icp_max_predictors != floor(icp_max_predictors)) {
-    cli::cli_abort("{.arg icp_max_predictors} must be one positive finite integer.")
-  }
-  # Match the package's coordinate/metadata exclusions, but do not use
-  # get_env_vars(): it silently screens nonnumeric and low-variance columns.
-  metadata <- c("lon", "lat", "HID", "species", "sid", "family", "category",
-                "fraction", "id", "ID", "site", "cell_id", "grid_id", "group",
-                "spid", "siteid", "occ", "fold")
-  predictors <- setdiff(names(data), c(response, environment, metadata))
-  if (!length(predictors)) cli::cli_abort("tramicp needs at least one numeric predictor.")
-  if (length(predictors) > icp_max_predictors) {
-    cli::cli_abort("Full subset search needs 2^{length(predictors)} tests, exceeding {.arg icp_max_predictors} = {icp_max_predictors}. Supply a scientifically prespecified smaller candidate set or explicitly increase the computational budget; no top-K truncation is performed.")
-  }
-  X <- data[, predictors, drop = FALSE]
-  if (!all(vapply(X, function(x) is.numeric(x) && is.null(dim(x)), logical(1)))) {
-    cli::cli_abort("tramicp requires numeric predictor columns (not factors, characters or matrices).")
-  }
-  y <- data[[response]]
-  if ((!is.numeric(y) && !is.logical(y)) || !is.null(dim(y)) ||
-      !all(y[!is.na(y)] %in% c(0, 1))) {
-    cli::cli_abort("tramicp requires a binary 0/1 response.")
-  }
-  e <- data[[environment]]
-  if ((!is.factor(e) && !is.character(e) && !is.numeric(e) && !is.logical(e)) ||
-      !is.null(dim(e)) || (is.numeric(e) && any(!is.finite(e) & !is.na(e)))) {
-    cli::cli_abort("The environment column must contain finite categorical labels.")
-  }
-  ok <- stats::complete.cases(X, y, e)
-  X <- X[ok, , drop = FALSE]
-  y <- as.numeric(y[ok])
-  e <- droplevels(factor(e[ok]))
-  if (!nrow(X) || length(unique(y)) != 2L) {
-    cli::cli_abort("tramicp needs complete rows with two response classes after shared complete-row filtering.")
-  }
-  if (any(!is.finite(as.matrix(X)))) {
-    cli::cli_abort("tramicp requires finite predictors after shared complete-row filtering.")
-  }
-  if (nlevels(e) < 2L) {
-    cli::cli_abort("tramicp needs at least two environment levels after shared complete-row filtering.")
-  }
-  aliases <- paste0("X", seq_along(predictors))
-  names(X) <- aliases
-  X$Y <- y
-  X$E <- e
-  if (!is.null(seed)) set.seed(seed)
-  backend <- tryCatch(
-    .cast_run_tramicp(X, stats::reformulate(aliases, response = "Y"),
-                      icp_alpha, verbose),
-    error = function(e) cli::cli_abort("tramicp backend failed: {conditionMessage(e)}", parent = e))
-  parsed <- .cast_parse_tramicp(backend, aliases, predictors, icp_alpha)
-  selected <- parsed$intersection
-  scores <- data.frame(variable = predictors, selected = predictors %in% selected,
-                       selected_reason = ifelse(predictors %in% selected,
-                         "invariant_intersection", "not_identified"),
-                       stringsAsFactors = FALSE)
-  new_cast_select(selected, scores, method = "tramicp", diagnostics = c(parsed,
-    list(environment = environment, row_ids = which(ok),
-         excluded_row_ids = which(!ok), environment_counts = table(e, dnn = environment),
-         alpha = icp_alpha, icp_max_predictors = icp_max_predictors,
-         alias_map = stats::setNames(predictors, aliases),
-         backend_version = tryCatch(as.character(utils::packageVersion("tramicp")),
-                                    error = function(e) NA_character_),
-         backend_result = backend,
-         interpretation = paste(
-           "Invariant-intersection identification assumes a correctly specified logit model,",
-           "valid environments, no hidden confounding and iid observations.",
-           "It establishes neither adjustment sufficiency nor ecological causality",
-           "from presence/background labels; subset p-values are not effect importance."))))
-}
-
-# Keep dependency calls isolated so the wrapper contract can be tested without
-# installing tramicp. Resolve its unexported binary-GLM residual method exactly.
-.cast_run_tramicp <- function(data, formula, icp_alpha, verbose) {
-  check_suggested("tramicp", "for invariant causal prediction")
-  controls <- tramicp::dicp_controls(
-    type = "residual", test = "gcm.test", alpha = icp_alpha,
-    residuals = utils::getFromNamespace("residuals.binglm", "tramicp"),
-    crossfit = FALSE, stop_if_empty_set_invariant = FALSE)
-  tramicp::glmICP(formula = formula, data = data, env = ~ E,
-                  family = stats::binomial(link = "logit"), verbose = verbose,
-                  type = "residual", test = "gcm.test", controls = controls,
-                  alpha = icp_alpha, greedy = FALSE, max_size = NULL,
-                  mandatory = NULL)
-}
-
-.cast_parse_tramicp <- function(backend, aliases, predictors, alpha) {
-  fail <- function() cli::cli_abort(paste(
-    "tramicp returned failed, nonfinite or incomplete subset tests;",
-    "every one of the 2^p subsets must have a valid p-value."))
-  if (!is.list(backend) || !is.list(backend$tests) ||
-      length(backend$tests) != 2^length(aliases)) fail()
-  subsets <- lapply(backend$tests, function(x) {
-    if (!is.list(x) || inherits(x, "try-error") || !is.character(x$set)) fail()
-    s <- x$set
-    if (identical(s, "Empty")) s <- character(0)
-    if (anyNA(s) || anyDuplicated(s) || !all(s %in% aliases)) fail()
-    aliases[aliases %in% s]
-  })
-  keys <- vapply(subsets, function(s) if (!length(s)) "Empty" else
-    paste(s, collapse = "+"), character(1))
-  # Unique valid subsets, with cardinality 2^p, prove full enumeration.
-  if (anyDuplicated(keys)) fail()
-  pvalues <- vapply(backend$tests, function(x) {
-    if (!is.list(x$test) || inherits(x$test, "try-error")) fail()
-    p <- x$test$p.value
-    if (!is.numeric(p) || length(p) != 1L || !is.finite(p) || p < 0 || p > 1) fail()
-    unname(p)
-  }, numeric(1))
-  sp <- backend$set_pvals
-  if (!is.numeric(sp) || length(sp) != length(keys) || is.null(names(sp)) ||
-      anyNA(names(sp)) || anyDuplicated(names(sp)) || any(!is.finite(sp))) fail()
-  # Backend labels use their original term order, not necessarily X1,...,Xp.
-  labels <- vapply(backend$tests, function(x) paste(x$set, collapse = "+"), character(1))
-  if (!setequal(names(sp), labels) || !isTRUE(all.equal(
-      unname(sp[labels]), unname(pvalues), tolerance = 0))) fail()
-  subsets <- lapply(subsets, function(s) predictors[match(s, aliases)])
-  accepted <- pvalues > alpha
-  accepted_sets <- subsets[accepted]
-  intersection <- if (length(accepted_sets)) Reduce(intersect, accepted_sets) else character(0)
-  status <- if (!length(accepted_sets)) "no_accepted_sets" else
-    if (any(lengths(accepted_sets) == 0L)) "empty_set_accepted" else
-      if (!length(intersection)) "empty_intersection" else "selected"
-  tested_sets <- data.frame(p_value = unname(pvalues), accepted = unname(accepted))
-  tested_sets$set <- I(unname(subsets))
-  list(status = status, accepted_sets = unname(accepted_sets),
-       tested_sets = tested_sets, intersection = intersection)
-}
 
 #' Univariate quadratic-logistic signal for stage-1 ranking
 #'
@@ -546,16 +340,69 @@ cast_select <- function(data, response = "presence",
   }, error = function(e) NA_real_)
 }
 
-#' Fit a probability forest and its permutation importance
+#' Fit a probability forest (no permutation importance)
+#'
+#' Stage 2 reports a single conditional-effect statistic, so the forest is
+#' fit without the permutation-importance bookkeeping.
 #' @keywords internal
 #' @noRd
 .cast_importance_fit <- function(X, y, num_trees, seed) {
   m <- ranger::ranger(x = X, y = y, probability = TRUE,
-                      num.trees = num_trees, importance = "permutation",
+                      num.trees = num_trees, importance = "none",
                       seed = seed, num.threads = 1L)
-  out <- m$variable.importance[colnames(X)]
-  out[!is.finite(out)] <- 0
-  list(model = m, importance = out)
+  list(model = m, importance = stats::setNames(rep(NA_real_, ncol(X)), colnames(X)))
+}
+
+#' Strata for the conditional permutation null
+#'
+#' One stratification per survivor, each built from the OTHER survivors, so a
+#' predictor's own signal cannot leak into its null through the clustering.
+#' Few rows collapse to a single stratum (a full permutation); k-means
+#' failure also falls back to one stratum rather than aborting. A lone
+#' survivor has nothing to condition on and permutes fully.
+#' @keywords internal
+#' @noRd
+.cast_perm_strata_list <- function(X, seed, k = 5L) {
+  n <- nrow(X)
+  out <- lapply(names(X), function(v) {
+    others <- setdiff(names(X), v)
+    if (!length(others)) return(rep(1L, n))
+    .cast_perm_strata(X[, others, drop = FALSE], seed)
+  })
+  stats::setNames(out, names(X))
+}
+
+#' @keywords internal
+#' @noRd
+.cast_perm_strata <- function(X, seed, k = 5L) {
+  n <- nrow(X)
+  k_use <- min(as.integer(k), n)
+  if (k_use < 2L || !ncol(X)) return(rep(1L, n))
+  Xs <- scale(as.matrix(X))
+  Xs[!is.finite(Xs)] <- 0
+  km <- tryCatch(suppressWarnings(stats::kmeans(Xs, centers = k_use, nstart = 10L)),
+                 error = function(e) NULL)
+  if (is.null(km)) return(rep(1L, n))
+  as.integer(km$cluster)
+}
+
+#' Permute each predictor independently within its own strata
+#'
+#' Single-row strata are left untouched (`sample()` on one value would sample
+#' from `1:x` instead of permuting).
+#' @keywords internal
+#' @noRd
+.cast_stratum_permute_list <- function(X, strata_list) {
+  X_p <- X
+  for (v in names(X_p)) {
+    strata <- strata_list[[v]]
+    for (s in unique(strata)) {
+      idx <- which(strata == s)
+      if (length(idx) < 2L) next
+      X_p[idx, v] <- sample(X_p[idx, v])
+    }
+  }
+  X_p
 }
 
 #' Interventional effect of shifting each predictor by +/- shift_size SD

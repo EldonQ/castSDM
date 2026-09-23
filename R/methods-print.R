@@ -12,11 +12,28 @@ print.cast_select <- function(x, ...) {
   if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")
   }
-  if (identical(x$method, "tramicp")) {
-    cli::cli_text("Invariance status: {d$status}; not a verified ecological cause or adjustment set.")
+  if (identical(x$method, "two_stage")) {
+    cli::cli_text("Null: conditional permutation; not a verified ecological cause or adjustment set.")
   }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)
+}
+
+# Defunct object printers (removed in 0.12.0) -------------------------------
+
+#' @export
+print.cast_sensitivity <- function(x, ...) {
+  cli::cli_abort("`cast_sensitivity` objects are no longer produced (removed in 0.12.0); use `cast_effect_table()` / `cast_effect_map()`.")
+}
+
+#' @export
+print.cast_dose_response <- function(x, ...) {
+  cli::cli_abort("`cast_dose_response` objects are no longer produced (removed in 0.12.0); use `cast_effect_table()` / `cast_effect_map()`.")
+}
+
+#' @export
+print.cast_support <- function(x, ...) {
+  cli::cli_abort("`cast_support` objects are no longer produced (removed in 0.12.0); masking now lives in `cast_effect_table()` / `cast_effect_map()`.")
 }
 
 #' @export
@@ -25,76 +42,22 @@ print.cast_importance <- function(x, ...) {
   n_sig <- sum(eff$selected, na.rm = TRUE)
   cli::cli_h1("castSDM Predictor Attribution")
   bullets <- c(
-    "Interventional effect (shift 1 SD, other predictors fixed)",
-    "Calibrated against a permuted-response null",
+    "Conditional effect (shift 1 SD, other predictors fixed)",
+    "Calibrated against a within-stratum permutation null",
     "Above the null (p < {x$alpha}): {n_sig} / {nrow(eff)}"
   )
-  ag <- x$diagnostics$importance_agreement
-  if (!is.null(ag) && is.finite(ag)) {
-    bullets <- c(bullets,
-                 "Spearman agreement with permutation importance: {round(ag, 3)}")
-  }
   cli::cli_ul(bullets)
   show <- utils::head(eff, 10L)
   disp <- data.frame(
     variable = show$variable,
     effect = signif(show$interventional_effect, 4),
     null = signif(show$null_threshold, 4),
-    perm_imp = signif(show$perm_importance, 4),
     p_value = signif(show$p_value, 3),
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
   print(disp, row.names = FALSE)
-  cli::cli_text("Each predictor is compared with its own permuted-response null ({.field null}).")
-  invisible(x)
-}
-
-#' @export
-print.cast_sensitivity <- function(x, ...) {
-  s <- x$summary
-  cli::cli_h1("castSDM Sensitivity What-If")
-  cli::cli_ul(c(
-    "Intervention: {x$variable} + {x$shift} ({x$shift_type})",
-    "Models averaged: {.val {x$models}}",
-    "Cells with suitability gain: {round(100 * s$frac_positive, 1)}%"
-  ))
-  cli::cli_text(
-    "Delta HSS: mean = {round(s$mean_delta, 4)}, range = [{round(s$max_loss, 3)}, {round(s$max_gain, 3)}]"
-  )
-  invisible(x)
-}
-
-#' @export
-print.cast_dose_response <- function(x, ...) {
-  cli::cli_h1("castSDM Dose-Response")
-  cli::cli_ul(c(
-    "Intervention: {x$variable} shift in {x$unit}",
-    "Models averaged: {.val {x$models}}"
-  ))
-  keep <- x$curve[x$curve$range_supported, , drop = FALSE]
-  if (nrow(keep)) {
-    imax <- which.max(keep$mean_abs_delta)
-    cli::cli_text(
-      "Largest mean |delta| among range-screened shifts = {round(keep$mean_abs_delta[imax], 4)} at shift {round(keep$shift[imax], 2)} ({x$unit}); box coverage {round(keep$support[imax], 3)}"
-    )
-  } else {
-    cli::cli_text("No shift met the quantile-box coverage threshold.")
-  }
-  cli::cli_text("{round(100 * mean(x$curve$range_supported), 0)}% of evaluated shifts meet box coverage >= {attr(x$curve, 'min_support')}; this does not establish joint positivity.")
-  invisible(x)
-}
-
-
-#' @export
-print.cast_support <- function(x, ...) {
-  cli::cli_h1("castSDM Shift Range Diagnostic")
-  cli::cli_text("Fraction of evaluated rows inside the training quantile box before and after shifting.")
-  tab <- x$support
-  tab$support <- round(tab$support, 3)
-  tab$shift_raw <- signif(tab$shift_raw, 4)
-  print(tab, row.names = FALSE)
-  cli::cli_text("Low coverage flags range extrapolation; high coverage does not establish joint positivity.")
+  cli::cli_text("Each predictor is compared with its own conditional null ({.field null}).")
   invisible(x)
 }
 

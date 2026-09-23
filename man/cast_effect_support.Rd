@@ -2,49 +2,17 @@
 % Please edit documentation in R/effect-grid.R
 \name{cast_effect_support}
 \alias{cast_effect_support}
-\title{Support Fraction of an Interventional Shift}
+\title{Support Fraction (removed in 0.12.0)}
 \usage{
-cast_effect_support(
-  fit,
-  variables = NULL,
-  shift = c(1, 2, 3),
-  shift_type = c("sd", "raw"),
-  newdata = NULL,
-  support_probs = c(0.01, 0.99),
-  max_rows = 20000L
-)
+cast_effect_support(...)
 }
 \arguments{
-\item{fit}{A \code{cast_fit} object.}
-
-\item{variables}{Predictors to assess. Default: every fitted predictor.}
-
-\item{shift}{Numeric vector of shift sizes, in training standard deviations
-unless \code{shift_type = "raw"}.}
-
-\item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
-
-\item{newdata}{Optional data frame defining the reference population.
-Defaults to training predictors stored in \code{fit}. Incomplete or non-finite
-rows are excluded from both effects and coverage.}
-
-\item{support_probs}{Length-2 numeric. Increasing training quantiles in
-\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
-
-\item{max_rows}{Positive integer limiting complete rows sampled evenly, or
-\code{Inf} for all rows. Default 20000.}
+\item{...}{Ignored.}
 }
 \value{
-A \code{cast_support} object with \code{support}: a data frame of
-\code{driver}, \code{shift}, \code{shift_raw}, and \code{support}.
+Never returns; always aborts.
 }
 \description{
-Reports, per driver and shift, the fraction of complete evaluated rows whose
-baseline and shifted vectors both lie inside every predictor's training
-quantile bounds. Low coverage flags range extrapolation. Unobserved predictor
-combinations inside this box remain undetected, so even full coverage does
-not establish conditional positivity or causal identification.
-}
-\seealso{
-\code{\link[=cast_effect_map]{cast_effect_map()}}, \code{\link[=cast_dose_response]{cast_dose_response()}}
+Removed: range-masking is now hard-wired into \code{\link[=cast_effect_table]{cast_effect_table()}} /
+\code{\link[=cast_effect_map]{cast_effect_map()}} (\code{support < 0.5} masked).
 }

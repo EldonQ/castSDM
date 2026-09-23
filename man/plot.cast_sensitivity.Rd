@@ -2,25 +2,18 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_sensitivity}
 \alias{plot.cast_sensitivity}
-\title{Plot Sensitivity What-If Map}
+\title{Plot Sensitivity Map (removed in 0.12.0)}
 \usage{
-\method{plot}{cast_sensitivity}(x, basemap = "world", var_label = NULL, title = NULL, ...)
+\method{plot}{cast_sensitivity}(x, ...)
 }
 \arguments{
-\item{x}{A \code{cast_sensitivity} object (from \code{\link[=cast_sensitivity]{cast_sensitivity()}}).}
-
-\item{basemap}{Character. \code{"world"}, \code{"china"}, or \code{"none"}.}
-
-\item{var_label}{Optional display label for the intervened predictor.}
-
-\item{title}{Optional plot title.}
+\item{x}{Ignored.}
 
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object.
+Never returns; always aborts.
 }
 \description{
-Diverging map of the per-cell change in habitat suitability under a
-single-predictor intervention on the current climate.
+Plot Sensitivity Map (removed in 0.12.0)
 }

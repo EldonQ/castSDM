@@ -1,3 +1,31 @@
+# castSDM 0.12.0 (unreleased)
+
+## One shift, one map, hard masking
+
+* BREAKING: `cast_effect_table()` and `cast_effect_map()` now take a single
+  raw-unit shift per driver (`shift`, default `1` in `shift_type = "raw"`;
+  `"sd"` converts through the stored training SDs) instead of a symmetric
+  shift set. Outputs are `mean_abs_dHSS` / `mean_signed_dHSS` over
+  supported rows or cells only, with `n`, `n_supported`, `support` and a
+  `masked` flag. Units outside the training quantile box are masked (`NA`
+  estimates), not ranked. `outside_range_fraction`, `pct_gain` / `pct_loss`,
+  `median_signed_dHSS`, `max_gain` / `max_loss` and `n_shifts` are removed;
+  existing effect outputs must be recomputed.
+* BREAKING: `cast_dose_response()`, `cast_effect_support()`,
+  `cast_necessity()` and `cast_sensitivity()` (including the
+  `marginaleffects` backend) are removed; calls abort with a forwarding
+  error. `cast_select(method = "tramicp")` and its `environment` /
+  `icp_*` arguments are removed, as are the `select_environment` /
+  `select_icp_*` arguments of `cast()` and `cast_cv()`.
+* `cast_select()` stage 2 keeps the shift-effect statistic but calibrates it
+  against a within-stratum permutation null: each survivor is shuffled only
+  among rows with similar values on the other survivors (one k-means
+  stratification per predictor), so the null respects the observed joint
+  support. The second attribution column (`perm_importance`), `p_adjusted`
+  and `importance_agreement` are removed; `cast_importance()` reports the
+  single conditional-effect column. Existing selection caches and downstream
+  model/CV outputs must be recomputed.
+
 # castSDM 0.11.0 (unreleased)
 
 ## Optional invariant selection and scenario comparisons

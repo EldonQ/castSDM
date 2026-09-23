@@ -1,4 +1,4 @@
-# Quantile-box coverage is not a joint-positivity test.
+# Single-shift effect with hard range-masking ----
 
 make_grid_data <- function(n = 900, seed = 31) {
   set.seed(seed)
@@ -19,18 +19,30 @@ grid_fit <- function(d, models = "rf") {
            seed = 77, verbose = FALSE)
 }
 
-test_that("cast_dose_response reports box coverage and drops zero shifts", {
+test_that("removed products abort with a forwarding error", {
+  expect_error(cast_dose_response(), "removed in 0.12.0")
+  expect_error(cast_effect_support(), "removed in 0.12.0")
+  expect_error(cast_necessity(), "removed in 0.12.0")
+  expect_error(cast_sensitivity(), "removed in 0.12.0")
+  expect_error(plot(structure(list(), class = "cast_dose_response")),
+               "removed in 0.12.0")
+})
+
+test_that("the shift table carries one raw shift per driver and masks", {
   skip_if_not_installed("ranger")
   d <- make_grid_data()
   fit <- grid_fit(d)
-  dr <- cast_dose_response(fit, "x1", shift = seq(-2, 2, by = 0.5))
-  expect_s3_class(dr, "cast_dose_response")
-  expect_true(all(c("shift", "shift_raw", "mean_delta", "mean_abs_delta",
-                    "support", "range_supported") %in% names(dr$curve)))
-  # A zero shift is not an intervention and is dropped from the scan.
-  expect_false(any(dr$curve$shift == 0))
-  expect_true(all(dr$curve$mean_abs_delta >= 0))
-  # The true driver must move the fit more than a pure noise variable.
+  tab <- cast_effect_table(fit, d, shift = list(x1 = 1, x2 = 1), verbose = FALSE)
+  expect_s3_class(tab, "cast_effect_table")
+  expect_true(all(c("driver", "shift_raw", "mean_abs_dHSS", "mean_signed_dHSS",
+                    "n", "n_supported", "support", "masked") %in% names(tab)))
+  expect_equal(tab$shift_raw, c(1, 1))
+  # A positive raw shift moves with the data-generating signs.
+  expect_lt(tab$mean_signed_dHSS[tab$driver == "x2"], 0)
+  expect_true(all(tab$mean_abs_dHSS >= 0, na.rm = TRUE))
+  expect_false(any(tab$masked))
+  expect_equal(tab$support, tab$n_supported / tab$n)
+  # The true drivers must move the fit more than a pure noise variable.
   noise <- data.frame(presence = d$presence, x1 = d$x1, x2 = d$x2,
                       noise = stats::rnorm(nrow(d)))
   screen_n <- new_cast_select(c("x1", "x2", "noise"),
@@ -38,61 +50,40 @@ test_that("cast_dose_response reports box coverage and drops zero shifts", {
                               method = "manual")
   fit2 <- cast_fit(noise, screen = screen_n, models = "rf", rf_ntree = 120,
                    seed = 77, verbose = FALSE)
-  dr2 <- cast_dose_response(fit2, "noise", shift = 1)
-  dr1 <- cast_dose_response(fit, "x1", shift = 1)
-  expect_gt(dr1$curve$mean_abs_delta[1], dr2$curve$mean_abs_delta[1])
-})
-
-test_that("support decays as the shift grows and is bounded in [0, 1]", {
-  skip_if_not_installed("ranger")
-  d <- make_grid_data()
-  fit <- grid_fit(d)
-  sp <- cast_effect_support(fit, c("x1", "x2"), shift = c(0.5, 2, 5))
-  expect_s3_class(sp, "cast_support")
-  expect_true(all(sp$support$support >= 0 & sp$support$support <= 1))
-  s <- sp$support
-  for (v in c("x1", "x2")) {
-    z <- s[s$driver == v, ]
-    # A larger shift can only remove observations from the training box.
-    expect_true(z$support[z$shift == 0.5] >= z$support[z$shift == 5] - 1e-12)
-  }
-  expect_gt(s$support[s$driver == "x1" & s$shift == 0.5], 0.9)
+  tab2 <- cast_effect_table(fit2, noise, verbose = FALSE)
+  expect_gt(tab2$mean_abs_dHSS[tab2$driver == "x1"],
+            tab2$mean_abs_dHSS[tab2$driver == "noise"])
 })
 
 test_that("an absurd shift is refused rather than answered by extrapolation", {
   skip_if_not_installed("ranger")
   d <- make_grid_data()
   fit <- grid_fit(d)
-  expect_error(cast_dose_response(fit, "x1", shift = 1e6), "training range")
+  expect_error(cast_effect_table(fit, d, shift = list(x1 = 1e6, x2 = 1),
+                                 verbose = FALSE), "training range")
 })
 
-
-
-test_that("grid inputs are validated against the fitted predictors", {
+test_that("table inputs are validated", {
   skip_if_not_installed("ranger")
   d <- make_grid_data()
   fit <- grid_fit(d)
-  expect_error(cast_dose_response(fit, "nope"), "one fitted predictor")
-  expect_error(cast_effect_support(fit, "nope"), "Unknown")
-  expect_error(cast_dose_response(fit, "x1", shift = 0), "non-zero")
+  expect_error(cast_effect_table(fit, d, drivers = "nope", verbose = FALSE), "Unknown")
+  expect_error(cast_effect_table(fit, d, shift = 0, verbose = FALSE), "non-zero")
+  expect_error(cast_effect_table(fit, d, shift = list(x1 = 1), verbose = FALSE), "lacks entries")
+  expect_error(cast_effect_table(fit, d, shift = c(1, 2), verbose = FALSE), "length 1")
+  expect_error(cast_effect_table(fit, d, min_support = 2, verbose = FALSE), "min_support")
+  expect_error(cast_effect_table(fit, d, support_probs = c(0.9, 0.1),
+                                 verbose = FALSE), "support_probs")
 })
 
-test_that("a fit without a training reference cannot claim support", {
+test_that("a fit without a training reference masks instead of ranking", {
   skip_if_not_installed("ranger")
   d <- make_grid_data()
   fit <- grid_fit(d)
   fit$scaling$reference <- NULL
-  expect_error(cast_effect_support(fit, "x1"), "reference")
-})
-
-test_that("effect grid objects plot", {
-  skip_if_not_installed("ranger")
-  skip_if_not_installed("ggplot2")
-  d <- make_grid_data()
-  fit <- grid_fit(d)
-  expect_s3_class(plot(cast_dose_response(fit, "x1", shift = c(-1, 1))), "ggplot")
-
-  expect_s3_class(plot(cast_effect_support(fit, c("x1", "x2"))), "ggplot")
+  tab <- cast_effect_table(fit, d, verbose = FALSE)
+  expect_true(all(tab$masked))
+  expect_true(all(is.na(tab$mean_abs_dHSS)))
 })
 
 test_that("range coverage uses supplied rows and every baseline predictor", {
@@ -117,7 +108,7 @@ test_that("quantile-box coverage does not certify conditional positivity", {
   expect_false(any(ref$x == X$x + 1 & ref$z == X$z))
 })
 
-test_that("effect diagnostics use the same complete reference population", {
+test_that("masking uses the same complete rows as the estimates", {
   local_mocked_bindings(.cast_predict_matrix = function(fit, X, models, ...) {
     matrix(plogis(X$x - X$z), ncol = 1)
   })
@@ -125,34 +116,30 @@ test_that("effect diagnostics use the same complete reference population", {
     env_vars = c("x", "z"), scaling = list(sds = c(x = 1, z = 1),
       reference = data.frame(x = 0:10, z = 0:10), impute = c(x = 5, z = 5)))
   X <- data.frame(x = c(5, 5, -1, 10, NA), z = c(5, 11, 5, 5, 5))
-  sp <- cast_effect_support(fit, "x", c(-1, 1), "raw", X, c(0, 1))
-  dr <- cast_dose_response(fit, "x", c(-1, 1), "raw", X, c(0, 1))
-  tab <- cast_effect_table(fit, X, "x", steps = c(-1, 1),
+  tab <- cast_effect_table(fit, X, "x", shift = 1, shift_type = "raw",
                            support_probs = c(0, 1), verbose = FALSE)
-  expect_equal(sp$support$support, c(0.5, 0.25))
-  expect_equal(dr$curve$support, sp$support$support)
-  expect_equal(dr$curve$range_supported, c(TRUE, FALSE))
-  expect_equal(tab$support, min(sp$support$support))
-  expect_equal(tab$mean_abs_dHSS, mean(dr$curve$mean_abs_delta))
-  expect_equal(attr(tab, "rows_complete"), 4L)
-  train <- cast_effect_support(fit, "x", 1, "raw", support_probs = c(0, 1))
-  expect_equal(train$support$support, 10 / 11)
-  limited <- cast_effect_support(fit, "x", 1, "raw", X, c(0, 1), max_rows = 1)
-  expect_equal(limited$support$support, 1)
-  unlimited <- cast_effect_support(fit, "x", 1, "raw", X, c(0, 1), max_rows = Inf)
-  expect_equal(unlimited$support$support, 0.25)
-  for (bad in list(NULL, NA_real_, 0, -1, 1.5, c(1, 2), "2", -Inf)) {
-    expect_error(cast_effect_support(fit, "x", max_rows = bad), "max_rows")
-    expect_error(cast_dose_response(fit, "x", max_rows = bad), "max_rows")
-  }
-  for (bad in list(NULL, c(0.9, 0.1), c(0.5, 0.5), c(-1, 1), c(0, 2),
-                   c(0, Inf), c(NA, 1), 0.5, c("0", "1"))) {
-    expect_error(cast_effect_support(fit, "x", support_probs = bad), "support_probs")
-    expect_error(cast_dose_response(fit, "x", support_probs = bad), "support_probs")
-    expect_error(cast_effect_table(fit, X, "x", support_probs = bad,
-                                  verbose = FALSE), "support_probs")
-  }
-  expect_error(cast_effect_support(fit, "x", newdata = X[FALSE, ]), "No complete")
-  expect_error(cast_effect_support(fit, "x", newdata = data.frame(x = "5", z = 5)),
-               "numeric")
+  # Rows: (5,5) covered, (5,11) baseline outside, (-1,5) shifted outside,
+  # (10,5) shifted to 11 outside; NA row dropped.
+  expect_equal(tab$n, 4L)
+  expect_equal(tab$n_supported, 1L)
+  expect_equal(tab$support, 0.25)
+  expect_true(tab$masked)
+  expect_true(is.na(tab$mean_abs_dHSS))
+  # A permissive threshold unmasks the same supported row.
+  tab2 <- cast_effect_table(fit, X, "x", shift = 1, shift_type = "raw",
+                            support_probs = c(0, 1), min_support = 0.2,
+                            verbose = FALSE)
+  expect_false(tab2$masked)
+  expect_equal(tab2$n_supported, 1L)
+  expect_error(cast_effect_table(fit, X[FALSE, ], "x", verbose = FALSE), "No complete")
+  expect_error(cast_effect_table(fit, data.frame(x = "5", z = 5), "x",
+                                 verbose = FALSE), "numeric")
+})
+
+test_that("the shift table plots", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("ggplot2")
+  d <- make_grid_data()
+  fit <- grid_fit(d)
+  expect_s3_class(plot(cast_effect_table(fit, d, verbose = FALSE)), "ggplot")
 })

@@ -24,10 +24,7 @@ cast(
   refit_full = TRUE,
   seed = NULL,
   verbose = TRUE,
-  select_keep = character(0),
-  select_environment = NULL,
-  select_icp_alpha = 0.05,
-  select_icp_max_predictors = 12L
+  select_keep = character(0)
 )
 }
 \arguments{
@@ -90,21 +87,10 @@ the training split. Default \code{TRUE}.}
 \item{select_keep}{Character vector passed to \code{keep} in \code{\link[=cast_select]{cast_select()}},
 retained in the training screen and every nested CV fold. Prespecify these
 variables before evaluating outcomes; retention does not verify adjustment.}
-
-\item{select_environment}{Column name containing scientifically justified
-environment groups for \code{select_method = "tramicp"}, not spatial CV folds.}
-
-\item{select_icp_alpha}{Invariance-test level passed to \code{\link[=cast_select]{cast_select()}}.}
-
-\item{select_icp_max_predictors}{Computational guard for exhaustive subset
-testing, not a cap on the inferred intersection.}
 }
 \value{
 A \code{cast_result} object (S3 class) containing pipeline outputs.
-Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, \code{\link[=plot]{plot()}}. When every spatial CV fold is
-unevaluable with \code{select_method = "tramicp"}, the
-\code{cast_cv_no_evaluable_folds} error retains \code{screens} and \code{fold_status};
-the pipeline stops instead of substituting hold-out evaluation.
+Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, \code{\link[=plot]{plot()}}.
 }
 \description{
 One-step pipeline that executes the entire workflow: data splitting,

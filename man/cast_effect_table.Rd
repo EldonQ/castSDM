@@ -2,16 +2,16 @@
 % Please edit documentation in R/effect-products.R
 \name{cast_effect_table}
 \alias{cast_effect_table}
-\title{Model Response Table for Species Distribution Models}
+\title{Shift Effect Table for Species Distribution Models}
 \usage{
 cast_effect_table(
   fit,
   newdata,
   drivers = NULL,
-  shifts = c(-2, -1, 1, 2),
-  shift_type = "sd",
-  steps = NULL,
+  shift = 1,
+  shift_type = "raw",
   support_probs = c(0.01, 0.99),
+  min_support = 0.5,
   verbose = TRUE
 )
 }
@@ -19,67 +19,58 @@ cast_effect_table(
 \item{fit}{A \code{cast_fit} object (from \code{\link[=cast_fit]{cast_fit()}} or \code{\link[=cast]{cast()}}).}
 
 \item{newdata}{Data frame with the fitted predictors; rows with missing
-predictors are dropped consistently with the raster API. Coordinates
-are not required.}
+predictors are dropped. Coordinates are not required.}
 
 \item{drivers}{Character vector of drivers to intervene on. Default:
 every fitted predictor.}
 
-\item{shifts}{Numeric vector of intervention sizes, in SD units unless
-\code{shift_type = "raw"}. Default \code{c(-2, -1, 1, 2)}: the effect is averaged
-over a symmetric shift set so it does not depend on the sign or the
-magnitude of one arbitrary step.}
+\item{shift}{Single raw-unit shift per driver (e.g. \code{list(bio01 = 2)} for
++2C). Either one unnamed numeric value applied to every driver, or a
+named numeric vector / named list with one value per driver. Default \code{1}.}
 
-\item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
-
-\item{steps}{Optional raw-unit shift sets, overriding
-\code{shifts}/\code{shift_type}. Either a numeric vector (used for every driver)
-or a named list of numeric vectors, one per driver.}
+\item{shift_type}{\code{"raw"} (default, predictor units) or \code{"sd"} (training
+standard deviations, converted through the fit).}
 
 \item{support_probs}{Length-2 numeric. Increasing training quantiles in
 \verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.
-\code{support} is the minimum, over shifts, of the fraction of complete rows
-whose baseline and shifted vectors both lie in that box. This diagnostic
-cannot detect holes inside the box and does not establish joint positivity.}
+This diagnostic cannot detect holes inside the box and does not establish
+joint positivity.}
+
+\item{min_support}{Numeric in \verb{[0, 1]}. Drivers with box coverage below
+this threshold are masked (\code{NA} estimates). Default \code{0.5}.}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_effect_table} data.frame, one row per driver.
-\code{mean_abs_dHSS} is the effect magnitude (mean absolute delta over the
-shift set); \code{mean_signed_dHSS} is the direction (deltas aligned to the
-sign of their own shift, so positive means raising the driver raises
-suitability). Rank drivers by \code{mean_abs_dHSS}; read
-\code{mean_signed_dHSS} for the sign.
-Summaries first average over shifts per row; \code{n} counts complete rows.
-\code{outside_range_fraction} is the fraction of row/shift pairs outside the
-predictor's training range. It does not test multivariate support.
-\code{support} is the minimum quantile-box coverage over the shift set, using
-the same range diagnostic as \code{\link[=cast_effect_support]{cast_effect_support()}}. All complete rows
-contribute to the effects, including those outside the box.
+A \code{cast_effect_table} data.frame, one row per driver:
+\code{shift_raw} (applied raw-unit shift), \code{mean_abs_dHSS} (magnitude: mean
+absolute delta over supported rows), \code{mean_signed_dHSS} (direction:
+mean signed delta), \code{n} (complete rows), \code{n_supported} (rows inside the
+box before and after shifting), \code{support} (\code{n_supported / n}), and
+\code{masked} (box coverage below \code{min_support}). Rank supported drivers by
+\code{mean_abs_dHSS}; read \code{mean_signed_dHSS} for the sign.
 }
 \description{
-Intervenes on each driver in turn (do-operator: shift the driver, hold
-every other driver fixed), and summarises the resulting change in
-predicted suitability on \code{newdata}: the model-based interventional
-response of the ensemble to each driver.
+Intervenes on each driver in turn with a single raw-unit shift (do-operator:
+shift the driver, hold every other driver fixed), and summarises the
+resulting change in predicted suitability on \code{newdata}: the model-based
+shift effect (shift estimand) of the ensemble for each driver.
 }
 \details{
-The effect is averaged over a symmetric shift set (default
-\eqn{\pm 1, \pm 2} SD) rather than read off one arbitrary step, and is
-reported as a magnitude (\code{mean_abs_dHSS}) separately from a direction
-(\code{mean_signed_dHSS}). A single signed step at one magnitude is not a
-stable driver ranking.
+Rows outside the training quantile box - at baseline or after shifting -
+are masked: estimates average over supported rows only, and drivers whose
+box coverage falls below \code{min_support} report \code{NA} estimates instead of an
+extrapolated ranking. A zero shift is not an intervention and is refused,
+as is a shift that leaves the training range everywhere.
 }
-\section{Read with the necessity diagnostic}{
+\section{Interpretation (read before citing)}{
 
-Pair this table with \code{\link[=cast_necessity]{cast_necessity()}} to describe predictive behavior.
-The latter uses a separate RF estimator, whereas this table averages the
-fitted engines equally. Neither agreement nor disagreement identifies a
-causal effect. A small knockout cost can reflect redundancy, limited power,
-estimator choice or AUC's insensitivity to calibration changes.
-Causal interpretation additionally needs a justified adjustment set,
-consistency, joint support and an adequate response model. With presence/
-background data the output is relative suitability, not occurrence risk.
+The table is a \emph{model-based} shift contrast (g-computation /
+standardization), reported on the relative suitability scale with
+presence/background data. A causal reading additionally needs consistency
+of the stated shift, a justified adjustment set, no uncontrolled
+confounding, joint support and adequate response and observation models.
+Quantile-box masking only diagnoses range extrapolation; it does not
+establish joint positivity or causal identification.
 }
 

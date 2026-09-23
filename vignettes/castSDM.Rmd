@@ -20,37 +20,20 @@ suitability, and where is that answer supported by data?
 
 Two concerns stay separate:
 
-- **Default selection ranks predictors by changes in the fitted response.**
-  `cast_select()` runs a two-stage screen: collinearity thinning at
-  \|r\| <= 0.7 (Dormann et al. 2013), then a filter against a
-  permuted-response null using the **interventional effect** — how far the
-  fitted probability moves when the predictor is shifted and every other
-  predictor stays at its observed value. The same forest's permutation
-  importance is reported alongside, because permuting a predictor breaks its
-  correlation with the others and is therefore governed by the model's
-  extrapolation behaviour (Hooker, Mentch & Zhou 2021). Selection is re-run
-  inside every spatial cross-validation fold, so held-out data never influence
+- **Default selection ranks predictors by conditional changes in the fitted
+  response.** `cast_select()` runs a two-stage screen: collinearity thinning
+  at \|r\| <= 0.7 (Dormann et al. 2013), then a filter against a
+  within-stratum permutation null using the **conditional effect** — how far
+  the fitted probability moves when the predictor is shifted and every other
+  predictor stays at its observed value. Shuffling only among rows with
+  similar values on the other predictors keeps the null inside the observed
+  joint support (Hooker, Mentch & Zhou 2021). Selection is re-run inside
+  every spatial cross-validation fold, so held-out data never influence
   variable choice.
-- **Effects come with their response shape and their support.** The
-  interventional response to each driver is reported as a table, a spatial map
-  and a dose-response curve, together with the fraction of observed predictor
-  vectors still inside the training support after the shift.
-  `cast_necessity()` separately reports what dropping a driver costs in
-  held-out AUC.
-
-For prespecified, scientifically justified environment groups,
-`cast_select(method = "tramicp", environment = "environment_group")` instead
-uses the optional tramicp package to test all candidate subsets for invariance.
-It does not apply the two-stage screen first, fabricate groups from CV folds,
-or replace an empty intersection with a ranked set. Valid environments and
-model/sampling assumptions remain necessary; the result is not a verified
-causal adjustment set.
-
-For a single fitted GAM, `cast_sensitivity(backend = "marginaleffects",
-model = "gam", ...)` provides explicit baseline-versus-shifted comparisons.
-The native backend remains available for multiple models. Neither backend turns
-presence/background suitability into occurrence probability or identifies a
-causal effect merely by holding the other predictors fixed.
+- **One shift, one map, hard masking.** The shift response to each driver is
+  reported as a table and a spatial map for a single raw-unit shift (for
+  example `bio01 + 2` degrees). Rows or cells outside the training quantile
+  box — at baseline or after shifting — are masked, not ranked.
 
 The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
 learners, nested spatial CV, MESS extrapolation flags, performance-weighted
@@ -87,7 +70,7 @@ result <- cast(
   models = c("rf", "gam"),
   select_method = "two_stage",
   select_num_trees = 100,
-  select_n_perm = 19,       # small example: a short permutation null
+  select_n_perm = 19,       # small example: a short conditional null
   do_cv = TRUE,
   cv_k = 3,
   seed = 42,
@@ -100,10 +83,9 @@ plot(result$screen)
 
 ## What each stage measured
 
-`cast_importance()` shows both attribution columns from the screen and how far
-they agree. A predictor the forest relies on but barely responds to when
-shifted is a collinear stand-in; the rank agreement summarises how much the
-choice of statistic mattered here.
+`cast_importance()` shows the single conditional-effect column from the
+screen. Predictors above their own within-stratum null are retained, up to
+the sample-size cap.
 
 ```{r importance}
 imp <- cast_importance(result$screen)
@@ -111,51 +93,22 @@ imp
 plot(imp)
 ```
 
-## Effect size, response shape and support
+## Shift effect and masking
 
 ```{r attribution}
-eff <- cast_effect_table(result$fit, newdata = dat, verbose = FALSE)
-eff        # rank by mean_abs_dHSS; mean_signed_dHSS gives the direction
-plot(eff)  # hollow = shift answered mostly by extrapolation (support < 0.5)
+eff <- cast_effect_table(result$fit, newdata = dat, shift = 1,
+                         verbose = FALSE)
+eff        # rank supported drivers by mean_abs_dHSS; masked drivers read NA
+plot(eff)  # cross = masked: the shift is not answerable inside the box
 
 # The driver the screen ranked first is guaranteed to be fitted.
 v1 <- result$screen$scores$variable[which.max(
   result$screen$scores$interventional_effect)]
-
-# Shape: how the effect scales with the size of the shift.
-dr <- cast_dose_response(result$fit, v1, shift = seq(-2, 2, by = 0.5))
-plot(dr)
-
-# Support: where the shift is answerable at all.
-sp <- cast_effect_support(result$fit, variables = v1, shift = c(1, 2, 3))
-plot(sp)
 ```
 
-A dose-response point drawn hollow is answered mostly by extrapolation.
-`cast_effect_support()` reports the same information as a number, and a shift
-that leaves the training range everywhere is refused rather than answered.
-
-## Necessity audit
-
-```{r necessity}
-nec <- cast_necessity(dat, screen = result$screen, k = 3, num_trees = 100,
-                      seed = 42, verbose = FALSE)
-nec        # mean_dAUC: held-out AUC lost by dropping each driver
-plot(nec)  # whiskers = fold range; read beside plot(eff)
-```
-
-A driver with a large `mean_abs_dHSS` but `mean_dAUC` near zero shows a model
-response with limited RF knockout cost. Redundancy, limited power, AUC and
-estimator choice can all contribute. Neither diagnostic is a causal test on
-its own.
-
-## Sensitivity what-if map
-
-```{r sensitivity}
-cf <- cast_sensitivity(result$fit, newdata = dat, variable = v1, shift = 1,
-                       shift_type = "sd")
-plot(cf, basemap = "none")
-```
+Give the shift in raw units whenever it has ecological meaning, for example
+`shift = list(bio01 = 2)` for +2 degrees. A shift that leaves the training
+range everywhere is refused rather than answered.
 
 ## Spatial prediction on a grid
 
@@ -176,13 +129,12 @@ plot(pred, basemap = "none")
 
 ## What the numbers are not
 
-Every effect product is a **model-based interventional contrast**
-(g-computation / standardization). A causal interpretation requires consistency,
-a justified adjustment set, no uncontrolled confounding, joint positivity,
-and adequate response and observation models. The support column checks only
-training-quantile-box coverage of baseline and shifted rows: it cannot detect
-unobserved combinations inside the box or establish positivity. The
-`range_supported` flag is a descriptive coverage threshold, not causal
-estimability. Automatic predictor selection does not identify an adjustment
-set. The estimator is not doubly robust. On presence/background data the scale
+Every effect product is a **model-based shift contrast**
+(g-computation / standardization). A causal interpretation requires consistency
+of the stated shift, a justified adjustment set, no uncontrolled confounding,
+joint positivity, and adequate response and observation models. Masking checks
+only training-quantile-box coverage of baseline and shifted rows: it cannot
+detect unobserved combinations inside the box or establish positivity.
+Automatic predictor selection does not identify an adjustment set. The
+estimator is not doubly robust. On presence/background data the scale
 is relative suitability, not occurrence probability.

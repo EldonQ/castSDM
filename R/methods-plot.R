@@ -18,7 +18,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("interventional_effect", "perm_importance", "freq", "assoc")
+  imp_candidates <- c("interventional_effect", "freq", "assoc")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)]
   imp_col <- imp_col[vapply(imp_col, function(nm)
     any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
@@ -61,8 +61,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   )
 
   x_lab <- switch(imp_col,
-    interventional_effect = "Interventional effect",
-    perm_importance = "Permutation importance",
+    interventional_effect = "Conditional effect",
     freq = "Fold selection frequency",
     assoc = "|marginal association|",
     importance_plot = "Selection indicator",
@@ -613,7 +612,7 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   n_sig <- sum(eff$selected, na.rm = TRUE)
 
   plot_subtitle <- sprintf(
-    "Interventional effect (shift 1 SD, others fixed) | %d/%d above the permuted-response null (p < %.2g)",
+    "Conditional effect (shift 1 SD, others fixed) | %d/%d above the within-stratum null (p < %.2g)",
     n_sig, nrow(eff), x$alpha
   )
 
@@ -642,7 +641,7 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   p +
     ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
     ggplot2::labs(
-      title = "Predictor interventional effect",
+      title = "Predictor conditional effect",
       subtitle = plot_subtitle,
       x = "Mean |change in predicted probability| per 1 SD shift", y = ""
     ) +
@@ -654,178 +653,42 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
 }
 
 
-#' Plot Sensitivity What-If Map
-#'
-#' Diverging map of the per-cell change in habitat suitability under a
-#' single-predictor intervention on the current climate.
-#'
-#' @param x A `cast_sensitivity` object (from [cast_sensitivity()]).
-#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
-#' @param var_label Optional display label for the intervened predictor.
-#' @param title Optional plot title.
+#' Plot Sensitivity Map (removed in 0.12.0)
+#' @param x Ignored.
 #' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
+#' @return Never returns; always aborts.
 #' @export
-plot.cast_sensitivity <- function(x, basemap = "world", var_label = NULL,
-                                     title = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
-  check_suggested("sf", "for geographic mapping")
-
-  pred <- x$predictions
-  lab <- var_label %||% x$variable
-  title <- title %||% sprintf("What-if: %s + %g %s", lab, x$shift, x$shift_type)
-  lim <- max(abs(pred$delta_hss), na.rm = TRUE)
-  if (!is.finite(lim) || lim == 0) lim <- 1e-6
-
-  p <- ggplot2::ggplot()
-  if (basemap != "none") {
-    basemap_sf <- load_basemap(basemap)
-    if (!is.null(basemap_sf)) {
-      p <- p + ggplot2::geom_sf(
-        data = basemap_sf, fill = "grey95", color = "#bdc3c7", linewidth = 0.2
-      )
-    }
-  }
-  large_grid <- nrow(pred) > 2e5
-  fill_scale <- ggplot2::scale_fill_gradient2(
-    low = "#2166AC", mid = "grey95", high = "#B2182B", midpoint = 0,
-    limits = c(-lim, lim), name = "\u0394 HSS"
-  )
-  color_scale <- ggplot2::scale_color_gradient2(
-    low = "#2166AC", mid = "grey95", high = "#B2182B", midpoint = 0,
-    limits = c(-lim, lim), name = "\u0394 HSS"
-  )
-  if (large_grid) {
-    p <- p + ggplot2::geom_raster(
-      data = pred,
-      ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$delta_hss)
-    ) + fill_scale
-  } else {
-    p <- p + ggplot2::geom_point(
-      data = pred,
-      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$delta_hss),
-      size = 0.4, alpha = 0.85
-    ) + color_scale
-  }
-  p <- p +
-    ggplot2::labs(
-      title = title,
-      subtitle = sprintf("Suitability gain in %d%% of cells (mean \u0394 = %.3f)",
-                         round(100 * x$summary$frac_positive),
-                         x$summary$mean_delta)
-    ) +
-    ggplot2::theme_void(
-      base_size = 10,
-      base_family = getOption("castSDM.font_family", "sans")
-    ) +
-    ggplot2::theme(
-      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
-      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
-      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
-      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
-      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
-      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
-      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
-      legend.position = "right",
-      legend.key.width = ggplot2::unit(0.5, "cm"),
-      legend.key.height = ggplot2::unit(1.5, "cm")
-    )
-
-  p <- .add_china_dashline(p, basemap)
-  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
-  .add_china_south_sea_inset(
-    p, basemap, data = pred, value_var = "delta_hss", raster = large_grid,
-    bg_fill = "grey95",
-    scale = if (large_grid) {
-      ggplot2::scale_fill_gradient2(low = "#2166AC", mid = "grey95",
-        high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
-    } else {
-      ggplot2::scale_color_gradient2(low = "#2166AC", mid = "grey95",
-        high = "#B2182B", midpoint = 0, limits = c(-lim, lim), guide = "none")
-    }
-  )
+plot.cast_sensitivity <- function(x, ...) {
+  cli::cli_abort("`plot.cast_sensitivity()` was removed in 0.12.0.")
 }
 
 
-#' Plot a Dose-Response Curve
-#'
-#' Mean change in predicted suitability against the size of the shift. Hollow
-#' points indicate quantile-box coverage below 0.5, not causal estimability.
-#' High coverage does not establish joint positivity.
-#'
-#' @param x A `cast_dose_response` object (from [cast_dose_response()]).
-#' @param var_label Optional display label for the intervened predictor.
+#' Plot a Dose-Response Curve (removed in 0.12.0)
+#' @param x Ignored.
 #' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
+#' @return Never returns; always aborts.
 #' @export
-plot.cast_dose_response <- function(x, var_label = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
-  crv <- x$curve
-  crv$box_coverage <- ifelse(crv$range_supported, "box coverage >= 0.5",
-                             "box coverage < 0.5")
-  lab <- var_label %||% x$variable
-  ggplot2::ggplot(crv, ggplot2::aes(x = .data$shift, y = .data$mean_delta)) +
-    ggplot2::geom_hline(yintercept = 0, color = "grey50", linewidth = 0.4) +
-    ggplot2::geom_ribbon(ggplot2::aes(ymin = 0, ymax = .data$mean_delta),
-                         fill = "grey85", alpha = 0.6) +
-    ggplot2::geom_line(color = "#B2182B", linewidth = 0.8) +
-    ggplot2::geom_point(ggplot2::aes(shape = .data$box_coverage),
-                        color = "#B2182B", size = 1.9, fill = "white") +
-    ggplot2::scale_shape_manual(values = c(`box coverage >= 0.5` = 16,
-                                           `box coverage < 0.5` = 1),
-                                name = NULL) +
-    ggplot2::labs(
-      title = sprintf("Dose-response of predicted suitability to %s", lab),
-      subtitle = sprintf("Shift in %s; other predictors held at their observed values", x$unit),
-      x = sprintf("Shift in %s", x$unit),
-      y = "Mean change in predicted suitability"
-    ) +
-    theme_cast(base_size = 11) +
-    ggplot2::theme(legend.position = "bottom")
+plot.cast_dose_response <- function(x, ...) {
+  cli::cli_abort("`plot.cast_dose_response()` was removed in 0.12.0.")
 }
 
 
-#' Plot Shift Quantile-Box Coverage by Driver
-#'
-#' @param x A `cast_support` object (from [cast_effect_support()]).
-#' @param var_labels Optional named character vector of display labels.
+#' Plot Shift Coverage (removed in 0.12.0)
+#' @param x Ignored.
 #' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
+#' @return Never returns; always aborts.
 #' @export
-plot.cast_support <- function(x, var_labels = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
-  s <- x$support
-  s$shift_lab <- factor(sprintf("%+g", s$shift), levels = sprintf("%+g", sort(unique(s$shift))))
-  s$display <- if (!is.null(var_labels)) {
-    ifelse(s$driver %in% names(var_labels), var_labels[s$driver], s$driver)
-  } else s$driver
-  ggplot2::ggplot(s, ggplot2::aes(x = .data$shift_lab, y = .data$display,
-                                  fill = .data$support)) +
-    ggplot2::geom_tile(color = "white", linewidth = 0.3) +
-    ggplot2::geom_text(ggplot2::aes(label = sprintf("%.2f", .data$support)),
-                       size = 3, color = "grey15") +
-    ggplot2::scale_fill_gradientn(
-      colours = c("#B2182B", "#F4A582", "#F7F7F7", "#92C5DE", "#2166AC"),
-      limits = c(0, 1), name = "Box coverage") +
-    ggplot2::labs(
-      title = "Shift range diagnostic by driver",
-      subtitle = "Fraction inside the training quantile box before and after shifting",
-      x = sprintf("Shift (%s)", if (x$shift_type == "sd") "training SD" else "raw units"), y = ""
-    ) +
-    theme_cast(base_size = 11) +
-    ggplot2::theme(panel.grid = ggplot2::element_blank())
+plot.cast_support <- function(x, ...) {
+  cli::cli_abort("`plot.cast_support()` was removed in 0.12.0.")
 }
 
 
-#' Plot an Effect Table: Magnitude, Direction and Support
+#' Plot an Effect Table: Magnitude, Direction and Masking
 #'
-#' Lollipop chart of per-driver interventional effects: position shows the
+#' Lollipop chart of per-driver shift effects: position shows the
 #' magnitude (`mean_abs_dHSS`), colour shows the direction
-#' (`mean_signed_dHSS`), hollow points mark minimum quantile-box coverage below
-#' 0.5, and crosses mark unknown coverage. Coverage is not joint positivity.
+#' (`mean_signed_dHSS`), crosses mark masked drivers (`NA` estimates:
+#' box coverage below `min_support`). Coverage is not joint positivity.
 #'
 #' @param x A `cast_effect_table` object (from [cast_effect_table()]).
 #' @param var_labels Optional named character vector of display labels.
@@ -836,80 +699,45 @@ plot.cast_support <- function(x, var_labels = NULL, ...) {
 plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   d <- as.data.frame(x)
-  d <- d[order(d$mean_abs_dHSS), , drop = FALSE]
+  d <- d[order(d$mean_abs_dHSS, na.last = TRUE), , drop = FALSE]
   d$display <- if (!is.null(var_labels)) {
     ifelse(d$driver %in% names(var_labels), var_labels[d$driver], d$driver)
   } else d$driver
   d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
-  d$direction <- ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
-                        "lowers suitability")
-  sup <- if ("support" %in% names(d)) d$support else rep(NA_real_, nrow(d))
-  d$box_coverage <- ifelse(!is.finite(sup), "box coverage unknown",
-                           ifelse(sup < 0.5, "box coverage < 0.5",
-                                  "box coverage >= 0.5"))
+  d$direction <- ifelse(!is.finite(d$mean_signed_dHSS), "masked",
+                        ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
+                        "lowers suitability"))
+  d$mask <- ifelse(is.finite(d$mean_abs_dHSS), "supported", "masked")
   ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
                                   color = .data$direction)) +
     ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data$mean_abs_dHSS,
                                        y = .data$display, yend = .data$display),
                           linewidth = 0.6) +
-    ggplot2::geom_point(ggplot2::aes(shape = .data$box_coverage), size = 2.8,
+    ggplot2::geom_point(ggplot2::aes(shape = .data$mask), size = 2.8,
                         fill = "white") +
-    ggplot2::scale_shape_manual(values = c(`box coverage >= 0.5` = 16,
-                                           `box coverage < 0.5` = 1,
-                                           `box coverage unknown` = 4),
+    ggplot2::scale_shape_manual(values = c(supported = 16, masked = 4),
                                 name = NULL) +
     ggplot2::scale_color_manual(values = c(`raises suitability` = "#B2182B",
-                                           `lowers suitability` = "#2166AC"),
+                                           `lowers suitability` = "#2166AC",
+                                           masked = "grey50"),
                                 name = NULL) +
     ggplot2::labs(
-      title = "Interventional effect by driver",
-      subtitle = "Magnitude with direction; hollow = low box coverage, cross = unknown",
-      x = "Mean |change in suitability| over the shift set", y = ""
+      title = "Shift effect by driver",
+      subtitle = "Magnitude with direction; cross = masked (shift not answerable in-box)",
+      x = "Mean |change in suitability| at the stated raw-unit shift", y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(legend.position = "bottom")
 }
 
 
-#' Plot Knockout Necessity (Held-Out AUC Cost)
-#'
-#' Bars show the mean held-out AUC lost by dropping each driver; whiskers
-#' span the observed fold range. Read beside [cast_effect_table()] as a
-#' predictive diagnostic. Small knockout costs can reflect redundancy, limited
-#' power or metric insensitivity; agreement does not establish causality.
-#'
-#' @param x A `cast_necessity` object (from [cast_necessity()]).
-#' @param var_labels Optional named character vector of display labels.
+#' Plot Knockout Necessity (removed in 0.12.0)
+#' @param x Ignored.
 #' @param ... Ignored.
-#'
-#' @return A `ggplot` object.
+#' @return Never returns; always aborts.
 #' @export
-plot.cast_necessity <- function(x, var_labels = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
-  d <- as.data.frame(x$necessity)
-  d <- d[order(d$mean_dAUC), , drop = FALSE]
-  d$display <- if (!is.null(var_labels)) {
-    ifelse(d$variable %in% names(var_labels), var_labels[d$variable],
-           d$variable)
-  } else d$variable
-  d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
-  ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_dAUC, y = .data$display)) +
-    ggplot2::geom_vline(xintercept = 0, color = "grey50", linewidth = 0.4) +
-    ggplot2::geom_segment(ggplot2::aes(x = .data$min_dAUC,
-                                      xend = .data$max_dAUC,
-                                      y = .data$display, yend = .data$display),
-                          color = "grey40", linewidth = 0.8) +
-    ggplot2::geom_point(ggplot2::aes(x = .data$min_dAUC, y = .data$display),
-                        color = "grey40", size = 1.6) +
-    ggplot2::geom_point(ggplot2::aes(x = .data$max_dAUC, y = .data$display),
-                        color = "grey40", size = 1.6) +
-    ggplot2::geom_point(size = 2.8, color = "#B2182B") +
-    ggplot2::labs(
-      title = "Knockout necessity by driver",
-      subtitle = "Mean held-out AUC lost by dropping the driver (whiskers = fold range)",
-      x = "Mean dAUC (full minus knocked-out)", y = ""
-    ) +
-    theme_cast(base_size = 11)
+plot.cast_necessity <- function(x, ...) {
+  cli::cli_abort("`plot.cast_necessity()` was removed in 0.12.0.")
 }
 
 

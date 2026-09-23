@@ -2,22 +2,18 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_dose_response}
 \alias{plot.cast_dose_response}
-\title{Plot a Dose-Response Curve}
+\title{Plot a Dose-Response Curve (removed in 0.12.0)}
 \usage{
-\method{plot}{cast_dose_response}(x, var_label = NULL, ...)
+\method{plot}{cast_dose_response}(x, ...)
 }
 \arguments{
-\item{x}{A \code{cast_dose_response} object (from \code{\link[=cast_dose_response]{cast_dose_response()}}).}
-
-\item{var_label}{Optional display label for the intervened predictor.}
+\item{x}{Ignored.}
 
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object.
+Never returns; always aborts.
 }
 \description{
-Mean change in predicted suitability against the size of the shift. Hollow
-points indicate quantile-box coverage below 0.5, not causal estimability.
-High coverage does not establish joint positivity.
+Plot a Dose-Response Curve (removed in 0.12.0)
 }

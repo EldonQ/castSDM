@@ -2,23 +2,18 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_necessity}
 \alias{plot.cast_necessity}
-\title{Plot Knockout Necessity (Held-Out AUC Cost)}
+\title{Plot Knockout Necessity (removed in 0.12.0)}
 \usage{
-\method{plot}{cast_necessity}(x, var_labels = NULL, ...)
+\method{plot}{cast_necessity}(x, ...)
 }
 \arguments{
-\item{x}{A \code{cast_necessity} object (from \code{\link[=cast_necessity]{cast_necessity()}}).}
-
-\item{var_labels}{Optional named character vector of display labels.}
+\item{x}{Ignored.}
 
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object.
+Never returns; always aborts.
 }
 \description{
-Bars show the mean held-out AUC lost by dropping each driver; whiskers
-span the observed fold range. Read beside \code{\link[=cast_effect_table]{cast_effect_table()}} as a
-predictive diagnostic. Small knockout costs can reflect redundancy, limited
-power or metric insensitivity; agreement does not establish causality.
+Plot Knockout Necessity (removed in 0.12.0)
 }

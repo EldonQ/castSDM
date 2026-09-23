@@ -14,10 +14,10 @@ new_cast_fit(models, cast_vars, env_vars, scaling, screen = NULL)
 \item{env_vars}{Character vector of all environmental variable names.}
 
 \item{scaling}{List of training-set predictor statistics reused across the
-prediction stack: \code{means} and \code{sds} (for sensitivity SD-based shifts in
-\code{\link[=cast_sensitivity]{cast_sensitivity()}}), \code{impute} (per-predictor training median used by
-the internal \code{.cast_impute()} helper), and \code{reference} (the imputed
-training predictor frame for MESS/clamp extrapolation control). Models are
+prediction stack: \code{means} and \code{sds}, \code{impute} (per-predictor training
+median used by the internal \code{.cast_impute()} helper), and \code{reference}
+(the imputed training predictor frame for MESS/clamp extrapolation
+control and effect range-masking). Models are
 trained on the raw predictors; \code{means}/\code{sds} are not applied to fitting
 inputs.}
 

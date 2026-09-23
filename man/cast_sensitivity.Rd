@@ -2,70 +2,16 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_sensitivity}
 \alias{cast_sensitivity}
-\title{Counterfactual What-If Map on the Current Climate}
+\title{Sensitivity product (removed in 0.12.0)}
 \usage{
-cast_sensitivity(
-  fit,
-  newdata,
-  variable,
-  shift = 1,
-  shift_type = c("sd", "raw", "percent"),
-  model = NULL,
-  coords = c("lon", "lat"),
-  backend = c("native", "marginaleffects")
-)
+cast_sensitivity(...)
 }
 \arguments{
-\item{fit}{A \code{cast_fit} object.}
-
-\item{newdata}{A \code{data.frame} with the fitted predictors and coordinate
-columns (\code{coords}). Typically the prediction grid on the current climate.}
-
-\item{variable}{Single predictor name to intervene on (must be a fitted
-variable in \code{fit}).}
-
-\item{shift}{Size of the intervention. Default \code{1}.}
-
-\item{shift_type}{How \code{shift} is interpreted: \code{"sd"} (default, in predictor
-standard deviations), \code{"raw"} (predictor units), or \code{"percent"} (percent of
-each cell's value).}
-
-\item{model}{Model name(s) whose predictions are averaged. Default \code{NULL}
-uses every successfully fitted model (an ensemble mean).}
-
-\item{coords}{Coordinate column names. Default \code{c("lon", "lat")}.}
-
-\item{backend}{Contrast implementation: \code{"native"} (default) or
-\code{"marginaleffects"}. The latter requires the optional marginaleffects
-package and exactly one explicitly selected GAM (\code{model = "gam"}). It
-compares observed (training-imputed) values with values plus the signed
-shift on the response scale, without standard errors or a native fallback.}
+\item{...}{Ignored.}
 }
 \value{
-A \code{cast_sensitivity} object. The \code{predictions} data.frame
-carries \code{baseline}, \code{counterfactual}, \code{delta_hss} (ensemble-mean change)
-and \code{delta_sd} (cross-model standard deviation of the change; \code{NA} for
-a single model, not a standard error). Both backends describe fitted-model
-scenario contrasts, not validated causal effects.
+Never returns; always aborts.
 }
 \description{
-Performs a g-computation intervention: one predictor is shifted while every
-other predictor is held at its observed value, and the change in predicted
-habitat suitability is mapped cell by cell. This isolates the modelled
-contrast for one driver on the supplied landscape without requiring a
-future-climate dataset; the shift itself may still require extrapolation.
-}
-\section{Interpretation}{
-
-The result is a \emph{model-based} what-if conditional on the fitted models and
-the observed predictor distribution, reported on the relative habitat
-suitability scale (not calibrated occurrence probability). It is not a
-validated causal effect: causal interpretation requires a justified
-adjustment set, no unobserved confounding, consistency and joint support; and
-large shifts can push cells outside the training envelope - pair it with the
-MESS/extrapolation flags from \code{\link[=cast_predict]{cast_predict()}}.
-}
-
-\seealso{
-\code{\link[=cast_importance]{cast_importance()}}, \code{\link[=cast_predict]{cast_predict()}}
+Removed: use \code{\link[=cast_effect_table]{cast_effect_table()}} / \code{\link[=cast_effect_map]{cast_effect_map()}}.
 }

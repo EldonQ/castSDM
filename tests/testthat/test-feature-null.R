@@ -34,7 +34,7 @@ fake_shift_effect <- function(model, X, sds, shift_size) {
   out
 }
 
-test_that("each predictor is compared with its own null scale", {
+test_that("each predictor is compared with its own conditional null scale", {
   skip_if_not_installed("ranger")
   set.seed(812)
   d <- data.frame(presence = rep(0:1, 100), a = rnorm(200),
@@ -42,7 +42,7 @@ test_that("each predictor is compared with its own null scale", {
   local_mocked_bindings(
     .cast_importance_fit = function(X, y, num_trees, seed) {
       list(model = fake_forest("a", 3),
-           importance = c(a = 1, b = 0.02, c = 0))
+           importance = stats::setNames(rep(NA_real_, ncol(X)), names(X)))
     },
     .cast_shift_effect = fake_shift_effect,
     .package = "castSDM")
@@ -54,10 +54,13 @@ test_that("each predictor is compared with its own null scale", {
   expect_identical(s$selected, "a")
   expect_true(all(is.finite(s$diagnostics$null_threshold)))
   expect_false(any(s$scores$fallback))
-  # The permutation-importance diagnostic is still reported alongside.
-  expect_true("perm_importance" %in% names(s$scores))
-  expect_true(any(is.finite(s$scores$perm_importance)))
-  expect_true(is.finite(s$diagnostics$importance_agreement))
+  # Single-statistic screen: no second attribution column.
+  expect_false("perm_importance" %in% names(s$scores))
+  expect_false("p_adjusted" %in% names(s$scores))
+  expect_false("importance_agreement" %in% names(s$diagnostics))
+  expect_identical(s$diagnostics$null_method,
+                   "feature-wise within-stratum permutation of the shift effect")
+  expect_true(is.finite(s$diagnostics$null_strata))
 })
 
 test_that("a null fallback is marked as fallback, not passed evidence", {
@@ -70,7 +73,7 @@ test_that("a null fallback is marked as fallback, not passed evidence", {
   local_mocked_bindings(
     .cast_importance_fit = function(X, y, num_trees, seed) {
       list(model = fake_forest("a", 3),
-           importance = stats::setNames(rep(0, ncol(X)), names(X)))
+           importance = stats::setNames(rep(NA_real_, ncol(X)), names(X)))
     },
     .cast_shift_effect = fake_shift_effect,
     .package = "castSDM")
@@ -86,7 +89,7 @@ test_that("a null fallback is marked as fallback, not passed evidence", {
   expect_true(all(s$scores$selected_reason[s$scores$selected] == "fallback-top-ncov"))
 })
 
-test_that("the interventional effect is larger for the true driver on real data", {
+test_that("the conditional effect is larger for the true driver on real data", {
   skip_if_not_installed("ranger")
   set.seed(814)
   n <- 600
@@ -98,16 +101,14 @@ test_that("the interventional effect is larger for the true driver on real data"
   expect_gt(eff[["x1"]], eff[["noise"]])
   expect_gt(eff[["x2"]], eff[["noise"]])
   expect_setequal(s$selected, c("x1", "x2"))
-  expect_true(is.finite(s$diagnostics$importance_agreement))
 })
 
 test_that("a collider is not selected on the strength of the association it creates", {
   skip_if_not_installed("ranger")
   # `coll` is a common effect of the driver `x1` and the response, so x1 has no
   # effect on the response and shifting it alone has a true effect of zero.
-  # Conditioning on the collider manufactures an association, which is what
-  # permutation importance rewards and what the shift contrast should decline.
-  # This is the small-scale form of the benchmark's collider scenario.
+  # Conditioning on the collider manufactures an association. The shift
+  # contrast should decline it relative to the true driver.
   set.seed(815)
   n <- 1500
   x1 <- rnorm(n); x2 <- rnorm(n)
@@ -125,3 +126,24 @@ test_that("a collider is not selected on the strength of the association it crea
   expect_lt(eff[["x1"]], eff[["x2"]])
 })
 
+test_that("strata helpers degrade gracefully and preserve margins", {
+  X <- data.frame(a = rnorm(50), b = rnorm(50))
+  s1 <- .cast_perm_strata_list(X[1:3, , drop = FALSE], seed = 1)
+  expect_true(all(vapply(s1, function(s) identical(s, rep(1L, 3)), logical(1))))
+  s5 <- .cast_perm_strata_list(X, seed = 2)
+  expect_true(all(vapply(s5, function(s) length(unique(s)) <= 5L, logical(1))))
+  expect_length(s5, 2L)
+  # Each stratification excludes its own predictor: with two columns the
+  # strata come from a single other column each.
+  expect_named(s5, c("a", "b"))
+  # Within-stratum permutation preserves each column's multiset ...
+  Xp <- .cast_stratum_permute_list(X, s5)
+  expect_equal(sort(Xp$a), sort(X$a))
+  expect_equal(sort(Xp$b), sort(Xp$b))
+  # ... and leaves single-row strata untouched.
+  Xp1 <- .cast_stratum_permute_list(X, list(a = seq_len(50), b = seq_len(50)))
+  expect_identical(Xp1, X)
+  # A lone survivor has nothing to condition on: full permutation.
+  expect_identical(.cast_perm_strata_list(X[, "a", drop = FALSE], seed = 1)$a,
+                   rep(1L, 50))
+})

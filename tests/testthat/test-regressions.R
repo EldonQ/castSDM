@@ -168,23 +168,22 @@ test_that("CV selector arguments cannot replace the outer training data", {
   }
 })
 
-test_that("CV preserves buffered environment alignment and unsuccessful screens", {
+test_that("CV passes buffered training rows to the selector and keeps statuses", {
   skip_if_not_installed("pROC")
   dat <- data.frame(lon = 1:120, lat = 0, presence = rep(0:1, 60),
-                    x = sin(1:120), environment_group = rep(1:4, 30))
+                    x = sin(1:120))
   folds <- rep(1:3, each = 40)
   seen <- list()
   testthat::local_mocked_bindings(
     make_spatial_folds = function(...) folds,
-    cast_select = function(data, response, method, environment, ...) {
+    cast_select = function(data, response, method, ...) {
       i <- length(seen) + 1L
       seen[[i]] <<- data
-      expect_identical(method, "tramicp")
-      expect_identical(environment, "environment_group")
+      expect_identical(method, "two_stage")
       if (i == 2L) stop("test backend failure")
       selected <- if (i == 1L) character(0) else "x"
       new_cast_select(selected, data.frame(variable = "x"), method = method,
-        diagnostics = list(status = if (i == 1L) "empty_intersection" else "selected"))
+        diagnostics = list(status = if (i == 1L) "empty_selection" else "selected"))
     },
     cast_fit = function(...) list(env_vars = "x", scaling = list(impute = c(x = 0)),
                                   models = list(gam = list(model = TRUE))),
@@ -192,8 +191,7 @@ test_that("CV preserves buffered environment alignment and unsuccessful screens"
     evaluate_model_full = function(...) c(auc = .7, tss = .4, cbi = .3)
   )
   expect_warning(cv <- cast_cv(dat, k = 3, models = "gam", buffer = 1.5,
-    select_method = "tramicp", select_args = list(environment = "environment_group"),
-    verbose = FALSE), "test backend failure")
+    select_method = "two_stage", verbose = FALSE), "test backend failure")
   for (i in 1:3) {
     idx <- .cast_buffer_train_idx(dat$lon, dat$lat, which(folds == i), 1.5)
     expect_identical(seen[[i]], dat[idx, , drop = FALSE])
@@ -201,39 +199,39 @@ test_that("CV preserves buffered environment alignment and unsuccessful screens"
   }
   expect_length(cv$screens, 3L)
   expect_length(cv$selections, 3L)
-  expect_identical(cv$screens[[1]]$diagnostics$status, "empty_intersection")
+  expect_identical(cv$screens[[1]]$diagnostics$status, "empty_selection")
   expect_null(cv$screens[[2]])
   expect_identical(cv$screens[[3]]$selected, "x")
-  expect_identical(cv$fold_status, c("empty_intersection", "selection_error", "evaluated"))
+  expect_identical(cv$fold_status, c("empty_selection", "selection_error", "evaluated"))
   expect_equal(cv$selection_freq$freq, 1 / 3)
   expect_true(all(is.na(cv$oof$HSS_gam[folds != 3L])))
   expect_identical(cv$fold_metrics$fold, 3L)
 })
 
-test_that("CV all-empty errors retain the scientific selection diagnostics", {
+test_that("CV all-empty errors retain the selection diagnostics", {
   skip_if_not_installed("pROC")
   dat <- data.frame(lon = 1:40, lat = 0, presence = rep(0:1, 20), x = 1:40)
   testthat::local_mocked_bindings(
     make_spatial_folds = function(...) rep(1:2, each = 20),
     cast_select = function(...) new_cast_select(character(0), data.frame(variable = "x"),
-      method = "tramicp", diagnostics = list(status = "no_accepted_sets"))
+      method = "two_stage", diagnostics = list(status = "empty_selection"))
   )
   err <- tryCatch(cast_cv(dat, k = 2L, verbose = FALSE), error = identity)
   expect_s3_class(err, "cast_cv_no_evaluable_folds")
-  expect_identical(err$fold_status, rep("no_accepted_sets", 2))
+  expect_identical(err$fold_status, rep("empty_selection", 2))
   expect_length(err$screens, 2)
 })
 
-test_that("the high-level pipeline forwards invariant-selection settings", {
+test_that("the high-level pipeline forwards selection settings", {
   dat <- data.frame(lon = 1:100, lat = 0, presence = rep(0:1, 50),
-                    x = sin(1:100), environment_group = rep(1:4, 25))
+                    x = sin(1:100))
   seen_select <- NULL
   seen_cv <- NULL
   testthat::local_mocked_bindings(
-    cast_select = function(data, ..., environment, icp_alpha, icp_max_predictors) {
-      seen_select <<- list(data = data, environment = environment,
-                           alpha = icp_alpha, budget = icp_max_predictors)
-      new_cast_select("x", data.frame(variable = "x"), method = "tramicp")
+    cast_select = function(data, ..., num_trees, n_perm, ncov, keep) {
+      seen_select <<- list(data = data, num_trees = num_trees,
+                           n_perm = n_perm, ncov = ncov, keep = keep)
+      new_cast_select("x", data.frame(variable = "x"), method = "two_stage")
     },
     cast_fit = function(...) list(),
     cast_cv = function(data, ..., select_args) {
@@ -242,43 +240,29 @@ test_that("the high-level pipeline forwards invariant-selection settings", {
     },
     cast_evaluate = function(...) list()
   )
-  cast(dat, select_method = "tramicp", select_environment = "environment_group",
-       select_icp_alpha = .1, select_icp_max_predictors = 5L,
-       do_predict = FALSE, verbose = FALSE, seed = 8)
+  cast(dat, select_num_trees = 111L, select_n_perm = 7L, select_ncov = 3L,
+       select_keep = "x", do_predict = FALSE, verbose = FALSE, seed = 8)
   expect_lt(nrow(seen_select$data), nrow(dat))
-  expect_identical(seen_select$environment, "environment_group")
-  expect_identical(seen_select$alpha, .1)
-  expect_identical(seen_select$budget, 5L)
-  expect_identical(seen_cv$args$environment, "environment_group")
-  expect_identical(seen_cv$args$icp_alpha, .1)
-  expect_identical(seen_cv$args$icp_max_predictors, 5L)
-  expect_identical(seen_select$data$environment_group,
-                   dat$environment_group[match(seen_select$data$lon, dat$lon)])
+  expect_identical(seen_select$num_trees, 111L)
+  expect_identical(seen_select$n_perm, 7L)
+  expect_identical(seen_select$ncov, 3L)
+  expect_identical(seen_select$keep, "x")
+  expect_identical(seen_cv$args$num_trees, 111L)
+  expect_identical(seen_cv$args$n_perm, 7L)
+  expect_identical(seen_cv$args$ncov, 3L)
+  expect_identical(seen_cv$args$keep, "x")
 })
 
-test_that("the pipeline preserves all-failed invariant CV diagnostics", {
+test_that("the pipeline falls back to hold-out evaluation when spatial CV fails", {
   dat <- data.frame(lon = 1:100, lat = 0, presence = rep(0:1, 50),
-                    x = sin(1:100), environment_group = rep(1:4, 25))
-  screen <- new_cast_select(character(), data.frame(variable = "x"),
-    method = "tramicp", diagnostics = list(status = "empty_intersection"))
-  failure <- tryCatch(cli::cli_abort("All spatial CV folds failed.",
-    class = "cast_cv_no_evaluable_folds", screens = list(screen, screen),
-    fold_status = rep("empty_intersection", 2)), error = identity)
+                    x = sin(1:100))
   evaluated <- FALSE
   local_mocked_bindings(
     cast_select = function(...) new_cast_select("x", data.frame(variable = "x")),
     cast_fit = function(...) list(),
-    cast_cv = function(...) stop(failure),
+    cast_cv = function(...) stop("deliberate CV failure"),
     cast_evaluate = function(...) { evaluated <<- TRUE; list() }
   )
-  result <- tryCatch(cast(dat, select_method = "tramicp",
-    select_environment = "environment_group", do_predict = FALSE,
-    verbose = FALSE, seed = 8), error = identity)
-  expect_identical(result, failure)
-  expect_identical(result$fold_status, rep("empty_intersection", 2))
-  expect_identical(result$screens, list(screen, screen))
-  expect_false(evaluated)
-
   expect_warning(result <- cast(dat, do_predict = FALSE, verbose = FALSE, seed = 8),
                  "Falling back to hold-out")
   expect_null(result$cv)

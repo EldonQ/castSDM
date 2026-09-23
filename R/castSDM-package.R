@@ -7,26 +7,17 @@
 #' where is that answer supported by data?
 #'
 #' Variable selection ([cast_select()]) answers *which predictors to carry*.
-#' Stage 1 thins collinear predictors. Stage 2 ranks the survivors by the
-#' **interventional effect**: the change each one causes in the fitted
+#' Stage 1 thins collinear predictors. Stage 2 ranks the survivors by a
+#' **conditional effect**: the change each one causes in the fitted
 #' probability when it is shifted while every other predictor stays at its
-#' observed value, calibrated against a permuted-response null. The same
-#' forest's permutation importance is reported alongside as a diagnostic,
-#' because permutation breaks predictor associations and the resulting score
-#' can be influenced by model extrapolation (Hooker, Mentch & Zhou 2021).
-#' Additive shifts can also leave joint support; neither statistic establishes
-#' causality, and selection does not identify a valid adjustment set.
-#' Alternatively, `method = "tramicp"` tests cross-environment invariance using
-#' supplied scientific group labels, without stage-1 screening. Its intersection
-#' can be empty and is not a verified ecological cause or adjustment set.
+#' observed value, calibrated against a conditional-permutation null that
+#' respects the observed joint distribution (Hooker, Mentch & Zhou 2021).
+#' Selection does not identify a valid adjustment set.
 #'
-#' The effect products ([cast_effect_table()], [cast_effect_map()],
-#' [cast_dose_response()], [cast_sensitivity()],
-#' [cast_effect_support()]) report the interventional response, its shape over
-#' the size of the shift, and the fraction of evaluated rows inside the training
-#' quantile box before and after shifting. The knockout audit
-#' ([cast_necessity()]) asks the complementary question: does the model still
-#' discriminate without this predictor?
+#' The effect products ([cast_effect_table()], [cast_effect_map()])
+#' report the interventional response to a single raw-unit shift, with
+#' hard range-masking: rows or cells outside the training quantile box are
+#' masked, not ranked.
 #'
 #' None of these is a claim of automatic causal discovery. Causal interpretation
 #' requires consistency, a justified adjustment set, no uncontrolled confounding,
@@ -38,9 +29,9 @@
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: collinearity thinning, then an interventional
-#'    effect filter against a permuted-response null ([cast_select()]),
-#'    reported via [cast_importance()] with both attribution columns
+#' 2. **Variable Selection**: collinearity thinning, then a conditional
+#'    effect filter against a conditional-permutation null ([cast_select()]),
+#'    reported via [cast_importance()] with a single conditional-effect column
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial
 #'    cross-validation with fold-specific selection ([cast_cv()])
@@ -50,11 +41,9 @@
 #'    ensemble prediction ([cast_ensemble()])
 #' 7. **Future Projection**: range-change analysis under climate scenarios
 #'    ([cast_project()])
-#' 8. **Interventional attribution**: effect sizes and maps
-#'    ([cast_effect_table()], [cast_effect_map()]), response shape
-#'    ([cast_dose_response()]), range-extrapolation diagnostics
-#'    ([cast_effect_support()]), paired with knockout necessity
-#'    ([cast_necessity()])
+#' 8. **Interventional attribution**: single-shift effect sizes and maps
+#'    with hard range-masking
+#'    ([cast_effect_table()], [cast_effect_map()])
 #'
 #' @section Quick Start:
 #' ```

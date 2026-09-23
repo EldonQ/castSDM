@@ -12,9 +12,7 @@
 #' @param select_method Selection method passed to [cast_select()]. Default
 #'   `"two_stage"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
-#'   Cannot override `data`, `response`, or `method`. For `"tramicp"`, pass
-#'   `environment` as a column name; its values follow the buffered training
-#'   rows and are never inferred from CV folds.
+#'   Cannot override `data`, `response`, or `method`.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
 #' @param block_method `"grid"` (default; grid cells grouped into spatially

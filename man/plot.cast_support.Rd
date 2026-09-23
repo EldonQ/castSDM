@@ -2,20 +2,18 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_support}
 \alias{plot.cast_support}
-\title{Plot Shift Quantile-Box Coverage by Driver}
+\title{Plot Shift Coverage (removed in 0.12.0)}
 \usage{
-\method{plot}{cast_support}(x, var_labels = NULL, ...)
+\method{plot}{cast_support}(x, ...)
 }
 \arguments{
-\item{x}{A \code{cast_support} object (from \code{\link[=cast_effect_support]{cast_effect_support()}}).}
-
-\item{var_labels}{Optional named character vector of display labels.}
+\item{x}{Ignored.}
 
 \item{...}{Ignored.}
 }
 \value{
-A \code{ggplot} object.
+Never returns; always aborts.
 }
 \description{
-Plot Shift Quantile-Box Coverage by Driver
+Plot Shift Coverage (removed in 0.12.0)
 }

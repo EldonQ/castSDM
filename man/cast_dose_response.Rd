@@ -2,69 +2,17 @@
 % Please edit documentation in R/effect-grid.R
 \name{cast_dose_response}
 \alias{cast_dose_response}
-\title{Dose-Response of Predicted Probability to a Predictor Shift}
+\title{Dose-Response (removed in 0.12.0)}
 \usage{
-cast_dose_response(
-  fit,
-  variable,
-  shift = seq(-3, 3, by = 0.25),
-  shift_type = c("sd", "raw"),
-  newdata = NULL,
-  support_probs = c(0.01, 0.99),
-  max_rows = 5000L
-)
+cast_dose_response(...)
 }
 \arguments{
-\item{fit}{A \code{cast_fit} object.}
-
-\item{variable}{Single predictor to intervene on.}
-
-\item{shift}{Numeric vector of shift sizes, in training standard deviations
-unless \code{shift_type = "raw"}. A zero shift is not an intervention and is
-dropped from the scan. Default scans -3 to 3 SD.}
-
-\item{shift_type}{\code{"sd"} (default) or \code{"raw"}.}
-
-\item{newdata}{Optional data frame defining the reference population.
-Defaults to training predictors stored in \code{fit}. Incomplete or non-finite
-rows are excluded from both effects and coverage.}
-
-\item{support_probs}{Length-2 numeric. Increasing training quantiles in
-\verb{[0, 1]} defining a box across all predictors. Default \code{c(0.01, 0.99)}.}
-
-\item{max_rows}{Positive integer limiting rows sampled evenly from the
-complete reference population, or \code{Inf} for all rows. Default 5000.}
+\item{...}{Ignored.}
 }
 \value{
-A \code{cast_dose_response} object with \code{curve} (data frame: \code{shift},
-\code{shift_raw}, \code{mean_delta}, \code{mean_abs_delta}, \code{support}, \code{range_supported}),
-\code{shift_type}, \code{variable}, \code{unit}, \code{models}, and \code{assumptions}.
+Never returns; always aborts.
 }
 \description{
-Sweeps the size of an additive intervention on one predictor, holding every
-other predictor at its observed value, and reports the mean change in
-predicted probability at each shift size. This is the response curve a
-single summary number cannot show: a bounded or saturating response is
-invisible once the curve is collapsed to one signed value.
-}
-\section{What the numbers mean}{
-
-\code{mean_delta} is the pointwise g-computation contrast
-\eqn{E[Y \mid A = a + \delta, C = c] - E[Y \mid A = a, C = c]} averaged over
-the rows supplied in \code{newdata}; \code{mean_abs_delta} is its absolute value,
-which does not cancel when a driver raises suitability in some places and
-lowers it in others. Both are contrasts of the \emph{fitted} model on the
-scale it predicts. On presence/background data that scale is relative
-suitability, not occurrence probability.
-
-\code{support} is the fraction of evaluated rows whose baseline and shifted
-vectors both lie inside every predictor's training quantile bounds. This
-box can contain unobserved combinations, so high coverage does not establish
-conditional positivity. \code{range_supported} marks coverage of at least 0.5:
-a descriptive range screen, not causal estimability. Contrasts are computed
-over all complete evaluated rows, including those outside the box.
-}
-
-\seealso{
-\code{\link[=cast_effect_support]{cast_effect_support()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}
+Removed: use \code{\link[=cast_effect_table]{cast_effect_table()}} / \code{\link[=cast_effect_map]{cast_effect_map()}} with a single
+raw-unit shift and hard range-masking.
 }

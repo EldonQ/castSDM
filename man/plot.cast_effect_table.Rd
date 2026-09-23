@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_effect_table}
 \alias{plot.cast_effect_table}
-\title{Plot an Effect Table: Magnitude, Direction and Support}
+\title{Plot an Effect Table: Magnitude, Direction and Masking}
 \usage{
 \method{plot}{cast_effect_table}(x, var_labels = NULL, ...)
 }
@@ -17,8 +17,8 @@
 A \code{ggplot} object.
 }
 \description{
-Lollipop chart of per-driver interventional effects: position shows the
+Lollipop chart of per-driver shift effects: position shows the
 magnitude (\code{mean_abs_dHSS}), colour shows the direction
-(\code{mean_signed_dHSS}), hollow points mark minimum quantile-box coverage below
-0.5, and crosses mark unknown coverage. Coverage is not joint positivity.
+(\code{mean_signed_dHSS}), crosses mark masked drivers (\code{NA} estimates:
+box coverage below \code{min_support}). Coverage is not joint positivity.
 }

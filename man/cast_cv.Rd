@@ -34,9 +34,7 @@ as optimistic.}
 \code{"two_stage"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.
-Cannot override \code{data}, \code{response}, or \code{method}. For \code{"tramicp"}, pass
-\code{environment} as a column name; its values follow the buffered training
-rows and are never inferred from CV folds.}
+Cannot override \code{data}, \code{response}, or \code{method}.}
 
 \item{k}{Number of outer spatial folds.}
 

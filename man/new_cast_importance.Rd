@@ -12,13 +12,12 @@ new_cast_importance(
 )
 }
 \arguments{
-\item{effects}{A \code{data.frame} of per-predictor interventional effect and
-permutation importance with permutation-null \code{p_value} and BH-adjusted
-\code{p_adjusted}.}
+\item{effects}{A \code{data.frame} of per-predictor conditional effects with
+conditional-permutation-null \code{p_value}.}
 
 \item{alpha}{Significance level used to flag predictors.}
 
-\item{threshold}{Numeric. The stage-2 permutation-null threshold, or \code{NA}
+\item{threshold}{Numeric. The stage-2 conditional null threshold, or \code{NA}
 when unknown (one entry per predictor for a two-stage screen).}
 
 \item{diagnostics}{Named list carried over from the screen.}

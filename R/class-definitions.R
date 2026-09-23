@@ -6,8 +6,8 @@
 #' @param scores A `data.frame` with per-variable scores. For
 #'   `method = "two_stage"`: marginal `assoc`, the stage-1
 #'   `collinear_thinned` flag, `interventional_effect` (the stage-2 selection
-#'   statistic), the `perm_importance` diagnostic, the permutation `p_value`,
-#'   the BH-adjusted `p_adjusted`, and the `selected` flag. For
+#'   statistic), the conditional-permutation `p_value`,
+#'   and the `selected` flag. For
 #'   `method = "full"` the score columns are `NA`.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
@@ -29,11 +29,10 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of per-predictor interventional effect and
-#'   permutation importance with permutation-null `p_value` and BH-adjusted
-#'   `p_adjusted`.
+#' @param effects A `data.frame` of per-predictor conditional effects with
+#'   conditional-permutation-null `p_value`.
 #' @param alpha Significance level used to flag predictors.
-#' @param threshold Numeric. The stage-2 permutation-null threshold, or `NA`
+#' @param threshold Numeric. The stage-2 conditional null threshold, or `NA`
 #'   when unknown (one entry per predictor for a two-stage screen).
 #' @param diagnostics Named list carried over from the screen.
 #'
@@ -53,113 +52,13 @@ new_cast_importance <- function(effects, alpha = 0.05,
   )
 }
 
-#' Create a cast_sensitivity Object
-#'
-#' @param predictions A `data.frame` with `lon`, `lat`, `baseline`,
-#'   `counterfactual`, and `delta_hss`.
-#' @param variable Character. The intervened predictor.
-#' @param shift Numeric. Intervention size.
-#' @param shift_type Character. How `shift` is interpreted.
-#' @param models Character vector of models averaged for prediction.
-#' @param summary Named list of change summaries.
-#'
-#' @return A `cast_sensitivity` object.
-#' @keywords internal
-#' @export
-new_cast_sensitivity <- function(predictions, variable, shift, shift_type,
-                                    models, summary = list()) {
-  structure(
-    list(
-      predictions = predictions,
-      variable = variable,
-      shift = shift,
-      shift_type = shift_type,
-      models = models,
-      summary = summary
-    ),
-    class = "cast_sensitivity"
-  )
-}
+# new_cast_sensitivity() removed in 0.12.0.
 
-#' Create a cast_dose_response Object
-#'
-#' @param curve A `data.frame` with `shift`, `shift_raw`, `mean_delta`,
-#'   `mean_abs_delta`, `support`, and `range_supported`.
-#' @param variable Character. The intervened predictor.
-#' @param shift_type Character. How `shift` is interpreted.
-#' @param unit Character. Human-readable shift unit.
-#' @param models Character vector of models averaged.
-#' @param assumptions Character. The identification assumptions carried by the
-#'   estimate.
-#'
-#' @return A `cast_dose_response` object.
-#' @keywords internal
-#' @export
-new_cast_dose_response <- function(curve, variable, shift_type, unit, models,
-                                   assumptions = NULL) {
-  structure(
-    list(curve = curve, variable = variable, shift_type = shift_type,
-         unit = unit, models = models, assumptions = assumptions),
-    class = "cast_dose_response"
-  )
-}
+# new_cast_dose_response() removed in 0.12.0.
 
-#' Create a cast_support Object
-#'
-#' @param support A `data.frame` with `driver`, `shift`, `shift_raw`, and
-#'   `support` (the fraction of evaluated rows inside the training quantile
-#'   box both before and after the shift).
-#' @param variables Character vector of assessed predictors.
-#' @param shift Numeric vector of assessed shift sizes.
-#' @param shift_type Character. How `shift` is interpreted.
-#' @param support_probs Numeric length 2. Quantiles defining the support box.
-#' @param models Character vector of models in the fit.
-#' @param assumptions Character. The identification assumptions carried.
-#'
-#' @return A `cast_support` object.
-#' @keywords internal
-#' @export
-new_cast_support <- function(support, variables, shift, shift_type,
-                             support_probs, models, assumptions = NULL) {
-  structure(
-    list(support = support, variables = variables, shift = shift,
-         shift_type = shift_type, support_probs = support_probs,
-         models = models, assumptions = assumptions),
-    class = "cast_support"
-  )
-}
+# new_cast_support() removed in 0.12.0.
 
-#' Create a cast_necessity Object
-#'
-#' @param necessity A `data.frame` with one row per driver: `mean_dAUC`,
-#'   `sd_dAUC`, `min_dAUC`, `max_dAUC`, `pct_folds_positive`, `n_folds`,
-#'   `necessary`.
-#' @param fold_dauc Numeric matrix of per-driver (rows) by per-fold
-#'   (columns) held-out AUC loss.
-#' @param auc_full Numeric vector of full-model held-out AUC per fold.
-#' @param folds Integer vector. Spatial fold assignment for each data row.
-#' @param k Integer. Number of folds actually used.
-#' @param block_method Character. Spatial blocking strategy used.
-#' @param diagnostics Named list of diagnostics.
-#'
-#' @return A `cast_necessity` object.
-#' @keywords internal
-#' @export
-new_cast_necessity <- function(necessity, fold_dauc, auc_full, folds, k,
-                               block_method, diagnostics = list()) {
-  structure(
-    list(
-      necessity = necessity,
-      fold_dauc = fold_dauc,
-      auc_full = auc_full,
-      folds = folds,
-      k = k,
-      block_method = block_method,
-      diagnostics = diagnostics
-    ),
-    class = "cast_necessity"
-  )
-}
+# new_cast_necessity() removed in 0.12.0.
 
 #' Create a cast_fit Object
 #'
@@ -167,10 +66,10 @@ new_cast_necessity <- function(necessity, fold_dauc, auc_full, folds, k,
 #' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List of training-set predictor statistics reused across the
-#'   prediction stack: `means` and `sds` (for sensitivity SD-based shifts in
-#'   [cast_sensitivity()]), `impute` (per-predictor training median used by
-#'   the internal `.cast_impute()` helper), and `reference` (the imputed
-#'   training predictor frame for MESS/clamp extrapolation control). Models are
+#'   prediction stack: `means` and `sds`, `impute` (per-predictor training
+#'   median used by the internal `.cast_impute()` helper), and `reference`
+#'   (the imputed training predictor frame for MESS/clamp extrapolation
+#'   control and effect range-masking). Models are
 #'   trained on the raw predictors; `means`/`sds` are not applied to fitting
 #'   inputs.
 #' @param screen A `cast_select` object (or `NULL`).

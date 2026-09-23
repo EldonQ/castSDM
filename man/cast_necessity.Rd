@@ -2,84 +2,17 @@
 % Please edit documentation in R/necessity.R
 \name{cast_necessity}
 \alias{cast_necessity}
-\title{Necessity of Each Driver by Spatial Knockout}
+\title{Necessity diagnostic (removed in 0.12.0)}
 \usage{
-cast_necessity(
-  data,
-  screen = NULL,
-  variables = NULL,
-  response = "presence",
-  k = 5L,
-  block_method = c("grid", "grid_random", "cluster"),
-  folds = NULL,
-  num_trees = 300L,
-  num_threads = 1L,
-  seed = NULL,
-  verbose = TRUE
-)
+cast_necessity(...)
 }
 \arguments{
-\item{data}{Data frame with \code{lon}, \code{lat}, the binary response and the
-predictors.}
-
-\item{screen}{Which predictors to test: a \code{cast_select} object (its
-\code{selected} set), a \code{cast_fit} / \code{cast_result} (its fitted predictors),
-a character vector, or \code{NULL} to use every predictor in \code{data}.}
-
-\item{variables}{Optional character vector overriding \code{screen}.}
-
-\item{response}{Binary response column. Default \code{"presence"}.}
-
-\item{k}{Number of spatial folds. Default 5.}
-
-\item{block_method}{Spatial blocking passed to the fold builder:
-\code{"grid"} (default), \code{"grid_random"}, or \code{"cluster"}. Ignored when
-\code{folds} is supplied.}
-
-\item{folds}{Optional integer vector of length \code{nrow(data)} assigning each
-row to a fold. When supplied, it overrides internal fold construction and
-\code{block_method}, so a caller with pre-computed or frozen spatial folds
-(e.g. a pre-registered protocol) can knock out on exactly those folds.}
-
-\item{num_trees}{Trees per random forest. Default 300.}
-
-\item{num_threads}{Threads passed to \code{ranger} for each fit. Default 1,
-which keeps results bit-for-bit reproducible. Raise it to parallelise
-the many refits (one full model plus one per driver, per fold); with a
-fixed \code{seed}, \code{ranger} stays deterministic across thread counts.}
-
-\item{seed}{Random seed.}
-
-\item{verbose}{Print progress. Default \code{TRUE}.}
+\item{...}{Ignored.}
 }
 \value{
-A \code{cast_necessity} object. \code{necessity} is a data.frame with one
-row per driver: \code{mean_dAUC} (mean held-out AUC lost by dropping it),
-\code{sd_dAUC}, \code{min_dAUC}, \code{max_dAUC}, \code{pct_folds_positive}, \code{n_folds},
-and \code{necessary} (\code{mean_dAUC > 0}). \code{pct_folds_positive} is there so a
-stricter rule can be applied without refitting.
-\code{necessary} is a legacy descriptive positive-mean flag, not a test of
-statistical significance or causal identification.
+Never returns; always aborts.
 }
 \description{
-Refits the model without each driver in turn and measures how much
-held-out discrimination is lost. Folds are spatial, and both the full and
-the knocked-out model are refitted inside every training fold, so the
-loss is an out-of-sample cost, not an in-sample importance score.
-}
-\section{Read with the sensitivity diagnostic}{
-
-Necessity and sensitivity answer different questions and can disagree.
-This diagnostic always refits a random forest, even when the supplied
-screen came from a multi-engine fit. It measures RF predictive necessity,
-not necessity for that ensemble. A small cost can reflect redundancy,
-limited power, estimator choice or the discrimination metric. A positive
-cost does not identify a causal driver. Report effects and costs together,
-with their estimator and uncertainty. A fixed predictor set selected using
-these same rows makes this a conditional, post-selection diagnostic; use
-an independently specified set for confirmatory evaluation.
-}
-
-\seealso{
-\code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_effect_map]{cast_effect_map()}}
+Removed: the knockout audit is discontinued. Read the single shift effect
+from \code{\link[=cast_effect_table]{cast_effect_table()}} / \code{\link[=cast_effect_map]{cast_effect_map()}}.
 }
