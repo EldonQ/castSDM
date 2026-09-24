@@ -1,3 +1,25 @@
+# castSDM 0.13.0 (unreleased)
+
+## Stage 2 is now a spatial forward search
+
+* BREAKING: `cast_select()` stage 2 no longer calibrates a shift-effect
+  statistic against a permutation null. It now runs a forward search on the
+  inner cross-validated loss (Brier by default, `"auc"` optional) of a
+  probability random forest: spatial folds when coordinates exist, starting
+  from the prespecified set (or the best pair), admitting a candidate only
+  when its paired improvement exceeds a 2-SE guard, and stopping by itself.
+  There is no predictor-count cap (`ncov`/`maxncov` removed), no p-values,
+  and no fallback set: an empty selection honestly means nothing improved
+  on the intercept-only model. `n_perm` and `shift_size` are removed;
+  `cast()` gains `select_metric` / `select_tolerance` / `select_n_folds`.
+* `scores` now carries the admission `step_added` (`0` for prespecified) and
+  `loss_gain` instead of `interventional_effect` / `p_value` /
+  `null_threshold` / `passed_null` / `fallback`; `diagnostics` carries the
+  forward `path`, `inner_method`, `null_loss`, `final_loss` and `n_fits`
+  instead of null-distribution summaries. `cast_importance()` reports the
+  admission path. Existing selection caches and downstream model/CV outputs
+  must be recomputed.
+
 # castSDM 0.12.0 (unreleased)
 
 ## One shift, one map, hard masking

@@ -4,21 +4,13 @@
 \alias{new_cast_importance}
 \title{Create a cast_importance Object}
 \usage{
-new_cast_importance(
-  effects,
-  alpha = 0.05,
-  threshold = NA_real_,
-  diagnostics = list()
-)
+new_cast_importance(effects, metric = "brier", diagnostics = list())
 }
 \arguments{
-\item{effects}{A \code{data.frame} of per-predictor conditional effects with
-conditional-permutation-null \code{p_value}.}
+\item{effects}{A \code{data.frame} of the forward-selection path: per-predictor
+admission \code{step_added} and inner-CV \code{loss_gain} at admission.}
 
-\item{alpha}{Significance level used to flag predictors.}
-
-\item{threshold}{Numeric. The stage-2 conditional null threshold, or \code{NA}
-when unknown (one entry per predictor for a two-stage screen).}
+\item{metric}{Inner-CV loss minimised by the search (\code{"brier"} or \code{"auc"}).}
 
 \item{diagnostics}{Named list carried over from the screen.}
 }

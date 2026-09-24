@@ -2,7 +2,7 @@ Package: castSDM
 Type: Package
 Title: Model Response and Interventional Effects for Species Distribution
     Models
-Version: 0.12.0
+Version: 0.13.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -14,9 +14,9 @@ Authors@R: c(
 Description: Audits model-based environmental responses in species
     distribution modelling. A single raw-unit predictor shift evaluated
     over a fitted model produces a shift effect size and a spatial effect
-    map with hard range-masking. Variable selection is a two-stage screen whose second stage ranks
-    predictors by a conditional effect that holds other predictors fixed,
-    calibrated against a conditional-permutation null.
+    map with hard range-masking. Variable selection is a two-stage screen
+    whose second stage is a spatial forward search on inner cross-validated
+    loss, with no predictor-count cap and no fallback set.
     The effect products carry a hard range diagnostic: rows or cells
     outside the training quantile box are masked, not ranked. This does
     not establish conditional positivity or causal identification. The

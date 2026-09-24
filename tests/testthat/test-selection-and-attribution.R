@@ -16,7 +16,7 @@ make_collinear_data <- function(n = 300, r = 0.98, seed = 21) {
 test_that("stage 1 drops a near-duplicate predictor", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data()
-  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 9,
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60,
                      seed = 22, verbose = FALSE)
   expect_s3_class(scr, "cast_select")
   expect_identical(scr$method, "two_stage")
@@ -25,22 +25,22 @@ test_that("stage 1 drops a near-duplicate predictor", {
   expect_false(all(c("x1", "x3") %in% scr$diagnostics$stage1_kept))
 })
 
-test_that("stage 2 thresholds against the conditional null, not zero", {
+test_that("stage 2 admits by inner-CV gain and records the path", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data()
-  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 19,
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60,
                      seed = 23, verbose = FALSE)
-  expect_true(all(is.finite(scr$diagnostics$null_threshold)))
-  expect_equal(scr$diagnostics$null_quantile, 0.95)
-  expect_equal(scr$diagnostics$n_perm, 19L)
-  expect_match(scr$diagnostics$null_method, "within-stratum")
-  # Pure noise predictors have effects above zero but not above the null.
-  noise <- scr$scores[scr$scores$variable %in% c("x4", "x5"), ]
-  expect_true(all(noise$p_value > 0.05 | !noise$selected))
+  expect_true(nrow(scr$diagnostics$path) >= 1L)
+  expect_identical(scr$diagnostics$status, "selected")
+  expect_identical(scr$diagnostics$metric, "brier")
+  # No null distribution, no p-values, no count cap in the new stage 2.
+  expect_false(any(c("p_value", "null_threshold", "interventional_effect",
+                     "passed_null", "fallback") %in% names(scr$scores)))
   # The retained set must be a subset of the stage-1 survivors.
   expect_true(all(scr$selected %in% scr$diagnostics$stage1_kept))
-  # Single-statistic screen: no second attribution column.
-  expect_false("perm_importance" %in% names(scr$scores))
+  # Single forward path: admitted steps are a 1..k sequence.
+  admitted <- scr$scores$step_added[scr$scores$selected]
+  expect_true(all(is.finite(admitted)))
 })
 
 test_that("stage 1 ranks a U-shaped driver above noise (poly2 signal)", {
@@ -53,21 +53,22 @@ test_that("stage 1 ranks a U-shaped driver above noise (poly2 signal)", {
     presence = rbinom(n, 1, plogis(-1 + 2.2 * xu^2)),
     xu = xu, noise = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
-  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 9,
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60,
                      seed = 32, verbose = FALSE)
   rnk <- stats::setNames(scr$scores$stage1_rank, scr$scores$variable)
   expect_lt(rnk[["xu"]], rnk[["noise"]])
 })
 
-test_that("ncov caps the retained set and records the reason", {
+test_that("no count cap exists: tolerance alone stops the search", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data(n = 400)
-  scr <- cast_select(dat, method = "two_stage", num_trees = 60, n_perm = 9,
-                     ncov = 1L, seed = 33, verbose = FALSE)
-  expect_lte(length(scr$selected), 1L)
-  expect_true(scr$diagnostics$ncov == 1L)
+  scr <- cast_select(dat, method = "two_stage", num_trees = 60,
+                     seed = 33, verbose = FALSE)
+  # Stopping is performance-driven; there is no ncov/maxncov argument left.
+  expect_error(cast_select(dat, ncov = 1L, verbose = FALSE), "unused argument")
+  expect_error(cast_select(dat, maxncov = 1L, verbose = FALSE), "unused argument")
   expect_true(all(scr$scores$selected_reason[scr$scores$selected] %in%
-                    c("null+top-ncov", "fallback-top-ncov")))
+                    c("forward", "prespecified")))
 })
 
 test_that("method = 'full' keeps every predictor and skips both stages", {
@@ -75,12 +76,15 @@ test_that("method = 'full' keeps every predictor and skips both stages", {
   scr <- cast_select(dat, method = "full", verbose = FALSE)
   expect_setequal(scr$selected, c("x1", "x2", "x3", "x4", "x5"))
   expect_identical(scr$method, "full")
+  expect_true(all(is.na(scr$scores$step_added)))
 })
 
 test_that("retired or invalid selection requests fail without running a replacement", {
   dat <- make_collinear_data(n = 150)
   expect_error(cast_select(dat, alpha = 0.01, min_vars = 3L), "unused argument")
   expect_error(cast_select(dat, environment = "x1"), "unused argument")
+  expect_error(cast_select(dat, n_perm = 19L), "unused argument")
+  expect_error(cast_select(dat, shift_size = 1), "unused argument")
   for (method in list("cpi", "dml", "rf", "tramicp", "typo", "two", NULL, character(),
                       NA_character_, 1, c("full", "two_stage"))) {
     expect_error(cast_select(dat, method = method), "method.*must be one of")
@@ -129,18 +133,17 @@ test_that("removed knockout and scenario products forward to the shift products"
   expect_error(cast_sensitivity(), "removed in 0.12.0")
 })
 
-test_that("prespecified predictors survive thinning, null threshold and cap", {
+test_that("prespecified predictors survive thinning and enter at step 0", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data(n = 150)
   required <- c("x1", "x3")
-  expect_warning(scr <- cast_select(dat, keep = required, ncov = 2L,
-    num_trees = 20L, n_perm = 1L, seed = 41, verbose = FALSE), "No predictor exceeded")
-  expect_identical(scr$selected, required)
+  scr <- cast_select(dat, keep = required,
+    num_trees = 20L, seed = 41, verbose = FALSE)
+  expect_true(all(required %in% scr$selected))
   rows <- scr$scores$variable %in% required
   expect_true(all(scr$scores$kept_by_design[rows]))
   expect_false(any(scr$scores$collinear_thinned[rows]))
-  expect_false(any(scr$scores$passed_null[rows]))
-  expect_false(any(scr$scores$fallback[rows]))
+  expect_true(all(scr$scores$step_added[rows] == 0L))
   expect_true(all(scr$scores$selected_reason[rows] == "prespecified"))
   expect_identical(scr$diagnostics$keep, required)
   expect_true(all(required %in% scr$diagnostics$stage1_kept))
@@ -150,14 +153,13 @@ test_that("prespecified predictors survive thinning, null threshold and cap", {
   expect_false("perm_importance" %in% names(reported))
 })
 
-test_that("prespecified retention leaves only the remaining cap for optional predictors", {
+test_that("prespecified retention coexists with forward admissions", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data(n = 150)
-  scr <- suppressWarnings(cast_select(dat, keep = "x5", ncov = 2L,
-    num_trees = 20L, n_perm = 1L, seed = 42, verbose = FALSE))
-  expect_length(scr$selected, 2L)
+  scr <- suppressWarnings(cast_select(dat, keep = "x5",
+    num_trees = 20L, seed = 42, verbose = FALSE))
   expect_true("x5" %in% scr$selected)
-  expect_equal(sum(scr$scores$fallback), 1L)
+  expect_identical(scr$scores$step_added[scr$scores$variable == "x5"], 0L)
   full <- cast_select(dat, method = "full", keep = "x5", verbose = FALSE)
   expect_equal(full$scores$variable[full$scores$kept_by_design], "x5")
   expect_setequal(full$selected, get_env_vars(dat))
@@ -168,8 +170,6 @@ test_that("invalid or unaccommodated prespecified sets fail explicitly", {
   for (required in list("unknown", "lon", "presence", c("x1", "x1"), NA_character_, 1)) {
     expect_error(cast_select(dat, keep = required, verbose = FALSE), "keep")
   }
-  expect_error(cast_select(dat, keep = c("x1", "x3"), ncov = 1L,
-    verbose = FALSE), "increase the cap")
   dat$x5 <- 0
   expect_error(cast_select(dat, keep = "x5", verbose = FALSE), "vary in the training data")
 })
@@ -180,7 +180,7 @@ test_that("nested CV retains the same prespecified variables within each trainin
   dat <- make_collinear_data(n = 200)
   required <- c("x1", "x3")
   cv <- suppressWarnings(cast_cv(dat, k = 2L, models = "rf", rf_ntree = 20L,
-    select_args = list(keep = required, ncov = 2L, num_trees = 20L, n_perm = 1L),
+    select_args = list(keep = required, num_trees = 20L, metric = "brier"),
     seed = 43, verbose = FALSE))
   expect_length(cv$screens, 2L)
   expect_true(all(vapply(cv$screens, function(s) {
@@ -194,9 +194,9 @@ test_that("the high-level pipeline forwards prespecified retention to CV", {
   dat <- make_collinear_data(n = 160)
   required <- c("x1", "x3")
   result <- suppressWarnings(cast(dat, models = "rf", do_predict = FALSE,
-    do_cv = TRUE, cv_k = 2L, select_num_trees = 20L, select_n_perm = 1L,
-    select_ncov = 2L, select_keep = required, seed = 44, verbose = FALSE))
-  expect_identical(result$screen$selected, required)
+    do_cv = TRUE, cv_k = 2L, select_num_trees = 20L, select_metric = "brier",
+    select_keep = required, seed = 44, verbose = FALSE))
+  expect_true(all(required %in% result$screen$selected))
   expect_false(is.null(result$cv))
   expect_true(all(vapply(result$cv$screens, function(s) {
     !is.null(s) && identical(s$diagnostics$keep, required) && all(required %in% s$selected)

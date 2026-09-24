@@ -11,9 +11,9 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 
 \item{scores}{A \code{data.frame} with per-variable scores. For
 \code{method = "two_stage"}: marginal \code{assoc}, the stage-1
-\code{collinear_thinned} flag, \code{interventional_effect} (the stage-2 selection
-statistic), the conditional-permutation \code{p_value},
-and the \code{selected} flag. For
+\code{collinear_thinned} flag, the forward-selection admission \code{step_added}
+(\code{0} for prespecified predictors, \code{NA} for never-admitted ones), the
+inner-CV \code{loss_gain} at admission, and the \code{selected} flag. For
 \code{method = "full"} the score columns are \code{NA}.}
 
 \item{method}{Character screening-method identifier.}

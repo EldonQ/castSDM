@@ -20,16 +20,15 @@ suitability, and where is that answer supported by data?
 
 Two concerns stay separate:
 
-- **Default selection ranks predictors by conditional changes in the fitted
-  response.** `cast_select()` runs a two-stage screen: collinearity thinning
-  at \|r\| <= 0.7 (Dormann et al. 2013), then a filter against a
-  within-stratum permutation null using the **conditional effect** — how far
-  the fitted probability moves when the predictor is shifted and every other
-  predictor stays at its observed value. Shuffling only among rows with
-  similar values on the other predictors keeps the null inside the observed
-  joint support (Hooker, Mentch & Zhou 2021). Selection is re-run inside
-  every spatial cross-validation fold, so held-out data never influence
-  variable choice.
+- **Default selection is a spatial forward search.** `cast_select()` runs a
+  two-stage screen: collinearity thinning at \|r\| <= 0.7 (Dormann et al.
+  2013), then forward selection on the inner cross-validated loss of a
+  probability random forest — spatial folds when coordinates exist. Each
+  addition must improve held-out loss beyond a paired 2-SE guard, so the
+  search stops by itself: no predictor-count cap, no fallback set, and an
+  empty selection honestly means nothing beat the intercept model (Meyer et
+  al. 2018, 2019). Selection is re-run inside every spatial
+  cross-validation fold, so held-out data never influence variable choice.
 - **One shift, one map, hard masking.** The shift response to each driver is
   reported as a table and a spatial map for a single raw-unit shift (for
   example `bio01 + 2` degrees). Rows or cells outside the training quantile
@@ -70,7 +69,7 @@ result <- cast(
   models = c("rf", "gam"),
   select_method = "two_stage",
   select_num_trees = 100,
-  select_n_perm = 19,       # small example: a short conditional null
+  select_n_folds = 3,     # small example: a short inner search
   do_cv = TRUE,
   cv_k = 3,
   seed = 42,
@@ -83,9 +82,9 @@ plot(result$screen)
 
 ## What each stage measured
 
-`cast_importance()` shows the single conditional-effect column from the
-screen. Predictors above their own within-stratum null are retained, up to
-the sample-size cap.
+`cast_importance()` shows the forward-selection path from the screen:
+each admitted predictor with its admission step and inner-CV loss
+improvement. There are no p-values and no count cap to read around.
 
 ```{r importance}
 imp <- cast_importance(result$screen)
@@ -101,9 +100,8 @@ eff <- cast_effect_table(result$fit, newdata = dat, shift = 1,
 eff        # rank supported drivers by mean_abs_dHSS; masked drivers read NA
 plot(eff)  # cross = masked: the shift is not answerable inside the box
 
-# The driver the screen ranked first is guaranteed to be fitted.
-v1 <- result$screen$scores$variable[which.max(
-  result$screen$scores$interventional_effect)]
+# The first-admitted driver is guaranteed to be fitted.
+v1 <- result$screen$selected[1]
 ```
 
 Give the shift in raw units whenever it has ecological meaning, for example

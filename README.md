@@ -16,30 +16,25 @@ Two products carry that:
   report `NA` estimates. High coverage does not establish joint positivity
   or causal identification.
 
-## Variable selection selects on the conditional effect
+## Variable selection is a spatial forward search
 
 `cast_select()` is a two-stage screen:
 
 1. **Collinearity thinning.** Rank predictors by a univariate
    quadratic-logistic signal, then greedily keep predictors whose pairwise
    correlation with all kept predictors is at most 0.7 (Dormann et al. 2013).
-2. **Conditional effect against a conditional null, capped by sample
-   size.** Fit a probability random forest on the survivors and measure how
-   far each predictor moves the fitted probability **when it is shifted
-   while every other predictor stays at its observed value**. Recompute the
-   same statistic on forests refitted to within-stratum permuted predictors
-   (strata group rows with similar values on the other survivors, one
-   stratification per predictor) to build a feature-wise null, keep
-   predictors with Monte Carlo tail probability <= 0.05, and cap the set at
-   `ceiling(log2(n_presence))` predictors (at most 12), ordered by the
-   effect.
+2. **Forward selection on inner spatial-CV loss.** Starting from prespecified
+   predictors (if any), repeatedly admit the survivor that most improves the
+   held-out loss of a probability random forest — spatial folds when
+   coordinates exist — and stop when no candidate passes a paired 2-SE
+   improvement guard. A redundant proxy adds nothing once its parents are in,
+   so it is never admitted. There is no predictor-count cap and no fallback
+   set: an empty selection honestly means nothing beat the intercept-only
+   model (Meyer et al. 2018, 2019).
 
-Shuffling only among comparable rows keeps the null inside the observed joint
-support, unlike marginal permutation, which is governed by the model's
-extrapolation behaviour (Hooker, Mentch & Zhou 2021). The reported
-p-values are exploratory scores, not confirmatory tests with guaranteed error
-control: the response-dependent stage-1 filter is not rerun under the null.
-This screen does not identify a causal adjustment set.
+Stopping is performance-driven, not count-driven. The screen serves
+parsimony for interpretation and projection; it does not identify a causal
+adjustment set.
 
 Selection is re-run inside every outer spatial training fold, so held-out folds
 never influence variable choice or tuning.
@@ -58,7 +53,7 @@ result <- cast(
 )
 
 summary(result)
-plot(result$screen)          # conditional effect vs the within-stratum null
+plot(result$screen)          # forward-selection path: admission steps and gains
 ```
 
 Attribution (give ecologically meaningful raw-unit shifts where possible):
@@ -138,12 +133,13 @@ install.packages(c(
 - On presence/background data the scale is **relative suitability, not
   occurrence probability**.
 - `cast_select(keep = c("exposure", "confounder"))` protects a prespecified
-  exposure/adjustment set from thinning, null screening and the predictor cap;
-  `ncov` must accommodate that set. `cast(select_keep = ...)` also protects it
-  inside nested CV. Optional candidates must still be scientifically admissible.
-  `kept_by_design` is not statistical evidence, and screening does not identify
-  a sufficient adjustment set.
-- Selected variables are ranked by conditional effect.
+  exposure/adjustment set from thinning and from the forward search: kept
+  predictors enter at step 0 no matter what the data say.
+  `cast(select_keep = ...)` also protects it inside nested CV. Optional
+  candidates must still be scientifically admissible. `kept_by_design` is not
+  statistical evidence, and screening does not identify a sufficient
+  adjustment set.
+- Selected variables are ordered by forward-admission step.
   Selection is a model-based screen, not a list of causes.
 - Future projections assume the learned response relationship remains
   applicable under the projected environment.
@@ -155,10 +151,15 @@ install.packages(c(
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal with
 it in ecological studies. *Ecography* 36: 27-46.
 
-Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
-extrapolation: variable importance requires at least one more model, or there
-is no free variable importance. *Statistics and Computing*
-31: 82. DOI: 10.1007/s11222-021-10057-z.
+Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
+learning models using forward feature selection and target-oriented
+validation. *Environmental Modelling & Software* 101: 1-9.
+DOI: 10.1016/j.envsoft.2017.12.001.
+
+Meyer, H. et al. (2019). Importance of spatial predictor variable selection
+in machine learning applications — moving from data reproduction to spatial
+prediction. *Ecological Modelling* 411: 108815.
+DOI: 10.1016/j.ecolmodel.2019.108815.
 
 ## License
 

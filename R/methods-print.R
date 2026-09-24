@@ -13,7 +13,8 @@ print.cast_select <- function(x, ...) {
     cli::cli_text("{d$engine}")
   }
   if (identical(x$method, "two_stage")) {
-    cli::cli_text("Null: conditional permutation; not a verified ecological cause or adjustment set.")
+    n_steps <- if (!is.null(d$path)) nrow(d$path) else NA_integer_
+    cli::cli_text("Forward search: {n_steps} admission{?s} on inner-CV {d$metric %||% 'loss'}; empty means nothing beat the intercept model.")
   }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)
@@ -39,25 +40,22 @@ print.cast_support <- function(x, ...) {
 #' @export
 print.cast_importance <- function(x, ...) {
   eff <- x$effects
-  n_sig <- sum(eff$selected, na.rm = TRUE)
-  cli::cli_h1("castSDM Predictor Attribution")
-  bullets <- c(
-    "Conditional effect (shift 1 SD, other predictors fixed)",
-    "Calibrated against a within-stratum permutation null",
-    "Above the null (p < {x$alpha}): {n_sig} / {nrow(eff)}"
-  )
-  cli::cli_ul(bullets)
-  show <- utils::head(eff, 10L)
+  n_adm <- sum(!is.na(eff$step_added))
+  cli::cli_h1("castSDM Forward-Selection Path")
+  cli::cli_ul(c(
+    "Inner-CV loss: {x$metric %||% 'unknown'} (lower is better)",
+    "Admitted: {n_adm} / {nrow(eff)}"
+  ))
+  show <- utils::head(eff[order(is.na(eff$step_added), eff$step_added), , drop = FALSE], 10L)
   disp <- data.frame(
     variable = show$variable,
-    effect = signif(show$interventional_effect, 4),
-    null = signif(show$null_threshold, 4),
-    p_value = signif(show$p_value, 3),
+    step = show$step_added,
+    gain = signif(show$loss_gain, 4),
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
   print(disp, row.names = FALSE)
-  cli::cli_text("Each predictor is compared with its own conditional null ({.field null}).")
+  cli::cli_text("Gain is the inner-CV loss improvement at admission; prespecified predictors enter at step 0.")
   invisible(x)
 }
 

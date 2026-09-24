@@ -1,149 +1,155 @@
-# Stage 2 calibration: each predictor is compared with its own null scale ----
+# Stage 2 forward selection: admission by inner-CV loss improvement ----------
 
-# A stand-in forest whose interventional effect is a known function of the
-# shifted predictor. `effect_for` names the predictor that moves the fitted
-# probability; shifting any other predictor leaves the prediction unchanged.
-fake_forest <- function(effect_for, magnitude) {
-  f <- function(object, data, ...) {
-    z <- if (object$effect_for %in% names(data)) {
-      data[[object$effect_for]]
-    } else {
-      rep(0, nrow(data))
-    }
-    p <- stats::plogis(object$magnitude * z)
-    list(predictions = cbind("0" = 1 - p, "1" = p))
-  }
-  obj <- list(effect_for = effect_for, magnitude = magnitude)
-  attr(obj, "predict") <- f
-  obj
-}
-
-# Mirrors the package statistic with the fake forest's own predict closure, so
-# the calibration logic is what is under test, not ranger.
-fake_shift_effect <- function(model, X, sds, shift_size) {
-  pf <- attr(model, "predict")
-  prob1 <- function(Z) pf(model, Z)$predictions[, "1"]
-  base <- prob1(X)
-  out <- numeric(ncol(X))
-  names(out) <- colnames(X)
-  for (v in colnames(X)) {
-    Xs <- X
-    Xs[[v]] <- Xs[[v]] + shift_size * sds[[v]]
-    out[[v]] <- mean(abs(prob1(Xs) - base))
-  }
-  out
-}
-
-test_that("each predictor is compared with its own conditional null scale", {
+test_that("forward search recovers true parents and drops a redundant proxy", {
   skip_if_not_installed("ranger")
-  set.seed(812)
-  d <- data.frame(presence = rep(0:1, 100), a = rnorm(200),
-                   b = rnorm(200), c = rnorm(200))
-  local_mocked_bindings(
-    .cast_importance_fit = function(X, y, num_trees, seed) {
-      list(model = fake_forest("a", 3),
-           importance = stats::setNames(rep(NA_real_, ncol(X)), names(X)))
-    },
-    .cast_shift_effect = fake_shift_effect,
-    .package = "castSDM")
-  local_mocked_bindings(
-    ranger = function(x, y, ...) fake_forest("b", 0.001),
-    .package = "ranger")
-  s <- cast_select(d, n_perm = 19, seed = 1, verbose = FALSE)
-  # Only "a" moves the fitted probability when it is shifted.
-  expect_identical(s$selected, "a")
-  expect_true(all(is.finite(s$diagnostics$null_threshold)))
-  expect_false(any(s$scores$fallback))
-  # Single-statistic screen: no second attribution column.
-  expect_false("perm_importance" %in% names(s$scores))
-  expect_false("p_adjusted" %in% names(s$scores))
-  expect_false("importance_agreement" %in% names(s$diagnostics))
-  expect_identical(s$diagnostics$null_method,
-                   "feature-wise within-stratum permutation of the shift effect")
-  expect_true(is.finite(s$diagnostics$null_strata))
-})
-
-test_that("a null fallback is marked as fallback, not passed evidence", {
-  skip_if_not_installed("ranger")
-  set.seed(813)
-  d <- data.frame(presence = rep(0:1, 100), a = rnorm(200),
-                   b = rnorm(200), c = rnorm(200))
-  # The null forests move the probability as much as the observed one, so no
-  # predictor can be separated from its own null.
-  local_mocked_bindings(
-    .cast_importance_fit = function(X, y, num_trees, seed) {
-      list(model = fake_forest("a", 3),
-           importance = stats::setNames(rep(NA_real_, ncol(X)), names(X)))
-    },
-    .cast_shift_effect = fake_shift_effect,
-    .package = "castSDM")
-  local_mocked_bindings(
-    ranger = function(x, y, ...) fake_forest("a", 3),
-    .package = "ranger")
-  expect_warning(s <- cast_select(d, n_perm = 19, seed = 1, verbose = FALSE),
-                  "keeping the top")
-  expect_true(all(s$scores$fallback[s$scores$selected]))
-  expect_false(any(s$scores$passed_null))
-  # The fallback keeps at most ncov predictors, not the whole stage-1 set.
-  expect_lte(length(s$selected), s$diagnostics$ncov)
-  expect_true(all(s$scores$selected_reason[s$scores$selected] == "fallback-top-ncov"))
-})
-
-test_that("the conditional effect is larger for the true driver on real data", {
-  skip_if_not_installed("ranger")
-  set.seed(814)
-  n <- 600
-  x1 <- rnorm(n); x2 <- rnorm(n); noise <- rnorm(n)
-  d <- data.frame(presence = rbinom(n, 1, plogis(1.4 * x1 - 1.1 * x2)),
-                  x1 = x1, x2 = x2, noise = noise)
-  s <- cast_select(d, num_trees = 150, n_perm = 19, seed = 5, verbose = FALSE)
-  eff <- stats::setNames(s$scores$interventional_effect, s$scores$variable)
-  expect_gt(eff[["x1"]], eff[["noise"]])
-  expect_gt(eff[["x2"]], eff[["noise"]])
-  expect_setequal(s$selected, c("x1", "x2"))
-})
-
-test_that("a collider is not selected on the strength of the association it creates", {
-  skip_if_not_installed("ranger")
-  # `coll` is a common effect of the driver `x1` and the response, so x1 has no
-  # effect on the response and shifting it alone has a true effect of zero.
-  # Conditioning on the collider manufactures an association. The shift
-  # contrast should decline it relative to the true driver.
-  set.seed(815)
-  n <- 1500
-  x1 <- rnorm(n); x2 <- rnorm(n)
-  y <- rbinom(n, 1, plogis(-0.3 - 1.6 * x2))
-  coll <- as.numeric(0.9 * x1 + 1.8 * (y - mean(y)) + rnorm(n) >
-                       stats::qnorm(0.5))
-  d <- data.frame(presence = y, x1 = x1, x2 = x2, coll = coll)
-  s <- cast_select(d, num_trees = 200, n_perm = 19, seed = 6, verbose = FALSE)
-  # The true driver is retained.
+  set.seed(21)
+  n <- 300
+  x1 <- rnorm(n)
+  x2 <- rnorm(n)
+  x3 <- 0.98 * x1 + sqrt(1 - 0.98^2) * rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.5 * x1 - 1.2 * x2)),
+    x1 = x1, x2 = x2, x3 = x3, x4 = rnorm(n)
+  )
+  s <- cast_select(dat, num_trees = 150, seed = 22, verbose = FALSE)
+  expect_s3_class(s, "cast_select")
+  expect_identical(s$diagnostics$status, "selected")
+  # The true driver is retained ...
   expect_true("x2" %in% s$selected)
-  # x1 has no effect, so the shift contrast must downweight it relative to
-  # the true driver. (Exact exclusion is not asserted: with 19 permutations
-  # the p = 0.05/0.10 boundary turns on a single null draw.)
-  eff <- stats::setNames(s$scores$interventional_effect, s$scores$variable)
-  expect_lt(eff[["x1"]], eff[["x2"]])
+  # ... exactly one of the near-duplicate pair survives (thinning or search) ...
+  expect_equal(sum(c("x1", "x3") %in% s$selected), 1L)
+  # ... and the pure noise predictor is not admitted.
+  expect_false("x4" %in% s$selected)
+  # Reasons use the forward vocabulary only.
+  expect_true(all(s$scores$selected_reason[s$scores$selected] %in%
+                    c("forward", "prespecified")))
+  expect_true(nrow(s$diagnostics$path) >= 1L)
 })
 
-test_that("strata helpers degrade gracefully and preserve margins", {
-  X <- data.frame(a = rnorm(50), b = rnorm(50))
-  s1 <- .cast_perm_strata_list(X[1:3, , drop = FALSE], seed = 1)
-  expect_true(all(vapply(s1, function(s) identical(s, rep(1L, 3)), logical(1))))
-  s5 <- .cast_perm_strata_list(X, seed = 2)
-  expect_true(all(vapply(s5, function(s) length(unique(s)) <= 5L, logical(1))))
-  expect_length(s5, 2L)
-  # Each stratification excludes its own predictor: with two columns the
-  # strata come from a single other column each.
-  expect_named(s5, c("a", "b"))
-  # Within-stratum permutation preserves each column's multiset ...
-  Xp <- .cast_stratum_permute_list(X, s5)
-  expect_equal(sort(Xp$a), sort(X$a))
-  expect_equal(sort(Xp$b), sort(Xp$b))
-  # ... and leaves single-row strata untouched.
-  Xp1 <- .cast_stratum_permute_list(X, list(a = seq_len(50), b = seq_len(50)))
-  expect_identical(Xp1, X)
-  # A lone survivor has nothing to condition on: full permutation.
-  expect_identical(.cast_perm_strata_list(X[, "a", drop = FALSE], seed = 1)$a,
-                   rep(1L, 50))
+test_that("a null signal returns an empty set, not a fallback set", {
+  skip_if_not_installed("ranger")
+  set.seed(23)
+  n <- 300
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, 0.3),
+    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
+  )
+  expect_warning(
+    s <- cast_select(dat, num_trees = 60, seed = 24, verbose = FALSE),
+    "empty set"
+  )
+  expect_length(s$selected, 0L)
+  expect_identical(s$diagnostics$status, "empty_selection")
+  expect_true(all(s$scores$selected_reason == "excluded"))
+  expect_false(any(c("fallback", "p_value", "null_threshold",
+                     "interventional_effect") %in% names(s$scores)))
+})
+
+test_that("keep forces prespecified predictors at step 0", {
+  skip_if_not_installed("ranger")
+  set.seed(25)
+  n <- 200
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.2 * rnorm(n))),
+    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n), x5 = rnorm(n)
+  )
+  s <- suppressWarnings(cast_select(dat, keep = "x5", num_trees = 40,
+                                    seed = 26, verbose = FALSE))
+  expect_true("x5" %in% s$selected)
+  row <- s$scores[s$scores$variable == "x5", ]
+  expect_identical(row$step_added, 0L)
+  expect_identical(row$selected_reason, "prespecified")
+  expect_true(row$kept_by_design)
+  reported <- cast_importance(s)$effects
+  expect_true(all(reported$kept_by_design[reported$variable == "x5"]))
+})
+
+test_that("scores and diagnostics carry the forward path schema", {
+  skip_if_not_installed("ranger")
+  set.seed(27)
+  n <- 250
+  x1 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.4 * x1)),
+    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
+  )
+  # keep forces a non-empty path so the schema is exercised deterministically.
+  s <- cast_select(dat, keep = "x1", num_trees = 60, seed = 28,
+                   verbose = FALSE)
+  expect_true(all(c("step_added", "loss_gain", "selected_reason",
+                    "kept_by_design", "selected") %in% names(s$scores)))
+  d <- s$diagnostics
+  expect_true(all(c("path", "metric", "inner_method", "tolerance",
+                    "n_folds", "null_loss", "final_loss", "n_fits",
+                    "status") %in% names(d)))
+  expect_true(d$n_fits >= 1L)
+  expect_true(d$status %in% c("selected", "empty_selection"))
+  expect_s3_class(cast_importance(s), "cast_importance")
+  expect_true(all(c("step_added", "loss_gain") %in%
+                    names(cast_importance(s)$effects)))
+})
+
+test_that("metric = 'auc' runs the same forward search on rank loss", {
+  skip_if_not_installed("ranger")
+  set.seed(29)
+  n <- 250
+  x1 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.4 * x1)),
+    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
+  )
+  s <- cast_select(dat, metric = "auc", num_trees = 60, seed = 30,
+                   verbose = FALSE)
+  expect_identical(s$diagnostics$metric, "auc")
+  expect_true("x1" %in% s$selected)
+})
+
+test_that("invalid stage-2 arguments fail explicitly", {
+  set.seed(31)
+  dat <- data.frame(presence = rep(0:1, 60),
+                    x1 = rnorm(120), x2 = rnorm(120), x3 = rnorm(120))
+  expect_error(cast_select(dat, tolerance = -1, verbose = FALSE), "tolerance")
+  expect_error(cast_select(dat, n_folds = 1L, verbose = FALSE), "n_folds")
+  expect_error(cast_select(dat, metric = "typo", verbose = FALSE), "metric")
+  expect_error(cast_select(dat, num_trees = 0L, verbose = FALSE), "num_trees")
+})
+
+test_that("a huge tolerance stops the search with an empty set", {
+  skip_if_not_installed("ranger")
+  set.seed(32)
+  n <- 250
+  x1 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.4 * x1)),
+    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
+  )
+  # No count cap exists: stopping is driven by the tolerance alone.
+  expect_warning(
+    s <- cast_select(dat, tolerance = 10, num_trees = 60, seed = 33,
+                     verbose = FALSE),
+    "empty set"
+  )
+  expect_length(s$selected, 0L)
+})
+
+test_that("forward path plots as a ggplot", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("ggplot2")
+  set.seed(34)
+  n <- 250
+  x1 <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.4 * x1)),
+    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
+  )
+  s <- cast_select(dat, num_trees = 60, seed = 35, verbose = FALSE)
+  expect_s3_class(plot(cast_importance(s)), "ggplot")
+  expect_s3_class(plot(s), "ggplot")
 })

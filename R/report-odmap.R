@@ -48,8 +48,13 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
 
   diag <- scr$diagnostics %||% list()
   screen_method <- scr$method %||% "unknown"
-  n_perm <- diag$n_perm %||% NA_integer_
-  null_thr <- diag$null_threshold %||% NA_real_
+  fwd_steps <- if (!is.null(diag$path)) nrow(diag$path) else NA_integer_
+  fwd_loss <- if (!is.null(diag$final_loss) && is.finite(diag$final_loss)) {
+    signif(diag$final_loss, 4)
+  } else {
+    NA_real_
+  }
+  fwd_metric <- diag$metric %||% "not recorded"
   n_sel <- length(scr$selected %||% character(0))
   sel_vars <- scr$selected %||% character(0)
   models_used <- names(fit$models)
@@ -90,10 +95,10 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     "## 3. Model",
     "",
     sprintf("- **Variable selection**: %s", screen_method),
-    sprintf("- **Stage-2 null**: %s response permutations, 95th-percentile threshold %s",
-            if (is.na(n_perm)) "not recorded" else n_perm,
-            if (all(is.na(null_thr))) "not recorded" else
-              paste(signif(range(null_thr, na.rm = TRUE), 3), collapse = " to ")),
+    sprintf("- **Stage-2 forward search**: %s admission(s), inner-CV %s = %s",
+            if (is.na(fwd_steps)) "not recorded" else fwd_steps,
+            fwd_metric,
+            if (is.na(fwd_loss)) "not recorded" else fwd_loss),
     sprintf("- **Predictors retained**: %s (%d)",
             paste(sel_vars, collapse = ", "), n_sel),
     sprintf("- **Selection leakage control**: %s",

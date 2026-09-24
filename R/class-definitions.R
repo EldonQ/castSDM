@@ -5,9 +5,9 @@
 #' @param selected Character vector of selected variable names.
 #' @param scores A `data.frame` with per-variable scores. For
 #'   `method = "two_stage"`: marginal `assoc`, the stage-1
-#'   `collinear_thinned` flag, `interventional_effect` (the stage-2 selection
-#'   statistic), the conditional-permutation `p_value`,
-#'   and the `selected` flag. For
+#'   `collinear_thinned` flag, the forward-selection admission `step_added`
+#'   (`0` for prespecified predictors, `NA` for never-admitted ones), the
+#'   inner-CV `loss_gain` at admission, and the `selected` flag. For
 #'   `method = "full"` the score columns are `NA`.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
@@ -29,23 +29,20 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of per-predictor conditional effects with
-#'   conditional-permutation-null `p_value`.
-#' @param alpha Significance level used to flag predictors.
-#' @param threshold Numeric. The stage-2 conditional null threshold, or `NA`
-#'   when unknown (one entry per predictor for a two-stage screen).
+#' @param effects A `data.frame` of the forward-selection path: per-predictor
+#'   admission `step_added` and inner-CV `loss_gain` at admission.
+#' @param metric Inner-CV loss minimised by the search (`"brier"` or `"auc"`).
 #' @param diagnostics Named list carried over from the screen.
 #'
 #' @return A `cast_importance` object.
 #' @keywords internal
 #' @export
-new_cast_importance <- function(effects, alpha = 0.05,
-                                threshold = NA_real_, diagnostics = list()) {
+new_cast_importance <- function(effects, metric = "brier",
+                                diagnostics = list()) {
   structure(
     list(
       effects = effects,
-      alpha = alpha,
-      threshold = threshold,
+      metric = metric,
       diagnostics = diagnostics
     ),
     class = "cast_importance"

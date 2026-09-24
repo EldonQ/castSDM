@@ -27,12 +27,10 @@ summary.cast_result <- function(object, ...) {
   if (!is.null(object$screen$method)) {
     cli::cli_text("Screening method: {object$screen$method}")
   }
-  thr <- object$screen$diagnostics$null_threshold
-  thr <- suppressWarnings(as.numeric(thr))
-  thr <- thr[is.finite(thr)]
-  if (length(thr)) {
-    cli::cli_text(paste0("Permutation-null threshold (median over {length(thr)} ",
-                         "predictor{?s}): {signif(stats::median(thr), 3)}"))
+  thr <- object$screen$diagnostics
+  if (!is.null(thr$path) && nrow(thr$path)) {
+    cli::cli_text(paste0("Forward selection: {nrow(thr$path)} admission{?s}, ",
+                         "inner-CV {thr$metric %||% 'loss'} = {signif(thr$final_loss, 3)}"))
   }
   cli::cli_h2("Models")
   if (!is.null(object$eval)) {

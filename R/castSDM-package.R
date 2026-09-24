@@ -7,12 +7,14 @@
 #' where is that answer supported by data?
 #'
 #' Variable selection ([cast_select()]) answers *which predictors to carry*.
-#' Stage 1 thins collinear predictors. Stage 2 ranks the survivors by a
-#' **conditional effect**: the change each one causes in the fitted
-#' probability when it is shifted while every other predictor stays at its
-#' observed value, calibrated against a conditional-permutation null that
-#' respects the observed joint distribution (Hooker, Mentch & Zhou 2021).
-#' Selection does not identify a valid adjustment set.
+#' Stage 1 thins collinear predictors. Stage 2 runs a spatial forward search:
+#' starting from prespecified predictors (if any), it repeatedly admits the
+#' survivor that most improves the inner cross-validated loss of a probability
+#' random forest — spatial folds when coordinates exist — and stops when
+#' nothing improves it further (Meyer et al. 2018, 2019). There is no
+#' predictor-count cap and no fallback set: an empty selection honestly means
+#' nothing improved on the intercept-only model. Selection serves parsimony
+#' for interpretation and projection, not causal discovery.
 #'
 #' The effect products ([cast_effect_table()], [cast_effect_map()])
 #' report the interventional response to a single raw-unit shift, with
@@ -29,9 +31,9 @@
 #'
 #' 1. **Data Preparation**: train/test splitting and optional VIF collinearity
 #'    screening ([cast_prepare()], [cast_vif()])
-#' 2. **Variable Selection**: collinearity thinning, then a conditional
-#'    effect filter against a conditional-permutation null ([cast_select()]),
-#'    reported via [cast_importance()] with a single conditional-effect column
+#' 2. **Variable Selection**: collinearity thinning, then spatial forward
+#'    selection on inner-CV loss ([cast_select()]), reported as an admission
+#'    path via [cast_importance()]
 #' 3. **Model Fitting**: RF, BRT, MaxEnt, GAM ([cast_fit()])
 #' 4. **Evaluation**: AUC, TSS, CBI metrics ([cast_evaluate()]), nested spatial
 #'    cross-validation with fold-specific selection ([cast_cv()])

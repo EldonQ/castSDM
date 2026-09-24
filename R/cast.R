@@ -14,15 +14,14 @@
 #' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
 #' @param select_method Character. Variable screening method passed to
 #'   [cast_select()]. Default `"two_stage"`.
-#' @param select_num_trees Integer. Trees per forest in the stage-2 importance
-#'   filter. Default `300`.
-#' @param select_n_perm Integer. Response permutations used to build the
-#'   stage-2 null distribution. Default `49`.
-#' @param select_ncov Integer or `NULL`. Maximum predictors retained by
-#'   [cast_select()], ordered by the interventional effect. Default `NULL`
-#'   selects `ceiling(log2(n_presence))`. Use `Inf` for no cap.
-#' @param select_maxncov Integer. Upper bound on the automatic `select_ncov`.
-#'   Default `12`.
+#' @param select_num_trees Integer. Trees per forest in the stage-2 forward
+#'   search. Default `300`.
+#' @param select_metric Character. Inner-CV loss minimised by the forward
+#'   search: `"brier"` (default) or `"auc"`.
+#' @param select_tolerance Numeric. Minimum inner-CV loss improvement required
+#'   to admit a predictor, on top of the 1-SE guard. Default `0`.
+#' @param select_n_folds Integer. Inner folds for the stage-2 forward search.
+#'   Default `3`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
@@ -58,9 +57,9 @@ cast <- function(species_data,
                  train_fraction = 0.7,
                   select_method = "two_stage",
                   select_num_trees = 300L,
-                  select_n_perm = 49L,
-                  select_ncov = NULL,
-                  select_maxncov = 12L,
+                  select_metric = "brier",
+                  select_tolerance = 0,
+                  select_n_folds = 3L,
                  num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -97,9 +96,9 @@ cast <- function(species_data,
     train_data,
     method = select_method,
     num_trees = select_num_trees,
-    n_perm = select_n_perm,
-    ncov = select_ncov,
-    maxncov = select_maxncov,
+    metric = select_metric,
+    tolerance = select_tolerance,
+    n_folds = select_n_folds,
     keep = select_keep,
     seed = seed, verbose = verbose
   )
@@ -125,9 +124,9 @@ cast <- function(species_data,
         select_method = select_method,
         select_args = list(
           num_trees = select_num_trees,
-          n_perm = select_n_perm,
-          ncov = select_ncov,
-          maxncov = select_maxncov,
+          metric = select_metric,
+          tolerance = select_tolerance,
+          n_folds = select_n_folds,
           keep = select_keep
         ),
         k = cv_k, models = models,

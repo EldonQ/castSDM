@@ -18,7 +18,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("interventional_effect", "freq", "assoc")
+  imp_candidates <- c("loss_gain", "freq", "assoc")
   imp_col <- imp_candidates[imp_candidates %in% names(scr)]
   imp_col <- imp_col[vapply(imp_col, function(nm)
     any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
@@ -61,7 +61,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   )
 
   x_lab <- switch(imp_col,
-    interventional_effect = "Conditional effect",
+    loss_gain = "CV loss improvement",
     freq = "Fold selection frequency",
     assoc = "|marginal association|",
     importance_plot = "Selection indicator",
@@ -586,7 +586,7 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 #'
 #' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.
-#' @param top Optional integer. Show only the `top` largest-magnitude effects.
+#' @param top Optional integer. Show only the `top` largest gains.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
@@ -594,60 +594,45 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   eff <- x$effects
+  eff <- eff[!is.na(eff$step_added) & is.finite(eff$loss_gain), , drop = FALSE]
   if (!is.null(top) && is.finite(top)) {
-    eff <- utils::head(eff[order(-abs(eff$interventional_effect)), , drop = FALSE],
+    eff <- utils::head(eff[order(-eff$loss_gain), , drop = FALSE],
                        as.integer(top))
   }
-  eff$sig <- ifelse(eff$selected, "above null", "not above null")
+  n_out <- sum(is.na(x$effects$step_added))
   if (!is.null(var_labels)) {
     eff$display <- ifelse(eff$variable %in% names(var_labels),
                           var_labels[eff$variable], eff$variable)
   } else {
     eff$display <- eff$variable
   }
-  eff <- eff[order(eff$interventional_effect), ]
+  eff <- eff[order(eff$loss_gain), ]
   eff$display <- factor(make.unique(eff$display), levels = make.unique(eff$display))
 
-  sig_colors <- c(`above null` = "#B2182B", `not above null` = "grey70")
-  n_sig <- sum(eff$selected, na.rm = TRUE)
-
   plot_subtitle <- sprintf(
-    "Conditional effect (shift 1 SD, others fixed) | %d/%d above the within-stratum null (p < %.2g)",
-    n_sig, nrow(eff), x$alpha
+    "Inner-CV %s improvement at admission | %d admitted, %d screened out",
+    x$metric %||% "loss", nrow(eff), n_out
   )
 
-  p <- ggplot2::ggplot(eff, ggplot2::aes(
-    x = .data$interventional_effect, y = .data$display, color = .data$sig
+  ggplot2::ggplot(eff, ggplot2::aes(
+    x = .data$loss_gain, y = .data$display
   )) +
     ggplot2::geom_vline(xintercept = 0, linetype = "solid",
                         color = "grey50", linewidth = 0.4) +
     ggplot2::geom_segment(
-      ggplot2::aes(x = 0, xend = .data$interventional_effect,
+      ggplot2::aes(x = 0, xend = .data$loss_gain,
                    y = .data$display, yend = .data$display),
-      linewidth = 0.6
+      linewidth = 0.6, color = "#B2182B"
     ) +
-    ggplot2::geom_point(size = 2.6)
-  # A two-stage screen calibrates each predictor against its own null, so there
-  # is a vector of thresholds rather than one line to draw. `cast_importance()`
-  # carries that vector on its effects frame and it is added per predictor.
-  if (!is.null(eff$null_threshold) && any(is.finite(eff$null_threshold))) {
-    p <- p + ggplot2::geom_point(
-      ggplot2::aes(x = .data$null_threshold, y = .data$display),
-      shape = "|", size = 3.2, color = "grey25", inherit.aes = FALSE)
-  } else if (length(x$threshold) == 1L && is.finite(x$threshold)) {
-    p <- p + ggplot2::geom_vline(xintercept = x$threshold, linetype = "dashed",
-                                 color = "grey30", linewidth = 0.4)
-  }
-  p +
-    ggplot2::scale_color_manual(values = sig_colors, name = NULL) +
+    ggplot2::geom_point(size = 2.6, color = "#B2182B") +
     ggplot2::labs(
-      title = "Predictor conditional effect",
+      title = "Forward-selection path",
       subtitle = plot_subtitle,
-      x = "Mean |change in predicted probability| per 1 SD shift", y = ""
+      x = "Inner-CV loss improvement at admission", y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
-      legend.position = "bottom",
+      legend.position = "none",
       panel.grid.major.y = ggplot2::element_line(color = "grey93", linewidth = 0.3)
     )
 }

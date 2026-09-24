@@ -9,11 +9,10 @@ cast_select(
   response = "presence",
   method = c("two_stage", "full"),
   num_trees = 300L,
-  n_perm = 49L,
-  shift_size = 1,
   max_rows = 2000L,
-  ncov = NULL,
-  maxncov = 12L,
+  metric = c("brier", "auc"),
+  tolerance = 0,
+  n_folds = 3L,
   seed = NULL,
   verbose = TRUE,
   keep = character(0)
@@ -21,30 +20,34 @@ cast_select(
 }
 \arguments{
 \item{data}{Data frame with response and predictors (coordinates allowed;
-they are never selected).}
+they are never selected, but \code{lon}/\code{lat} define the inner spatial folds
+when both are present and finite).}
 
 \item{response}{Binary response column. Default \code{"presence"}.}
 
 \item{method}{\code{"two_stage"} (default) or \code{"full"} (keep every predictor).}
 
-\item{num_trees}{Trees per forest. Default 300.}
+\item{num_trees}{Trees per forest in the stage-2 forward search.
+Default 300.}
 
-\item{n_perm}{Conditional permutations used to build the stage-2 null.}
-
-\item{shift_size}{Shift applied to the intervened predictor, in training
-standard deviations. Default \code{1}. The statistic averages the absolute
-change over \code{+shift_size} and \code{-shift_size}, so it does not depend on a
-sign convention.}
-
-\item{max_rows}{Rows sampled (evenly, preserving order) for the
-g-computation contrast. Bounds stage-2 cost on large data sets.
+\item{max_rows}{Rows sampled (evenly, preserving order) before the
+stage-2 search. Bounds stage-2 cost on large data sets.
 Default 2000.}
 
-\item{ncov}{Maximum predictors retained, ordered by the interventional
-effect. Default \code{NULL} selects \code{ceiling(log2(n_presence))} where
-\code{n_presence} is the number of presences. Use \code{Inf} for no cap.}
+\item{metric}{Inner-CV loss minimised by the forward search: \code{"brier"}
+(default, mean squared error of the predicted probability, sensitive to
+calibration) or \code{"auc"} (rank discrimination, insensitive to calibration
+shifts).}
 
-\item{maxncov}{Upper bound applied to the automatic \code{ncov}. Default \code{12}.}
+\item{tolerance}{Non-negative number. A candidate is admitted only if its
+paired inner-CV loss improvement exceeds both this absolute floor and
+two standard errors of the fold differences (a 2-SE guard in the spirit
+of the \code{glmnet}/\code{rpart} one-standard-error rule, set a notch stricter
+because greedy search always takes the best of many candidates).
+Default \code{0}, i.e. the 2-SE guard alone stops the search; outer nested
+spatial CV in \code{\link[=cast_cv]{cast_cv()}} remains the honest performance estimate.}
+
+\item{n_folds}{Number of inner folds for the stage-2 search. Default \code{3}.}
 
 \item{seed}{Random seed.}
 
@@ -52,33 +55,25 @@ effect. Default \code{NULL} selects \code{ceiling(log2(n_presence))} where
 
 \item{keep}{Character vector of predictors specified before screening, such
 as an exposure and a scientifically justified adjustment set. These bypass
-collinearity thinning and the null threshold, count toward \code{ncov}, and
-cannot be removed by the cap. The cap must accommodate them. This does not
-identify a sufficient adjustment set; candidate covariates must also be
-scientifically admissible (not colliders or mediators of a total effect).}
+collinearity thinning and are always retained: expert knowledge outranks
+the data-driven search. Candidate covariates must still be scientifically
+admissible (not colliders or mediators of a total effect); retention does
+not verify a sufficient adjustment set.}
 }
 \value{
-A \code{cast_select} object with \code{selected} (kept predictors), \code{scores}
-(per-predictor marginal \code{assoc}, the \code{stage1_p} ranking signal with its
-\code{stage1_rank}, the stage-1 \code{collinear_thinned} flag,
-\code{interventional_effect} -- the stage-2 selection statistic -- with its
-\code{effect_rank}, its conditional-permutation \code{p_value},
-the feature-wise \code{null_threshold},
-the \code{selected_reason} (\code{"null"}, \code{"null+top-ncov"},
-\code{"fallback-top-ncov"}, \code{"prespecified"}, \code{"full"} or \code{"excluded"}), the
-\code{kept_by_design} indicator for \code{keep}, and the \code{selected} flag).
-Prespecified retention is not evidence of an effect. Selection uses
-\code{(1 + sum(null >= observed)) / (1 + n_perm)} for each predictor
-separately. These are screening diagnostics: the
-response-dependent stage-1 screen is held fixed during permutation, so
-they do not establish confirmatory p-values or FDR control.
-\code{passed_null} distinguishes evidence from a capped or fallback set when
-the null is not the binding constraint. Fewer than 19 permutations
-cannot resolve p <= 0.05.
+A \code{cast_select} object with \code{selected} (kept predictors, in
+admission order), \code{scores} (per-predictor marginal \code{assoc}, the
+\code{stage1_p} ranking signal with its \code{stage1_rank}, the stage-1
+\code{collinear_thinned} flag, the admission \code{step_added} (\code{0} for
+prespecified predictors, \code{NA} for never-admitted ones), the
+\code{loss_gain} (inner-CV loss improvement at admission, \code{NA} otherwise),
+the \code{selected_reason} (\code{"prespecified"}, \code{"forward"}, \code{"full"} or
+\code{"excluded"}), the \code{kept_by_design} indicator for \code{keep}, and the
+\code{selected} flag). An empty \code{selected} set is a valid answer: it means
+no candidate improved on the intercept-only model.
 }
 \description{
-Two-stage variable selection whose second stage is calibrated against a
-\emph{conditional} permutation null:
+Two-stage variable selection:
 \enumerate{
 \item \strong{Stage 1 — collinearity thinning}: rank predictors by a
 univariate quadratic-logistic signal (the smaller p-value of the two
@@ -86,45 +81,42 @@ univariate quadratic-logistic signal (the smaller p-value of the two
 misses), then greedily keep predictors whose pairwise correlation with
 all kept predictors is \eqn{\le 0.7} (Dormann et al. 2013). Predictors
 whose GLM fails to fit fall back to the marginal-correlation rank.
-\item \strong{Stage 2 — conditional effect above a conditional null}:
-fit a probability random forest on the stage-1 survivors, then measure
-how far each predictor moves the fitted probability when it is
-\strong{shifted while every other predictor is held at its observed
-value} (a g-computation contrast; see \code{\link[=cast_effect_table]{cast_effect_table()}}). The same
-statistic is recomputed on forests refitted to within-stratum
-permuted predictors (strata from k-means on the survivors), and
-predictors whose Monte Carlo tail probability is at most 0.05 are
-kept. The kept set is capped at \code{ncov} predictors (default
-\code{ceiling(log2(n_presence))}, at most \code{maxncov}), ordered by the
-conditional effect, so model complexity stays tied to the number of
-presences (Adde et al. 2023).
+\item \strong{Stage 2 — spatial forward selection}: starting from the
+prespecified predictors (if any), repeatedly add the stage-1 survivor
+that most improves the inner cross-validated loss of a probability
+random forest, and stop when nothing improves it further. Folds are
+spatial when coordinates are available, random otherwise. There is no
+predictor-count cap and no fallback set: if no candidate improves on
+the intercept-only model, the selection is empty. Stopping is driven
+by predictive performance (Meyer et al. 2018, 2019), not by an
+arbitrary count.
 }
 }
-\section{Why the second stage is conditional}{
+\section{Why forward selection on spatial-CV loss}{
 
-Marginal permutation breaks a predictor's correlation
-with every other predictor. For collinear predictors the permuted rows leave
-the observed data support, so the score is governed by the model's
-extrapolation behaviour rather than by the predictor's influence
-(Hooker, Mentch & Zhou 2021). A within-stratum permutation instead shuffles
-each predictor only among rows with similar values on the other survivors
-(k-means strata), so the null respects the observed joint distribution.
-Selection does not find an adjustment set;
-use a scientifically justified set directly when estimating causal effects.
+Importance scores rank predictors by how much the fitted model leans on
+them, which rewards collinear stand-ins for the correlation they borrow
+from the true drivers (Hooker, Mentch & Zhou 2021). A forward search asks
+the opposite question — does adding this predictor improve predictions on
+held-out spatial folds? — so a redundant proxy adds nothing once its
+parents are in the model, while a count cap is never needed: the search
+stops by itself. Selection serves parsimony for interpretation and
+projection; it does not identify a causal adjustment set.
 }
 
 \references{
-Adde, A. et al. (2023). Too many candidates: embedded covariate selection
-procedure for species distribution modelling with the covsel R package.
-\emph{Ecological Informatics} 75: 102080.
-
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 with it in ecological studies. \emph{Ecography} 36: 27-46.
 
-Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
-extrapolation: variable importance requires at least one more model, or
-there is no free variable importance. \emph{Statistics and Computing} 31: 82.
-\doi{10.1007/s11222-021-10057-z}.
+Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
+learning models using forward feature selection and target-oriented
+validation. \emph{Environmental Modelling & Software} 101: 1-9.
+\doi{10.1016/j.envsoft.2017.12.001}.
+
+Meyer, H. et al. (2019). Importance of spatial predictor variable selection
+in machine learning applications — moving from data reproduction to spatial
+prediction. \emph{Ecological Modelling} 411: 108815.
+\doi{10.1016/j.ecolmodel.2019.108815}.
 }
 \seealso{
 \code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}

@@ -11,7 +11,7 @@
 
 \item{var_labels}{Optional named character vector for display labels.}
 
-\item{top}{Optional integer. Show only the \code{top} largest-magnitude effects.}
+\item{top}{Optional integer. Show only the \code{top} largest gains.}
 
 \item{...}{Ignored.}
 }

@@ -10,7 +10,7 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
   )
   cv <- cast_cv(
     dat, select_method = "two_stage",
-    select_args = list(num_trees = 40, n_perm = 9),
+    select_args = list(num_trees = 40, metric = "brier"),
     k = 3, models = "rf", rf_ntree = 40, seed = 81, verbose = FALSE
   )
   expect_true(all(c("variable", "freq") %in% names(cv$selection_freq)))

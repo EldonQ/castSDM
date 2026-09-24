@@ -157,7 +157,7 @@ test_that("cast() refits final models on the full data set", {
   dat <- make_syn_data(n = 200)
   grid <- make_syn_grid(dat)
   res <- cast(dat, env_data = grid, models = "rf",
-              select_method = "two_stage", select_n_perm = 9L,
+              select_method = "two_stage",
               do_cv = TRUE, cv_k = 2, refit_full = TRUE,
               seed = 45, verbose = FALSE)
   expect_s3_class(res, "cast_result")
@@ -173,7 +173,7 @@ test_that("cast() reports when the ensemble is skipped (no CV)", {
   msg <- character(0)
   withCallingHandlers(
     res <- cast(dat, env_data = grid, models = "rf",
-                select_method = "two_stage", select_n_perm = 9L,
+                select_method = "two_stage",
                 do_cv = FALSE, refit_full = FALSE,
                 seed = 46, verbose = TRUE),
     message = function(m) { msg <<- c(msg, conditionMessage(m));

@@ -11,9 +11,9 @@ cast(
   train_fraction = 0.7,
   select_method = "two_stage",
   select_num_trees = 300L,
-  select_n_perm = 49L,
-  select_ncov = NULL,
-  select_maxncov = 12L,
+  select_metric = "brier",
+  select_tolerance = 0,
+  select_n_folds = 3L,
   num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
@@ -43,18 +43,17 @@ the same environmental columns as \code{species_data}.}
 \item{select_method}{Character. Variable screening method passed to
 \code{\link[=cast_select]{cast_select()}}. Default \code{"two_stage"}.}
 
-\item{select_num_trees}{Integer. Trees per forest in the stage-2 importance
-filter. Default \code{300}.}
+\item{select_num_trees}{Integer. Trees per forest in the stage-2 forward
+search. Default \code{300}.}
 
-\item{select_n_perm}{Integer. Response permutations used to build the
-stage-2 null distribution. Default \code{49}.}
+\item{select_metric}{Character. Inner-CV loss minimised by the forward
+search: \code{"brier"} (default) or \code{"auc"}.}
 
-\item{select_ncov}{Integer or \code{NULL}. Maximum predictors retained by
-\code{\link[=cast_select]{cast_select()}}, ordered by the interventional effect. Default \code{NULL}
-selects \code{ceiling(log2(n_presence))}. Use \code{Inf} for no cap.}
+\item{select_tolerance}{Numeric. Minimum inner-CV loss improvement required
+to admit a predictor, on top of the 1-SE guard. Default \code{0}.}
 
-\item{select_maxncov}{Integer. Upper bound on the automatic \code{select_ncov}.
-Default \code{12}.}
+\item{select_n_folds}{Integer. Inner folds for the stage-2 forward search.
+Default \code{3}.}
 
 \item{num_threads}{Integer. Threads for the ranger learners. Default \code{1}.}
 

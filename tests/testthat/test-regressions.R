@@ -228,9 +228,9 @@ test_that("the high-level pipeline forwards selection settings", {
   seen_select <- NULL
   seen_cv <- NULL
   testthat::local_mocked_bindings(
-    cast_select = function(data, ..., num_trees, n_perm, ncov, keep) {
+    cast_select = function(data, ..., num_trees, metric, tolerance, keep) {
       seen_select <<- list(data = data, num_trees = num_trees,
-                           n_perm = n_perm, ncov = ncov, keep = keep)
+                           metric = metric, tolerance = tolerance, keep = keep)
       new_cast_select("x", data.frame(variable = "x"), method = "two_stage")
     },
     cast_fit = function(...) list(),
@@ -240,16 +240,17 @@ test_that("the high-level pipeline forwards selection settings", {
     },
     cast_evaluate = function(...) list()
   )
-  cast(dat, select_num_trees = 111L, select_n_perm = 7L, select_ncov = 3L,
-       select_keep = "x", do_predict = FALSE, verbose = FALSE, seed = 8)
+  cast(dat, select_num_trees = 111L, select_metric = "auc", select_tolerance = 0.01,
+       select_n_folds = 4L, select_keep = "x", do_predict = FALSE,
+       verbose = FALSE, seed = 8)
   expect_lt(nrow(seen_select$data), nrow(dat))
   expect_identical(seen_select$num_trees, 111L)
-  expect_identical(seen_select$n_perm, 7L)
-  expect_identical(seen_select$ncov, 3L)
+  expect_identical(seen_select$metric, "auc")
+  expect_identical(seen_select$tolerance, 0.01)
   expect_identical(seen_select$keep, "x")
   expect_identical(seen_cv$args$num_trees, 111L)
-  expect_identical(seen_cv$args$n_perm, 7L)
-  expect_identical(seen_cv$args$ncov, 3L)
+  expect_identical(seen_cv$args$metric, "auc")
+  expect_identical(seen_cv$args$tolerance, 0.01)
   expect_identical(seen_cv$args$keep, "x")
 })
 

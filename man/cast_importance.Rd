@@ -2,7 +2,7 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_importance}
 \alias{cast_importance}
-\title{Conditional Effect Table from the Screen}
+\title{Forward-Selection Path from the Screen}
 \usage{
 cast_importance(object)
 }
@@ -15,29 +15,25 @@ A \code{cast_importance} object.
 }
 \description{
 Turns a two-stage screen into a tidy per-predictor table carrying the
-single \strong{conditional effect} that selected the predictor (stage 2 of
-\code{\link[=cast_select]{cast_select()}}). Within-stratum permutation p-values refer only to this
-statistic. Response-dependent stage-1 filtering is not repeated under the
-null, so these are exploratory scores, not confirmatory tests with
-guaranteed error control.
+forward-selection path: each admitted predictor with its admission step
+and the inner cross-validated loss improvement at admission (\code{loss_gain}).
+Excluded survivors are listed with missing steps and gains.
 }
 \section{Interpretation (read before citing)}{
 
-The column describes the \emph{fitted model}. It is not a causal effect:
-a causal reading additionally requires a justified adjustment set, no
-uncontrolled confounding, consistency, joint support and adequate response
-and observation models. These assumptions are not verified by the ranking
-(Byrnes & Dee 2025).
+The table describes the \emph{fitted screening procedure}. It is not a
+causal effect and carries no p-values: a causal reading additionally
+requires a justified adjustment set, no uncontrolled confounding,
+consistency, joint support and adequate response and observation models.
+These assumptions are not verified by the ranking (Byrnes & Dee 2025).
 
-Importance carries no sign, so read it together with
-\code{\link[=cast_effect_table]{cast_effect_table()}} for direction.
+Gains carry no sign convention beyond "lower loss is better", so read the
+path together with \code{\link[=cast_effect_table]{cast_effect_table()}} for response direction.
 }
 
 \references{
-Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
-extrapolation: variable importance requires at least one more model, or
-there is no free variable importance. \emph{Statistics and Computing}, 31, 82.
-\doi{10.1007/s11222-021-10057-z}.
+Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
+data and unobserved confounding variables. \emph{Ecology Letters}, 28(1), e70023.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}

@@ -1,7 +1,6 @@
 #' Select Variables for Species Distribution Models
 #'
-#' Two-stage variable selection whose second stage is calibrated against a
-#' \emph{conditional} permutation null:
+#' Two-stage variable selection:
 #' \enumerate{
 #'   \item \strong{Stage 1 — collinearity thinning}: rank predictors by a
 #'     univariate quadratic-logistic signal (the smaller p-value of the two
@@ -9,99 +8,100 @@
 #'     misses), then greedily keep predictors whose pairwise correlation with
 #'     all kept predictors is \eqn{\le 0.7} (Dormann et al. 2013). Predictors
 #'     whose GLM fails to fit fall back to the marginal-correlation rank.
-#'   \item \strong{Stage 2 — conditional effect above a conditional null}:
-#'     fit a probability random forest on the stage-1 survivors, then measure
-#'     how far each predictor moves the fitted probability when it is
-#'     \strong{shifted while every other predictor is held at its observed
-#'     value} (a g-computation contrast; see [cast_effect_table()]). The same
-#'     statistic is recomputed on forests refitted to within-stratum
-#'     permuted predictors (strata from k-means on the survivors), and
-#'     predictors whose Monte Carlo tail probability is at most 0.05 are
-#'     kept. The kept set is capped at `ncov` predictors (default
-#'     `ceiling(log2(n_presence))`, at most `maxncov`), ordered by the
-#'     conditional effect, so model complexity stays tied to the number of
-#'     presences (Adde et al. 2023).
+#'   \item \strong{Stage 2 — spatial forward selection}: starting from the
+#'     prespecified predictors (if any), repeatedly add the stage-1 survivor
+#'     that most improves the inner cross-validated loss of a probability
+#'     random forest, and stop when nothing improves it further. Folds are
+#'     spatial when coordinates are available, random otherwise. There is no
+#'     predictor-count cap and no fallback set: if no candidate improves on
+#'     the intercept-only model, the selection is empty. Stopping is driven
+#'     by predictive performance (Meyer et al. 2018, 2019), not by an
+#'     arbitrary count.
 #' }
 #'
-#' @section Why the second stage is conditional:
-#' Marginal permutation breaks a predictor's correlation
-#' with every other predictor. For collinear predictors the permuted rows leave
-#' the observed data support, so the score is governed by the model's
-#' extrapolation behaviour rather than by the predictor's influence
-#' (Hooker, Mentch & Zhou 2021). A within-stratum permutation instead shuffles
-#' each predictor only among rows with similar values on the other survivors
-#' (k-means strata), so the null respects the observed joint distribution.
-#' Selection does not find an adjustment set;
-#' use a scientifically justified set directly when estimating causal effects.
+#' @section Why forward selection on spatial-CV loss:
+#' Importance scores rank predictors by how much the fitted model leans on
+#' them, which rewards collinear stand-ins for the correlation they borrow
+#' from the true drivers (Hooker, Mentch & Zhou 2021). A forward search asks
+#' the opposite question — does adding this predictor improve predictions on
+#' held-out spatial folds? — so a redundant proxy adds nothing once its
+#' parents are in the model, while a count cap is never needed: the search
+#' stops by itself. Selection serves parsimony for interpretation and
+#' projection; it does not identify a causal adjustment set.
 #'
 #' @param data Data frame with response and predictors (coordinates allowed;
-#'   they are never selected).
+#'   they are never selected, but `lon`/`lat` define the inner spatial folds
+#'   when both are present and finite).
 #' @param response Binary response column. Default `"presence"`.
 #' @param method `"two_stage"` (default) or `"full"` (keep every predictor).
-#' @param num_trees Trees per forest. Default 300.
-#' @param n_perm Conditional permutations used to build the stage-2 null.
-#' @param shift_size Shift applied to the intervened predictor, in training
-#'   standard deviations. Default `1`. The statistic averages the absolute
-#'   change over `+shift_size` and `-shift_size`, so it does not depend on a
-#'   sign convention.
-#' @param max_rows Rows sampled (evenly, preserving order) for the
-#'   g-computation contrast. Bounds stage-2 cost on large data sets.
+#' @param num_trees Trees per forest in the stage-2 forward search.
+#'   Default 300.
+#' @param max_rows Rows sampled (evenly, preserving order) before the
+#'   stage-2 search. Bounds stage-2 cost on large data sets.
 #'   Default 2000.
-#' @param ncov Maximum predictors retained, ordered by the interventional
-#'   effect. Default `NULL` selects `ceiling(log2(n_presence))` where
-#'   `n_presence` is the number of presences. Use `Inf` for no cap.
-#' @param maxncov Upper bound applied to the automatic `ncov`. Default `12`.
+#' @param metric Inner-CV loss minimised by the forward search: `"brier"`
+#'   (default, mean squared error of the predicted probability, sensitive to
+#'   calibration) or `"auc"` (rank discrimination, insensitive to calibration
+#'   shifts).
+#' @param tolerance Non-negative number. A candidate is admitted only if its
+#'   paired inner-CV loss improvement exceeds both this absolute floor and
+#'   two standard errors of the fold differences (a 2-SE guard in the spirit
+#'   of the `glmnet`/`rpart` one-standard-error rule, set a notch stricter
+#'   because greedy search always takes the best of many candidates).
+#'   Default `0`, i.e. the 2-SE guard alone stops the search; outer nested
+#'   spatial CV in [cast_cv()] remains the honest performance estimate.
+#' @param n_folds Number of inner folds for the stage-2 search. Default `3`.
 #' @param seed Random seed.
 #' @param verbose Print progress.
 #' @param keep Character vector of predictors specified before screening, such
 #'   as an exposure and a scientifically justified adjustment set. These bypass
-#'   collinearity thinning and the null threshold, count toward `ncov`, and
-#'   cannot be removed by the cap. The cap must accommodate them. This does not
-#'   identify a sufficient adjustment set; candidate covariates must also be
-#'   scientifically admissible (not colliders or mediators of a total effect).
+#'   collinearity thinning and are always retained: expert knowledge outranks
+#'   the data-driven search. Candidate covariates must still be scientifically
+#'   admissible (not colliders or mediators of a total effect); retention does
+#'   not verify a sufficient adjustment set.
 #'
-#' @return A `cast_select` object with `selected` (kept predictors), `scores`
-#'   (per-predictor marginal `assoc`, the `stage1_p` ranking signal with its
-#'   `stage1_rank`, the stage-1 `collinear_thinned` flag,
-#'   `interventional_effect` -- the stage-2 selection statistic -- with its
-#'   `effect_rank`, its conditional-permutation `p_value`,
-#'   the feature-wise `null_threshold`,
-#'   the `selected_reason` (`"null"`, `"null+top-ncov"`,
-#'   `"fallback-top-ncov"`, `"prespecified"`, `"full"` or `"excluded"`), the
-#'   `kept_by_design` indicator for `keep`, and the `selected` flag).
-#'   Prespecified retention is not evidence of an effect. Selection uses
-#'   `(1 + sum(null >= observed)) / (1 + n_perm)` for each predictor
-#'   separately. These are screening diagnostics: the
-#'   response-dependent stage-1 screen is held fixed during permutation, so
-#'   they do not establish confirmatory p-values or FDR control.
-#'   `passed_null` distinguishes evidence from a capped or fallback set when
-#'   the null is not the binding constraint. Fewer than 19 permutations
-#'   cannot resolve p <= 0.05.
+#' @return A `cast_select` object with `selected` (kept predictors, in
+#'   admission order), `scores` (per-predictor marginal `assoc`, the
+#'   `stage1_p` ranking signal with its `stage1_rank`, the stage-1
+#'   `collinear_thinned` flag, the admission `step_added` (`0` for
+#'   prespecified predictors, `NA` for never-admitted ones), the
+#'   `loss_gain` (inner-CV loss improvement at admission, `NA` otherwise),
+#'   the `selected_reason` (`"prespecified"`, `"forward"`, `"full"` or
+#'   `"excluded"`), the `kept_by_design` indicator for `keep`, and the
+#'   `selected` flag). An empty `selected` set is a valid answer: it means
+#'   no candidate improved on the intercept-only model.
 #'
 #' @references
-#' Adde, A. et al. (2023). Too many candidates: embedded covariate selection
-#' procedure for species distribution modelling with the covsel R package.
-#' \emph{Ecological Informatics} 75: 102080.
-#'
 #' Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 #' with it in ecological studies. \emph{Ecography} 36: 27-46.
 #'
-#' Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
-#' extrapolation: variable importance requires at least one more model, or
-#' there is no free variable importance. \emph{Statistics and Computing} 31: 82.
-#' \doi{10.1007/s11222-021-10057-z}.
+#' Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
+#' learning models using forward feature selection and target-oriented
+#' validation. \emph{Environmental Modelling & Software} 101: 1-9.
+#' \doi{10.1016/j.envsoft.2017.12.001}.
+#'
+#' Meyer, H. et al. (2019). Importance of spatial predictor variable selection
+#' in machine learning applications — moving from data reproduction to spatial
+#' prediction. \emph{Ecological Modelling} 411: 108815.
+#' \doi{10.1016/j.ecolmodel.2019.108815}.
 #' @seealso [cast_effect_table()], [cast_importance()]
 #' @export
 cast_select <- function(data, response = "presence",
                          method = c("two_stage", "full"),
-                         num_trees = 300L, n_perm = 49L, shift_size = 1,
-                         max_rows = 2000L, ncov = NULL, maxncov = 12L,
+                         num_trees = 300L, max_rows = 2000L,
+                         metric = c("brier", "auc"),
+                         tolerance = 0, n_folds = 3L,
                          seed = NULL, verbose = TRUE, keep = character(0)) {
   if (!missing(method) && (!is.character(method) || length(method) != 1L ||
                           is.na(method) || !method %in% c("two_stage", "full"))) {
     cli::cli_abort("{.arg method} must be one of 'two_stage' or 'full'.")
   }
   method <- match.arg(method)
+  if (missing(metric)) metric <- "brier"
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric) ||
+      !metric %in% c("brier", "auc")) {
+    cli::cli_abort("{.arg metric} must be {.val brier} or {.val auc}.")
+  }
   env_vars <- get_env_vars(data, response)
   if (!is.character(keep) || anyNA(keep) || anyDuplicated(keep) ||
       !all(keep %in% env_vars)) {
@@ -111,53 +111,33 @@ cast_select <- function(data, response = "presence",
   .cast_check_numeric_predictors(data[, env_vars, drop = FALSE], arg = "data")
   if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
   num_trees <- as.integer(num_trees)
-  n_perm <- as.integer(n_perm)
-  if (is.na(n_perm) || n_perm < 1L) {
-    cli::cli_abort("{.arg n_perm} must be at least 1.")
-  }
-  if (!is.numeric(shift_size) || length(shift_size) != 1L ||
-      !is.finite(shift_size) || shift_size <= 0) {
-    cli::cli_abort("{.arg shift_size} must be one positive finite number.")
+  if (is.na(num_trees) || num_trees < 1L) {
+    cli::cli_abort("{.arg num_trees} must be at least 1.")
   }
   max_rows <- as.integer(max_rows)
   if (is.na(max_rows) || max_rows < 2L) {
     cli::cli_abort("{.arg max_rows} must be at least 2.")
   }
-  maxncov <- suppressWarnings(as.integer(maxncov))
-  if (length(maxncov) != 1L || is.na(maxncov) || maxncov < 1L) {
-    cli::cli_abort("{.arg maxncov} must be one positive integer.")
+  if (!is.numeric(tolerance) || length(tolerance) != 1L ||
+      !is.finite(tolerance) || tolerance < 0) {
+    cli::cli_abort("{.arg tolerance} must be one finite non-negative number.")
   }
-  n_presence <- sum(data[[response]] == 1, na.rm = TRUE)
-  ncov_auto <- max(1L, ceiling(log2(max(n_presence, 2L))))
-  ncov_auto <- min(ncov_auto, maxncov)
-  if (is.null(ncov)) {
-    ncov <- ncov_auto
-  } else if (length(ncov) == 1L && is.infinite(ncov) && ncov > 0) {
-    ncov <- .Machine$integer.max
-  } else {
-    ncov <- suppressWarnings(as.integer(ncov))
-    if (length(ncov) != 1L || is.na(ncov) || ncov < 1L) {
-      cli::cli_abort("{.arg ncov} must be one positive integer, {.code NULL} or {.code Inf}.")
-    }
+  n_folds <- as.integer(n_folds)
+  if (is.na(n_folds) || n_folds < 2L) {
+    cli::cli_abort("{.arg n_folds} must be at least 2.")
   }
 
   if (identical(method, "full")) {
     scores <- data.frame(variable = env_vars, assoc = NA_real_,
                          stage1_p = NA_real_, stage1_rank = NA_integer_,
                          collinear_thinned = FALSE,
-                         interventional_effect = NA_real_,
-                         effect_rank = NA_integer_,
-                         p_value = NA_real_,
-                         null_threshold = NA_real_,
-                         passed_null = FALSE, fallback = FALSE,
+                         step_added = NA_integer_,
+                         loss_gain = NA_real_,
                          kept_by_design = env_vars %in% keep,
                          selected_reason = "full",
                          selected = TRUE)
     return(new_cast_select(selected = env_vars, scores = scores,
                            method = "full", diagnostics = list(keep = keep)))
-  }
-  if (length(keep) > ncov) {
-    cli::cli_abort("{.arg ncov} must be at least length(keep); increase the cap rather than dropping prespecified predictors.")
   }
 
   # ---- Stage 1: quadratic-logistic ranking + greedy pairwise |r| <= 0.7 ----
@@ -191,127 +171,49 @@ cast_select <- function(data, response = "presence",
   }
   if (verbose) cli::cli_inform("Stage 1: {length(env_vars)} -> {length(kept)} after collinearity thinning.")
 
-  # ---- Stage 2: conditional effect above a conditional null ---------------
-  effect <- stats::setNames(rep(NA_real_, length(kept)), kept)
-  p_value <- effect
-  threshold <- NA_real_
-  n_strata <- NA_integer_
-  if (length(kept) >= 1L) {
-    check_suggested("ranger", "for stage-2 conditional screening")
-    X <- data[, kept, drop = FALSE]
-    for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
-    ok <- rowSums(!is.finite(as.matrix(X))) == 0L
-    X <- X[ok, , drop = FALSE]
-    y <- factor(data[[response]][ok])
-    if (!nrow(X) || length(unique(y)) < 2L) {
-      cli::cli_abort(c(
-        "Stage 2 needs complete predictor rows and two response classes.",
-        "i" = "Check for missing predictor values or a single-class response."))
-    }
-    sds <- vapply(X, stats::sd, numeric(1))
-    sds[!is.finite(sds) | sds <= 0] <- 1
-    # Bound the g-computation cost; even steps keep the row distribution.
-    if (nrow(X) > max_rows) {
-      idx <- unique(round(seq(1, nrow(X), length.out = max_rows)))
-      X <- X[idx, , drop = FALSE]
-      y <- y[idx]
-    }
-
-    if (!is.null(seed)) set.seed(seed)
-    base_seed <- seed %||% 1L
-    fit_obs <- .cast_importance_fit(X, y, num_trees, base_seed)
-    effect <- .cast_shift_effect(fit_obs$model, X, sds, shift_size)
-
-    if (verbose) cli::cli_inform("Stage 2: building the conditional null from {n_perm} within-stratum permutation{?s}...")
-    # Strata group rows with similar values on the OTHER survivors, so each
-    # null replicate shuffles a predictor only among rows that match on the
-    # rest. The null forests see the same joint X support as the observed
-    # forest; only the conditional links to the response are broken. With one
-    # stratum this degrades gracefully to a full permutation.
-    strata_list <- .cast_perm_strata_list(X, base_seed)
-    n_strata <- max(vapply(strata_list, function(s) length(unique(s)),
-                           integer(1)))
-    # Each feature has its own null scale; unrelated predictors are not
-    # exchangeable null replicates for this predictor.
-    null_draws <- vapply(seq_len(n_perm), function(i) {
-      X_p <- .cast_stratum_permute_list(X, strata_list)
-      m <- ranger::ranger(x = X_p, y = y, probability = TRUE,
-                          num.trees = num_trees, seed = base_seed + i,
-                          num.threads = 1L, write.forest = TRUE)
-      .cast_shift_effect(m, X_p, sds, shift_size)
-    }, numeric(length(kept)))
-    if (is.null(dim(null_draws))) {
-      null_draws <- matrix(null_draws, nrow = length(kept))
-    }
-    rownames(null_draws) <- kept
-    threshold <- apply(null_draws, 1, stats::quantile, probs = 0.95, names = FALSE)
-    p_value <- vapply(kept, function(v)
-      (1 + sum(null_draws[v, ] >= effect[[v]])) / (1 + n_perm), numeric(1))
-  }
-  effect_rank <- stats::setNames(rep(NA_integer_, length(kept)), kept)
-  effect_rank[names(sort(effect, decreasing = TRUE))] <- seq_along(kept)
-  cap <- min(ncov, length(kept))
-  pass <- kept[is.finite(p_value) & p_value <= 0.05]
-  pass <- pass[order(-effect[pass])]
-  optional_pass <- setdiff(pass, keep)
-  optional_cap <- cap - length(keep)
-  capped <- length(optional_pass) > optional_cap
-  fallback <- !length(pass)
-  reason <- stats::setNames(rep("excluded", length(kept)), kept)
+  # ---- Stage 2: spatial forward selection on inner-CV loss -----------------
+  step_added <- stats::setNames(rep(NA_integer_, length(env_vars)), env_vars)
+  loss_gain <- stats::setNames(rep(NA_real_, length(env_vars)), env_vars)
+  reason <- stats::setNames(rep("excluded", length(env_vars)), env_vars)
+  path <- data.frame(step = integer(0), added = character(0),
+                     loss = numeric(0), gain = numeric(0),
+                     stringsAsFactors = FALSE)
+  diagnostics <- list(stage1_kept = kept, stage1_metric = "poly2-glm-min-p",
+                      num_trees = num_trees, max_rows = max_rows,
+                      metric = metric, tolerance = tolerance,
+                      n_folds = n_folds, keep = keep)
   if (!length(kept)) {
-    selected <- kept
-    reason <- stats::setNames(character(0), character(0))
-    capped <- FALSE
-    fallback <- TRUE
     cli::cli_warn("No varying predictor survived stage 1; returning an empty set.")
-  } else if (!length(pass)) {
-    optional <- setdiff(names(sort(effect, decreasing = TRUE)), keep)
-    selected <- c(keep, utils::head(optional, optional_cap))
-    reason[selected] <- "fallback-top-ncov"
-    cli::cli_warn(c(
-      "No predictor exceeded the conditional null; retaining {length(keep)} prespecified and keeping the top {optional_cap} optional predictors.",
-      "i" = "Read this as weak evidence for any single predictor, not as a clean screen."))
+    selected <- kept
   } else {
-    selected <- c(keep, utils::head(optional_pass, optional_cap))
-    reason[selected] <- if (capped) "null+top-ncov" else "null"
-    if (verbose) cli::cli_inform("Stage 2: retaining {length(keep)} prespecified and {length(selected) - length(keep)} null-screened predictors (cap = {cap}).")
+    fwd <- .cast_forward_search(data, response, kept, keep, num_trees,
+                                max_rows, metric, tolerance, n_folds,
+                                seed, verbose)
+    selected <- fwd$selected
+    step_added[names(fwd$step_added)] <- fwd$step_added
+    loss_gain[names(fwd$loss_gain)] <- fwd$loss_gain
+    reason[selected] <- fwd$reason[selected]
+    reason[keep] <- "prespecified"
+    path <- fwd$path
+    diagnostics <- c(diagnostics, fwd$diagnostics)
+    diagnostics$path <- fwd$path
   }
-  reason[keep] <- "prespecified"
-  passed_null <- pass
-
   scores <- data.frame(
     variable = env_vars,
     assoc = unname(assoc[env_vars]),
     stage1_p = unname(stage1_p[env_vars]),
     stage1_rank = unname(stage1_rank[env_vars]),
     collinear_thinned = unname(thinned[env_vars]),
-    interventional_effect = unname(effect[env_vars]),
-    effect_rank = unname(effect_rank[env_vars]),
-    p_value = unname(p_value[env_vars]),
-    null_threshold = unname(threshold[match(env_vars, names(threshold))]),
-    passed_null = env_vars %in% passed_null,
-    fallback = fallback & env_vars %in% selected & !env_vars %in% keep,
+    step_added = unname(step_added[env_vars]),
+    loss_gain = unname(loss_gain[env_vars]),
     kept_by_design = env_vars %in% keep,
-    selected_reason = ifelse(env_vars %in% selected,
-                             unname(reason[env_vars]), "excluded"),
+    selected_reason = unname(reason[env_vars]),
     selected = env_vars %in% selected,
     stringsAsFactors = FALSE)
   scores$selected_reason[scores$selected_reason %in% c(NA, "NA")] <- "excluded"
 
   new_cast_select(selected = selected, scores = scores, method = "two_stage",
-                  diagnostics = list(
-                    stage1_kept = kept, stage1_metric = "poly2-glm-min-p",
-                    num_trees = num_trees,
-                    n_perm = n_perm, shift_size = shift_size,
-                    max_rows = max_rows, null_quantile = 0.95,
-                    null_threshold = threshold,
-                    null_method = paste("feature-wise within-stratum",
-                                        "permutation of the shift effect"),
-                    null_strata = n_strata,
-                    statistic = "interventional_effect",
-                    n_presence = n_presence, ncov = cap, maxncov = maxncov,
-                    keep = keep, capped = capped,
-                    fallback = fallback, alpha = 0.05))
+                  diagnostics = diagnostics)
 }
 
 # ---- internal helpers -----------------------------------------------------
@@ -340,93 +242,290 @@ cast_select <- function(data, response = "presence",
   }, error = function(e) NA_real_)
 }
 
-#' Fit a probability forest (no permutation importance)
+#' Inner folds for the stage-2 forward search
 #'
-#' Stage 2 reports a single conditional-effect statistic, so the forest is
-#' fit without the permutation-importance bookkeeping.
+#' Spatial grid folds when finite `lon`/`lat` columns exist, otherwise plain
+#' random folds. Never aborts on degenerate coordinates: [make_spatial_folds()]
+#' already collapses those.
 #' @keywords internal
 #' @noRd
-.cast_importance_fit <- function(X, y, num_trees, seed) {
-  m <- ranger::ranger(x = X, y = y, probability = TRUE,
-                      num.trees = num_trees, importance = "none",
-                      seed = seed, num.threads = 1L)
-  list(model = m, importance = stats::setNames(rep(NA_real_, ncol(X)), colnames(X)))
-}
-
-#' Strata for the conditional permutation null
-#'
-#' One stratification per survivor, each built from the OTHER survivors, so a
-#' predictor's own signal cannot leak into its null through the clustering.
-#' Few rows collapse to a single stratum (a full permutation); k-means
-#' failure also falls back to one stratum rather than aborting. A lone
-#' survivor has nothing to condition on and permutes fully.
-#' @keywords internal
-#' @noRd
-.cast_perm_strata_list <- function(X, seed, k = 5L) {
-  n <- nrow(X)
-  out <- lapply(names(X), function(v) {
-    others <- setdiff(names(X), v)
-    if (!length(others)) return(rep(1L, n))
-    .cast_perm_strata(X[, others, drop = FALSE], seed)
-  })
-  stats::setNames(out, names(X))
-}
-
-#' @keywords internal
-#' @noRd
-.cast_perm_strata <- function(X, seed, k = 5L) {
-  n <- nrow(X)
-  k_use <- min(as.integer(k), n)
-  if (k_use < 2L || !ncol(X)) return(rep(1L, n))
-  Xs <- scale(as.matrix(X))
-  Xs[!is.finite(Xs)] <- 0
-  km <- tryCatch(suppressWarnings(stats::kmeans(Xs, centers = k_use, nstart = 10L)),
-                 error = function(e) NULL)
-  if (is.null(km)) return(rep(1L, n))
-  as.integer(km$cluster)
-}
-
-#' Permute each predictor independently within its own strata
-#'
-#' Single-row strata are left untouched (`sample()` on one value would sample
-#' from `1:x` instead of permuting).
-#' @keywords internal
-#' @noRd
-.cast_stratum_permute_list <- function(X, strata_list) {
-  X_p <- X
-  for (v in names(X_p)) {
-    strata <- strata_list[[v]]
-    for (s in unique(strata)) {
-      idx <- which(strata == s)
-      if (length(idx) < 2L) next
-      X_p[idx, v] <- sample(X_p[idx, v])
+.cast_inner_folds <- function(data, n_folds) {
+  if (all(c("lon", "lat") %in% names(data))) {
+    lon <- suppressWarnings(as.numeric(data$lon))
+    lat <- suppressWarnings(as.numeric(data$lat))
+    if (all(is.finite(lon)) && all(is.finite(lat))) {
+      return(list(folds = make_spatial_folds(lon, lat, k = n_folds,
+                                             method = "grid", seed = NULL),
+                  method = "spatial"))
     }
   }
-  X_p
+  list(folds = sample(rep(seq_len(n_folds), length.out = nrow(data))),
+       method = "random")
 }
 
-#' Interventional effect of shifting each predictor by +/- shift_size SD
+#' Inner-CV loss of one candidate predictor set
 #'
-#' One g-computation contrast per predictor: shift it, hold every other
-#' predictor at its observed value, and average the absolute change in the
-#' fitted probability over both shift directions.
+#' Fits a probability forest per inner fold and returns the mean held-out
+#' loss together with the per-fold losses (for paired comparison). Folds
+#' without two response classes (or failed predictions) contribute `NA`; a
+#' set with no evaluable fold scores `NA`.
 #' @keywords internal
 #' @noRd
-.cast_shift_effect <- function(model, X, sds, shift_size) {
-  base <- stats::predict(model, data = X)$predictions[, "1"]
-  out <- stats::setNames(numeric(ncol(X)), colnames(X))
-  for (v in colnames(X)) {
-    step <- shift_size * sds[[v]]
-    total <- 0
-    for (sgn in c(1, -1)) {
-      Xs <- X
-      Xs[[v]] <- Xs[[v]] + sgn * step
-      cf <- stats::predict(model, data = Xs)$predictions[, "1"]
-      d <- abs(cf - base)
-      d[!is.finite(d)] <- NA_real_
-      total <- total + mean(d, na.rm = TRUE)
+.cast_inner_loss <- function(X, y_num, folds, vars, metric, num_trees,
+                             seed_base, counter) {
+  lv <- sort(unique(folds))
+  fl <- vapply(lv, function(f) {
+    tr <- which(folds != f)
+    te <- which(folds == f)
+    if (!length(tr) || !length(te) ||
+        length(unique(y_num[tr])) < 2L) return(NA_real_)
+    counter$seed <- counter$seed + 1L
+    m <- tryCatch(
+      ranger::ranger(x = X[tr, vars, drop = FALSE], y = factor(y_num[tr]),
+                     probability = TRUE, num.trees = num_trees,
+                     seed = seed_base + counter$seed, num.threads = 1L),
+      error = function(e) NULL)
+    if (is.null(m)) return(NA_real_)
+    p <- tryCatch(
+      suppressWarnings(stats::predict(m, data = X[te, vars, drop = FALSE])$predictions[, "1"]),
+      error = function(e) NULL)
+    if (is.null(p)) return(NA_real_)
+    if (identical(metric, "brier")) {
+      ok <- is.finite(p)
+      if (!any(ok)) return(NA_real_)
+      mean((p[ok] - y_num[te][ok])^2)
+    } else {
+      compute_auc(as.integer(y_num[te]), as.numeric(p))
     }
-    out[[v]] <- total / 2
+  }, numeric(1))
+  list(loss = if (all(!is.finite(fl))) NA_real_ else mean(fl[is.finite(fl)]),
+       folds = stats::setNames(fl, lv), fits = length(lv))
+}
+
+#' Intercept-only inner-CV loss (the honest null model)
+#'
+#' For `"brier"`, each fold predicts its own training prevalence; for `"auc"`,
+#' a constant scores 0.5 by definition (reported only where the test fold
+#' carries two classes, keeping the pairing honest).
+#' @keywords internal
+#' @noRd
+.cast_null_loss <- function(y_num, folds, metric) {
+  lv <- sort(unique(folds))
+  if (identical(metric, "auc")) {
+    fl <- vapply(lv, function(f) {
+      if (length(unique(y_num[folds == f])) < 2L) return(NA_real_)
+      0.5
+    }, numeric(1))
+    return(list(loss = 0.5, folds = stats::setNames(fl, lv)))
   }
-  out
+  fl <- vapply(lv, function(f) {
+    tr <- which(folds != f)
+    te <- which(folds == f)
+    if (!length(tr) || !length(te)) return(NA_real_)
+    p0 <- mean(y_num[tr])
+    if (!is.finite(p0)) return(NA_real_)
+    mean((p0 - y_num[te])^2)
+  }, numeric(1))
+  list(loss = if (all(!is.finite(fl))) NA_real_ else mean(fl[is.finite(fl)]),
+       folds = stats::setNames(fl, lv))
+}
+
+#' Paired admission test: 2-SE rule with an absolute floor
+#'
+#' Gains are signed so positive means better (`ref - cand` for Brier,
+#' `cand - ref` for AUC), paired by inner fold. Admits iff the mean gain
+#' over finite paired folds exceeds both `tolerance` and two standard errors
+#' of the gains. The 2-SE bar (rather than 1-SE) guards against the
+#' best-of-many luck intrinsic to greedy search over correlated folds, whose
+#' overlap makes the naive SE optimistic. Returns the mean gain (or `NA`
+#' when no paired fold exists).
+#' @keywords internal
+#' @noRd
+.cast_admits <- function(ref_folds, cand_folds, tolerance, metric) {
+  common <- intersect(names(ref_folds), names(cand_folds))
+  g <- if (identical(metric, "brier")) {
+    ref_folds[common] - cand_folds[common]
+  } else {
+    cand_folds[common] - ref_folds[common]
+  }
+  g <- unname(g[is.finite(g)])
+  if (!length(g)) return(list(admit = FALSE, gain = NA_real_))
+  se <- if (length(g) >= 2L) 2 * stats::sd(g) / sqrt(length(g)) else 0
+  gain <- mean(g)
+  list(admit = is.finite(gain) && gain > max(tolerance, se), gain = gain)
+}
+
+#' Spatial forward selection on inner-CV loss
+#'
+#' Starts from the prespecified set (or the best pair when nothing is
+#' prespecified), then greedily admits the candidate with the largest loss
+#' improvement while it exceeds `tolerance`. Returns an empty selection —
+#' with a warning, not a fallback set — when nothing improves on the
+#' intercept-only model.
+#' @keywords internal
+#' @noRd
+.cast_forward_search <- function(data, response, kept, keep, num_trees,
+                                 max_rows, metric, tolerance, n_folds,
+                                 seed, verbose) {
+  check_suggested("ranger", "for stage-2 forward selection")
+  X <- data[, kept, drop = FALSE]
+  for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
+  y_raw <- data[[response]]
+  y_num <- suppressWarnings(as.numeric(y_raw))
+  ok <- rowSums(!is.finite(as.matrix(X))) == 0L &
+    is.finite(y_num) & y_num %in% c(0, 1)
+  rows <- which(ok)
+  if (!length(rows)) {
+    cli::cli_abort(c(
+      "Stage 2 needs complete predictor rows and two response classes.",
+      "i" = "Check for missing predictor values or a single-class response."))
+  }
+  # Bound the search cost; even steps keep the row distribution.
+  if (length(rows) > max_rows) {
+    rows <- rows[unique(round(seq(1, length(rows), length.out = max_rows)))]
+  }
+  X <- X[rows, , drop = FALSE]
+  y_num <- y_num[rows]
+  geo <- data[rows, , drop = FALSE]
+  if (length(unique(y_num)) < 2L) {
+    cli::cli_abort(c(
+      "Stage 2 needs complete predictor rows and two response classes.",
+      "i" = "Check for missing predictor values or a single-class response."))
+  }
+  if (!is.null(seed)) set.seed(seed)
+  seed_base <- seed %||% 1L
+  inner <- .cast_inner_folds(geo, n_folds)
+  folds <- inner$folds
+  if (length(unique(folds)) < 2L) {
+    cli::cli_abort(c(
+      "Stage 2 needs at least two non-empty inner folds.",
+      "i" = "Provide more rows or fewer {.arg n_folds}."))
+  }
+  counter <- new.env(parent = emptyenv())
+  counter$seed <- 0L
+  eval_loss <- function(vars) {
+    .cast_inner_loss(X, y_num, folds, vars, metric, num_trees,
+                     seed_base, counter)
+  }
+  null_res <- .cast_null_loss(y_num, folds, metric)
+  n_fits <- 0L
+  path <- data.frame(step = integer(0), added = character(0),
+                     loss = numeric(0), gain = numeric(0),
+                     stringsAsFactors = FALSE)
+  step_added <- stats::setNames(rep(NA_integer_, length(kept)), kept)
+  loss_gain <- stats::setNames(rep(NA_real_, length(kept)), kept)
+  status <- "selected"
+
+  current <- keep
+  pool <- setdiff(kept, keep)
+  cur <- if (length(current)) {
+    r <- eval_loss(current)
+    n_fits <- n_fits + r$fits
+    r
+  } else {
+    list(loss = NA_real_, folds = stats::setNames(numeric(0), character(0)), fits = 0L)
+  }
+  if (length(keep)) {
+    step_added[keep] <- 0L
+    g0 <- .cast_admits(null_res$folds, cur$folds, tolerance, metric)
+    loss_gain[keep] <- g0$gain
+    path <- rbind(path, data.frame(step = 0L, added = paste(keep, collapse = "+"),
+                                   loss = cur$loss,
+                                   gain = g0$gain,
+                                   stringsAsFactors = FALSE))
+    if (verbose) cli::cli_inform("Stage 2: starting from {length(keep)} prespecified predictor{?s}.")
+  } else if (length(pool) >= 2L) {
+    # CAST-style start: the best pair must first beat the intercept model,
+    # otherwise the honest answer is an empty set, not a fallback set.
+    pairs <- utils::combn(pool, 2, simplify = FALSE)
+    if (verbose) cli::cli_inform("Stage 2: testing {length(pairs)} candidate pairs in {n_folds} inner {inner$method} folds...")
+    cand <- lapply(pairs, function(pr) {
+      r <- eval_loss(pr)
+      n_fits <<- n_fits + r$fits
+      r
+    })
+    verdict <- lapply(cand, function(r) .cast_admits(null_res$folds, r$folds, tolerance, metric))
+    gains <- vapply(verdict, function(v) ifelse(is.finite(v$gain), v$gain, -Inf), numeric(1))
+    best <- which.max(gains)
+    if (!length(best) || !isTRUE(verdict[[best]]$admit)) {
+      cli::cli_warn(c(
+        "No candidate pair improves on the intercept-only model; returning an empty set.",
+        "i" = "This is a finding (no detectable signal), not a failure. Prespecify {.arg keep} to force predictors in."))
+      return(list(selected = character(0), step_added = step_added,
+                  loss_gain = loss_gain, reason = stats::setNames(character(0), character(0)),
+                  path = path,
+                  diagnostics = list(inner_method = inner$method, null_loss = null_res$loss,
+                                     final_loss = NA_real_, n_fits = n_fits,
+                                     status = "empty_selection")))
+    }
+    current <- pairs[[best]]
+    cur <- cand[[best]]
+    g <- verdict[[best]]$gain
+    step_added[current] <- 1L
+    loss_gain[current] <- g
+    path <- rbind(path, data.frame(step = 1L, added = paste(current, collapse = "+"),
+                                   loss = cur$loss, gain = g,
+                                   stringsAsFactors = FALSE))
+    pool <- setdiff(pool, current)
+    if (verbose) cli::cli_inform("Stage 2: starting pair {.val {current}}.")
+  } else {
+    # A single candidate: admit it only if it beats the intercept model.
+    r <- eval_loss(pool)
+    n_fits <- n_fits + r$fits
+    v <- .cast_admits(null_res$folds, r$folds, tolerance, metric)
+    if (!isTRUE(v$admit)) {
+      cli::cli_warn(c(
+        "The single candidate does not improve on the intercept-only model; returning an empty set.",
+        "i" = "This is a finding (no detectable signal), not a failure. Prespecify {.arg keep} to force predictors in."))
+      return(list(selected = character(0), step_added = step_added,
+                  loss_gain = loss_gain, reason = stats::setNames(character(0), character(0)),
+                  path = path,
+                  diagnostics = list(inner_method = inner$method, null_loss = null_res$loss,
+                                     final_loss = NA_real_, n_fits = n_fits,
+                                     status = "empty_selection")))
+    }
+    current <- pool
+    cur <- r
+    g <- v$gain
+    step_added[current] <- 1L
+    loss_gain[current] <- g
+    path <- rbind(path, data.frame(step = 1L, added = current,
+                                   loss = cur$loss, gain = g,
+                                   stringsAsFactors = FALSE))
+    pool <- character(0)
+  }
+
+  # Greedy additions while any candidate passes the paired 1-SE admission test.
+  step <- max(path$step)
+  repeat {
+    if (!length(pool)) break
+    cand <- lapply(pool, function(v) {
+      r <- eval_loss(c(current, v))
+      n_fits <<- n_fits + r$fits
+      r
+    })
+    verdict <- lapply(cand, function(r) .cast_admits(cur$folds, r$folds, tolerance, metric))
+    gains <- vapply(verdict, function(x) ifelse(is.finite(x$gain), x$gain, -Inf), numeric(1))
+    best <- which.max(gains)
+    if (!length(best) || !isTRUE(verdict[[best]]$admit)) break
+    step <- step + 1L
+    v <- pool[best]
+    current <- c(current, v)
+    cur <- cand[[best]]
+    step_added[v] <- step
+    loss_gain[v] <- verdict[[best]]$gain
+    path <- rbind(path, data.frame(step = step, added = v,
+                                   loss = cur$loss, gain = verdict[[best]]$gain,
+                                   stringsAsFactors = FALSE))
+    pool <- setdiff(pool, v)
+    if (verbose) cli::cli_inform("Stage 2: step {step} admits {.val {v}}.")
+  }
+  if (verbose) cli::cli_inform("Stage 2: retaining {length(current)} predictor{?s} after {step} forward step{?s}.")
+
+  reason <- stats::setNames(rep("forward", length(current)), current)
+  list(selected = current, step_added = step_added, loss_gain = loss_gain,
+       reason = reason, path = path,
+       diagnostics = list(inner_method = inner$method, null_loss = null_res$loss,
+                          final_loss = cur$loss, n_fits = n_fits,
+                          status = "selected"))
 }

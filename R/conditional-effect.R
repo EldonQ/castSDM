@@ -1,9 +1,8 @@
 # Importance reporting ------------------------------------------------------
 #
-# cast_importance() tidies the screen's single conditional-effect column: the
-# shift effect that selected each predictor, with conditional-permutation
-# p-values and null thresholds. It reuses the screen so no new estimation
-# engine or hand-tuned knob is introduced.
+# cast_importance() tidies the screen's forward-selection path: each admitted
+# predictor with the inner-CV loss improvement at admission. It reuses the
+# screen so no new estimation engine or hand-tuned knob is introduced.
 
 #' @keywords internal
 #' @noRd
@@ -25,70 +24,58 @@
   screen
 }
 
-#' Conditional Effect Table from the Screen
+#' Forward-Selection Path from the Screen
 #'
 #' Turns a two-stage screen into a tidy per-predictor table carrying the
-#' single \strong{conditional effect} that selected the predictor (stage 2 of
-#' [cast_select()]). Within-stratum permutation p-values refer only to this
-#' statistic. Response-dependent stage-1 filtering is not repeated under the
-#' null, so these are exploratory scores, not confirmatory tests with
-#' guaranteed error control.
+#' forward-selection path: each admitted predictor with its admission step
+#' and the inner cross-validated loss improvement at admission (`loss_gain`).
+#' Excluded survivors are listed with missing steps and gains.
 #'
 #' @section Interpretation (read before citing):
-#' The column describes the \emph{fitted model}. It is not a causal effect:
-#' a causal reading additionally requires a justified adjustment set, no
-#' uncontrolled confounding, consistency, joint support and adequate response
-#' and observation models. These assumptions are not verified by the ranking
-#' (Byrnes & Dee 2025).
+#' The table describes the \emph{fitted screening procedure}. It is not a
+#' causal effect and carries no p-values: a causal reading additionally
+#' requires a justified adjustment set, no uncontrolled confounding,
+#' consistency, joint support and adequate response and observation models.
+#' These assumptions are not verified by the ranking (Byrnes & Dee 2025).
 #'
-#' Importance carries no sign, so read it together with
-#' [cast_effect_table()] for direction.
+#' Gains carry no sign convention beyond "lower loss is better", so read the
+#' path together with [cast_effect_table()] for response direction.
 #'
 #' @param object A `cast_select` from `method = "two_stage"`, or a
 #'   `cast_fit` / `cast_result` that carries such a screen.
 #'
 #' @return A `cast_importance` object.
 #' @references
-#' Hooker, G., Mentch, L. & Zhou, S. (2021). Unrestricted permutation forces
-#' extrapolation: variable importance requires at least one more model, or
-#' there is no free variable importance. *Statistics and Computing*, 31, 82.
-#' \doi{10.1007/s11222-021-10057-z}.
+#' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
+#' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
 #' @seealso [cast_select()], [cast_effect_table()]
 #' @export
 cast_importance <- function(object) {
   screen <- .cast_extract_screen(object)
   sc <- screen$scores
-  needed <- c("interventional_effect", "p_value")
+  needed <- c("step_added", "loss_gain")
   if (!all(needed %in% names(sc))) {
     cli::cli_abort(c(
-      "{.fn cast_importance} needs a two-stage screen carrying a stage-2 statistic.",
+      "{.fn cast_importance} needs a two-stage screen carrying a forward-selection path.",
       i = "Run {.code cast_select(..., method = \"two_stage\")} first."))
-  }
-  sc <- sc[is.finite(sc$interventional_effect), , drop = FALSE]
-  if (!nrow(sc)) {
-    cli::cli_abort(c(
-      "The screen holds no finite conditional-effect estimates.",
-      i = "{.code method = \"full\"} skips stage 2, so there is nothing to report."))
   }
   effects <- data.frame(
     variable              = sc$variable,
-    interventional_effect = sc$interventional_effect,
-    null_threshold        = sc$null_threshold,
-    p_value               = sc$p_value,
+    step_added            = sc$step_added,
+    loss_gain             = sc$loss_gain,
     selected              = sc$selected,
     kept_by_design        = sc$kept_by_design,
     selected_reason       = sc$selected_reason,
     stringsAsFactors = FALSE
   )
-  effects <- effects[order(-effects$interventional_effect), , drop = FALSE]
+  effects <- effects[order(is.na(effects$step_added), effects$step_added), , drop = FALSE]
   rownames(effects) <- NULL
 
   diagnostics <- screen$diagnostics
-  diagnostics$measure <- "interventional_effect"
+  diagnostics$measure <- "loss_gain"
   new_cast_importance(
     effects = effects,
-    alpha = screen$diagnostics$alpha %||% 0.05,
-    threshold = screen$diagnostics$null_threshold %||% NA_real_,
+    metric = screen$diagnostics$metric %||% "brier",
     diagnostics = diagnostics
   )
 }
