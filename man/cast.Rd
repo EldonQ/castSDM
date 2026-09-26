@@ -50,7 +50,7 @@ search. Default \code{300}.}
 search: \code{"brier"} (default) or \code{"auc"}.}
 
 \item{select_tolerance}{Numeric. Minimum inner-CV loss improvement required
-to admit a predictor, on top of the 1-SE guard. Default \code{0}.}
+to admit a predictor, on top of the 2-SE guard. Default \code{0}.}
 
 \item{select_n_folds}{Integer. Inner folds for the stage-2 forward search.
 Default \code{3}.}

@@ -19,7 +19,7 @@
 A \code{ggplot} object.
 }
 \description{
-Lollipop plot of each predictor's random-forest permutation importance,
-with the stage-2 permutation-null threshold marked. Predictors above the
-null are highlighted.
+Lollipop plot of the forward-selection path: each admitted predictor with
+the inner-CV loss improvement at admission. Excluded survivors are listed
+with missing steps and gains, not plotted.
 }

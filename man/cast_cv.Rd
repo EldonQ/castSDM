@@ -66,6 +66,8 @@ the fold boundary. Default \code{0} (no exclusion band).}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.
+Metrics include \code{auc_n_folds}, \code{tss_n_folds}, and \code{cbi_n_folds} counting
+finite values separately; \code{n_folds} counts model result rows.
 Empty or failed folds do not contribute predictive metrics. When no fold
 is evaluable, the \code{cast_cv_no_evaluable_folds} error carries \code{screens} and
 \code{fold_status} for inspection.

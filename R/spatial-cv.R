@@ -33,6 +33,8 @@
 #' @param verbose Print progress.
 #'
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
+#'   Metrics include `auc_n_folds`, `tss_n_folds`, and `cbi_n_folds` counting
+#'   finite values separately; `n_folds` counts model result rows.
 #'   Empty or failed folds do not contribute predictive metrics. When no fold
 #'   is evaluable, the `cast_cv_no_evaluable_folds` error carries `screens` and
 #'   `fold_status` for inspection.
@@ -231,11 +233,15 @@ cast_cv <- function(data,
   agg <- lapply(models, function(mdl) {
     z <- fold_df[fold_df$model == mdl, , drop = FALSE]
     if (!nrow(z)) return(NULL)
+    auc <- z$auc[is.finite(z$auc)]
+    tss <- z$tss[is.finite(z$tss)]
+    cbi <- z$cbi[is.finite(z$cbi)]
     data.frame(
       model = mdl,
-      auc_mean = mean(z$auc, na.rm = TRUE), auc_sd = stats::sd(z$auc, na.rm = TRUE),
-      tss_mean = mean(z$tss, na.rm = TRUE), tss_sd = stats::sd(z$tss, na.rm = TRUE),
-      cbi_mean = mean(z$cbi, na.rm = TRUE), cbi_sd = stats::sd(z$cbi, na.rm = TRUE),
+      auc_mean = if (length(auc)) mean(auc) else NA_real_, auc_sd = stats::sd(auc),
+      tss_mean = if (length(tss)) mean(tss) else NA_real_, tss_sd = stats::sd(tss),
+      cbi_mean = if (length(cbi)) mean(cbi) else NA_real_, cbi_sd = stats::sd(cbi),
+      auc_n_folds = length(auc), tss_n_folds = length(tss), cbi_n_folds = length(cbi),
       n_folds = nrow(z), n_selected_mean = mean(z$n_selected, na.rm = TRUE),
       stringsAsFactors = FALSE
     )

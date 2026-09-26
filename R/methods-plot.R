@@ -228,10 +228,13 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
       stringsAsFactors = FALSE
     )
   }
+  if (!length(rows)) cli::cli_abort("No requested evaluation metrics are available.")
   long <- do.call(rbind, rows)
-  long <- long[!is.na(long$value), , drop = FALSE]
+  long$value[!is.finite(long$value)] <- NA_real_
+  long$label <- ifelse(is.na(long$value), "n.a.", sprintf("%.3f", long$value))
   long$metric <- factor(long$metric, levels = toupper(sub("_mean$", "", present)))
   long$model  <- factor(long$model, levels = rev(m$model))
+  score_range <- range(c(0, 1, long$value), na.rm = TRUE)
 
   # Numeric y positions with manual per-metric offsets keep stems horizontal
   n_metric <- nlevels(long$metric)
@@ -243,12 +246,13 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
   )) +
     ggplot2::geom_segment(
       ggplot2::aes(x = 0, xend = .data$value, yend = .data$y_pos),
-      linewidth = 0.5, alpha = 0.45
+      linewidth = 0.5, alpha = 0.45, na.rm = TRUE
     ) +
-    ggplot2::geom_point(size = 2.6) +
+    ggplot2::geom_point(size = 2.6, na.rm = TRUE) +
     ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("%.3f", .data$value)),
-      hjust = -0.3, size = 2.6,
+      ggplot2::aes(x = ifelse(is.na(.data$value), 0, .data$value), label = .data$label,
+                   hjust = ifelse(!is.na(.data$value) & .data$value < 0, 1.3, -0.3)),
+      size = 2.6,
       family = getOption("castSDM.font_family", "sans"),
       show.legend = FALSE
     ) +
@@ -258,12 +262,12 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
       expand = ggplot2::expansion(mult = c(0.12, 0.12))
     ) +
     ggplot2::scale_x_continuous(
-      limits = c(0, 1.12), breaks = seq(0, 1, 0.25),
-      expand = ggplot2::expansion(mult = c(0, 0))
+      limits = score_range,
+      expand = ggplot2::expansion(mult = c(0.16, 0.16))
     ) +
     ggplot2::labs(
       title = "Model Performance Comparison", subtitle = src,
-      x = "Score", y = NULL
+      x = "Score", y = NULL, caption = "n.a. = metric unavailable"
     ) +
     theme_cast() +
     ggplot2::theme(
@@ -276,7 +280,7 @@ plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
 #' Plot Spatial CV Fold Map and Metrics
 #'
 #' Two-panel figure: (left) geographic fold assignment map; (right) per-fold
-#' metric box/dot plot.
+#' metric dots with unavailable folds retained and finite fold counts by model.
 #'
 #' @param x A `cast_cv` object.
 #' @param lon Numeric vector. Longitudes of the data used in [cast_cv()].
@@ -307,27 +311,48 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     mcol <- "auc"
   }
 
-  fd$model <- factor(fd$model, levels = names(model_colors))
-  fd$fold  <- factor(fd$fold)
-
+  models <- unique(c(names(x$thresholds), as.character(fd$model)))
+  fd <- merge(expand.grid(fold = seq_len(x$k), model = models,
+                          stringsAsFactors = FALSE), fd,
+              by = c("fold", "model"), all.x = TRUE, sort = TRUE)
+  fd$model <- factor(fd$model, levels = models)
+  fd$fold <- factor(fd$fold, levels = seq_len(x$k))
+  fd[[mcol]][!is.finite(fd[[mcol]])] <- NA_real_
+  fd$tag <- ifelse(is.na(fd[[mcol]]), "n.a.", "")
+  counts <- vapply(models, function(m) sum(is.finite(fd[fd$model == m, mcol])), integer(1))
+  model_labels <- stats::setNames(sprintf("%s (%d/%d)", models, counts, x$k), models)
+  fold_labels <- as.character(seq_len(x$k))
+  if (!is.null(x$fold_status)) {
+    unavailable <- which(!is.na(x$fold_status) & x$fold_status != "evaluated")
+    fold_labels[unavailable] <- paste0(fold_labels[unavailable], "\n",
+      gsub("_", " ", x$fold_status[unavailable], fixed = TRUE))
+  }
+  score_range <- range(c(0, 1, fd[[mcol]]), na.rm = TRUE)
+  pd <- ggplot2::position_dodge(width = 0.6)
   p_metric <- ggplot2::ggplot(
     fd,
     ggplot2::aes(x = .data$fold, y = .data[[mcol]],
                  color = .data$model, group = .data$model)
   ) +
-    ggplot2::geom_line(linewidth = 0.7, alpha = 0.8) +
-    ggplot2::geom_point(size = 2.5) +
-    ggplot2::scale_color_manual(values = model_colors, name = "Model") +
+    ggplot2::geom_point(size = 2.5, position = pd, na.rm = TRUE) +
+    ggplot2::geom_text(
+      ggplot2::aes(y = score_range[1], label = .data$tag), position = pd,
+      angle = 90, hjust = 0, size = 2.2, show.legend = FALSE
+    ) +
+    ggplot2::scale_color_manual(values = model_colors, breaks = models,
+                                labels = model_labels, name = NULL, drop = FALSE) +
+    ggplot2::scale_x_discrete(drop = FALSE, labels = fold_labels) +
     ggplot2::labs(
       title = sprintf("Per-fold %s", toupper(mcol)),
-      subtitle = sprintf(
-        "%d-fold spatial (%s) block CV \u2014 folds are geographically disjoint",
-        x$k, x$block_method
-      ),
-      x = "Spatial fold", y = toupper(mcol)
+      subtitle = sprintf("%d-fold spatial block CV (%s)", x$k, x$block_method),
+      x = "Spatial fold", y = toupper(mcol),
+      caption = "n.a. = metric unavailable\nLegend: finite / planned folds"
     ) +
-    ggplot2::coord_cartesian(ylim = c(0, 1)) +
-    theme_cast()
+    ggplot2::scale_y_continuous(limits = score_range,
+                               expand = ggplot2::expansion(mult = c(0.05, 0.08))) +
+    ggplot2::guides(colour = ggplot2::guide_legend(ncol = 2)) +
+    theme_cast() + ggplot2::theme(legend.position = "bottom",
+                                 legend.text = ggplot2::element_text(size = 8))
 
   if (is.null(lon) || is.null(lat)) return(p_metric)
 
@@ -358,7 +383,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     ggplot2::scale_color_manual(values = fold_pal, name = "Fold") +
     ggplot2::labs(
       title = "Spatial block folds",
-      subtitle = "Contiguous geographic blocks, not random points"
+      subtitle = sprintf("Fold assignment: %s", x$block_method)
     ) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
@@ -580,9 +605,9 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 
 #' Plot Predictor Importance
 #'
-#' Lollipop plot of each predictor's random-forest permutation importance,
-#' with the stage-2 permutation-null threshold marked. Predictors above the
-#' null are highlighted.
+#' Lollipop plot of the forward-selection path: each admitted predictor with
+#' the inner-CV loss improvement at admission. Excluded survivors are listed
+#' with missing steps and gains, not plotted.
 #'
 #' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.

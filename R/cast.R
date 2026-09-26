@@ -19,7 +19,7 @@
 #' @param select_metric Character. Inner-CV loss minimised by the forward
 #'   search: `"brier"` (default) or `"auc"`.
 #' @param select_tolerance Numeric. Minimum inner-CV loss improvement required
-#'   to admit a predictor, on top of the 1-SE guard. Default `0`.
+#'   to admit a predictor, on top of the 2-SE guard. Default `0`.
 #' @param select_n_folds Integer. Inner folds for the stage-2 forward search.
 #'   Default `3`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.

@@ -14,7 +14,7 @@ print.cast_select <- function(x, ...) {
   }
   if (identical(x$method, "two_stage")) {
     n_steps <- if (!is.null(d$path)) nrow(d$path) else NA_integer_
-    cli::cli_text("Forward search: {n_steps} admission{?s} on inner-CV {d$metric %||% 'loss'}; empty means nothing beat the intercept model.")
+    cli::cli_text("Forward search: {n_steps} admission{?s} on inner-CV {d$metric %||% 'loss'}; empty means nothing passed admission (too few paired folds also yields empty).")
   }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)

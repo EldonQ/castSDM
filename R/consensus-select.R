@@ -1,6 +1,6 @@
 # Consensus selection -------------------------------------------------------
 #
-# Nested cross-validation re-runs the conditional screen inside every outer
+# Nested cross-validation re-runs the two-stage screen inside every outer
 # spatial fold (cast_cv()). A predictor that is retained in most folds is
 # conditionally informative across regions -- the operational counterpart of
 # "transferable driver". cast_consensus() aggregates the fold selections

@@ -31,3 +31,52 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
   cons2 <- cast_consensus(cv_manual, threshold = 2 / 3)
   expect_setequal(cons2$selected, c("x1", "x2"))
 })
+
+test_that("CV reports finite fold counts separately for each metric", {
+  skip_if_not_installed("ranger")
+  metric_rows <- list(
+    c(auc = 0.7, tss = 0.2, cbi = -0.3),
+    c(auc = 0.6, tss = NA_real_, cbi = NA_real_),
+    c(auc = NA_real_, tss = NA_real_, cbi = NA_real_)
+  )
+  evaluated <- 0L
+  local_mocked_bindings(
+    make_spatial_folds = function(lon, lat, k, method, seed) rep(1:4, each = 6),
+    evaluate_model_full = function(pred, obs) {
+      evaluated <<- evaluated + 1L
+      metric_rows[[evaluated]]
+    }
+  )
+  dat <- data.frame(lon = seq_len(24), lat = rep(1:6, 4),
+                    presence = c(rep(0:1, 9), rep(0, 6)),
+                    x1 = seq_len(24), x2 = rep(1:4, 6), x3 = rep(1:6, 4))
+  expect_warning(
+    cv <- cast_cv(dat, select_method = "full", k = 4, models = "rf",
+                  rf_ntree = 10, seed = 87, verbose = FALSE),
+    "single response class"
+  )
+  expect_equal(cv$metrics$n_folds, 3L)
+  expect_equal(cv$metrics$auc_n_folds, 2L)
+  expect_equal(cv$metrics$tss_n_folds, 1L)
+  expect_equal(cv$metrics$cbi_n_folds, 1L)
+  expect_equal(cv$metrics$auc_mean, 0.65)
+  expect_equal(cv$metrics$auc_sd, sd(c(0.7, 0.6)))
+  expect_equal(cv$metrics$cbi_mean, -0.3)
+  expect_true(is.na(cv$metrics$cbi_sd))
+  expect_identical(cv$fold_status[4], "single_class")
+  expect_true(all(is.na(cv$oof$HSS_rf[19:24])))
+
+  evaluated <- 0L
+  metric_rows <- lapply(metric_rows, function(x) {
+    x["cbi"] <- NA_real_
+    x
+  })
+  expect_warning(
+    cv <- cast_cv(dat, select_method = "full", k = 4, models = "rf",
+                  rf_ntree = 10, seed = 87, verbose = FALSE),
+    "single response class"
+  )
+  expect_equal(cv$metrics$cbi_n_folds, 0L)
+  expect_identical(cv$metrics$cbi_mean, NA_real_)
+  expect_identical(cv$metrics$cbi_sd, NA_real_)
+})

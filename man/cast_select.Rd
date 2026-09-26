@@ -41,9 +41,8 @@ shifts).}
 
 \item{tolerance}{Non-negative number. A candidate is admitted only if its
 paired inner-CV loss improvement exceeds both this absolute floor and
-two standard errors of the fold differences (a 2-SE guard in the spirit
-of the \code{glmnet}/\code{rpart} one-standard-error rule, set a notch stricter
-because greedy search always takes the best of many candidates).
+two standard errors of the fold differences, with at least two finite
+paired folds. This heuristic does not control a false-positive rate.
 Default \code{0}, i.e. the 2-SE guard alone stops the search; outer nested
 spatial CV in \code{\link[=cast_cv]{cast_cv()}} remains the honest performance estimate.}
 
@@ -69,8 +68,8 @@ prespecified predictors, \code{NA} for never-admitted ones), the
 \code{loss_gain} (inner-CV loss improvement at admission, \code{NA} otherwise),
 the \code{selected_reason} (\code{"prespecified"}, \code{"forward"}, \code{"full"} or
 \code{"excluded"}), the \code{kept_by_design} indicator for \code{keep}, and the
-\code{selected} flag). An empty \code{selected} set is a valid answer: it means
-no candidate improved on the intercept-only model.
+\code{selected} flag). An empty \code{selected} set is a valid answer: no
+candidate passed admission, including when too few paired folds exist.
 }
 \description{
 Two-stage variable selection:

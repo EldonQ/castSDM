@@ -24,5 +24,5 @@ A \code{patchwork} combined plot, or single ggplot if patchwork absent.
 }
 \description{
 Two-panel figure: (left) geographic fold assignment map; (right) per-fold
-metric box/dot plot.
+metric dots with unavailable folds retained and finite fold counts by model.
 }

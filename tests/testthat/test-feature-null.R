@@ -153,3 +153,60 @@ test_that("forward path plots as a ggplot", {
   expect_s3_class(plot(cast_importance(s)), "ggplot")
   expect_s3_class(plot(s), "ggplot")
 })
+
+test_that("paired admission requires at least two finite common folds", {
+  for (metric in c("auc", "brier")) {
+    ref <- c(a = 0.5, b = 0.5, c = NA_real_)
+    candidate <- if (metric == "auc") c(a = 0.6, b = 0.6, c = 0.6) else
+      c(a = 0.4, b = 0.4, c = 0.4)
+    expect_true(.cast_admits(ref, candidate, 0, metric)$admit)
+    expect_false(.cast_admits(ref, candidate, 0.2, metric)$admit)
+    expect_false(.cast_admits(ref, candidate, 0.1, metric)$admit)
+    expect_false(.cast_admits(ref, candidate[c("a", "c")], 0, metric)$admit)
+    expect_false(.cast_admits(ref, candidate["c"], 0, metric)$admit)
+    expect_false(.cast_admits(ref, c(d = 0.6), 0, metric)$admit)
+    expect_equal(.cast_admits(ref, candidate["a"], 0, metric)$gain, 0.1)
+    expect_true(is.na(.cast_admits(ref, candidate["c"], 0, metric)$gain))
+    expect_true(.cast_admits(ref, candidate[c("c", "b", "a")], 0, metric)$admit)
+  }
+})
+
+test_that("forward search chooses the best admissible pair or addition", {
+  skip_if_not_installed("ranger")
+  local_mocked_bindings(
+    .cast_inner_folds = function(data, n_folds) {
+      list(folds = rep(1:3, each = 2), method = "random")
+    },
+    .cast_null_loss = function(y_num, folds, metric) {
+      list(loss = 0.5, folds = c(a = 0.5, b = 0.5, c = 0.5))
+    },
+    .cast_inner_loss = function(X, y_num, folds, vars, metric, num_trees,
+                                seed_base, counter) {
+      scores <- if (setequal(vars, c("x1", "x2"))) c(0.9, 0.6, 0.4) else
+        if (all(c("x1", "x3") %in% vars)) c(0.59, 0.60, 0.61) else
+          rep(0.5, 3)
+      if (metric == "brier") scores <- 1 - scores
+      list(loss = mean(scores), folds = setNames(scores, c("a", "b", "c")),
+           fits = 3L)
+    }
+  )
+  dat <- data.frame(presence = rep(0:1, 3), x1 = 1:6, x2 = 6:1,
+                    x3 = c(2, 4, 6, 1, 3, 5))
+  for (metric in c("auc", "brier")) {
+    for (keep in list(character(0), "x1")) {
+      result <- .cast_forward_search(dat, "presence", c("x1", "x2", "x3"),
+                                     keep, 1L, 2000L, metric, 0, 3L, 42L, FALSE)
+      expect_identical(result$selected, c("x1", "x3"))
+      expect_equal(unname(result$loss_gain["x3"]), 0.1)
+      expect_identical(result$diagnostics$status, "selected")
+      expect_false("x2" %in% result$selected)
+    }
+    expect_warning(
+      result <- .cast_forward_search(dat, "presence", c("x1", "x2", "x3"),
+                                     character(0), 1L, 2000L, metric, 0.2, 3L,
+                                     42L, FALSE),
+      "empty set"
+    )
+    expect_length(result$selected, 0L)
+  }
+})

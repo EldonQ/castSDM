@@ -45,9 +45,8 @@
 #'   shifts).
 #' @param tolerance Non-negative number. A candidate is admitted only if its
 #'   paired inner-CV loss improvement exceeds both this absolute floor and
-#'   two standard errors of the fold differences (a 2-SE guard in the spirit
-#'   of the `glmnet`/`rpart` one-standard-error rule, set a notch stricter
-#'   because greedy search always takes the best of many candidates).
+#'   two standard errors of the fold differences, with at least two finite
+#'   paired folds. This heuristic does not control a false-positive rate.
 #'   Default `0`, i.e. the 2-SE guard alone stops the search; outer nested
 #'   spatial CV in [cast_cv()] remains the honest performance estimate.
 #' @param n_folds Number of inner folds for the stage-2 search. Default `3`.
@@ -68,8 +67,8 @@
 #'   `loss_gain` (inner-CV loss improvement at admission, `NA` otherwise),
 #'   the `selected_reason` (`"prespecified"`, `"forward"`, `"full"` or
 #'   `"excluded"`), the `kept_by_design` indicator for `keep`, and the
-#'   `selected` flag). An empty `selected` set is a valid answer: it means
-#'   no candidate improved on the intercept-only model.
+#'   `selected` flag). An empty `selected` set is a valid answer: no
+#'   candidate passed admission, including when too few paired folds exist.
 #'
 #' @references
 #' Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
@@ -334,11 +333,9 @@ cast_select <- function(data, response = "presence",
 #'
 #' Gains are signed so positive means better (`ref - cand` for Brier,
 #' `cand - ref` for AUC), paired by inner fold. Admits iff the mean gain
-#' over finite paired folds exceeds both `tolerance` and two standard errors
-#' of the gains. The 2-SE bar (rather than 1-SE) guards against the
-#' best-of-many luck intrinsic to greedy search over correlated folds, whose
-#' overlap makes the naive SE optimistic. Returns the mean gain (or `NA`
-#' when no paired fold exists).
+#' over at least two finite paired folds exceeds both `tolerance` and two
+#' standard errors of the gains. This is a heuristic, not a significance test.
+#' Returns the mean gain (or `NA` when no paired fold exists).
 #' @keywords internal
 #' @noRd
 .cast_admits <- function(ref_folds, cand_folds, tolerance, metric) {
@@ -350,8 +347,9 @@ cast_select <- function(data, response = "presence",
   }
   g <- unname(g[is.finite(g)])
   if (!length(g)) return(list(admit = FALSE, gain = NA_real_))
-  se <- if (length(g) >= 2L) 2 * stats::sd(g) / sqrt(length(g)) else 0
   gain <- mean(g)
+  if (length(g) < 2L) return(list(admit = FALSE, gain = gain))
+  se <- 2 * stats::sd(g) / sqrt(length(g))
   list(admit = is.finite(gain) && gain > max(tolerance, se), gain = gain)
 }
 
@@ -445,12 +443,12 @@ cast_select <- function(data, response = "presence",
       r
     })
     verdict <- lapply(cand, function(r) .cast_admits(null_res$folds, r$folds, tolerance, metric))
-    gains <- vapply(verdict, function(v) ifelse(is.finite(v$gain), v$gain, -Inf), numeric(1))
+    gains <- vapply(verdict, function(v) if (isTRUE(v$admit)) v$gain else -Inf, numeric(1))
     best <- which.max(gains)
     if (!length(best) || !isTRUE(verdict[[best]]$admit)) {
       cli::cli_warn(c(
-        "No candidate pair improves on the intercept-only model; returning an empty set.",
-        "i" = "This is a finding (no detectable signal), not a failure. Prespecify {.arg keep} to force predictors in."))
+        "No candidate pair passes the paired admission guard; returning an empty set.",
+        "i" = "Admission requires at least two finite paired folds and sufficient gain. An empty set does not establish absence of signal."))
       return(list(selected = character(0), step_added = step_added,
                   loss_gain = loss_gain, reason = stats::setNames(character(0), character(0)),
                   path = path,
@@ -475,8 +473,8 @@ cast_select <- function(data, response = "presence",
     v <- .cast_admits(null_res$folds, r$folds, tolerance, metric)
     if (!isTRUE(v$admit)) {
       cli::cli_warn(c(
-        "The single candidate does not improve on the intercept-only model; returning an empty set.",
-        "i" = "This is a finding (no detectable signal), not a failure. Prespecify {.arg keep} to force predictors in."))
+        "The single candidate does not pass the paired admission guard; returning an empty set.",
+        "i" = "Admission requires at least two finite paired folds and sufficient gain. An empty set does not establish absence of signal."))
       return(list(selected = character(0), step_added = step_added,
                   loss_gain = loss_gain, reason = stats::setNames(character(0), character(0)),
                   path = path,
@@ -495,7 +493,6 @@ cast_select <- function(data, response = "presence",
     pool <- character(0)
   }
 
-  # Greedy additions while any candidate passes the paired 1-SE admission test.
   step <- max(path$step)
   repeat {
     if (!length(pool)) break
@@ -505,7 +502,7 @@ cast_select <- function(data, response = "presence",
       r
     })
     verdict <- lapply(cand, function(r) .cast_admits(cur$folds, r$folds, tolerance, metric))
-    gains <- vapply(verdict, function(x) ifelse(is.finite(x$gain), x$gain, -Inf), numeric(1))
+    gains <- vapply(verdict, function(v) if (isTRUE(v$admit)) v$gain else -Inf, numeric(1))
     best <- which.max(gains)
     if (!length(best) || !isTRUE(verdict[[best]]$admit)) break
     step <- step + 1L

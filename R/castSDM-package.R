@@ -13,7 +13,8 @@
 #' random forest — spatial folds when coordinates exist — and stops when
 #' nothing improves it further (Meyer et al. 2018, 2019). There is no
 #' predictor-count cap and no fallback set: an empty selection honestly means
-#' nothing improved on the intercept-only model. Selection serves parsimony
+#' nothing passed admission (admission needs at least two finite paired folds
+#' and sufficient gain). Selection serves parsimony
 #' for interpretation and projection, not causal discovery.
 #'
 #' The effect products ([cast_effect_table()], [cast_effect_map()])

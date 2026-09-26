@@ -128,9 +128,9 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     sprintf("- **Prediction extent**: %s", pred_info),
     "- **Extrapolation control**: MESS flags on every prediction row",
     "  (`mess`, `extrapolating` columns); optional clamping",
-    sprintf("- **Uncertainty layers**: ensemble `hss_sd` (cross-model SD); %s",
+    sprintf("- **Uncertainty layers**: ensemble `hss_sd` (cross-model SD)%s",
             if (!is.null(object$ensemble))
-              "sensitivity `delta_sd` available" else "[report]"),
+              " (NA where fewer than two models contribute)" else ""),
     ""
   )
 
