@@ -104,13 +104,3 @@ cast_importance <- function(object) {
   }
   out
 }
-
-#' Sensitivity product (removed in 0.12.0)
-#'
-#' Removed: use [cast_effect_table()] / [cast_effect_map()].
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-cast_sensitivity <- function(...) {
-  cli::cli_abort("`cast_sensitivity()` was removed in 0.12.0; use `cast_effect_table()` / `cast_effect_map()`.")
-}

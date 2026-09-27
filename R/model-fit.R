@@ -13,9 +13,12 @@
 #' @param models Character vector. Models to fit: `"rf"`, `"maxent"`, `"brt"`,
 #'   `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
 #' @param response Character. Response column name. Default `"presence"`.
-#' @param rf_ntree Integer. Number of RF trees. Default `300`.
-#' @param brt_n_trees Integer. Number of BRT iterations. Default `500`.
+#' @param rf_ntree Integer. Number of RF trees. Default `500`.
+#' @param brt_n_trees Integer. Number of BRT trees. Default `2000`.
 #' @param brt_depth Integer. BRT tree depth. Default `5`.
+#' @param brt_shrinkage Numeric. BRT learning rate. Default `0.005`
+#'   (with 2000 trees, the Elith et al. 2008 recipe for presence-background
+#'   data; larger rates underfit unless the tree count grows with them).
 #' @param num_threads Integer. Threads for the Random Forest learner. Default
 #'   `1` (safe under fold-parallel cross-validation; raise for a single fit).
 #' @param seed Integer or `NULL`. Base random seed.
@@ -30,6 +33,10 @@
 #' - **BRT**: [gbm::gbm()] with Bernoulli loss and 5-fold CV.
 #' - **GAM**: [mgcv::gam()] with thin-plate splines.
 #'
+#' @references
+#' Elith, J., Leathwick, J. R. & Hastie, T. (2008). A working guide to boosted
+#' regression trees. *Journal of Animal Ecology*, 77(4), 802-813.
+#'
 #' @seealso [cast_select()], [cast_evaluate()], [cast_predict()]
 #'
 #' @export
@@ -37,9 +44,10 @@ cast_fit <- function(data,
                      screen       = NULL,
                      models       = c("rf", "brt", "maxent", "gam"),
                      response     = "presence",
-                     rf_ntree     = 300L,
-                     brt_n_trees  = 500L,
+                     rf_ntree     = 500L,
+                     brt_n_trees  = 2000L,
                      brt_depth    = 5L,
+                     brt_shrinkage = 0.005,
                      num_threads  = 1L,
                      seed         = NULL,
                      verbose      = TRUE) {
@@ -90,8 +98,8 @@ cast_fit <- function(data,
   for (mdl in models) {
     if (verbose) cli::cli_inform("Training {.val {mdl}}...")
     fitted_models[[mdl]] <- tryCatch(
-      fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth, seed,
-                      num_threads),
+      fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees, brt_depth,
+                      brt_shrinkage, seed, num_threads),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -144,7 +152,8 @@ cast_fit <- function(data,
 #' @keywords internal
 #' @noRd
 fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
-                            brt_depth, seed, num_threads = 1L) {
+                             brt_depth, brt_shrinkage, seed,
+                             num_threads = 1L) {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
@@ -185,7 +194,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         distribution = "bernoulli",
         n.trees = brt_n_trees,
         interaction.depth = brt_depth,
-        shrinkage = 0.01,
+        shrinkage = brt_shrinkage,
         cv.folds = 5L,
         # gbm() defaults n.cores to a parallel cluster. On a small CI runner
         # (or inside an already-parallel cross-validation) spawning workers

@@ -20,23 +20,6 @@ print.cast_select <- function(x, ...) {
   invisible(x)
 }
 
-# Defunct object printers (removed in 0.12.0) -------------------------------
-
-#' @export
-print.cast_sensitivity <- function(x, ...) {
-  cli::cli_abort("`cast_sensitivity` objects are no longer produced (removed in 0.12.0); use `cast_effect_table()` / `cast_effect_map()`.")
-}
-
-#' @export
-print.cast_dose_response <- function(x, ...) {
-  cli::cli_abort("`cast_dose_response` objects are no longer produced (removed in 0.12.0); use `cast_effect_table()` / `cast_effect_map()`.")
-}
-
-#' @export
-print.cast_support <- function(x, ...) {
-  cli::cli_abort("`cast_support` objects are no longer produced (removed in 0.12.0); masking now lives in `cast_effect_table()` / `cast_effect_map()`.")
-}
-
 #' @export
 print.cast_importance <- function(x, ...) {
   eff <- x$effects

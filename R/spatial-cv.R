@@ -25,8 +25,9 @@
 #'   are dropped for that fold, thinning spatial-autocorrelation leakage at
 #'   the fold boundary. Default `0` (no exclusion band).
 #' @param response Binary response column.
-#' @param rf_ntree RF trees per fold.
-#' @param brt_n_trees BRT iterations per fold.
+#' @param rf_ntree RF trees per fold. Default `500`.
+#' @param brt_n_trees BRT trees per fold. Default `2000`.
+#' @param brt_shrinkage BRT learning rate per fold. Default `0.005`.
 #' @param parallel Run folds with `future.apply`; requires the user to set a
 #'   [future::plan()] first (a warning is issued when none is set).
 #' @param seed Random seed.
@@ -48,8 +49,9 @@ cast_cv <- function(data,
                     block_method = c("grid", "grid_random", "cluster"),
                     buffer = 0,
                     response = "presence",
-                    rf_ntree = 300L,
-                    brt_n_trees = 500L,
+                    rf_ntree = 500L,
+                    brt_n_trees = 2000L,
+                    brt_shrinkage = 0.005,
                     parallel = FALSE,
                     seed = NULL,
                     verbose = TRUE) {
@@ -115,6 +117,7 @@ cast_cv <- function(data,
       cast_fit(
         train, screen = fold_screen, models = models, response = response,
         rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
+        brt_shrinkage = brt_shrinkage,
         seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
         verbose = FALSE
       ),

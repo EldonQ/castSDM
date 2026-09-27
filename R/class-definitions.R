@@ -49,14 +49,6 @@ new_cast_importance <- function(effects, metric = "brier",
   )
 }
 
-# new_cast_sensitivity() removed in 0.12.0.
-
-# new_cast_dose_response() removed in 0.12.0.
-
-# new_cast_support() removed in 0.12.0.
-
-# new_cast_necessity() removed in 0.12.0.
-
 #' Create a cast_fit Object
 #'
 #' @param models Named list of fitted model objects.

@@ -14,8 +14,9 @@ cast_cv(
   block_method = c("grid", "grid_random", "cluster"),
   buffer = 0,
   response = "presence",
-  rf_ntree = 300L,
-  brt_n_trees = 500L,
+  rf_ntree = 500L,
+  brt_n_trees = 2000L,
+  brt_shrinkage = 0.005,
   parallel = FALSE,
   seed = NULL,
   verbose = TRUE
@@ -53,9 +54,11 @@ the fold boundary. Default \code{0} (no exclusion band).}
 
 \item{response}{Binary response column.}
 
-\item{rf_ntree}{RF trees per fold.}
+\item{rf_ntree}{RF trees per fold. Default \code{500}.}
 
-\item{brt_n_trees}{BRT iterations per fold.}
+\item{brt_n_trees}{BRT trees per fold. Default \code{2000}.}
+
+\item{brt_shrinkage}{BRT learning rate per fold. Default \code{0.005}.}
 
 \item{parallel}{Run folds with \code{future.apply}; requires the user to set a
 \code{\link[future:plan]{future::plan()}} first (a warning is issued when none is set).}

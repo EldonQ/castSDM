@@ -128,11 +128,6 @@ test_that("cast_effect_table rejects a zero shift", {
   )
 })
 
-test_that("removed knockout and scenario products forward to the shift products", {
-  expect_error(cast_necessity(data.frame()), "removed in 0.12.0")
-  expect_error(cast_sensitivity(), "removed in 0.12.0")
-})
-
 test_that("prespecified predictors survive thinning and enter at step 0", {
   skip_if_not_installed("ranger")
   dat <- make_collinear_data(n = 150)

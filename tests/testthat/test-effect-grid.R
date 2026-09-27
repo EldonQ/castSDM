@@ -19,15 +19,6 @@ grid_fit <- function(d, models = "rf") {
            seed = 77, verbose = FALSE)
 }
 
-test_that("removed products abort with a forwarding error", {
-  expect_error(cast_dose_response(), "removed in 0.12.0")
-  expect_error(cast_effect_support(), "removed in 0.12.0")
-  expect_error(cast_necessity(), "removed in 0.12.0")
-  expect_error(cast_sensitivity(), "removed in 0.12.0")
-  expect_error(plot(structure(list(), class = "cast_dose_response")),
-               "removed in 0.12.0")
-})
-
 test_that("the shift table carries one raw shift per driver and masks", {
   skip_if_not_installed("ranger")
   d <- make_grid_data()

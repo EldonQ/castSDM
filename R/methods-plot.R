@@ -663,36 +663,6 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
 }
 
 
-#' Plot Sensitivity Map (removed in 0.12.0)
-#' @param x Ignored.
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-plot.cast_sensitivity <- function(x, ...) {
-  cli::cli_abort("`plot.cast_sensitivity()` was removed in 0.12.0.")
-}
-
-
-#' Plot a Dose-Response Curve (removed in 0.12.0)
-#' @param x Ignored.
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-plot.cast_dose_response <- function(x, ...) {
-  cli::cli_abort("`plot.cast_dose_response()` was removed in 0.12.0.")
-}
-
-
-#' Plot Shift Coverage (removed in 0.12.0)
-#' @param x Ignored.
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-plot.cast_support <- function(x, ...) {
-  cli::cli_abort("`plot.cast_support()` was removed in 0.12.0.")
-}
-
-
 #' Plot an Effect Table: Magnitude, Direction and Masking
 #'
 #' Lollipop chart of per-driver shift effects: position shows the
@@ -738,16 +708,6 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(legend.position = "bottom")
-}
-
-
-#' Plot Knockout Necessity (removed in 0.12.0)
-#' @param x Ignored.
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-plot.cast_necessity <- function(x, ...) {
-  cli::cli_abort("`plot.cast_necessity()` was removed in 0.12.0.")
 }
 
 

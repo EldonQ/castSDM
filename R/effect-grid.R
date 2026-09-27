@@ -81,29 +81,6 @@
   ref[, env_vars, drop = FALSE]
 }
 
-#' Dose-Response (removed in 0.12.0)
-#'
-#' Removed: use [cast_effect_table()] / [cast_effect_map()] with a single
-#' raw-unit shift and hard range-masking.
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-cast_dose_response <- function(...) {
-  cli::cli_abort("`cast_dose_response()` was removed in 0.12.0; use `cast_effect_table()` / `cast_effect_map()`.")
-}
-
-
-#' Support Fraction (removed in 0.12.0)
-#'
-#' Removed: range-masking is now hard-wired into [cast_effect_table()] /
-#' [cast_effect_map()] (`support < 0.5` masked).
-#' @param ... Ignored.
-#' @return Never returns; always aborts.
-#' @export
-cast_effect_support <- function(...) {
-  cli::cli_abort("`cast_effect_support()` was removed in 0.12.0; masking now lives in `cast_effect_table()` / `cast_effect_map()`.")
-}
-
 # ---- internals ------------------------------------------------------------
 
 .cast_effect_assumptions <- function() paste(

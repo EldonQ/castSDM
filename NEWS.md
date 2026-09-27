@@ -1,3 +1,22 @@
+# castSDM 0.14.0 (unreleased)
+
+## Model defaults follow the SDM literature; 0.12.0 stubs removed
+
+* BREAKING: `cast_fit()` / `cast_cv()` defaults follow the Elith et al. (2008)
+  BRT recipe: `brt_n_trees` 500 -> 2000, new `brt_shrinkage = 0.005`
+  (was hard-coded 0.01), `rf_ntree` 300 -> 500. Fitted models and cached
+  CV outputs must be recomputed.
+* `cast_select()` bounds its search cost with a response-stratified subsample
+  (every presence row kept, only the background evenly thinned) instead of a
+  plain systematic subsample, so a large background (e.g. ~25 presences in
+  10,000 rows) no longer starves the inner folds of the minority class.
+* BREAKING: the 0.12.0 defunct stubs are removed outright --
+  `cast_sensitivity()`, `cast_dose_response()`, `cast_effect_support()`,
+  `cast_necessity()` and their `plot()`/`print()` methods no longer exist.
+* Documentation: `plot.cast_importance()` describes the forward-selection
+  path (not permutation importance); ensemble fallbacks and empty-selection
+  wording updated.
+
 # castSDM 0.13.0 (unreleased)
 
 ## Stage 2 is now a spatial forward search

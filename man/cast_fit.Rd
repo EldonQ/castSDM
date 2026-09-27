@@ -9,9 +9,10 @@ cast_fit(
   screen = NULL,
   models = c("rf", "brt", "maxent", "gam"),
   response = "presence",
-  rf_ntree = 300L,
-  brt_n_trees = 500L,
+  rf_ntree = 500L,
+  brt_n_trees = 2000L,
   brt_depth = 5L,
+  brt_shrinkage = 0.005,
   num_threads = 1L,
   seed = NULL,
   verbose = TRUE
@@ -27,11 +28,15 @@ cast_fit(
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
 
-\item{rf_ntree}{Integer. Number of RF trees. Default \code{300}.}
+\item{rf_ntree}{Integer. Number of RF trees. Default \code{500}.}
 
-\item{brt_n_trees}{Integer. Number of BRT iterations. Default \code{500}.}
+\item{brt_n_trees}{Integer. Number of BRT trees. Default \code{2000}.}
 
 \item{brt_depth}{Integer. BRT tree depth. Default \code{5}.}
+
+\item{brt_shrinkage}{Numeric. BRT learning rate. Default \code{0.005}
+(with 2000 trees, the Elith et al. 2008 recipe for presence-background
+data; larger rates underfit unless the tree count grows with them).}
 
 \item{num_threads}{Integer. Threads for the Random Forest learner. Default
 \code{1} (safe under fold-parallel cross-validation; raise for a single fit).}
@@ -60,6 +65,10 @@ detected in \code{data} are used.
 \item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
+}
+\references{
+Elith, J., Leathwick, J. R. & Hastie, T. (2008). A working guide to boosted
+regression trees. \emph{Journal of Animal Ecology}, 77(4), 802-813.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_predict]{cast_predict()}}

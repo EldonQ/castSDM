@@ -378,9 +378,24 @@ cast_select <- function(data, response = "presence",
       "Stage 2 needs complete predictor rows and two response classes.",
       "i" = "Check for missing predictor values or a single-class response."))
   }
-  # Bound the search cost; even steps keep the row distribution.
+  # Bound the search cost with a response-stratified subsample: every
+  # presence row is kept and only the background rows are evenly thinned
+  # (even spacing keeps their geographic spread). A plain systematic
+  # subsample would starve the minority class on presence-background data
+  # with a large background (e.g. ~20 presences within 10,000 rows) and
+  # starve the inner folds of evaluable paired folds.
   if (length(rows) > max_rows) {
-    rows <- rows[unique(round(seq(1, length(rows), length.out = max_rows)))]
+    pres <- rows[y_num[rows] == 1]
+    bg <- rows[y_num[rows] == 0]
+    if (length(pres) >= max_rows) {
+      pres <- pres[unique(round(seq(1, length(pres),
+                                    length.out = max_rows)))]
+      rows <- pres
+    } else {
+      n_bg <- max(0L, max_rows - length(pres))
+      bg <- bg[unique(round(seq(1, length(bg), length.out = n_bg)))]
+      rows <- sort(c(pres, bg))
+    }
   }
   X <- X[rows, , drop = FALSE]
   y_num <- y_num[rows]
