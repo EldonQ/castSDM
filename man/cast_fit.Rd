@@ -10,9 +10,14 @@ cast_fit(
   models = c("rf", "brt", "maxent", "gam"),
   response = "presence",
   rf_ntree = 500L,
+  rf_mtry = NULL,
   brt_n_trees = 2000L,
   brt_depth = 5L,
   brt_shrinkage = 0.005,
+  maxent_classes = NULL,
+  maxent_regmult = NULL,
+  tune = FALSE,
+  tune_folds = 3L,
   num_threads = 1L,
   seed = NULL,
   verbose = TRUE
@@ -30,13 +35,35 @@ cast_fit(
 
 \item{rf_ntree}{Integer. Number of RF trees. Default \code{500}.}
 
+\item{rf_mtry}{Integer. RF variables considered at each split. Default
+\code{NULL} (the ranger default, \code{floor(sqrt(p))}).}
+
 \item{brt_n_trees}{Integer. Number of BRT trees. Default \code{2000}.}
 
-\item{brt_depth}{Integer. BRT tree depth. Default \code{5}.}
+\item{brt_depth}{Integer. BRT tree depth. Default \code{5}. Ignored when
+\code{tune = TRUE} (the depth enters the search grid).}
 
 \item{brt_shrinkage}{Numeric. BRT learning rate. Default \code{0.005}
 (with 2000 trees, the Elith et al. 2008 recipe for presence-background
-data; larger rates underfit unless the tree count grows with them).}
+data; larger rates underfit unless the tree count grows with them).
+Ignored when \code{tune = TRUE} (the rate enters the search grid).}
+
+\item{maxent_classes}{Character. MaxEnt feature classes as a single string
+of class letters, e.g. \code{"l"}, \code{"lq"}, \code{"lqh"}, \code{"lqhp"}. Default \code{NULL}
+(the maxnet default feature set). When \code{tune = TRUE}, a supplied value is
+held fixed while the regularisation multiplier is searched.}
+
+\item{maxent_regmult}{Numeric. MaxEnt regularisation multiplier. Default
+\code{NULL} (i.e. \code{1}, the maxnet default). When \code{tune = TRUE}, a supplied
+value is held fixed while the feature classes are searched.}
+
+\item{tune}{Logical. Run a small grid search per engine (RF \code{mtry}; BRT
+\code{interaction.depth} x \code{shrinkage}; MaxEnt feature classes x regularisation
+multiplier) and fit with the best-scoring combination. Default \code{FALSE}.
+See Details.}
+
+\item{tune_folds}{Integer. Folds used by the inner grid-search scoring
+(BRT internal CV; MaxEnt stratified random folds). Default \code{3}.}
 
 \item{num_threads}{Integer. Threads for the Random Forest learner. Default
 \code{1} (safe under fold-parallel cross-validation; raise for a single fit).}
@@ -46,7 +73,9 @@ data; larger rates underfit unless the tree count grows with them).}
 \item{verbose}{Logical. Default \code{TRUE}.}
 }
 \value{
-A \code{cast_fit} object containing fitted models and metadata.
+A \code{cast_fit} object containing fitted models and metadata. Each
+entry of the \code{models} list additionally carries a \code{tune} component
+(grid, per-combination scores, best combination) when \code{tune = TRUE}.
 }
 \description{
 Trains one or more SDM algorithms on prepared data. Supported models:
@@ -60,13 +89,44 @@ detected in \code{data} are used.
 \subsection{Supported Models}{
 \itemize{
 \item \strong{RF}: \code{\link[ranger:ranger]{ranger::ranger()}} with probability output.
-\item \strong{MaxEnt}: \code{\link[maxnet:maxnet]{maxnet::maxnet()}} with logistic output.
+\item \strong{MaxEnt}: \code{\link[maxnet:maxnet]{maxnet::maxnet()}} with logistic output. The engine never
+clamps predictions internally; clamping to the training range is a
+package-level decision (see \code{\link[=cast_predict]{cast_predict()}} and
+\code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}, argument \code{clamp}).
 \item \strong{BRT}: \code{\link[gbm:gbm]{gbm::gbm()}} with Bernoulli loss and 5-fold CV.
 \item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
+
+\subsection{Hyperparameter grids (\code{tune = TRUE})}{
+
+Small default grids, informed by the reference SDM toolkits (biomod2,
+flexsdm) but trimmed for cost:
+\itemize{
+\item \strong{RF} searches \code{mtry} around \code{sqrt(p)} and is scored by out-of-bag TSS
+(no extra refits beyond the grid itself).
+\item \strong{BRT} searches \code{interaction.depth} x \code{shrinkage}; the tree count stays
+adaptive via \code{\link[gbm:gbm.perf]{gbm::gbm.perf()}}. Each combination is scored by the TSS of
+its internal cross-validated predictions.
+\item \strong{MaxEnt} searches feature classes x regularisation multiplier, scored
+by stratified random-fold TSS with the threshold selected on the
+training part of each fold.
+}
+
+Combinations that fail to fit (e.g. very small folds) score \code{NA}; if no
+combination scores, the fixed defaults are kept with a warning.
+Hyperparameters supplied explicitly are held fixed rather than searched.
+Selecting hyperparameters on inner data and evaluating on outer folds is
+the nested-selection principle of Cawley & Talbot (2010): pass
+\code{tune = TRUE} to \code{\link[=cast_cv]{cast_cv()}} to run the grid inside every outer training
+fold, so the held-out folds never influence the chosen hyperparameters.
+}
 }
 \references{
+Cawley, G. C. & Talbot, N. L. C. (2010). On over-fitting in model selection
+and subsequent selection bias in performance evaluation. \emph{Journal of
+Machine Learning Research}, 11, 2079-2107.
+
 Elith, J., Leathwick, J. R. & Hastie, T. (2008). A working guide to boosted
 regression trees. \emph{Journal of Animal Ecology}, 77(4), 802-813.
 }

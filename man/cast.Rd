@@ -14,6 +14,9 @@ cast(
   select_metric = "brier",
   select_tolerance = 0,
   select_n_folds = 3L,
+  threshold_method = "max_tss",
+  tune = FALSE,
+  tune_folds = 3L,
   num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
@@ -53,6 +56,16 @@ search: \code{"brier"} (default) or \code{"auc"}.}
 to admit a predictor, on top of the 2-SE guard. Default \code{0}.}
 
 \item{select_n_folds}{Integer. Inner folds for the stage-2 forward search.
+Default \code{3}.}
+
+\item{threshold_method}{Binary threshold rule, selected on training data and
+then applied to held-out predictions. See \code{\link[=cast_threshold]{cast_threshold()}}. Default
+\code{"max_tss"}.}
+
+\item{tune}{Logical. Per-engine hyperparameter grid search inside the
+nested spatial CV folds (\code{\link[=cast_cv]{cast_cv()}}, argument \code{tune}). Default \code{FALSE}.}
+
+\item{tune_folds}{Integer. Folds for the inner grid-search scoring.
 Default \code{3}.}
 
 \item{num_threads}{Integer. Threads for the ranger learners. Default \code{1}.}

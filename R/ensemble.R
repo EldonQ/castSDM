@@ -47,9 +47,9 @@
 #'
 #' \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 #'
-#' following the N-SDM nested-modelling framework (Adde et al. 2020). All
-#' three components are required: a model whose CV metrics are incomplete
-#' scores `NA` and is dropped with a warning, because averaging over
+#' following the N-SDM nested-modelling framework (Adde et al. 2023). A
+#' model with fewer than two finite score components scores `NA` and is
+#' dropped with a warning, because averaging over
 #' whichever components happen to be present would rescale the score and
 #' make models incomparable. Models with Score < 0.5 are excluded from the
 #' weighted ensemble (a warning is issued when this excludes every model and
@@ -68,9 +68,11 @@
 #' warns that this is only an approximation.
 #'
 #' @references
-#' Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
-#' computing pipeline for Nested Species Distribution Modelling.
-#' *Ecography*, 43(2), 331-334.
+#' Adde, A., Rey, P.-L., Brun, P., Külling, N., Fopp, F., Altermatt, F.,
+#' Broennimann, O., Lehmann, A., Petitpierre, B., Zimmermann, N. E.,
+#' Pellissier, L., Guisan, A. (2023). N-SDM: a high-performance computing
+#' pipeline for Nested Species Distribution Modelling.
+#' *Ecography*, 2023(6), e06540. \doi{10.1111/ecog.06540}
 #'
 #' @seealso [cast_cv()], [cast_predict()], [cast_project()]
 #'

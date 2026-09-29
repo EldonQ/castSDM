@@ -9,8 +9,11 @@ cast_ensemble_raster(
   cv,
   raster_stack,
   output_dir,
-  method = c("weighted", "best", "equal"),
+  method = c("weighted", "best", "equal", "median", "committee"),
   models = NULL,
+  min_score = 0.5,
+  fallback = c("best", "equal", "error"),
+  min_metric_folds = 2L,
   mask = NULL,
   clamp = FALSE,
   extrapolation = TRUE,
@@ -33,9 +36,18 @@ environmental variables in \code{fit$env_vars}.}
 it does not exist.}
 
 \item{method}{Character. Ensemble strategy: \code{"weighted"} (default),
-\code{"best"}, \code{"equal"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
+\code{"best"}, \code{"equal"}, \code{"median"}, or \code{"committee"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
 
 \item{models}{Character vector or \code{NULL}. Models to use. Default all.}
+
+\item{min_score}{Minimum composite score for weighted inclusion. Default
+\code{0.5}.}
+
+\item{fallback}{Weighted-score fallback: \code{"best"}, \code{"equal"}, or \code{"error"}.
+Default \code{"best"}.}
+
+\item{min_metric_folds}{Minimum finite spatial-CV folds for a metric to
+contribute to the composite score. Default \code{2}.}
 
 \item{mask}{A \code{terra::SpatRaster} or \code{NULL}. If provided, prediction
 is restricted to cells where mask is non-NA. Only the first layer is

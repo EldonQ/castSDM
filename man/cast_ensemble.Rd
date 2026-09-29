@@ -8,8 +8,11 @@ cast_ensemble(
   fit,
   cv,
   new_data,
-  method = c("weighted", "best", "equal"),
-  models = NULL
+  method = c("weighted", "best", "equal", "median", "committee"),
+  models = NULL,
+  min_score = 0.5,
+  fallback = c("best", "equal", "error"),
+  min_metric_folds = 2L
 )
 }
 \arguments{
@@ -23,13 +26,26 @@ variables matching the training data.}
 \item{method}{Character. Ensemble strategy:
 \itemize{
 \item \code{"weighted"} (default): weight = Score / sum(Score), zero out
-models with Score < 0.5.
+models with Score < \code{min_score}.
 \item \code{"best"}: use the single highest-scoring model.
 \item \code{"equal"}: simple average of all models.
+\item \code{"median"}: cell-wise median of contributing suitability scores.
+\item \code{"committee"}: fraction of contributing models voting suitable at
+their outer-CV thresholds; the ensemble threshold is 0.5.
 }}
 
 \item{models}{Character vector. Subset of models to include. Default
 \code{NULL} (all fitted models).}
+
+\item{min_score}{Minimum composite score for weighted inclusion. Default
+\code{0.5}.}
+
+\item{fallback}{When no model reaches \code{min_score}: \code{"best"} retains the
+highest-scoring finite model, \code{"equal"} uses equal weights, or \code{"error"}
+aborts. The choice and reason are stored in the result. Default \code{"best"}.}
+
+\item{min_metric_folds}{Minimum finite spatial-CV folds required for a
+metric to contribute to the composite score. Default \code{2}.}
 }
 \value{
 A \code{cast_ensemble} object with components:
@@ -44,6 +60,8 @@ reference, the MESS columns (\code{mess}, \code{extrapolating}) from
 \item{method}{The ensemble method used.}
 \item{threshold}{Binary classification threshold.}
 \item{model_scores}{Named numeric vector of per-model composite scores.}
+\item{weights_fallback}{Whether weighted selection needed a fallback.}
+\item{fallback_reason}{Reason for the fallback, or \code{NULL}.}
 }
 }
 \description{
@@ -56,9 +74,9 @@ The composite score for each model is:
 
 \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
 
-following the N-SDM nested-modelling framework (Adde et al. 2020). All
-three components are required: a model whose CV metrics are incomplete
-scores \code{NA} and is dropped with a warning, because averaging over
+following the N-SDM nested-modelling framework (Adde et al. 2023). A
+model with fewer than two finite score components scores \code{NA} and is
+dropped with a warning, because averaging over
 whichever components happen to be present would rescale the score and
 make models incomparable. Models with Score < 0.5 are excluded from the
 weighted ensemble (a warning is issued when this excludes every model and
@@ -77,9 +95,11 @@ function falls back to a weighted mean of the per-model thresholds and
 warns that this is only an approximation.
 }
 \references{
-Adde, A., Rey, C., Brun, P., et al. (2020). N-SDM: a high-performance
-computing pipeline for Nested Species Distribution Modelling.
-\emph{Ecography}, 43(2), 331-334.
+Adde, A., Rey, P.-L., Brun, P., Külling, N., Fopp, F., Altermatt, F.,
+Broennimann, O., Lehmann, A., Petitpierre, B., Zimmermann, N. E.,
+Pellissier, L., Guisan, A. (2023). N-SDM: a high-performance computing
+pipeline for Nested Species Distribution Modelling.
+\emph{Ecography}, 2023(6), e06540. \doi{10.1111/ecog.06540}
 }
 \seealso{
 \code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_project]{cast_project()}}

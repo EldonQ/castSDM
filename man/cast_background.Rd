@@ -13,6 +13,8 @@ cast_background(
   min_bg = 500L,
   max_bg = 20000L,
   strategy = c("random", "environmental"),
+  user_table = NULL,
+  bias_raster = NULL,
   cell_thin = TRUE,
   exclude_presence = TRUE,
   seed = NULL,
@@ -49,6 +51,21 @@ and for defining valid (non-NA) sampling cells.}
 (partitions environmental PCA space into bins and samples uniformly
 across bins).
 }}
+
+\item{user_table}{Optional \code{data.frame} with \code{lon} and \code{lat} columns.
+When supplied, the background sample is taken from exactly these points
+(Phillips et al. 2009-style user-defined background): \code{strategy} and the
+adaptive count are ignored, \code{n_bg} defaults to the number of usable
+points, and points are only filtered by raster coverage, duplicate cells,
+presence-cell exclusion, and \code{NA} environments. Intended for already
+available species records used as background, or expert-chosen controls.}
+
+\item{bias_raster}{Optional \code{terra::SpatRaster} (single layer, same grid
+as \code{raster_stack}). When supplied, random sampling draws cells with
+probability proportional to the raster values (Phillips et al. 2009
+target-group background): e.g. a raster of the sampling effort of the
+target taxon group. Non-finite and negative values are treated as zero
+weight; requires \code{strategy = "random"}.}
 
 \item{cell_thin}{Logical. If \code{TRUE} (default), ensures only one
 occurrence per raster cell (removes spatial duplicates at raster

@@ -28,6 +28,12 @@
 #' @param rf_ntree RF trees per fold. Default `500`.
 #' @param brt_n_trees BRT trees per fold. Default `2000`.
 #' @param brt_shrinkage BRT learning rate per fold. Default `0.005`.
+#' @param tune Logical. Run the per-engine hyperparameter grid search
+#'   ([cast_fit()], argument `tune`) inside every outer training fold, so the
+#'   held-out folds never influence the chosen hyperparameters. Default
+#'   `FALSE`. Raises compute cost by the grid size per fold.
+#' @param tune_folds Integer. Folds for the inner grid-search scoring.
+#'   Default `3`.
 #' @param threshold_method Rule for selecting the binary threshold inside each
 #'   outer training fold. That threshold is then applied to the held-out fold.
 #'   See [cast_threshold()]. Default `"max_tss"`.
@@ -55,6 +61,8 @@ cast_cv <- function(data,
                     rf_ntree = 500L,
                     brt_n_trees = 2000L,
                     brt_shrinkage = 0.005,
+                    tune = FALSE,
+                    tune_folds = 3L,
                     threshold_method = "max_tss",
                     parallel = FALSE,
                     seed = NULL,
@@ -122,6 +130,7 @@ cast_cv <- function(data,
         train, screen = fold_screen, models = models, response = response,
         rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
         brt_shrinkage = brt_shrinkage,
+        tune = tune, tune_folds = tune_folds,
         seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
         verbose = FALSE
       ),
@@ -399,10 +408,4 @@ make_spatial_folds <- function(lon, lat, k,
   b <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
   b[is.na(b)] <- 1L
   b
-}
-
-#' @keywords internal
-#' @noRd
-find_tss_threshold <- function(pred, obs) {
-  cast_threshold(pred, obs, method = "max_tss")
 }

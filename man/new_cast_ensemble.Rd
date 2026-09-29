@@ -4,7 +4,16 @@
 \alias{new_cast_ensemble}
 \title{Create a cast_ensemble Object}
 \usage{
-new_cast_ensemble(predictions, weights, method, threshold, model_scores)
+new_cast_ensemble(
+  predictions,
+  weights,
+  method,
+  threshold,
+  model_scores,
+  weights_fallback = FALSE,
+  fallback_reason = NULL,
+  score_components = NULL
+)
 }
 \arguments{
 \item{predictions}{A \code{data.frame} with columns \code{lon}, \code{lat}, \code{hss_ensemble}
@@ -13,11 +22,18 @@ and optionally \code{binary_ensemble}.}
 \item{weights}{Named numeric vector of per-model weights.}
 
 \item{method}{Character. Ensemble method used (\code{"weighted"}, \code{"best"},
-\code{"equal"}).}
+\code{"equal"}, \code{"median"}, \code{"committee"}).}
 
 \item{threshold}{Numeric. Binary classification threshold.}
 
 \item{model_scores}{Named numeric vector of per-model composite scores.}
+
+\item{weights_fallback}{Logical. Whether weighted selection invoked its
+fallback policy because no model met the minimum score.}
+
+\item{fallback_reason}{Character reason for the fallback, or \code{NULL}.}
+
+\item{score_components}{Named list of metrics used for each model score.}
 }
 \value{
 A \code{cast_ensemble} object.

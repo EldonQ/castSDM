@@ -17,6 +17,9 @@ cast_cv(
   rf_ntree = 500L,
   brt_n_trees = 2000L,
   brt_shrinkage = 0.005,
+  tune = FALSE,
+  tune_folds = 3L,
+  threshold_method = "max_tss",
   parallel = FALSE,
   seed = NULL,
   verbose = TRUE
@@ -59,6 +62,18 @@ the fold boundary. Default \code{0} (no exclusion band).}
 \item{brt_n_trees}{BRT trees per fold. Default \code{2000}.}
 
 \item{brt_shrinkage}{BRT learning rate per fold. Default \code{0.005}.}
+
+\item{tune}{Logical. Run the per-engine hyperparameter grid search
+(\code{\link[=cast_fit]{cast_fit()}}, argument \code{tune}) inside every outer training fold, so the
+held-out folds never influence the chosen hyperparameters. Default
+\code{FALSE}. Raises compute cost by the grid size per fold.}
+
+\item{tune_folds}{Integer. Folds for the inner grid-search scoring.
+Default \code{3}.}
+
+\item{threshold_method}{Rule for selecting the binary threshold inside each
+outer training fold. That threshold is then applied to the held-out fold.
+See \code{\link[=cast_threshold]{cast_threshold()}}. Default \code{"max_tss"}.}
 
 \item{parallel}{Run folds with \code{future.apply}; requires the user to set a
 \code{\link[future:plan]{future::plan()}} first (a warning is issued when none is set).}

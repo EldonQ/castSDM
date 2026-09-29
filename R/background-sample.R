@@ -26,6 +26,19 @@
 #'   - `"environmental"`: stratified random sampling in environmental space
 #'     (partitions environmental PCA space into bins and samples uniformly
 #'     across bins).
+#' @param user_table Optional `data.frame` with `lon` and `lat` columns.
+#'   When supplied, the background sample is taken from exactly these points
+#'   (Phillips et al. 2009-style user-defined background): `strategy` and the
+#'   adaptive count are ignored, `n_bg` defaults to the number of usable
+#'   points, and points are only filtered by raster coverage, duplicate cells,
+#'   presence-cell exclusion, and `NA` environments. Intended for already
+#'   available species records used as background, or expert-chosen controls.
+#' @param bias_raster Optional `terra::SpatRaster` (single layer, same grid
+#'   as `raster_stack`). When supplied, random sampling draws cells with
+#'   probability proportional to the raster values (Phillips et al. 2009
+#'   target-group background): e.g. a raster of the sampling effort of the
+#'   target taxon group. Non-finite and negative values are treated as zero
+#'   weight; requires `strategy = "random"`.
 #' @param cell_thin Logical. If `TRUE` (default), ensures only one
 #'   occurrence per raster cell (removes spatial duplicates at raster
 #'   resolution).
@@ -74,12 +87,26 @@ cast_background <- function(occurrences,
                             min_bg = 500L,
                             max_bg = 20000L,
                             strategy = c("random", "environmental"),
+                            user_table = NULL,
+                            bias_raster = NULL,
                             cell_thin = TRUE,
                             exclude_presence = TRUE,
                             seed = NULL,
                             verbose = TRUE) {
   check_suggested("terra", "for raster extraction")
   strategy <- match.arg(strategy)
+
+  use_user <- !is.null(user_table)
+  use_bias <- !is.null(bias_raster)
+  if (use_user && use_bias) {
+    cli::cli_abort("Pass either {.arg user_table} or {.arg bias_raster}, not both.")
+  }
+  if (use_bias && strategy == "environmental") {
+    cli::cli_abort(c(
+      "{.arg bias_raster} combines with {.code strategy = \"random\"} only.",
+      i = "Environmental stratification and bias weighting are competing sampling designs."
+    ))
+  }
 
   # ---- Validate inputs -------------------------------------------------------
   if (!is.data.frame(occurrences)) {
@@ -93,6 +120,40 @@ cast_background <- function(occurrences,
   }
   if (!is.null(study_area) && !inherits(study_area, "cast_study_area")) {
     cli::cli_abort("{.arg study_area} must be a {.cls cast_study_area} or NULL.")
+  }
+  if (use_user) {
+    if (!is.data.frame(user_table) ||
+        !all(c("lon", "lat") %in% names(user_table))) {
+      cli::cli_abort("{.arg user_table} must be a data.frame with {.val lon} and {.val lat} columns.")
+    }
+    if (!nrow(user_table)) {
+      cli::cli_abort("{.arg user_table} is empty.")
+    }
+  }
+  if (use_bias) {
+    if (!inherits(bias_raster, "SpatRaster")) {
+      cli::cli_abort("{.arg bias_raster} must be a {.cls SpatRaster}.")
+    }
+    if (terra::nlyr(bias_raster) > 1L) {
+      cli::cli_warn(
+        "{.arg bias_raster} has {terra::nlyr(bias_raster)} layers; using the first one."
+      )
+      bias_raster <- bias_raster[[1L]]
+    }
+    # Weight lookup indexes cells against raster_stack below, so mismatched
+    # geometry would silently weight the wrong cells.
+    geom_ok <- tryCatch(
+      terra::compareGeom(bias_raster, raster_stack, lyrs = FALSE),
+      error = function(e) e
+    )
+    if (!isTRUE(geom_ok)) {
+      cli::cli_abort(c(
+        "{.arg bias_raster} and {.arg raster_stack} have incompatible geometry.",
+        "x" = if (inherits(geom_ok, "error")) conditionMessage(geom_ok) else
+          "compareGeom() mismatch",
+        "i" = "Build the bias raster on the same raster grid you sample from."
+      ))
+    }
   }
 
   # The study-area mask is indexed against raster_stack cell numbers below,
@@ -132,57 +193,103 @@ cast_background <- function(occurrences,
 
   n_pres <- nrow(occurrences)
 
-  # ---- Determine number of background points ----------------------------------
-  if (is.null(n_bg)) {
-    n_bg <- as.integer(round(ratio * n_pres))
-    n_bg <- max(min_bg, min(max_bg, n_bg))
-    if (verbose) {
-      cli::cli_inform(
-        "Adaptive background: {ratio} x {n_pres} = {n_bg} points (clamped to [{min_bg}, {max_bg}])."
-      )
-    }
-  }
-
-  # ---- Identify valid sampling cells -------------------------------------------
-  if (!is.null(study_area)) {
-    # Mask the raster stack by study area
-    ref_mask <- study_area$mask
-  } else {
-    ref_mask <- !is.na(raster_stack[[1]])
-    ref_mask[ref_mask == 0] <- NA
-  }
-
-  # Get all valid cell indices: inside the mask AND non-NA in every layer
-  # (per-cell anyNA across layers, not just the first).
-  n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
-  valid_r <- !is.na(ref_mask) & (n_na_layers == 0)
-  valid_cells <- which(as.logical(terra::values(valid_r, mat = FALSE)))
-
-  # Exclude presence cells if requested
-  if (exclude_presence) {
-    valid_cells <- setdiff(valid_cells, occ_cells)
-  }
-
-  if (length(valid_cells) < n_bg) {
-    if (verbose) {
+  # ---- Background cell selection -----------------------------------------------
+  if (use_user) {
+    # User-defined background: exactly the supplied points. Filtered only by
+    # raster coverage, duplicate cells, presence-cell exclusion and, later,
+    # NA environments; the study-area mask does not apply.
+    u_cells <- terra::cellFromXY(raster_stack,
+                                 as.matrix(user_table[, c("lon", "lat")]))
+    n_outside <- sum(is.na(u_cells))
+    if (n_outside > 0 && verbose) {
       cli::cli_warn(
-        "Only {length(valid_cells)} valid cells available; sampling with replacement."
+        "{n_outside} user background point{?s} fall outside the raster; dropped."
       )
     }
-    sample_replace <- TRUE
+    u_cells <- unique(stats::na.omit(u_cells))
+    if (exclude_presence) u_cells <- setdiff(u_cells, occ_cells)
+    if (!length(u_cells)) {
+      cli::cli_abort("No usable points in {.arg user_table} after filtering.")
+    }
+    if (is.null(n_bg)) {
+      n_bg <- length(u_cells)
+    } else {
+      n_bg <- as.integer(n_bg)
+      if (n_bg > length(u_cells)) {
+        cli::cli_warn(
+          "Only {length(u_cells)} usable user background point{?s}; n_bg reduced from {n_bg}."
+        )
+        n_bg <- length(u_cells)
+      }
+    }
+    valid_cells <- u_cells  # the top-up pool is the remaining user points
+    bg_cells <- if (length(u_cells) > n_bg) sample(u_cells, n_bg) else u_cells
   } else {
-    sample_replace <- FALSE
-  }
+    # ---- Determine number of background points ----------------------------------
+    if (is.null(n_bg)) {
+      n_bg <- as.integer(round(ratio * n_pres))
+      n_bg <- max(min_bg, min(max_bg, n_bg))
+      if (verbose) {
+        cli::cli_inform(
+          "Adaptive background: {ratio} x {n_pres} = {n_bg} points (clamped to [{min_bg}, {max_bg}])."
+        )
+      }
+    }
 
-  # ---- Sample background cells ------------------------------------------------
-  if (strategy == "random") {
-    bg_cells <- sample(valid_cells, size = n_bg, replace = sample_replace)
+    # ---- Identify valid sampling cells -------------------------------------------
+    if (!is.null(study_area)) {
+      # Mask the raster stack by study area
+      ref_mask <- study_area$mask
+    } else {
+      ref_mask <- !is.na(raster_stack[[1]])
+      ref_mask[ref_mask == 0] <- NA
+    }
 
-  } else if (strategy == "environmental") {
-    # Environmental stratification via PCA binning
-    bg_cells <- .sample_environmental(
-      raster_stack, valid_cells, n_bg, seed, sample_replace
-    )
+    # Get all valid cell indices: inside the mask AND non-NA in every layer
+    # (per-cell anyNA across layers, not just the first).
+    n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
+    valid_r <- !is.na(ref_mask) & (n_na_layers == 0)
+    valid_cells <- which(as.logical(terra::values(valid_r, mat = FALSE)))
+
+    # Exclude presence cells if requested
+    if (exclude_presence) {
+      valid_cells <- setdiff(valid_cells, occ_cells)
+    }
+
+    if (length(valid_cells) < n_bg) {
+      if (verbose) {
+        cli::cli_warn(
+          "Only {length(valid_cells)} valid cells available; sampling with replacement."
+        )
+      }
+      sample_replace <- TRUE
+    } else {
+      sample_replace <- FALSE
+    }
+
+    # ---- Sample background cells ------------------------------------------------
+    if (use_bias) {
+      # Target-group background (Phillips et al. 2009): cells are drawn with
+      # probability proportional to the bias surface.
+      bias_vals <- as.numeric(terra::values(bias_raster, mat = FALSE))
+      w <- bias_vals[valid_cells]
+      w[!is.finite(w) | w < 0] <- 0
+      if (sum(w) <= 0) {
+        cli::cli_abort(
+          "{.arg bias_raster} has no positive weights inside the valid sampling area."
+        )
+      }
+      bg_cells <- sample(valid_cells, size = n_bg, prob = w,
+                         replace = sample_replace)
+    } else if (strategy == "random") {
+      bg_cells <- sample(valid_cells, size = n_bg, replace = sample_replace)
+
+    } else if (strategy == "environmental") {
+      # Environmental stratification via PCA binning
+      bg_cells <- .sample_environmental(
+        raster_stack, valid_cells, n_bg, seed, sample_replace
+      )
+    }
   }
 
   # ---- Extract coordinates and environmental values ----------------------------
@@ -214,7 +321,19 @@ cast_background <- function(occurrences,
     pool <- setdiff(valid_cells, used_cells)
     if (!length(pool)) break
     topup_rounds <- topup_rounds + 1L
-    add <- sample(pool, min(length(pool), n_bg - n_bg_ok))
+    take_n <- min(length(pool), n_bg - n_bg_ok)
+    add <- if (use_bias) {
+      # Top-up follows the same bias surface as the initial draw.
+      wp <- bias_vals[pool]
+      wp[!is.finite(wp) | wp < 0] <- 0
+      if (sum(wp) > 0) {
+        sample(pool, take_n, prob = wp)
+      } else {
+        sample(pool, take_n)
+      }
+    } else {
+      sample(pool, take_n)
+    }
     used_cells <- c(used_cells, add)
     add_xy <- terra::xyFromCell(raster_stack, add)
     add_env <- as.data.frame(raster_stack[add])
@@ -249,9 +368,11 @@ cast_background <- function(occurrences,
   n_bg_final <- sum(out_df$presence == 0)
 
   if (verbose) {
+    strategy_label <- if (use_user) "user_table" else
+      if (use_bias) "bias-weighted random" else strategy
     cli::cli_inform(c(
       "v" = "Background sampling complete:",
-      " " = "Strategy: {.val {strategy}}",
+      " " = "Strategy: {.val {strategy_label}}",
       " " = "Presences: {n_pres_final} | Backgrounds: {n_bg_final}",
       if (n_removed > 0)
         c("!" = "{n_removed} rows removed due to NA environmental values.")

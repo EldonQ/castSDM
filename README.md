@@ -48,6 +48,7 @@ result <- cast(
   species_data,
   env_data = prediction_grid,
   models = c("rf", "brt", "maxent", "gam"),
+  tune = TRUE,   # per-engine hyperparameter grid search inside the CV folds
   do_cv = TRUE,
   seed = 42
 )
@@ -55,6 +56,10 @@ result <- cast(
 summary(result)
 plot(result$screen)          # forward-selection path: admission steps and gains
 ```
+
+Background sampling supports user-defined points (`cast_background(user_table =)`)
+and bias-surface (target-group) weighting (`cast_background(bias_raster =)`,
+Phillips et al. 2009).
 
 Attribution (give ecologically meaningful raw-unit shifts where possible):
 

@@ -9,8 +9,11 @@ cast_project(
   cv,
   current_env,
   future_envs,
-  method = c("weighted", "best", "equal"),
+  method = c("weighted", "best", "equal", "median", "committee"),
   models = NULL,
+  min_score = 0.5,
+  fallback = c("best", "equal", "error"),
+  min_metric_folds = 2L,
   save_dir = NULL
 )
 }
@@ -28,9 +31,17 @@ variables for the current (baseline) period.}
 (e.g., \code{list(ssp245_2070 = df1, ssp585_2070 = df2)}).}
 
 \item{method}{Character. Ensemble strategy: \code{"weighted"} (default),
-\code{"best"}, \code{"equal"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
+\code{"best"}, \code{"equal"}, \code{"median"}, or \code{"committee"}. See \code{\link[=cast_ensemble]{cast_ensemble()}}.}
 
 \item{models}{Character vector. Models to use. Default \code{NULL} (all).}
+
+\item{min_score}{Minimum composite score for weighted inclusion. Default \code{0.5}.}
+
+\item{fallback}{Weighted-score fallback (\code{"best"}, \code{"equal"}, or \code{"error"}).
+Default \code{"best"}.}
+
+\item{min_metric_folds}{Minimum finite CV folds for a score component.
+Default \code{2}.}
 
 \item{save_dir}{Optional character. When provided, saves CSV and (if
 \code{terra} is available) GeoTIFF outputs to this directory:

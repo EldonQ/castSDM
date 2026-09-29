@@ -63,7 +63,7 @@ validate_species_data <- function(data,
   vals <- unique(y[!is.na(y)])
   if (!is.numeric(y) || !all(vals %in% c(0, 1))) {
     cli::cli_abort(c(
-      "Response {.val {response}} must be binary 0/1; found value{?s}: {.val {head(vals, 5)}}.",
+      "Response {.val {response}} must be binary 0/1; found value{?s}: {.val {utils::head(vals, 5)}}.",
       i = "Recode presence/background as 1/0 before modelling."
     ), call = call)
   }

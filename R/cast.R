@@ -25,6 +25,10 @@
 #' @param threshold_method Binary threshold rule, selected on training data and
 #'   then applied to held-out predictions. See [cast_threshold()]. Default
 #'   `"max_tss"`.
+#' @param tune Logical. Per-engine hyperparameter grid search inside the
+#'   nested spatial CV folds ([cast_cv()], argument `tune`). Default `FALSE`.
+#' @param tune_folds Integer. Folds for the inner grid-search scoring.
+#'   Default `3`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
@@ -64,6 +68,8 @@ cast <- function(species_data,
                    select_tolerance = 0,
                    select_n_folds = 3L,
                   threshold_method = "max_tss",
+                  tune = FALSE,
+                  tune_folds = 3L,
                   num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
@@ -113,6 +119,7 @@ cast <- function(species_data,
     train_data,
     screen = screen,
     models = models,
+    tune = tune, tune_folds = tune_folds,
     num_threads = num_threads,
     seed = seed, verbose = verbose
   )
@@ -136,6 +143,7 @@ cast <- function(species_data,
          k = cv_k, models = models,
          block_method = cv_block_method,
          threshold_method = threshold_method,
+         tune = tune, tune_folds = tune_folds,
          seed = seed, verbose = verbose
       ),
       error = function(e) {
@@ -164,9 +172,17 @@ cast <- function(species_data,
     # the training split, but published predictions reuse every record.
     if (isTRUE(refit_full)) {
       if (verbose) cli::cli_inform("Refitting final models on the full data set.")
+      # Reuse the hyperparameters tuned on the training split: re-running the
+      # grid on the full data would double grid compute and could silently
+      # change the configuration of the published maps.
+      tuned <- .cast_tuned_args(fit)
       fit_full <- tryCatch(
         cast_fit(
           species_data, screen = screen, models = models,
+          rf_mtry = tuned$rf_mtry,
+          brt_depth = tuned$brt_depth, brt_shrinkage = tuned$brt_shrinkage,
+          maxent_classes = tuned$maxent_classes,
+          maxent_regmult = tuned$maxent_regmult,
           num_threads = num_threads, seed = seed, verbose = verbose
         ),
         error = function(e) {
@@ -210,4 +226,31 @@ cast <- function(species_data,
     fit_full = fit_full,
     call = cl
   )
+}
+
+#' Extract Tuned Hyperparameters from a cast_fit
+#'
+#' Returns the per-engine best combinations chosen by `cast_fit(tune = TRUE)`
+#' so a full-data refit can reuse the training-split configuration instead of
+#' re-running the grid.
+#'
+#' @keywords internal
+#' @noRd
+.cast_tuned_args <- function(fit) {
+  out <- list(rf_mtry = NULL, brt_depth = NULL, brt_shrinkage = NULL,
+              maxent_classes = NULL, maxent_regmult = NULL)
+  for (mdl in names(fit$models %||% list())) {
+    t <- fit$models[[mdl]]$tune
+    if (is.null(t) || is.null(t$best)) next
+    if (mdl == "rf") out$rf_mtry <- t$best$mtry
+    if (mdl == "brt") {
+      out$brt_depth <- t$best$depth
+      out$brt_shrinkage <- t$best$shrinkage
+    }
+    if (mdl == "maxent") {
+      out$maxent_classes <- t$best$classes
+      out$maxent_regmult <- t$best$regmult
+    }
+  }
+  out
 }

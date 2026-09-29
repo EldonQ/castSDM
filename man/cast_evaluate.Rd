@@ -4,7 +4,12 @@
 \alias{cast_evaluate}
 \title{Evaluate Fitted Models}
 \usage{
-cast_evaluate(fit, test_data, response = "presence")
+cast_evaluate(
+  fit,
+  test_data,
+  response = "presence",
+  threshold_method = "max_tss"
+)
 }
 \arguments{
 \item{fit}{A \link{cast_fit} object.}
@@ -13,13 +18,17 @@ cast_evaluate(fit, test_data, response = "presence")
 predictor variables used in fitting.}
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
+
+\item{threshold_method}{Binary threshold rule selected using training
+predictions. See \code{\link[=cast_threshold]{cast_threshold()}}. Default \code{"max_tss"}.}
 }
 \value{
 A \code{cast_eval} object (S3 class).
 }
 \description{
-Computes AUC (Area Under ROC Curve), TSS (True Skill Statistic), and
-CBI (Continuous Boyce Index) for fitted models on test data.
+Computes discrimination, threshold-dependent, calibration, and suitability
+metrics for fitted models on test data. Thresholds are selected on the
+training reference stored in the fit and then evaluated on the test data.
 }
 \details{
 \itemize{
@@ -27,11 +36,12 @@ CBI (Continuous Boyce Index) for fitted models on test data.
 measuring discrimination ability. Computed via \code{\link[pROC:roc]{pROC::roc()}} with
 \code{direction = "<"} fixed, so a worse-than-random model correctly reports
 AUC < 0.5 instead of being mirrored by \code{direction = "auto"}.
-\item \strong{TSS}: True Skill Statistic = Sensitivity + Specificity - 1, at the
-max-Youden threshold chosen on the evaluation set itself (the usual
-SDM evaluation convention; mildly optimistic if the same threshold is
-then reused elsewhere).
-\item \strong{CBI}: Continuous Boyce Index, measuring predicted-expected ratio.
+\item \strong{TSS}: evaluated at a threshold selected on the training fit, not tuned
+on the held-out labels.
+\item \strong{PR-AUC/SEDI}: complementary rare-event discrimination metrics; PR-AUC's
+baseline depends on the sampled prevalence.
+\item \strong{Boyce}: moving-window background-based estimate; \code{cbi_mean} is retained
+as a legacy fixed-bin diagnostic.
 }
 }
 \seealso{

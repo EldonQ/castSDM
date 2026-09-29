@@ -1,3 +1,35 @@
+# castSDM 0.15.0 (unreleased)
+
+## Hyperparameter tuning, user background, reference fixes (P0 review round)
+
+* `cast_fit()` gains `tune = TRUE`: a small per-engine grid search (RF `mtry`
+  scored by out-of-bag TSS; BRT `interaction.depth` x `shrinkage` scored by
+  internal-CV TSS; MaxEnt feature classes x regularisation multiplier scored
+  by stratified random-fold TSS), informed by the biomod2/flexsdm grids and
+  trimmed for cost. Combinations that fail to fit score `NA`; failing grids
+  keep the fixed defaults with a warning. `cast_cv(tune = TRUE)` runs the
+  grid inside every outer training fold (nested, leak-free);
+  `cast()` passes `tune` / `tune_folds` through and reuses the training-split
+  hyperparameters for the full-data refit.
+* `cast_fit()` exposes `maxent_classes`, `maxent_regmult` and `rf_mtry` for
+  explicit hyperparameter control.
+* `cast_background()` gains `user_table` (user-defined background from exact
+  points) and `bias_raster` (target-group background: cells drawn with
+  probability proportional to a bias surface; Phillips et al. 2009), closing
+  the gap between the package's own reference list and its feature set.
+* The moving-window Boyce index no longer drops ratio-0 windows: only
+  undefined 0/0 windows are excluded, aligning with ecospat.boyce (the
+  reference implementation used by biomod2 and N-SDM) and removing an
+  optimistic bias that propagated into ensemble weights.
+* `predict_single_model()` passes `clamp` explicitly to maxnet: the MaxEnt
+  engine no longer clamps predictions silently to the training range while
+  RF/BRT/GAM extrapolate. Clamping is now solely the package-level
+  `clamp` argument of `cast_predict()` / `cast_ensemble_raster()`.
+* Corrected the N-SDM citation (Adde et al. 2023, *Ecography* e06540; was
+  wrongly "2020, 43(2), 331-334") and aligned the ensemble-score
+  documentation with the implemented >=2-components rule.
+* Removed the dead internal helper `find_tss_threshold()`.
+
 # castSDM 0.14.0 (unreleased)
 
 ## Model defaults follow the SDM literature; 0.12.0 stubs removed

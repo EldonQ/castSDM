@@ -106,7 +106,7 @@ compute_pr_auc <- function(obs, pred) {
   fp <- ends - tp
   recall <- c(0, tp / n_pos)
   precision <- c(1, tp / pmax(1, tp + fp))
-  sum(diff(recall) * (head(precision, -1L) + tail(precision, -1L)) / 2)
+  sum(diff(recall) * (utils::head(precision, -1L) + utils::tail(precision, -1L)) / 2)
 }
 
 #' Symmetric Extremal Dependence Index
@@ -163,10 +163,16 @@ compute_boyce <- function(pred, obs, window_fraction = 0.1, n_windows = 100L) {
     b <- a + width
     fp <- mean(pres >= a & pres <= b)
     fb <- mean(bg >= a & bg <= b)
-    if (fp <= 0 || fb <= 0) NA_real_ else fp / fb
+    # Only the 0/0 case (no background in the window) is undefined. A ratio
+    # of exactly 0 (background present, no presences) is informative
+    # low-suitability evidence; dropping those windows - as in
+    # `pe > 0` filters - biases Spearman's rho optimistically upwards.
+    # Aligned with ecospat.boyce (Hirzel et al. 2006), which keeps ratio-0
+    # windows; biomod2 and N-SDM inherit that reference behaviour.
+    if (fb <= 0) NA_real_ else fp / fb
   }, numeric(1))
   centers <- starts + width / 2
-  keep <- is.finite(pe) & pe > 0
+  keep <- is.finite(pe)
   if (sum(keep) < 2L) return(NA_real_)
   pe <- pe[keep]; centers <- centers[keep]
   if (length(pe) > 1L) {

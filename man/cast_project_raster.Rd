@@ -10,8 +10,11 @@ cast_project_raster(
   current_raster,
   future_rasters,
   output_dir,
-  method = c("weighted", "best", "equal"),
+  method = c("weighted", "best", "equal", "median", "committee"),
   models = NULL,
+  min_score = 0.5,
+  fallback = c("best", "equal", "error"),
+  min_metric_folds = 2L,
   mask = NULL,
   overwrite = FALSE,
   compression = "LZW",
@@ -33,9 +36,18 @@ each for a future scenario (e.g., \code{list(ssp126_2050 = rast1, ...)}).}
 
 \item{output_dir}{Character. Output directory for all rasters and CSV.}
 
-\item{method}{Character. Ensemble method. Default \code{"weighted"}.}
+\item{method}{Character. Ensemble method (\code{"weighted"}, \code{"best"},
+\code{"equal"}, \code{"median"}, or \code{"committee"}). Default \code{"weighted"}.}
 
 \item{models}{Character vector or \code{NULL}. Models to use.}
+
+\item{min_score}{Minimum composite score for weighted inclusion. Default \code{0.5}.}
+
+\item{fallback}{Weighted-score fallback (\code{"best"}, \code{"equal"}, or \code{"error"}).
+Default \code{"best"}.}
+
+\item{min_metric_folds}{Minimum finite CV folds for a score component.
+Default \code{2}.}
 
 \item{mask}{A \code{terra::SpatRaster} or \code{NULL}. Prediction mask.}
 

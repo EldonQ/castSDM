@@ -15,9 +15,11 @@ new_cast_fit(models, cast_vars, env_vars, scaling, screen = NULL)
 
 \item{scaling}{List of training-set predictor statistics reused across the
 prediction stack: \code{means} and \code{sds}, \code{impute} (per-predictor training
-median used by the internal \code{.cast_impute()} helper), and \code{reference}
+median used by the internal \code{.cast_impute()} helper), \code{reference}
 (the imputed training predictor frame for MESS/clamp extrapolation
-control and effect range-masking). Models are
+control and effect range-masking), and \code{response} (training labels used
+to select an evaluation threshold without consulting held-out labels).
+Models are
 trained on the raw predictors; \code{means}/\code{sds} are not applied to fitting
 inputs.}
 

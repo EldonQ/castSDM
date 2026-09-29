@@ -14,6 +14,9 @@ cast_save_future_projection(
   fig_dpi = 600L,
   method = "weighted",
   models = NULL,
+  min_score = 0.5,
+  fallback = "best",
+  min_metric_folds = 2L,
   prefix = "future"
 )
 }
@@ -35,6 +38,12 @@ cast_save_future_projection(
 \item{method}{Ensemble method.}
 
 \item{models}{Optional models used by \code{\link[=cast_project]{cast_project()}}.}
+
+\item{min_score}{Minimum composite score for weighted inclusion.}
+
+\item{fallback}{Weighted-score fallback (\code{"best"}, \code{"equal"}, or \code{"error"}).}
+
+\item{min_metric_folds}{Minimum finite CV folds for a score component.}
 
 \item{prefix}{Filename prefix.}
 }

@@ -15,7 +15,8 @@ new_cast_cv(
   screens = list(),
   selection_freq = NULL,
   oof = NULL,
-  fold_status = NULL
+  fold_status = NULL,
+  threshold_method = "max_tss"
 )
 }
 \arguments{
@@ -44,6 +45,9 @@ surface \code{\link[=cast_ensemble]{cast_ensemble()}} thresholds on.}
 
 \item{fold_status}{Character vector of evaluation, empty-selection or failure
 statuses, one per scheduled fold.}
+
+\item{threshold_method}{Rule used to select binary thresholds within the
+outer training folds before scoring held-out folds.}
 }
 \value{
 A \code{cast_cv} object.
