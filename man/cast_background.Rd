@@ -12,11 +12,15 @@ cast_background(
   ratio = 2,
   min_bg = 500L,
   max_bg = 20000L,
-  strategy = c("random", "environmental"),
+  strategy = c("random", "environmental", "sre", "disk"),
   user_table = NULL,
   bias_raster = NULL,
+  sre_quantile = 0.025,
+  disk_min = NULL,
+  disk_max = NULL,
   cell_thin = TRUE,
   exclude_presence = TRUE,
+  n_rep = 1L,
   seed = NULL,
   verbose = TRUE
 )
@@ -50,6 +54,14 @@ and for defining valid (non-NA) sampling cells.}
 \item \code{"environmental"}: stratified random sampling in environmental space
 (partitions environmental PCA space into bins and samples uniformly
 across bins).
+\item \code{"sre"}: surface-range-envelope sampling — cells whose environmental
+values fall inside the per-variable
+\verb{[sre_quantile, 1 - sre_quantile]} quantile range of the presence
+environments (Barbet-Massin et al. 2012). Environmentally plausible,
+geographically unconstrained pseudo-absences; harder than random.
+\item \code{"disk"}: ring sampling — cells at a distance between \code{disk_min} and
+\code{disk_max} map units from the nearest presence (Barbet-Massin et al.
+2012). Geographically close, hard pseudo-absences.
 }}
 
 \item{user_table}{Optional \code{data.frame} with \code{lon} and \code{lat} columns.
@@ -67,12 +79,30 @@ target-group background): e.g. a raster of the sampling effort of the
 target taxon group. Non-finite and negative values are treated as zero
 weight; requires \code{strategy = "random"}.}
 
+\item{sre_quantile}{Numeric in \verb{[0, 0.5)}. Envelope tail probability for
+\code{strategy = "sre"}: each variable's range is trimmed at this quantile on
+both sides of the presence distribution. \code{0} keeps the full min-max
+envelope. Default \code{0.025}.}
+
+\item{disk_min, disk_max}{Numeric. Distance band (map units; degrees for
+lon/lat rasters, consistent with \code{buffer} in \code{\link[=cast_cv]{cast_cv()}}) around
+presences for \code{strategy = "disk"}. \code{disk_min} defaults to \code{0};
+\code{disk_max} to half the shortest raster extent side. Must satisfy
+\verb{0 <= disk_min < disk_max}.}
+
 \item{cell_thin}{Logical. If \code{TRUE} (default), ensures only one
 occurrence per raster cell (removes spatial duplicates at raster
 resolution).}
 
 \item{exclude_presence}{Logical. If \code{TRUE} (default), background points
 cannot fall in cells occupied by occurrences.}
+
+\item{n_rep}{Integer >= 1. Number of independent pseudo-absence
+replicate sets (Barbet-Massin et al. 2012 fit separately to each
+replicate to propagate PA-selection uncertainty). With \code{n_rep = 1}
+(default) a single \code{data.frame} is returned as before; with
+\code{n_rep > 1} a named list of such data frames (class
+\code{cast_background_reps}), each sampled under its own sub-seed.}
 
 \item{seed}{Integer or \code{NULL}. Random seed for reproducibility.}
 

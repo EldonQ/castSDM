@@ -117,6 +117,8 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #'   surface [cast_ensemble()] thresholds on.
 #' @param fold_status Character vector of evaluation, empty-selection or failure
 #'   statuses, one per scheduled fold.
+#' @param n_repeat Integer. Number of independent blocking repeats the
+#'   metrics were aggregated over (1 = single run).
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
@@ -125,7 +127,7 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
                         selections = list(), screens = list(),
                         selection_freq = NULL, oof = NULL, fold_status = NULL,
-                        threshold_method = "max_tss") {
+                        threshold_method = "max_tss", n_repeat = 1L) {
   structure(
     list(
       metrics      = metrics,
@@ -139,7 +141,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       selection_freq = selection_freq,
       oof          = oof,
       fold_status  = fold_status,
-      threshold_method = threshold_method
+      threshold_method = threshold_method,
+      n_repeat     = n_repeat
     ),
     class = "cast_cv"
   )

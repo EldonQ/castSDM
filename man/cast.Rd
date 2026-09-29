@@ -17,9 +17,11 @@ cast(
   threshold_method = "max_tss",
   tune = FALSE,
   tune_folds = 3L,
+  prevalence_target = NULL,
   num_threads = 1L,
   do_cv = TRUE,
   cv_k = 5L,
+  n_repeat = 1L,
   cv_block_method = "grid",
   do_predict = NULL,
   do_ensemble = TRUE,
@@ -68,11 +70,21 @@ nested spatial CV folds (\code{\link[=cast_cv]{cast_cv()}}, argument \code{tune}
 \item{tune_folds}{Integer. Folds for the inner grid-search scoring.
 Default \code{3}.}
 
+\item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. Passed to
+\code{\link[=cast_fit]{cast_fit()}} (training fit, full-data refit) and \code{\link[=cast_cv]{cast_cv()}} (every
+fold): presence/background rows are weighted so the fitted prevalence
+equals the target (weight = target/n per class). Evaluation metrics
+remain unweighted. Default \code{NULL}.}
+
 \item{num_threads}{Integer. Threads for the ranger learners. Default \code{1}.}
 
 \item{do_cv}{Logical. Run spatial cross-validation. Default \code{TRUE}.}
 
 \item{cv_k}{Integer. Number of spatial folds. Default \code{5}.}
+
+\item{n_repeat}{Integer >= 1. Independent spatial-blocking repeats
+(\code{\link[=cast_cv]{cast_cv()}}, argument \code{n_repeat}). Each repeat redraws the fold
+assignment; metrics are aggregated across repeats. Default \code{1}.}
 
 \item{cv_block_method}{Character. Spatial blocking strategy. Default
 \code{"grid"} - grid cells grouped into spatially contiguous folds (the

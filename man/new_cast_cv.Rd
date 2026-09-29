@@ -16,7 +16,8 @@ new_cast_cv(
   selection_freq = NULL,
   oof = NULL,
   fold_status = NULL,
-  threshold_method = "max_tss"
+  threshold_method = "max_tss",
+  n_repeat = 1L
 )
 }
 \arguments{
@@ -48,6 +49,9 @@ statuses, one per scheduled fold.}
 
 \item{threshold_method}{Rule used to select binary thresholds within the
 outer training folds before scoring held-out folds.}
+
+\item{n_repeat}{Integer. Number of independent blocking repeats the
+metrics were aggregated over (1 = single run).}
 }
 \value{
 A \code{cast_cv} object.

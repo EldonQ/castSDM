@@ -1,3 +1,39 @@
+# castSDM 0.16.0 (unreleased)
+
+## Prevalence weighting, SRE/disk background, thinning, response curves, replication (P1 review round)
+
+* `cast_fit()` gains `prevalence_target`: presence/background rows are
+  weighted (weight = target/n per class) so the fitted prevalence equals the
+  target, the standard presence-background correction (N-SDM uses the
+  equivalent `n_bg/n_pres` presence weight). RF, BRT and GAM accept the
+  weights; MaxEnt has no row-weight interface and stays unweighted.
+  Evaluation metrics remain unweighted. `cast_cv()` and `cast()` pass the
+  target into every fold and the full-data refit.
+* `cast_background()` gains two sampling strategies (Barbet-Massin et al.
+  2012): `strategy = "sre"` draws cells whose environments fall inside the
+  per-variable presence quantile envelope (`sre_quantile`, default 0.025),
+  and `strategy = "disk"` draws cells in a distance band (`disk_min` /
+  `disk_max`, map units) around presences. Both restrict the NA top-up pool
+  to the same design; an empty pool aborts with a hint instead of falling
+  back to random.
+* New `cast_thin()`: greedy great-circle (Haversine) thinning of occurrence
+  records to a minimum distance (`min_dist_km`), with a seeded random
+  visiting order for reproducibility; rows are returned in original order.
+* New `cast_response_curves()`: single-variable response curves with the
+  other predictors fixed at training medians or marginalized as partial
+  dependence (`type = "pdp"`, Friedman 2001), plus optional two-variable
+  interaction grids (`pair`); tidy long-format output with a ggplot-based
+  `plot()` method for both layouts.
+* `cast_background()` gains `n_rep`: independent pseudo-absence replicate
+  sets, each drawn under its own sub-seed (a named `cast_background_reps`
+  list; `n_rep = 1` keeps the plain data.frame return).
+* `cast_cv()` gains `n_repeat`: independent spatial-blocking repeats.
+  Metrics are averaged within each repeat and reported with the
+  **between-repeat** standard deviation (blocking randomness rather than
+  fold noise); `fold_metrics` gains a `replicate` column; selection
+  frequencies pool all repeats; out-of-fold predictions and thresholds
+  refer to the first repeat. `cast()` passes `n_repeat` through.
+
 # castSDM 0.15.0 (unreleased)
 
 ## Hyperparameter tuning, user background, reference fixes (P0 review round)

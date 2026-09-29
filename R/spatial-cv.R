@@ -34,6 +34,20 @@
 #'   `FALSE`. Raises compute cost by the grid size per fold.
 #' @param tune_folds Integer. Folds for the inner grid-search scoring.
 #'   Default `3`.
+#' @param prevalence_target Numeric in (0, 1), or `NULL`. Passed to
+#'   [cast_fit()] in every outer fold: presence/background rows are weighted
+#'   so the fitted prevalence equals the target (weight = target/n per class).
+#'   Evaluation metrics remain unweighted. Default `NULL`.
+#' @param n_repeat Integer >= 1. Number of independent spatial-blocking
+#'   repeats (Barbet-Massin et al. 2012-style replicated evaluation).
+#'   Each repeat redraws the fold assignment under its own seed, so the
+#'   spread across repeats isolates blocking randomness from sampling noise.
+#'   With `n_repeat = 1` (default) `metrics` averages and standardises
+#'   across folds as before. With `n_repeat > 1`, `metrics` first averages
+#'   within each repeat, then reports the mean across repeats and the
+#'   **between-repeat** standard deviation; `fold_metrics` gains a `repeat`
+#'   column; `selection_freq` pools all repeats; `oof`, `thresholds` and
+#'   `folds` refer to the first repeat.
 #' @param threshold_method Rule for selecting the binary threshold inside each
 #'   outer training fold. That threshold is then applied to the held-out fold.
 #'   See [cast_threshold()]. Default `"max_tss"`.
@@ -63,6 +77,8 @@ cast_cv <- function(data,
                     brt_shrinkage = 0.005,
                     tune = FALSE,
                     tune_folds = 3L,
+                    prevalence_target = NULL,
+                    n_repeat = 1L,
                     threshold_method = "max_tss",
                     parallel = FALSE,
                     seed = NULL,
@@ -83,6 +99,10 @@ cast_cv <- function(data,
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
     cli::cli_abort("{.arg buffer} must be a single non-negative number.")
   }
+  n_repeat <- as.integer(n_repeat)
+  if (is.na(n_repeat) || n_repeat < 1L) {
+    cli::cli_abort("{.arg n_repeat} must be an integer >= 1.")
+  }
   validate_species_data(data, required_cols = c("lon", "lat", response),
                         response = response)
   if (is.null(select_method) && !is.null(screen)) {
@@ -91,9 +111,8 @@ cast_cv <- function(data,
       i = "That screen was selected on the full data set, so selection leaks into these CV metrics; treat them as optimistic."
     ))
   }
-  folds <- make_spatial_folds(data$lon, data$lat, k, block_method, seed)
 
-  cv_one <- function(fold_i) {
+  cv_one <- function(folds, fold_i) {
     test_idx <- which(folds == fold_i)
     train_idx <- .cast_buffer_train_idx(data$lon, data$lat, test_idx, buffer)
     train <- data[train_idx, , drop = FALSE]
@@ -131,6 +150,7 @@ cast_cv <- function(data,
         rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
         brt_shrinkage = brt_shrinkage,
         tune = tune, tune_folds = tune_folds,
+        prevalence_target = prevalence_target,
         seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
         verbose = FALSE
       ),
@@ -195,61 +215,122 @@ cast_cv <- function(data,
          screen = fold_screen, status = if (length(rows)) "evaluated" else "no_predictions")
   }
 
+  run_once <- function(rep_i) {
+    # Per-repeat fold assignment: seeds separated by a prime so distinct
+    # repeats draw unrelated blockings under the same user seed.
+    rep_seed <- if (!is.null(seed)) seed + (rep_i - 1L) * 7919L else NULL
+    folds <- make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed)
+    if (verbose && n_repeat > 1L) {
+      cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
+    }
+    if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
+      if (requireNamespace("future", quietly = TRUE) &&
+          inherits(future::plan(), "sequential")) {
+        cli::cli_warn(c(
+          "{.code parallel = TRUE} but no {.pkg future} plan is set; folds will run sequentially.",
+          i = "Set one first, e.g. {.code future::plan(future::multisession)}."
+        ))
+      }
+      results <- future.apply::future_lapply(
+        seq_len(k), function(i) cv_one(folds, i), future.seed = TRUE
+      )
+    } else {
+      results <- lapply(seq_len(k), function(i) cv_one(folds, i))
+    }
+
+    row_list <- list()
+    oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
+    selections <- vector("list", k)
+    screens <- vector("list", k)
+    fold_status <- rep("failed", k)
+    skipped_single <- integer(0)
+    for (i in seq_along(results)) {
+      res <- results[[i]]
+      if (is.null(res)) next
+      if (isTRUE(res$skipped_single_class)) {
+        skipped_single <- c(skipped_single, i)
+        fold_status[i] <- "single_class"
+        next
+      }
+      row_list <- c(row_list, res$rows)
+      selections[i] <- list(res$selected)
+      screens[i] <- list(res$screen)
+      fold_status[i] <- res$status
+      for (mdl in names(res$updates)) {
+        upd <- res$updates[[mdl]]
+        oof[[mdl]][upd$idx] <- upd$pred
+      }
+    }
+
+    fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
+    # Keep the out-of-fold surface: it is the only labelled ensemble-scale
+    # prediction available downstream, and cast_ensemble() needs it to
+    # threshold the ensemble rather than averaging per-model thresholds.
+    oof_df <- data.frame(obs = data[[response]])
+    for (mdl in models) oof_df[[paste0("HSS_", mdl)]] <- oof[[mdl]]
+    thresholds <- vapply(models, function(mdl) {
+      pred <- oof[[mdl]]
+      ok <- is.finite(pred)
+      if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) return(0.5)
+      cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
+    }, numeric(1))
+
+    list(folds = folds, fold_df = fold_df, oof_df = oof_df,
+         thresholds = thresholds, selections = selections,
+         screens = screens, fold_status = fold_status,
+         skipped_single = skipped_single)
+  }
+
   if (verbose) {
     cli::cli_inform(
-      "Nested spatial CV: {k} folds; selector={select_method %||% 'fixed'}."
+      "Nested spatial CV: {k} fold{?s} x {n_repeat} repeat{?s}; selector={select_method %||% 'fixed'}."
     )
   }
-  if (parallel && requireNamespace("future.apply", quietly = TRUE)) {
-    if (requireNamespace("future", quietly = TRUE) &&
-        inherits(future::plan(), "sequential")) {
-      cli::cli_warn(c(
-        "{.code parallel = TRUE} but no {.pkg future} plan is set; folds will run sequentially.",
-        i = "Set one first, e.g. {.code future::plan(future::multisession)}."
-      ))
-    }
-    results <- future.apply::future_lapply(
-      seq_len(k), function(i) cv_one(i), future.seed = TRUE
+  reps <- lapply(seq_len(n_repeat), run_once)
+
+  total_skipped <- sum(vapply(reps, function(rp) length(rp$skipped_single),
+                              integer(1)))
+  if (total_skipped) {
+    cli::cli_warn(
+      "Skipped {total_skipped} fold run{?s} across {n_repeat} repeat{?s} x {k} folds: a single response class in the train or test split."
     )
-  } else {
-    results <- lapply(seq_len(k), cv_one)
   }
 
-  row_list <- list()
-  oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
-  selections <- vector("list", k)
-  screens <- vector("list", k)
-  fold_status <- rep("failed", k)
-  skipped_single <- integer(0)
-  for (i in seq_along(results)) {
-    res <- results[[i]]
-    if (is.null(res)) next
-    if (isTRUE(res$skipped_single_class)) {
-      skipped_single <- c(skipped_single, i)
-      fold_status[i] <- "single_class"
-      next
-    }
-    row_list <- c(row_list, res$rows)
-    selections[i] <- list(res$selected)
-    screens[i] <- list(res$screen)
-    fold_status[i] <- res$status
-    for (mdl in names(res$updates)) {
-      upd <- res$updates[[mdl]]
-      oof[[mdl]][upd$idx] <- upd$pred
-    }
+  # Fold status per fold position across repeats: identical states pass
+  # through; disagreement is surfaced as "mixed" rather than hidden.
+  fold_status_final <- if (n_repeat == 1L) reps[[1]]$fold_status else
+    vapply(seq_len(k), function(i) {
+      st <- vapply(reps, function(rp) rp$fold_status[i], character(1))
+      if (all(st == st[1])) st[1] else "mixed"
+    }, character(1))
+
+  parts <- lapply(seq_len(n_repeat), function(ri) {
+    if (!nrow(reps[[ri]]$fold_df)) return(NULL)
+    if (n_repeat == 1L) return(reps[[ri]]$fold_df)
+    cbind(data.frame(replicate = ri, stringsAsFactors = FALSE),
+          reps[[ri]]$fold_df)
+  })
+  fold_df_all <- do.call(rbind, Filter(Negate(is.null), parts))
+  if (is.null(fold_df_all)) fold_df_all <- data.frame()
+  if (n_repeat > 1L && nrow(fold_df_all)) {
+    fold_df_all <- fold_df_all[order(fold_df_all$replicate,
+                                     fold_df_all$fold), , drop = FALSE]
+    rownames(fold_df_all) <- NULL
   }
 
-  # Fold-level selection frequency: the fraction of outer folds in which
-  # each predictor was retained. The basis of the consensus selector
-  # (cast_consensus()) and of the spatial-stability diagnostic. The
-  # denominator is ALL k folds: an empty (or failed) fold contributes zero
-  # rather than silently shrinking the denominator and inflating frequency.
-  all_vars <- unique(unlist(selections))
+  # Fold-level selection frequency pooled over ALL repeats: the fraction of
+  # fold runs in which each predictor was retained. The basis of the
+  # consensus selector (cast_consensus()) and of the spatial-stability
+  # diagnostic. The denominator is every fold run (k x n_repeat): an empty
+  # (or failed) fold contributes zero rather than silently shrinking the
+  # denominator and inflating frequency.
+  selections_all <- do.call(c, lapply(reps, `[[`, "selections"))
+  all_vars <- unique(unlist(selections_all))
   selection_freq <- data.frame(variable = character(0), freq = numeric(0),
                                stringsAsFactors = FALSE)
   if (length(all_vars)) {
     freq <- vapply(all_vars, function(v) {
-      mean(vapply(selections, function(s) v %in% (s %||% character(0)),
+      mean(vapply(selections_all, function(s) v %in% (s %||% character(0)),
                   logical(1)))
     }, numeric(1))
     selection_freq <- data.frame(
@@ -257,18 +338,39 @@ cast_cv <- function(data,
     selection_freq <- selection_freq[order(-selection_freq$freq), , drop = FALSE]
     rownames(selection_freq) <- NULL
   }
-  fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
-  if (length(skipped_single)) {
-    cli::cli_warn(
-      "Skipped {length(skipped_single)}/{k} fold{?s} ({skipped_single}): a single response class in the train or test split."
-    )
-  }
-  if (!nrow(fold_df)) {
+
+  if (!nrow(fold_df_all)) {
     cli::cli_abort("All spatial CV folds failed.",
                    class = "cast_cv_no_evaluable_folds",
-                   screens = screens, fold_status = fold_status)
+                   screens = reps[[1]]$screens,
+                   fold_status = fold_status_final)
   }
 
+  metrics <- if (n_repeat == 1L) {
+    .cast_fold_metrics(reps[[1]]$fold_df, models)
+  } else {
+    per_rep <- lapply(reps, function(rp) .cast_fold_metrics(rp$fold_df, models))
+    .cast_repeat_metrics(per_rep, models)
+  }
+
+  new_cast_cv(
+    metrics = metrics, fold_metrics = fold_df_all, folds = reps[[1]]$folds,
+    k = k, block_method = block_method, thresholds = reps[[1]]$thresholds,
+    selections = selections_all, screens = do.call(c, lapply(reps, `[[`, "screens")),
+    selection_freq = selection_freq, oof = reps[[1]]$oof_df,
+    fold_status = fold_status_final, threshold_method = threshold_method,
+    n_repeat = n_repeat
+  )
+}
+
+#' Aggregate Fold-Level Metrics Per Model (single blocking)
+#'
+#' Mean/sd across folds for every metric, plus the finite-value counts and
+#' the mean tuned threshold. Shared by the single-repeat and repeated CV
+#' aggregation paths.
+#' @keywords internal
+#' @noRd
+.cast_fold_metrics <- function(fold_df, models) {
   agg <- lapply(models, function(mdl) {
     z <- fold_df[fold_df$model == mdl, , drop = FALSE]
     if (!nrow(z)) return(NULL)
@@ -286,27 +388,46 @@ cast_cv <- function(data,
     out$n_selected_mean <- mean(z$n_selected, na.rm = TRUE)
     as.data.frame(out, stringsAsFactors = FALSE)
   })
-  metrics <- do.call(rbind, Filter(Negate(is.null), agg))
-  thresholds <- vapply(models, function(mdl) {
-    pred <- oof[[mdl]]
-    ok <- is.finite(pred)
-    if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) return(0.5)
-    cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
-  }, numeric(1))
+  do.call(rbind, Filter(Negate(is.null), agg))
+}
 
-  # Keep the out-of-fold surface: it is the only labelled ensemble-scale
-  # prediction available downstream, and cast_ensemble() needs it to threshold
-  # the ensemble rather than averaging per-model thresholds.
-  oof_df <- data.frame(obs = data[[response]])
-  for (mdl in models) oof_df[[paste0("HSS_", mdl)]] <- oof[[mdl]]
-
-  new_cast_cv(
-    metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
-    block_method = block_method, thresholds = thresholds,
-    selections = selections, screens = screens,
-    selection_freq = selection_freq, oof = oof_df, fold_status = fold_status,
-    threshold_method = threshold_method
-  )
+#' Aggregate Metrics Across Blocking Repeats
+#'
+#' Two-level aggregation for `n_repeat > 1`: per-repeat fold means are
+#' averaged across repeats (`*_mean`), the **between-repeat** standard
+#' deviation of those means is reported (`*_sd`; blocking randomness, not
+#' fold noise), and fold counts are summed.
+#' @keywords internal
+#' @noRd
+.cast_repeat_metrics <- function(per_rep, models) {
+  agg <- lapply(models, function(mdl) {
+    rows <- Filter(Negate(is.null), lapply(per_rep, function(m) {
+      z <- m[m$model == mdl, , drop = FALSE]
+      if (!nrow(z)) NULL else z
+    }))
+    if (!length(rows)) return(NULL)
+    metric_names <- c("auc", "pr_auc", "tss", "sedi", "brier", "logloss",
+                      "boyce", "cbi")
+    out <- list(model = mdl)
+    for (metric in metric_names) {
+      means <- vapply(rows, function(z) z[[paste0(metric, "_mean")]][1],
+                      numeric(1))
+      out[[paste0(metric, "_mean")]] <- mean(means)
+      out[[paste0(metric, "_sd")]] <- if (length(means) >= 2L) {
+        stats::sd(means)
+      } else NA_real_
+      out[[paste0(metric, "_n_folds")]] <-
+        sum(vapply(rows, function(z) z[[paste0(metric, "_n_folds")]][1],
+                   numeric(1)))
+    }
+    out$tss_threshold_mean <- mean(vapply(rows, function(z)
+      z$tss_threshold_mean[1], numeric(1)))
+    out$n_selected_mean <- mean(vapply(rows, function(z)
+      z$n_selected_mean[1], numeric(1)))
+    out$n_folds <- sum(vapply(rows, function(z) z$n_folds[1], numeric(1)))
+    as.data.frame(out, stringsAsFactors = FALSE)
+  })
+  do.call(rbind, Filter(Negate(is.null), agg))
 }
 
 #' Assign Spatial Folds

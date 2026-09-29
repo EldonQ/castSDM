@@ -29,9 +29,17 @@
 #'   nested spatial CV folds ([cast_cv()], argument `tune`). Default `FALSE`.
 #' @param tune_folds Integer. Folds for the inner grid-search scoring.
 #'   Default `3`.
+#' @param prevalence_target Numeric in (0, 1), or `NULL`. Passed to
+#'   [cast_fit()] (training fit, full-data refit) and [cast_cv()] (every
+#'   fold): presence/background rows are weighted so the fitted prevalence
+#'   equals the target (weight = target/n per class). Evaluation metrics
+#'   remain unweighted. Default `NULL`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
+#' @param n_repeat Integer >= 1. Independent spatial-blocking repeats
+#'   ([cast_cv()], argument `n_repeat`). Each repeat redraws the fold
+#'   assignment; metrics are aggregated across repeats. Default `1`.
 #' @param cv_block_method Character. Spatial blocking strategy. Default
 #'   `"grid"` - grid cells grouped into spatially contiguous folds (the
 #'   legacy interleaved packing is still available as `"grid_random"`; see
@@ -70,9 +78,11 @@ cast <- function(species_data,
                   threshold_method = "max_tss",
                   tune = FALSE,
                   tune_folds = 3L,
+                  prevalence_target = NULL,
                   num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
+                 n_repeat = 1L,
                  cv_block_method = "grid",
                  do_predict = NULL,
                  do_ensemble = TRUE,
@@ -120,6 +130,7 @@ cast <- function(species_data,
     screen = screen,
     models = models,
     tune = tune, tune_folds = tune_folds,
+    prevalence_target = prevalence_target,
     num_threads = num_threads,
     seed = seed, verbose = verbose
   )
@@ -142,8 +153,10 @@ cast <- function(species_data,
          ),
          k = cv_k, models = models,
          block_method = cv_block_method,
+         n_repeat = n_repeat,
          threshold_method = threshold_method,
          tune = tune, tune_folds = tune_folds,
+         prevalence_target = prevalence_target,
          seed = seed, verbose = verbose
       ),
       error = function(e) {
@@ -183,6 +196,7 @@ cast <- function(species_data,
           brt_depth = tuned$brt_depth, brt_shrinkage = tuned$brt_shrinkage,
           maxent_classes = tuned$maxent_classes,
           maxent_regmult = tuned$maxent_regmult,
+          prevalence_target = prevalence_target,
           num_threads = num_threads, seed = seed, verbose = verbose
         ),
         error = function(e) {

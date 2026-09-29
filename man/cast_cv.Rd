@@ -19,6 +19,8 @@ cast_cv(
   brt_shrinkage = 0.005,
   tune = FALSE,
   tune_folds = 3L,
+  prevalence_target = NULL,
+  n_repeat = 1L,
   threshold_method = "max_tss",
   parallel = FALSE,
   seed = NULL,
@@ -70,6 +72,22 @@ held-out folds never influence the chosen hyperparameters. Default
 
 \item{tune_folds}{Integer. Folds for the inner grid-search scoring.
 Default \code{3}.}
+
+\item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. Passed to
+\code{\link[=cast_fit]{cast_fit()}} in every outer fold: presence/background rows are weighted
+so the fitted prevalence equals the target (weight = target/n per class).
+Evaluation metrics remain unweighted. Default \code{NULL}.}
+
+\item{n_repeat}{Integer >= 1. Number of independent spatial-blocking
+repeats (Barbet-Massin et al. 2012-style replicated evaluation).
+Each repeat redraws the fold assignment under its own seed, so the
+spread across repeats isolates blocking randomness from sampling noise.
+With \code{n_repeat = 1} (default) \code{metrics} averages and standardises
+across folds as before. With \code{n_repeat > 1}, \code{metrics} first averages
+within each repeat, then reports the mean across repeats and the
+\strong{between-repeat} standard deviation; \code{fold_metrics} gains a \code{repeat}
+column; \code{selection_freq} pools all repeats; \code{oof}, \code{thresholds} and
+\code{folds} refer to the first repeat.}
 
 \item{threshold_method}{Rule for selecting the binary threshold inside each
 outer training fold. That threshold is then applied to the held-out fold.

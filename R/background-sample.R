@@ -26,6 +26,14 @@
 #'   - `"environmental"`: stratified random sampling in environmental space
 #'     (partitions environmental PCA space into bins and samples uniformly
 #'     across bins).
+#'   - `"sre"`: surface-range-envelope sampling — cells whose environmental
+#'     values fall inside the per-variable
+#'     `[sre_quantile, 1 - sre_quantile]` quantile range of the presence
+#'     environments (Barbet-Massin et al. 2012). Environmentally plausible,
+#'     geographically unconstrained pseudo-absences; harder than random.
+#'   - `"disk"`: ring sampling — cells at a distance between `disk_min` and
+#'     `disk_max` map units from the nearest presence (Barbet-Massin et al.
+#'     2012). Geographically close, hard pseudo-absences.
 #' @param user_table Optional `data.frame` with `lon` and `lat` columns.
 #'   When supplied, the background sample is taken from exactly these points
 #'   (Phillips et al. 2009-style user-defined background): `strategy` and the
@@ -39,11 +47,26 @@
 #'   target-group background): e.g. a raster of the sampling effort of the
 #'   target taxon group. Non-finite and negative values are treated as zero
 #'   weight; requires `strategy = "random"`.
+#' @param sre_quantile Numeric in `[0, 0.5)`. Envelope tail probability for
+#'   `strategy = "sre"`: each variable's range is trimmed at this quantile on
+#'   both sides of the presence distribution. `0` keeps the full min-max
+#'   envelope. Default `0.025`.
+#' @param disk_min,disk_max Numeric. Distance band (map units; degrees for
+#'   lon/lat rasters, consistent with `buffer` in [cast_cv()]) around
+#'   presences for `strategy = "disk"`. `disk_min` defaults to `0`;
+#'   `disk_max` to half the shortest raster extent side. Must satisfy
+#'   `0 <= disk_min < disk_max`.
 #' @param cell_thin Logical. If `TRUE` (default), ensures only one
 #'   occurrence per raster cell (removes spatial duplicates at raster
 #'   resolution).
 #' @param exclude_presence Logical. If `TRUE` (default), background points
 #'   cannot fall in cells occupied by occurrences.
+#' @param n_rep Integer >= 1. Number of independent pseudo-absence
+#'   replicate sets (Barbet-Massin et al. 2012 fit separately to each
+#'   replicate to propagate PA-selection uncertainty). With `n_rep = 1`
+#'   (default) a single `data.frame` is returned as before; with
+#'   `n_rep > 1` a named list of such data frames (class
+#'   `cast_background_reps`), each sampled under its own sub-seed.
 #' @param seed Integer or `NULL`. Random seed for reproducibility.
 #' @param verbose Logical. Print informational messages. Default `TRUE`.
 #'
@@ -86,11 +109,15 @@ cast_background <- function(occurrences,
                             ratio = 2,
                             min_bg = 500L,
                             max_bg = 20000L,
-                            strategy = c("random", "environmental"),
+                            strategy = c("random", "environmental", "sre", "disk"),
                             user_table = NULL,
                             bias_raster = NULL,
+                            sre_quantile = 0.025,
+                            disk_min = NULL,
+                            disk_max = NULL,
                             cell_thin = TRUE,
                             exclude_presence = TRUE,
+                            n_rep = 1L,
                             seed = NULL,
                             verbose = TRUE) {
   check_suggested("terra", "for raster extraction")
@@ -101,10 +128,10 @@ cast_background <- function(occurrences,
   if (use_user && use_bias) {
     cli::cli_abort("Pass either {.arg user_table} or {.arg bias_raster}, not both.")
   }
-  if (use_bias && strategy == "environmental") {
+  if (use_bias && strategy != "random") {
     cli::cli_abort(c(
       "{.arg bias_raster} combines with {.code strategy = \"random\"} only.",
-      i = "Environmental stratification and bias weighting are competing sampling designs."
+      i = "Bias weighting and the environmental/SRE/disk designs are competing sampling designs."
     ))
   }
 
@@ -173,9 +200,37 @@ cast_background <- function(occurrences,
     }
   }
 
-  if (!is.null(seed)) set.seed(seed)
+  if (strategy == "sre") {
+    if (!is.numeric(sre_quantile) || length(sre_quantile) != 1L ||
+        !is.finite(sre_quantile) || sre_quantile < 0 || sre_quantile >= 0.5) {
+      cli::cli_abort("{.arg sre_quantile} must be a single number in [0, 0.5).")
+    }
+  }
+  if (strategy == "disk") {
+    if (is.null(disk_min)) disk_min <- 0
+    if (is.null(disk_max)) {
+      ext <- terra::ext(raster_stack)
+      disk_max <- 0.5 * min(ext$xmax - ext$xmin, ext$ymax - ext$ymin)
+    }
+    if (!is.numeric(disk_min) || length(disk_min) != 1L ||
+        !is.finite(disk_min) || disk_min < 0 ||
+        !is.numeric(disk_max) || length(disk_max) != 1L ||
+        !is.finite(disk_max) || disk_max <= disk_min) {
+      cli::cli_abort(c(
+        "{.arg disk_min} and {.arg disk_max} must satisfy 0 <= disk_min < disk_max (map units).",
+        i = "Both are resolved in the CRS of {.arg raster_stack} (degrees for lon/lat data)."
+      ))
+    }
+  }
+
+  n_rep <- as.integer(n_rep)
+  if (is.na(n_rep) || n_rep < 1L) {
+    cli::cli_abort("{.arg n_rep} must be an integer >= 1.")
+  }
 
   # ---- Cell-thinning of occurrences -------------------------------------------
+  # Deterministic (seed-independent), so it runs once outside the replicate
+  # loop: every replicate starts from the same thinned occurrence set.
   occ_xy <- as.matrix(occurrences[, c("lon", "lat")])
   occ_cells <- terra::cellFromXY(raster_stack, occ_xy)
 
@@ -192,6 +247,14 @@ cast_background <- function(occurrences,
   }
 
   n_pres <- nrow(occurrences)
+
+  # One sampling replicate. With n_rep = 1 the plain user seed is kept for
+  # backwards compatibility; with n_rep > 1 each replicate draws under its
+  # own sub-seed so the sets are independent.
+  bg_once <- function(rep_i) {
+    if (!is.null(seed)) {
+      set.seed(if (n_rep == 1L) seed else seed + rep_i - 1L)
+    }
 
   # ---- Background cell selection -----------------------------------------------
   if (use_user) {
@@ -256,6 +319,38 @@ cast_background <- function(occurrences,
       valid_cells <- setdiff(valid_cells, occ_cells)
     }
 
+    # ---- Strategy-specific candidate pools ---------------------------------------
+    # The pool REPLACES valid_cells so the NA top-up loop below stays inside
+    # the same strategy design instead of drifting back to uniform sampling.
+    if (strategy == "sre") {
+      valid_cells <- .sre_pool(raster_stack, occ_cells, valid_cells,
+                               sre_quantile)
+      if (verbose) {
+        cli::cli_inform(
+          "SRE envelope (q = {sre_quantile}): {length(valid_cells)} candidate cells."
+        )
+      }
+    } else if (strategy == "disk") {
+      valid_cells <- .disk_pool(raster_stack, occ_xy, occ_cells, valid_cells,
+                                disk_min, disk_max)
+      if (verbose) {
+        cli::cli_inform(
+          "Disk band [{disk_min}, {disk_max}] map units: {length(valid_cells)} candidate cells."
+        )
+      }
+    }
+    if (!length(valid_cells)) {
+      hint <- switch(strategy,
+        sre = "Widen {.arg sre_quantile} toward 0.5 or use {.code strategy = \"random\"}.",
+        disk = "Lower {.arg disk_min} or raise {.arg disk_max}, or use {.code strategy = \"random\"}.",
+        "Check the study-area mask and raster coverage."
+      )
+      cli::cli_abort(c(
+        "No candidate background cells for strategy {.val {strategy}}.",
+        "i" = hint
+      ))
+    }
+
     if (length(valid_cells) < n_bg) {
       if (verbose) {
         cli::cli_warn(
@@ -281,7 +376,8 @@ cast_background <- function(occurrences,
       }
       bg_cells <- sample(valid_cells, size = n_bg, prob = w,
                          replace = sample_replace)
-    } else if (strategy == "random") {
+    } else if (strategy == "random" || strategy == "sre" || strategy == "disk") {
+      # sre / disk pools are already restricted; the draw is uniform within.
       bg_cells <- sample(valid_cells, size = n_bg, replace = sample_replace)
 
     } else if (strategy == "environmental") {
@@ -379,11 +475,91 @@ cast_background <- function(occurrences,
     ))
   }
 
-  out_df
+    out_df
+  }
+
+  reps <- lapply(seq_len(n_rep), bg_once)
+  if (n_rep == 1L) return(reps[[1]])
+  reps <- stats::setNames(reps, sprintf("rep%d", seq_len(n_rep)))
+  class(reps) <- c("cast_background_reps", "list")
+  if (verbose) {
+    cli::cli_inform(
+      "Generated {n_rep} pseudo-absence replicate sets ({names(reps)})."
+    )
+  }
+  reps
 }
 
 
 # ---- Internal helpers ---------------------------------------------------------
+
+#' Surface Range Envelope candidate pool (SRE)
+#'
+#' Cells whose environmental values fall inside the per-variable
+#' `[q, 1 - q]` quantile range of the presence environments
+#' (Barbet-Massin et al. 2012, "sre"): environmentally plausible,
+#' geographically unconstrained pseudo-absences.
+#' @keywords internal
+#' @noRd
+.sre_pool <- function(raster_stack, occ_cells, valid_cells, sre_quantile) {
+  occ_cells <- occ_cells[!is.na(occ_cells)]
+  pres_env <- as.data.frame(raster_stack[occ_cells])
+  pres_env <- pres_env[stats::complete.cases(pres_env), , drop = FALSE]
+  if (nrow(pres_env) < 2L) {
+    cli::cli_abort(
+      "SRE needs environmental values at at least 2 presence cells."
+    )
+  }
+  probs <- c(sre_quantile, 1 - sre_quantile)
+  bounds <- apply(pres_env, 2, stats::quantile, probs = probs, names = FALSE)
+  lo <- bounds[1, ]
+  hi <- bounds[2, ]
+  pool <- integer(0)
+  chunk <- 200000L  # bounded-memory sweep over the candidate cells
+  for (s in seq(1L, length(valid_cells), by = chunk)) {
+    idx <- s:min(s + chunk - 1L, length(valid_cells))
+    cells_chunk <- valid_cells[idx]
+    ev <- as.data.frame(raster_stack[cells_chunk])
+    ok <- stats::complete.cases(ev)
+    ev <- ev[ok, , drop = FALSE]
+    inside <- rep(TRUE, nrow(ev))
+    for (j in seq_along(ev)) {
+      inside <- inside & ev[[j]] >= lo[j] & ev[[j]] <= hi[j]
+    }
+    pool <- c(pool, cells_chunk[ok][inside])
+  }
+  pool
+}
+
+#' Disk-band candidate pool
+#'
+#' Cells whose planar Euclidean distance to the nearest presence coordinate
+#' lies in `[disk_min, disk_max]` map units (Barbet-Massin et al. 2012,
+#' "disk"): geographically close, hard pseudo-absences. Distances are
+#' computed between cell centroids and presence coordinates in the same
+#' units as `buffer` in [cast_cv()] (degrees for lon/lat data) rather than
+#' via [terra::distance()], which switches to geodesic metres on
+#' lon/lat geometries.
+#' @keywords internal
+#' @noRd
+.disk_pool <- function(raster_stack, occ_xy, occ_cells, valid_cells,
+                       disk_min, disk_max) {
+  ok_p <- !is.na(occ_cells)
+  if (!any(ok_p)) {
+    cli::cli_abort("Disk strategy needs presences inside the raster extent.")
+  }
+  occ_xy <- occ_xy[ok_p, , drop = FALSE]
+  if (!length(valid_cells)) return(integer(0))
+  xy_v <- terra::xyFromCell(raster_stack, valid_cells)
+  # Running row-min of squared distances, one presence at a time: O(n_pres)
+  # vectorised passes, O(n_cells) memory, no terra version-dependent units.
+  dmin2 <- rep(Inf, nrow(xy_v))
+  for (p in seq_len(nrow(occ_xy))) {
+    d2 <- (xy_v[, 1] - occ_xy[p, 1])^2 + (xy_v[, 2] - occ_xy[p, 2])^2
+    dmin2 <- pmin(dmin2, d2)
+  }
+  valid_cells[dmin2 >= disk_min^2 & dmin2 <= disk_max^2]
+}
 
 #' Environmental-space stratified background sampling
 #' @keywords internal

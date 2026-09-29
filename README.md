@@ -59,7 +59,18 @@ plot(result$screen)          # forward-selection path: admission steps and gains
 
 Background sampling supports user-defined points (`cast_background(user_table =)`)
 and bias-surface (target-group) weighting (`cast_background(bias_raster =)`,
-Phillips et al. 2009).
+Phillips et al. 2009), plus the Barbet-Massin et al. (2012) designs
+`strategy = "sre"` (environmental envelope) and `strategy = "disk"`
+(distance band around presences), and `n_rep =` replicate pseudo-absence
+sets. Clumped occurrence records can be thinned first with
+`cast_thin(occurrences, min_dist_km = 5)`.
+
+Fitted models accept `prevalence_target =` (presence-background weighting,
+weight = target/n per class) in `cast_fit()`, `cast_cv()` and `cast()`.
+Interpret the fits with `cast_response_curves()` (fixed-profile or partial
+dependence curves, plus optional two-variable interaction grids and a
+`plot()` method), and quantify blocking uncertainty with
+`cast_cv(n_repeat =)` (between-repeat standard deviation of the metrics).
 
 Attribution (give ecologically meaningful raw-unit shifts where possible):
 

@@ -36,6 +36,14 @@
 #'   See Details.
 #' @param tune_folds Integer. Folds used by the inner grid-search scoring
 #'   (BRT internal CV; MaxEnt stratified random folds). Default `3`.
+#' @param prevalence_target Numeric in (0, 1), or `NULL`. When supplied,
+#'   presence and background rows are weighted so that the *weighted*
+#'   prevalence equals `prevalence_target` (weight = target/n per class),
+#'   following the standard presence-background correction (N-SDM uses the
+#'   equivalent `n_bg/n_pres` presence weight; biomod2 defaults to a 0.5
+#'   target). RF, BRT and GAM accept the weights; MaxEnt has no row-weight
+#'   interface and is always fitted unweighted. Default `NULL` (unweighted:
+#'   outputs stay relative suitabilities under the sampled prevalence).
 #' @param num_threads Integer. Threads for the Random Forest learner. Default
 #'   `1` (safe under fold-parallel cross-validation; raise for a single fit).
 #' @param seed Integer or `NULL`. Base random seed.
@@ -99,6 +107,7 @@ cast_fit <- function(data,
                      maxent_regmult = NULL,
                      tune         = FALSE,
                      tune_folds   = 3L,
+                     prevalence_target = NULL,
                      num_threads  = 1L,
                      seed         = NULL,
                      verbose      = TRUE) {
@@ -134,6 +143,12 @@ cast_fit <- function(data,
       cli::cli_abort("{.arg tune_folds} must be an integer >= 2.")
     }
   }
+  if (!is.null(prevalence_target) &&
+      (!is.numeric(prevalence_target) || length(prevalence_target) != 1L ||
+       !is.finite(prevalence_target) ||
+       prevalence_target <= 0 || prevalence_target >= 1)) {
+    cli::cli_abort("{.arg prevalence_target} must be a single number in (0, 1), or NULL.")
+  }
 
   # ---- Determine variables ------------------------------------------------
   env_vars <- if (!is.null(screen)) {
@@ -168,6 +183,22 @@ cast_fit <- function(data,
   X_sds   <- apply(X_raw, 2, stats::sd, na.rm = TRUE)
   X_sds[X_sds < 1e-10] <- 1
 
+  # -- Prevalence-correcting case weights (W3) --------------------------------
+  # Weight = target/n per class, so the weighted prevalence is exactly the
+  # target regardless of the sampled presence:background ratio. Evaluation
+  # metrics stay unweighted: only the fitting objective is re-prevalenced.
+  case_weights <- NULL
+  if (!is.null(prevalence_target)) {
+    n1 <- sum(Y == 1L); n0 <- sum(Y == 0L)
+    if (!n1 || !n0) {
+      cli::cli_abort(
+        "{.arg prevalence_target} needs both response classes in {.arg data}."
+      )
+    }
+    case_weights <- ifelse(Y == 1L, prevalence_target / n1,
+                           (1 - prevalence_target) / n0)
+  }
+
   # ---- Fit each model -----------------------------------------------------
   fitted_models <- list()
   for (mdl in models) {
@@ -186,6 +217,7 @@ cast_fit <- function(data,
           mdl, X_raw, Y,
           tune_folds = tune_folds,
           rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
+          case_weights = case_weights,
           fixed = list(maxent_classes = maxent_classes,
                        maxent_regmult = maxent_regmult),
           seed = seed, num_threads = num_threads, verbose = verbose
@@ -211,7 +243,8 @@ cast_fit <- function(data,
                       p_brt_depth, p_brt_shrinkage, seed, num_threads,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
-                      rf_mtry = p_rf_mtry),
+                      rf_mtry = p_rf_mtry,
+                      case_weights = case_weights),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -231,7 +264,8 @@ cast_fit <- function(data,
     cast_vars = cast_vars,
     env_vars  = env_vars,
     scaling   = list(means = X_means, sds = X_sds, impute = X_impute,
-                     reference = X_raw, response = Y, response_name = response),
+                     reference = X_raw, response = Y, response_name = response,
+                     prevalence_target = prevalence_target),
     screen    = screen
   )
 }
@@ -272,7 +306,8 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                              num_threads = 1L,
                              maxent_classes = NULL,
                              maxent_regmult = NULL,
-                             rf_mtry = NULL) {
+                             rf_mtry = NULL,
+                             case_weights = NULL) {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
@@ -282,6 +317,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         data = cbind(presence = as.factor(Y), X),
         num.trees = rf_ntree, probability = TRUE, seed = seed %||% 42L,
         mtry = rf_mtry,  # NULL keeps the ranger default floor(sqrt(nvar))
+        case.weights = case_weights,  # NULL -> unweighted
         num.threads = as.integer(num_threads), verbose = FALSE
       )
       list(type = "traditional", model = m, name = "rf")
@@ -301,6 +337,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         interaction.depth = brt_depth,
         shrinkage = brt_shrinkage,
         cv.folds = 5L,
+        weights = case_weights,  # NULL -> unweighted
         # gbm() defaults n.cores to a parallel cluster. On a small CI runner
         # (or inside an already-parallel cross-validation) spawning workers
         # makes the fit fail outright rather than run slower, so the fold
@@ -329,14 +366,15 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       )
       m <- tryCatch(
         mgcv::gam(f, data = df, family = stats::binomial(),
-                  method = "REML"),
+                  weights = case_weights, method = "REML"),
         error = function(e) {
           flin <- stats::as.formula(
             paste("presence ~",
                   paste(vapply(colnames(X), qname, character(1)),
                         collapse = " + "))
           )
-          mgcv::gam(flin, data = df, family = stats::binomial())
+          mgcv::gam(flin, data = df, family = stats::binomial(),
+                    weights = case_weights)
         }
       )
       list(type = "traditional", model = m, name = "gam")
@@ -413,6 +451,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 #' @noRd
 .cast_tune <- function(name, X, Y, tune_folds = 3L,
                        rf_ntree = 500L, brt_n_trees = 2000L,
+                       case_weights = NULL,
                        fixed = list(), seed = NULL,
                        num_threads = 1L, verbose = TRUE) {
   p <- ncol(X)
@@ -434,9 +473,10 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 
   scores <- switch(name,
     rf   = .tune_rf(X, Y, grid, rf_ntree = rf_ntree, seed = seed,
-                    num_threads = num_threads),
+                    num_threads = num_threads, case_weights = case_weights),
     brt  = .tune_brt(X, Y, grid, brt_n_trees = brt_n_trees,
-                     tune_folds = tune_folds, seed = seed),
+                     tune_folds = tune_folds, seed = seed,
+                     case_weights = case_weights),
     maxent = .tune_maxent(X, Y, grid, tune_folds = tune_folds, seed = seed)
   )
   names(scores) <- apply(grid, 1L, function(r) paste(names(r), r, sep = "=",
@@ -463,10 +503,12 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 }
 
 #' Grid-score RF by out-of-bag TSS (ranger probability forests carry OOB
-#' predictions, so no extra evaluation splits are needed)
+#' predictions, so no extra evaluation splits are needed). Fitting honours
+#' `case_weights`; the OOB TSS itself stays unweighted.
 #' @keywords internal
 #' @noRd
-.tune_rf <- function(X, Y, grid, rf_ntree, seed, num_threads) {
+.tune_rf <- function(X, Y, grid, rf_ntree, seed, num_threads,
+                     case_weights = NULL) {
   check_suggested("ranger", "for Random Forest tuning")
   vapply(seq_len(nrow(grid)), function(i) {
     tryCatch({
@@ -475,6 +517,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         presence ~ ., data = cbind(presence = as.factor(Y), X),
         num.trees = rf_ntree, probability = TRUE, mtry = grid$mtry[i],
         seed = seed %||% 42L, num.threads = as.integer(num_threads),
+        case.weights = case_weights,  # NULL -> unweighted
         verbose = FALSE
       )
       .tss_score(m$predictions[, "1"], Y)
@@ -483,10 +526,12 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 }
 
 #' Grid-score BRT by internal-CV TSS (each combination is fit once with
-#' `cv.folds`; `gbm.perf()` keeps the tree count adaptive)
+#' `cv.folds`; `gbm.perf()` keeps the tree count adaptive). Fitting honours
+#' `case_weights`; the CV TSS itself stays unweighted.
 #' @keywords internal
 #' @noRd
-.tune_brt <- function(X, Y, grid, brt_n_trees, tune_folds, seed) {
+.tune_brt <- function(X, Y, grid, brt_n_trees, tune_folds, seed,
+                      case_weights = NULL) {
   check_suggested("gbm", "for BRT tuning")
   vapply(seq_len(nrow(grid)), function(i) {
     tryCatch({
@@ -495,6 +540,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         presence ~ ., data = cbind(presence = Y, X),
         distribution = "bernoulli", n.trees = brt_n_trees,
         interaction.depth = grid$depth[i], shrinkage = grid$shrinkage[i],
+        weights = case_weights,  # NULL -> unweighted
         cv.folds = tune_folds, n.cores = 1L, verbose = FALSE
       )
       if (is.null(m$cv.fitted)) return(NA_real_)

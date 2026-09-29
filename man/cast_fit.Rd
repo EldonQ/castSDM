@@ -18,6 +18,7 @@ cast_fit(
   maxent_regmult = NULL,
   tune = FALSE,
   tune_folds = 3L,
+  prevalence_target = NULL,
   num_threads = 1L,
   seed = NULL,
   verbose = TRUE
@@ -64,6 +65,15 @@ See Details.}
 
 \item{tune_folds}{Integer. Folds used by the inner grid-search scoring
 (BRT internal CV; MaxEnt stratified random folds). Default \code{3}.}
+
+\item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. When supplied,
+presence and background rows are weighted so that the \emph{weighted}
+prevalence equals \code{prevalence_target} (weight = target/n per class),
+following the standard presence-background correction (N-SDM uses the
+equivalent \code{n_bg/n_pres} presence weight; biomod2 defaults to a 0.5
+target). RF, BRT and GAM accept the weights; MaxEnt has no row-weight
+interface and is always fitted unweighted. Default \code{NULL} (unweighted:
+outputs stay relative suitabilities under the sampled prevalence).}
 
 \item{num_threads}{Integer. Threads for the Random Forest learner. Default
 \code{1} (safe under fold-parallel cross-validation; raise for a single fit).}
