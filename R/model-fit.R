@@ -115,7 +115,7 @@ cast_fit <- function(data,
     cast_vars = cast_vars,
     env_vars  = env_vars,
     scaling   = list(means = X_means, sds = X_sds, impute = X_impute,
-                     reference = X_raw),
+                     reference = X_raw, response = Y, response_name = response),
     screen    = screen
   )
 }

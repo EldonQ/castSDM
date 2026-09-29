@@ -1,12 +1,15 @@
 #' Evaluate Fitted Models
 #'
-#' Computes AUC (Area Under ROC Curve), TSS (True Skill Statistic), and
-#' CBI (Continuous Boyce Index) for fitted models on test data.
+#' Computes discrimination, threshold-dependent, calibration, and suitability
+#' metrics for fitted models on test data. Thresholds are selected on the
+#' training reference stored in the fit and then evaluated on the test data.
 #'
 #' @param fit A [cast_fit] object.
 #' @param test_data A `data.frame` with `presence` column and the same
 #'   predictor variables used in fitting.
 #' @param response Character. Response column name. Default `"presence"`.
+#' @param threshold_method Binary threshold rule selected using training
+#'   predictions. See [cast_threshold()]. Default `"max_tss"`.
 #'
 #' @return A `cast_eval` object (S3 class).
 #'
@@ -15,16 +18,18 @@
 #'   measuring discrimination ability. Computed via [pROC::roc()] with
 #'   `direction = "<"` fixed, so a worse-than-random model correctly reports
 #'   AUC < 0.5 instead of being mirrored by `direction = "auto"`.
-#' - **TSS**: True Skill Statistic = Sensitivity + Specificity - 1, at the
-#'   max-Youden threshold chosen on the evaluation set itself (the usual
-#'   SDM evaluation convention; mildly optimistic if the same threshold is
-#'   then reused elsewhere).
-#' - **CBI**: Continuous Boyce Index, measuring predicted-expected ratio.
+#' - **TSS**: evaluated at a threshold selected on the training fit, not tuned
+#'   on the held-out labels.
+#' - **PR-AUC/SEDI**: complementary rare-event discrimination metrics; PR-AUC's
+#'   baseline depends on the sampled prevalence.
+#' - **Boyce**: moving-window background-based estimate; `cbi_mean` is retained
+#'   as a legacy fixed-bin diagnostic.
 #'
 #' @seealso [cast_fit()], [cast_predict()]
 #'
 #' @export
-cast_evaluate <- function(fit, test_data, response = "presence") {
+cast_evaluate <- function(fit, test_data, response = "presence",
+                          threshold_method = "max_tss") {
   check_suggested("pROC", "for AUC computation")
 
   .cast_check_response(test_data[[response]], response)
@@ -50,12 +55,31 @@ cast_evaluate <- function(fit, test_data, response = "presence") {
       error = function(e) rep(NA_real_, nrow(test_data))
     )
 
-    ev <- evaluate_model_full(preds, Y_test)
+    y_train <- fit$scaling$response
+    train_ref <- fit$scaling$reference
+    threshold <- NULL
+    if (!is.null(y_train) && !is.null(train_ref) &&
+        length(y_train) == nrow(train_ref)) {
+      p_train <- tryCatch(predict_single_model(mdl_info, train_ref),
+                          error = function(e) rep(NA_real_, length(y_train)))
+      threshold <- tryCatch(cast_threshold(p_train, y_train,
+        method = threshold_method), error = function(e) NA_real_)
+    } else {
+      cli::cli_warn("Fit lacks stored training responses; selecting the threshold on evaluation data is optimistic.")
+    }
+    ev <- evaluate_model_full(preds, Y_test, threshold = threshold,
+                              threshold_method = threshold_method)
     results[[mdl_name]] <- data.frame(
       model       = mdl_name,
       auc_mean    = ev["auc"],
+      pr_auc_mean = ev["pr_auc"],
       tss_mean    = ev["tss"],
+      sedi_mean   = ev["sedi"],
+      brier_mean  = ev["brier"],
+      logloss_mean = ev["logloss"],
+      boyce_mean  = ev["boyce"],
       cbi_mean    = ev["cbi"],
+      tss_threshold = ev["tss_threshold"],
       stringsAsFactors = FALSE,
       row.names = NULL
     )

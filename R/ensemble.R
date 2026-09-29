@@ -10,11 +10,21 @@
 #'   variables matching the training data.
 #' @param method Character. Ensemble strategy:
 #'   - `"weighted"` (default): weight = Score / sum(Score), zero out
-#'     models with Score < 0.5.
+#'     models with Score < `min_score`.
 #'   - `"best"`: use the single highest-scoring model.
 #'   - `"equal"`: simple average of all models.
+#'   - `"median"`: cell-wise median of contributing suitability scores.
+#'   - `"committee"`: fraction of contributing models voting suitable at
+#'     their outer-CV thresholds; the ensemble threshold is 0.5.
 #' @param models Character vector. Subset of models to include. Default
 #'   `NULL` (all fitted models).
+#' @param min_score Minimum composite score for weighted inclusion. Default
+#'   `0.5`.
+#' @param fallback When no model reaches `min_score`: `"best"` retains the
+#'   highest-scoring finite model, `"equal"` uses equal weights, or `"error"`
+#'   aborts. The choice and reason are stored in the result. Default `"best"`.
+#' @param min_metric_folds Minimum finite spatial-CV folds required for a
+#'   metric to contribute to the composite score. Default `2`.
 #'
 #' @return A `cast_ensemble` object with components:
 #' \describe{
@@ -28,6 +38,8 @@
 #'   \item{method}{The ensemble method used.}
 #'   \item{threshold}{Binary classification threshold.}
 #'   \item{model_scores}{Named numeric vector of per-model composite scores.}
+#'   \item{weights_fallback}{Whether weighted selection needed a fallback.}
+#'   \item{fallback_reason}{Reason for the fallback, or `NULL`.}
 #' }
 #'
 #' @details
@@ -64,9 +76,12 @@
 #'
 #' @export
 cast_ensemble <- function(fit, cv, new_data,
-                          method = c("weighted", "best", "equal"),
-                          models = NULL) {
+                          method = c("weighted", "best", "equal", "median", "committee"),
+                          models = NULL, min_score = 0.5,
+                          fallback = c("best", "equal", "error"),
+                          min_metric_folds = 2L) {
   method <- match.arg(method)
+  fallback <- match.arg(fallback)
 
   # ---- Compute per-model composite scores from CV -------------------------
   cv_metrics <- cv$metrics
@@ -78,10 +93,14 @@ cast_ensemble <- function(fit, cv, new_data,
   }
 
   cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
-  scores <- .cast_ensemble_scores(cv_sub, mdl_names)
+  scores <- .cast_ensemble_scores(cv_sub, mdl_names,
+                                  min_metric_folds = min_metric_folds)
 
   # ---- Determine weights --------------------------------------------------
-  weights <- .cast_ensemble_weights(scores, method)
+  weights <- .cast_ensemble_weights(scores, method, min_score, fallback)
+  weights_fallback <- isTRUE(attr(weights, "fallback_used"))
+  fallback_reason <- attr(weights, "fallback_reason")
+  score_components <- attr(scores, "components")
 
   # ---- Generate per-model predictions -------------------------------------
   pred_obj <- cast_predict(fit, new_data, models = mdl_names)
@@ -129,12 +148,29 @@ cast_ensemble <- function(fit, cv, new_data,
   w <- w / sum(w)
 
   pred_mat <- as.matrix(pred_df[, hss_cols[include], drop = FALSE])
-  ensemble_hss <- .ensemble_rowmean(pred_mat, w)
+  if (identical(method, "median")) {
+    ensemble_hss <- apply(pred_mat, 1L, function(z) {
+      z <- z[is.finite(z)]
+      if (length(z)) stats::median(z) else NA_real_
+    })
+  } else if (identical(method, "committee")) {
+    thr <- cv$thresholds[mdl_names[include]]
+    if (length(thr) != ncol(pred_mat) || any(!is.finite(thr))) {
+      cli::cli_abort("{.arg method = 'committee'} requires finite outer-CV thresholds for every contributing model.")
+    }
+    votes <- sweep(pred_mat, 2L, thr, FUN = ">=")
+    votes[!is.finite(pred_mat)] <- NA
+    ensemble_hss <- rowMeans(votes, na.rm = TRUE)
+    ensemble_hss[!is.finite(ensemble_hss)] <- NA_real_
+  } else {
+    ensemble_hss <- .ensemble_rowmean(pred_mat, w)
+  }
   hss_sd <- .ensemble_rowsd(pred_mat)
 
   # ---- Binary threshold ---------------------------------------------------
   # Use the same model set that actually contributes to the ensemble.
-  threshold <- .ensemble_threshold(cv, mdl_names[include], weights, method)
+  threshold <- if (identical(method, "committee")) 0.5 else
+    .ensemble_threshold(cv, mdl_names[include], weights, method)
 
   # ---- Build output -------------------------------------------------------
   has_coords <- all(c("lon", "lat") %in% names(pred_df))
@@ -158,7 +194,10 @@ cast_ensemble <- function(fit, cv, new_data,
     weights      = weights,
     method       = method,
     threshold    = threshold,
-    model_scores = scores
+    model_scores = scores,
+    weights_fallback = weights_fallback,
+    fallback_reason = fallback_reason,
+    score_components = score_components
   )
 }
 
@@ -206,72 +245,112 @@ cast_ensemble <- function(fit, cv, new_data,
 #' Composite per-model scores from CV metrics (N-SDM score)
 #' @keywords internal
 #' @noRd
-.cast_ensemble_scores <- function(cv_sub, mdl_names) {
-  need <- c("auc_mean", "tss_mean", "cbi_mean")
+.cast_ensemble_scores <- function(cv_sub, mdl_names, min_metric_folds = 2L) {
+  need <- c("auc_mean", "tss_mean")
   miss <- setdiff(need, names(cv_sub))
   if (length(miss)) {
     cli::cli_abort(c(
       "{.arg cv} metrics lack the column{?s} {.val {miss}}.",
-      i = "The N-SDM score is (2*AUC - 1 + maxTSS + CBI) / 3; no component can be dropped."
+      i = "Composite scoring needs AUC and TSS; Boyce contributes only when sufficiently evaluable."
     ))
+  }
+  min_metric_folds <- as.integer(min_metric_folds)
+  if (is.na(min_metric_folds) || min_metric_folds < 1L) {
+    cli::cli_abort("{.arg min_metric_folds} must be a positive integer.")
+  }
+  components <- stats::setNames(vector("list", length(mdl_names)), mdl_names)
+  get_metric <- function(row, value_name, count_name = NULL) {
+    if (!value_name %in% names(row) || !is.finite(row[[value_name]][1])) return(NA_real_)
+    if (!is.null(count_name) && count_name %in% names(row) &&
+        (!is.finite(row[[count_name]][1]) || row[[count_name]][1] < min_metric_folds)) {
+      return(NA_real_)
+    }
+    unname(row[[value_name]][1])
   }
   scores <- vapply(mdl_names, function(m) {
     row <- cv_sub[cv_sub$model == m, , drop = FALSE]
     if (nrow(row) == 0) return(NA_real_)
-    parts <- c(2 * row$auc_mean[1] - 1, row$tss_mean[1], row$cbi_mean[1])
-    # No na.rm: averaging over whichever components survived would change the
-    # divisor and make models with different missing metrics incomparable.
-    if (anyNA(parts)) return(NA_real_)
-    sum(parts) / 3
+    auc <- get_metric(row, "auc_mean", "auc_n_folds")
+    tss <- get_metric(row, "tss_mean", "tss_n_folds")
+    if ("boyce_mean" %in% names(row)) {
+      boyce <- get_metric(row, "boyce_mean", "boyce_n_folds")
+    } else {
+      boyce <- get_metric(row, "cbi_mean", "cbi_n_folds")
+    }
+    parts <- c(AUC_S = if (is.finite(auc)) 2 * auc - 1 else NA_real_,
+               TSS = tss, Boyce = boyce)
+    parts <- parts[is.finite(parts)]
+    components[[m]] <<- names(parts)
+    if (length(parts) < 2L) return(NA_real_)
+    mean(parts)
   }, numeric(1))
-  stats::setNames(scores, mdl_names)
+  scores <- stats::setNames(scores, mdl_names)
+  attr(scores, "components") <- components
+  scores
 }
 
 #' Ensemble weights from composite scores
 #' @keywords internal
 #' @noRd
-.cast_ensemble_weights <- function(scores, method) {
+.cast_ensemble_weights <- function(scores, method, min_score = 0.5,
+                                   fallback = c("best", "equal", "error")) {
+  fallback <- match.arg(fallback)
+  if (!is.numeric(min_score) || length(min_score) != 1L || !is.finite(min_score)) {
+    cli::cli_abort("{.arg min_score} must be one finite number.")
+  }
   mdl_names <- names(scores)
-  na_mdl <- mdl_names[is.na(scores)]
-  if (length(na_mdl) == length(mdl_names)) {
-    cli::cli_abort(c(
-      "No model has a complete composite score (AUC, maxTSS and CBI).",
-      i = "Check {.code cv$metrics} for missing values."
-    ))
-  }
+  finite <- is.finite(scores)
+  na_mdl <- mdl_names[!finite]
   if (length(na_mdl)) {
-    cli::cli_warn(
-      "Dropping {.val {na_mdl}} from the ensemble: incomplete CV metrics."
-    )
+    cli::cli_warn("Composite score unavailable for {.val {na_mdl}}; inspect per-metric fold counts.")
   }
+  fallback_used <- FALSE
+  fallback_reason <- NULL
   weights <- switch(method,
     weighted = {
       w <- scores
-      w[is.na(w) | w < 0.5] <- 0
+      w[!finite | w < min_score] <- 0
       total <- sum(w)
       if (total > 0) {
         w / total
       } else {
-        cli::cli_warn(
-          "All model scores are below 0.5; falling back to equal ensemble weights."
-        )
-        w <- as.numeric(!is.na(scores))
-        w / sum(w)
+        fallback_used <<- TRUE
+        fallback_reason <<- sprintf("No finite model score reached min_score = %g", min_score)
+        if (fallback == "error") cli::cli_abort("{fallback_reason}.")
+        w[] <- 0
+        candidates <- which(finite)
+        if (fallback == "best") {
+          if (!length(candidates)) cli::cli_abort("No finite composite score is available for fallback = 'best'.")
+          w[candidates[which.max(scores[candidates])]] <- 1
+          cli::cli_warn(c(
+            "{fallback_reason}; using the highest-scoring finite model only.",
+            i = "The fallback is recorded in the cast_ensemble object."
+          ))
+        } else {
+          if (!length(candidates)) candidates <- seq_along(scores)
+          w[candidates] <- 1 / length(candidates)
+          cli::cli_warn(c(
+            "{fallback_reason}; using equal weights.",
+            i = "The fallback is recorded in the cast_ensemble object."
+          ))
+        }
+        w
       }
     },
     best = {
-      w <- rep(0, length(mdl_names))
-      names(w) <- mdl_names
-      best_idx <- which.max(scores)
-      if (length(best_idx) > 0) w[best_idx] <- 1
+      if (!any(finite)) cli::cli_abort("No finite composite score is available for {.arg method = 'best'}.")
+      w <- rep(0, length(mdl_names)); names(w) <- mdl_names
+      w[which.max(ifelse(finite, scores, -Inf))] <- 1
       w
     },
-    equal = {
-      w <- as.numeric(!is.na(scores))
-      w / sum(w)
-    }
+    equal = rep(1 / length(mdl_names), length(mdl_names)),
+    median = rep(1 / length(mdl_names), length(mdl_names)),
+    committee = rep(1 / length(mdl_names), length(mdl_names))
   )
-  stats::setNames(weights, mdl_names)
+  weights <- stats::setNames(as.numeric(weights), mdl_names)
+  attr(weights, "fallback_used") <- fallback_used
+  attr(weights, "fallback_reason") <- fallback_reason
+  weights
 }
 
 
@@ -303,7 +382,8 @@ cast_ensemble <- function(fit, cv, new_data,
     ens <- .ensemble_rowmean(as.matrix(oof[, cols, drop = FALSE]), w / sum(w))
     ok <- is.finite(ens) & !is.na(oof$obs)
     if (sum(ok) >= 10L && length(unique(oof$obs[ok])) > 1L) {
-      return(find_tss_threshold(ens[ok], oof$obs[ok]))
+      return(cast_threshold(ens[ok], oof$obs[ok],
+                            method = cv$threshold_method %||% "max_tss"))
     }
   }
 
@@ -338,8 +418,14 @@ cast_ensemble <- function(fit, cv, new_data,
 #' @param output_dir Character. Directory for output rasters. Created if
 #'   it does not exist.
 #' @param method Character. Ensemble strategy: `"weighted"` (default),
-#'   `"best"`, `"equal"`. See [cast_ensemble()].
+#'   `"best"`, `"equal"`, `"median"`, or `"committee"`. See [cast_ensemble()].
 #' @param models Character vector or `NULL`. Models to use. Default all.
+#' @param min_score Minimum composite score for weighted inclusion. Default
+#'   `0.5`.
+#' @param fallback Weighted-score fallback: `"best"`, `"equal"`, or `"error"`.
+#'   Default `"best"`.
+#' @param min_metric_folds Minimum finite spatial-CV folds for a metric to
+#'   contribute to the composite score. Default `2`.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
 #'   is restricted to cells where mask is non-NA. Only the first layer is
 #'   used; a mask whose geometry cannot be matched to `raster_stack` is
@@ -387,8 +473,11 @@ cast_ensemble <- function(fit, cv, new_data,
 #' @export
 cast_ensemble_raster <- function(fit, cv, raster_stack,
                                  output_dir,
-                                 method = c("weighted", "best", "equal"),
+                                 method = c("weighted", "best", "equal", "median", "committee"),
                                  models = NULL,
+                                 min_score = 0.5,
+                                 fallback = c("best", "equal", "error"),
+                                 min_metric_folds = 2L,
                                  mask = NULL,
                                  clamp = FALSE,
                                  extrapolation = TRUE,
@@ -399,6 +488,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
                                  verbose = TRUE) {
   check_suggested("terra", "for raster prediction")
   method <- match.arg(method)
+  fallback <- match.arg(fallback)
 
   if (!inherits(raster_stack, "SpatRaster")) {
     if (is.character(raster_stack)) {
@@ -452,9 +542,14 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   }
   cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
 
-  scores <- .cast_ensemble_scores(cv_sub, mdl_names)
-  weights <- .cast_ensemble_weights(scores, method)
-  threshold <- .ensemble_threshold(cv, mdl_names, weights, method)
+  scores <- .cast_ensemble_scores(cv_sub, mdl_names,
+                                  min_metric_folds = min_metric_folds)
+  weights <- .cast_ensemble_weights(scores, method, min_score, fallback)
+  weights_fallback <- isTRUE(attr(weights, "fallback_used"))
+  fallback_reason <- attr(weights, "fallback_reason")
+  score_components <- attr(scores, "components")
+  threshold <- if (identical(method, "committee")) 0.5 else
+    .ensemble_threshold(cv, mdl_names, weights, method)
 
   outputs_exist <- file.exists(hss_path) && file.exists(hss_sd_path) &&
     file.exists(bin_path) && (!want_mess || file.exists(mess_path))
@@ -462,10 +557,12 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
     return(invisible(list(
       hss_path = hss_path, hss_sd_path = hss_sd_path,
-      binary_path = bin_path,
-      mess_path = if (want_mess) mess_path else NULL,
-      weights = weights, threshold = threshold, n_valid_cells = NA_integer_
-    )))
+       binary_path = bin_path,
+       mess_path = if (want_mess) mess_path else NULL,
+       weights = weights, threshold = threshold, n_valid_cells = NA_integer_,
+       model_scores = scores, weights_fallback = weights_fallback,
+       fallback_reason = fallback_reason, score_components = score_components
+     )))
   }
 
   if (verbose) {
@@ -649,7 +746,23 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
         w_blk <- weights[contrib]
         w_blk <- w_blk / sum(w_blk)
         sub <- pred_mat[, names(w_blk), drop = FALSE]
-        ens_hss <- .ensemble_rowmean(sub, w_blk)
+        if (identical(method, "median")) {
+          ens_hss <- apply(sub, 1L, function(z) {
+            z <- z[is.finite(z)]
+            if (length(z)) stats::median(z) else NA_real_
+          })
+        } else if (identical(method, "committee")) {
+          thr <- cv$thresholds[names(w_blk)]
+          if (length(thr) != ncol(sub) || any(!is.finite(thr))) {
+            cli::cli_abort("{.arg method = 'committee'} requires finite outer-CV thresholds for contributing models.")
+          }
+          votes <- sweep(sub, 2L, thr, FUN = ">=")
+          votes[!is.finite(sub)] <- NA
+          ens_hss <- rowMeans(votes, na.rm = TRUE)
+          ens_hss[!is.finite(ens_hss)] <- NA_real_
+        } else {
+          ens_hss <- .ensemble_rowmean(sub, w_blk)
+        }
         ens_sd <- .ensemble_rowsd(sub)
         hss_vec[valid_idx] <- ens_hss
         hss_sd_vec[valid_idx] <- ens_sd
@@ -732,6 +845,10 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     mess_path    = if (want_mess) mess_path else NULL,
     weights      = weights,
     threshold    = threshold,
+    model_scores = scores,
+    weights_fallback = weights_fallback,
+    fallback_reason = fallback_reason,
+    score_components = score_components,
     n_valid_cells = n_valid
   ))
 }

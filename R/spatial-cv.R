@@ -28,6 +28,9 @@
 #' @param rf_ntree RF trees per fold. Default `500`.
 #' @param brt_n_trees BRT trees per fold. Default `2000`.
 #' @param brt_shrinkage BRT learning rate per fold. Default `0.005`.
+#' @param threshold_method Rule for selecting the binary threshold inside each
+#'   outer training fold. That threshold is then applied to the held-out fold.
+#'   See [cast_threshold()]. Default `"max_tss"`.
 #' @param parallel Run folds with `future.apply`; requires the user to set a
 #'   [future::plan()] first (a warning is issued when none is set).
 #' @param seed Random seed.
@@ -52,6 +55,7 @@ cast_cv <- function(data,
                     rf_ntree = 500L,
                     brt_n_trees = 2000L,
                     brt_shrinkage = 0.005,
+                    threshold_method = "max_tss",
                     parallel = FALSE,
                     seed = NULL,
                     verbose = TRUE) {
@@ -144,13 +148,36 @@ cast_cv <- function(data,
         predict_single_model(info, x_test),
         error = function(e) rep(NA_real_, nrow(test))
       )
+      fold_threshold <- NULL
+      if (!is.null(fit$scaling$response) && !is.null(fit$scaling$reference)) {
+        train_pred <- tryCatch(
+          predict_single_model(info, fit$scaling$reference),
+          error = function(e) rep(NA_real_, nrow(train)))
+        fold_threshold <- tryCatch(cast_threshold(
+          train_pred, fit$scaling$response, method = threshold_method),
+          error = function(e) NA_real_)
+      }
       met <- tryCatch(
-        evaluate_model_full(pred, test[[response]]),
-        error = function(e) c(auc = NA_real_, tss = NA_real_, cbi = NA_real_)
+        if (is.null(fold_threshold)) {
+          evaluate_model_full(pred, test[[response]])
+        } else {
+          evaluate_model_full(pred, test[[response]], threshold = fold_threshold,
+                              threshold_method = threshold_method)
+        },
+        error = function(e) c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
+          sedi = NA_real_, brier = NA_real_, logloss = NA_real_, boyce = NA_real_,
+          cbi = NA_real_, tss_threshold = NA_real_)
       )
+      metric_value <- function(nm) {
+        if (nm %in% names(met)) unname(met[[nm]]) else NA_real_
+      }
       rows[[mdl]] <- data.frame(
-        fold = fold_i, model = mdl, auc = met["auc"], tss = met["tss"],
-        cbi = met["cbi"], n_selected = length(fold_screen$selected),
+        fold = fold_i, model = mdl, auc = metric_value("auc"),
+        pr_auc = metric_value("pr_auc"), tss = metric_value("tss"),
+        sedi = metric_value("sedi"), brier = metric_value("brier"),
+        logloss = metric_value("logloss"), boyce = metric_value("boyce"),
+        cbi = metric_value("cbi"), tss_threshold = metric_value("tss_threshold"),
+        n_selected = length(fold_screen$selected),
         stringsAsFactors = FALSE
       )
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
@@ -236,25 +263,26 @@ cast_cv <- function(data,
   agg <- lapply(models, function(mdl) {
     z <- fold_df[fold_df$model == mdl, , drop = FALSE]
     if (!nrow(z)) return(NULL)
-    auc <- z$auc[is.finite(z$auc)]
-    tss <- z$tss[is.finite(z$tss)]
-    cbi <- z$cbi[is.finite(z$cbi)]
-    data.frame(
-      model = mdl,
-      auc_mean = if (length(auc)) mean(auc) else NA_real_, auc_sd = stats::sd(auc),
-      tss_mean = if (length(tss)) mean(tss) else NA_real_, tss_sd = stats::sd(tss),
-      cbi_mean = if (length(cbi)) mean(cbi) else NA_real_, cbi_sd = stats::sd(cbi),
-      auc_n_folds = length(auc), tss_n_folds = length(tss), cbi_n_folds = length(cbi),
-      n_folds = nrow(z), n_selected_mean = mean(z$n_selected, na.rm = TRUE),
-      stringsAsFactors = FALSE
-    )
+    metrics <- c("auc", "pr_auc", "tss", "sedi", "brier", "logloss", "boyce", "cbi")
+    out <- list(model = mdl)
+    for (metric in metrics) {
+      vals <- z[[metric]][is.finite(z[[metric]])]
+      out[[paste0(metric, "_mean")]] <- if (length(vals)) mean(vals) else NA_real_
+      out[[paste0(metric, "_sd")]] <- if (length(vals) >= 2L) stats::sd(vals) else NA_real_
+      out[[paste0(metric, "_n_folds")]] <- length(vals)
+    }
+    thr <- z$tss_threshold[is.finite(z$tss_threshold)]
+    out$tss_threshold_mean <- if (length(thr)) mean(thr) else NA_real_
+    out$n_folds <- nrow(z)
+    out$n_selected_mean <- mean(z$n_selected, na.rm = TRUE)
+    as.data.frame(out, stringsAsFactors = FALSE)
   })
   metrics <- do.call(rbind, Filter(Negate(is.null), agg))
   thresholds <- vapply(models, function(mdl) {
     pred <- oof[[mdl]]
     ok <- is.finite(pred)
     if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) return(0.5)
-    find_tss_threshold(pred[ok], data[[response]][ok])
+    cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
   }, numeric(1))
 
   # Keep the out-of-fold surface: it is the only labelled ensemble-scale
@@ -267,7 +295,8 @@ cast_cv <- function(data,
     metrics = metrics, fold_metrics = fold_df, folds = folds, k = k,
     block_method = block_method, thresholds = thresholds,
     selections = selections, screens = screens,
-    selection_freq = selection_freq, oof = oof_df, fold_status = fold_status
+    selection_freq = selection_freq, oof = oof_df, fold_status = fold_status,
+    threshold_method = threshold_method
   )
 }
 
@@ -375,12 +404,5 @@ make_spatial_folds <- function(lon, lat, k,
 #' @keywords internal
 #' @noRd
 find_tss_threshold <- function(pred, obs) {
-  thresholds <- seq(0.01, 0.99, by = 0.01)
-  values <- vapply(thresholds, function(thr) {
-    cls <- pred >= thr
-    sens <- sum(cls & obs == 1) / max(1, sum(obs == 1))
-    spec <- sum(!cls & obs == 0) / max(1, sum(obs == 0))
-    sens + spec - 1
-  }, numeric(1))
-  thresholds[which.max(values)]
+  cast_threshold(pred, obs, method = "max_tss")
 }

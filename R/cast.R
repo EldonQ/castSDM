@@ -22,6 +22,9 @@
 #'   to admit a predictor, on top of the 2-SE guard. Default `0`.
 #' @param select_n_folds Integer. Inner folds for the stage-2 forward search.
 #'   Default `3`.
+#' @param threshold_method Binary threshold rule, selected on training data and
+#'   then applied to held-out predictions. See [cast_threshold()]. Default
+#'   `"max_tss"`.
 #' @param num_threads Integer. Threads for the ranger learners. Default `1`.
 #' @param do_cv Logical. Run spatial cross-validation. Default `TRUE`.
 #' @param cv_k Integer. Number of spatial folds. Default `5`.
@@ -57,10 +60,11 @@ cast <- function(species_data,
                  train_fraction = 0.7,
                   select_method = "two_stage",
                   select_num_trees = 300L,
-                  select_metric = "brier",
-                  select_tolerance = 0,
-                  select_n_folds = 3L,
-                 num_threads = 1L,
+                   select_metric = "brier",
+                   select_tolerance = 0,
+                   select_n_folds = 3L,
+                  threshold_method = "max_tss",
+                  num_threads = 1L,
                  do_cv = TRUE,
                  cv_k = 5L,
                  cv_block_method = "grid",
@@ -122,16 +126,17 @@ cast <- function(species_data,
         species_data,
         screen = screen,
         select_method = select_method,
-        select_args = list(
+         select_args = list(
           num_trees = select_num_trees,
           metric = select_metric,
           tolerance = select_tolerance,
           n_folds = select_n_folds,
-          keep = select_keep
-        ),
-        k = cv_k, models = models,
-        block_method = cv_block_method,
-        seed = seed, verbose = verbose
+           keep = select_keep
+         ),
+         k = cv_k, models = models,
+         block_method = cv_block_method,
+         threshold_method = threshold_method,
+         seed = seed, verbose = verbose
       ),
       error = function(e) {
         cli::cli_warn(
@@ -144,7 +149,8 @@ cast <- function(species_data,
 
   # === Step 5: Model Evaluation ===
   if (verbose) cli::cli_h2("Step 5: Model Evaluation")
-  eval_result <- cast_evaluate(fit, test_data)
+  eval_result <- cast_evaluate(fit, test_data,
+                               threshold_method = threshold_method)
   if (verbose) {
     if (!is.null(cv_result)) print(cv_result) else print(eval_result)
   }

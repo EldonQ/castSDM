@@ -105,6 +105,12 @@ print.cast_ensemble <- function(x, ...) {
   if (!is.null(x$weights) && length(x$weights) > 0) {
     cli::cli_text("Weights: {paste(names(x$weights), round(x$weights, 3), sep='=', collapse=', ')}")
   }
+  if (isTRUE(x$weights_fallback)) {
+    cli::cli_warn("Weight fallback used: {x$fallback_reason}")
+  }
+  if (identical(x$method, "committee")) {
+    cli::cli_text("Ensemble surface is the fraction of models voting suitable; threshold = 0.5.")
+  }
   invisible(x)
 }
 

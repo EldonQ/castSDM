@@ -13,8 +13,13 @@
 #'   `lon`, `lat` grid and environmental variables for a future scenario
 #'   (e.g., `list(ssp245_2070 = df1, ssp585_2070 = df2)`).
 #' @param method Character. Ensemble strategy: `"weighted"` (default),
-#'   `"best"`, `"equal"`. See [cast_ensemble()].
+#'   `"best"`, `"equal"`, `"median"`, or `"committee"`. See [cast_ensemble()].
 #' @param models Character vector. Models to use. Default `NULL` (all).
+#' @param min_score Minimum composite score for weighted inclusion. Default `0.5`.
+#' @param fallback Weighted-score fallback (`"best"`, `"equal"`, or `"error"`).
+#'   Default `"best"`.
+#' @param min_metric_folds Minimum finite CV folds for a score component.
+#'   Default `2`.
 #' @param save_dir Optional character. When provided, saves CSV and (if
 #'   `terra` is available) GeoTIFF outputs to this directory:
 #'   - `current_prediction.csv` / `.tif`
@@ -55,10 +60,14 @@
 #'
 #' @export
 cast_project <- function(fit, cv, current_env, future_envs,
-                         method = c("weighted", "best", "equal"),
+                         method = c("weighted", "best", "equal", "median", "committee"),
                          models = NULL,
+                         min_score = 0.5,
+                         fallback = c("best", "equal", "error"),
+                         min_metric_folds = 2L,
                          save_dir = NULL) {
   method <- match.arg(method)
+  fallback <- match.arg(fallback)
 
   if (!is.list(future_envs) || length(future_envs) == 0) {
     cli::cli_abort("{.arg future_envs} must be a non-empty named list of data.frames.")
@@ -77,7 +86,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
   # ---- Current prediction -------------------------------------------------
   current <- cast_ensemble(fit, cv, current_env,
                            method = method,
-                           models = models)
+                           models = models, min_score = min_score,
+                           fallback = fallback,
+                           min_metric_folds = min_metric_folds)
 
   # ---- Future predictions -------------------------------------------------
   future_list <- list()
@@ -93,7 +104,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
       # Predict using the same ensemble configuration
       fut <- cast_ensemble(fit, cv, fut_env,
                            method = method,
-                           models = models)
+                           models = models, min_score = min_score,
+                           fallback = fallback,
+                           min_metric_folds = min_metric_folds)
 
       # ---- Compute change map -----------------------------------------------
       fut_bin <- fut$predictions$binary_ensemble
@@ -399,8 +412,14 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #' @param future_rasters A named list of `terra::SpatRaster` stacks,
 #'   each for a future scenario (e.g., `list(ssp126_2050 = rast1, ...)`).
 #' @param output_dir Character. Output directory for all rasters and CSV.
-#' @param method Character. Ensemble method. Default `"weighted"`.
+#' @param method Character. Ensemble method (`"weighted"`, `"best"`,
+#'   `"equal"`, `"median"`, or `"committee"`). Default `"weighted"`.
 #' @param models Character vector or `NULL`. Models to use.
+#' @param min_score Minimum composite score for weighted inclusion. Default `0.5`.
+#' @param fallback Weighted-score fallback (`"best"`, `"equal"`, or `"error"`).
+#'   Default `"best"`.
+#' @param min_metric_folds Minimum finite CV folds for a score component.
+#'   Default `2`.
 #' @param mask A `terra::SpatRaster` or `NULL`. Prediction mask.
 #' @param overwrite Logical. Overwrite existing outputs. Default `FALSE`.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
@@ -436,8 +455,11 @@ cast_project_raster <- function(fit, cv,
                                 current_raster,
                                 future_rasters,
                                 output_dir,
-                                method = c("weighted", "best", "equal"),
+                                method = c("weighted", "best", "equal", "median", "committee"),
                                 models = NULL,
+                                min_score = 0.5,
+                                fallback = c("best", "equal", "error"),
+                                min_metric_folds = 2L,
                                 mask = NULL,
                                 overwrite = FALSE,
                                 compression = "LZW",
@@ -445,6 +467,7 @@ cast_project_raster <- function(fit, cv,
                                 verbose = TRUE) {
   check_suggested("terra", "for raster projection")
   method <- match.arg(method)
+  fallback <- match.arg(fallback)
 
   if (!is.list(future_rasters) || length(future_rasters) == 0) {
     cli::cli_abort("{.arg future_rasters} must be a non-empty named list of SpatRasters.")
@@ -462,7 +485,9 @@ cast_project_raster <- function(fit, cv,
   er_call <- function(r, prefix) {
     cast_ensemble_raster(
       fit = fit, cv = cv, raster_stack = r, output_dir = raster_dir,
-      method = method, models = models, mask = mask, prefix = prefix,
+      method = method, models = models, min_score = min_score,
+      fallback = fallback, min_metric_folds = min_metric_folds,
+      mask = mask, prefix = prefix,
       overwrite = overwrite, compression = compression,
       clamp = isTRUE(clamp), verbose = verbose
     )

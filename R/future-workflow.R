@@ -72,16 +72,22 @@ cast_load_future_envs <- function(path) {
 #' @param fig_dpi Figure DPI. Default `600`.
 #' @param method Ensemble method.
 #' @param models Optional models used by [cast_project()].
+#' @param min_score Minimum composite score for weighted inclusion.
+#' @param fallback Weighted-score fallback (`"best"`, `"equal"`, or `"error"`).
+#' @param min_metric_folds Minimum finite CV folds for a score component.
 #' @param prefix Filename prefix.
 #' @return A `cast_project` object.
 #' @export
 cast_save_future_projection <- function(fit, cv, current_env, future_envs,
                                         save_dir,
                                         basemap = "world",
-                                        fig_dpi = 600L,
-                                        method = "weighted",
-                                        models = NULL,
-                                        prefix = "future") {
+                                         fig_dpi = 600L,
+                                         method = "weighted",
+                                         models = NULL,
+                                         min_score = 0.5,
+                                         fallback = "best",
+                                         min_metric_folds = 2L,
+                                         prefix = "future") {
   if (is.null(cv)) {
     cli::cli_abort("Future projection requires a non-null {.cls cast_cv} object for ensemble weights.")
   }
@@ -94,6 +100,9 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
     future_envs = future_envs,
     method = method,
     models = models,
+    min_score = min_score,
+    fallback = fallback,
+    min_metric_folds = min_metric_folds,
     save_dir = save_dir
   )
 

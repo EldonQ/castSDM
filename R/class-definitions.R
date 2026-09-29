@@ -56,9 +56,11 @@ new_cast_importance <- function(effects, metric = "brier",
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List of training-set predictor statistics reused across the
 #'   prediction stack: `means` and `sds`, `impute` (per-predictor training
-#'   median used by the internal `.cast_impute()` helper), and `reference`
+#'   median used by the internal `.cast_impute()` helper), `reference`
 #'   (the imputed training predictor frame for MESS/clamp extrapolation
-#'   control and effect range-masking). Models are
+#'   control and effect range-masking), and `response` (training labels used
+#'   to select an evaluation threshold without consulting held-out labels).
+#'   Models are
 #'   trained on the raw predictors; `means`/`sds` are not applied to fitting
 #'   inputs.
 #' @param screen A `cast_select` object (or `NULL`).
@@ -104,6 +106,8 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #' @param k Integer. Number of folds.
 #' @param block_method Character. Blocking strategy used.
 #' @param thresholds Named numeric. TSS-optimal threshold per model.
+#' @param threshold_method Rule used to select binary thresholds within the
+#'   outer training folds before scoring held-out folds.
 #' @param selections List of selected variables for each outer fold.
 #' @param screens List of fold-specific `cast_select` objects.
 #' @param selection_freq A `data.frame` with each predictor's fold-level
@@ -120,7 +124,8 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
                         selections = list(), screens = list(),
-                        selection_freq = NULL, oof = NULL, fold_status = NULL) {
+                        selection_freq = NULL, oof = NULL, fold_status = NULL,
+                        threshold_method = "max_tss") {
   structure(
     list(
       metrics      = metrics,
@@ -133,7 +138,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       screens      = screens,
       selection_freq = selection_freq,
       oof          = oof,
-      fold_status  = fold_status
+      fold_status  = fold_status,
+      threshold_method = threshold_method
     ),
     class = "cast_cv"
   )
@@ -201,22 +207,32 @@ new_cast_result <- function(screen, fit, eval,
 #'   and optionally `binary_ensemble`.
 #' @param weights Named numeric vector of per-model weights.
 #' @param method Character. Ensemble method used (`"weighted"`, `"best"`,
-#'   `"equal"`).
+#'   `"equal"`, `"median"`, `"committee"`).
 #' @param threshold Numeric. Binary classification threshold.
 #' @param model_scores Named numeric vector of per-model composite scores.
+#' @param weights_fallback Logical. Whether weighted selection invoked its
+#'   fallback policy because no model met the minimum score.
+#' @param fallback_reason Character reason for the fallback, or `NULL`.
+#' @param score_components Named list of metrics used for each model score.
 #'
 #' @return A `cast_ensemble` object.
 #' @keywords internal
 #' @export
 new_cast_ensemble <- function(predictions, weights, method,
-                              threshold, model_scores) {
+                              threshold, model_scores,
+                              weights_fallback = FALSE,
+                              fallback_reason = NULL,
+                              score_components = NULL) {
   structure(
     list(
       predictions = predictions,
       weights = weights,
       method = method,
       threshold = threshold,
-      model_scores = model_scores
+      model_scores = model_scores,
+      weights_fallback = isTRUE(weights_fallback),
+      fallback_reason = fallback_reason,
+      score_components = score_components
     ),
     class = "cast_ensemble"
   )

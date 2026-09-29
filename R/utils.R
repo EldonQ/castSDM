@@ -169,22 +169,35 @@ compute_auc <- function(y, pred) {
 }
 
 
-#' Full Model Evaluation: AUC, TSS, CBI
+#' Full Model Evaluation: discrimination, threshold, and probability-scale scores
 #'
 #' @param pred Numeric vector of predicted probabilities [0,1].
 #' @param obs  Integer/numeric binary observed outcomes (0/1).
-#' @return Named numeric vector with AUC, TSS, CBI.
+#' @param threshold Optional numeric threshold selected on calibration/training
+#'   data. When `NULL`, `evaluate_model_full()` selects max-TSS on the supplied
+#'   data; predictive workflows should pass a training-fold threshold instead.
+#' @return Named numeric vector with ROC-AUC, PR-AUC, TSS, SEDI, Brier score,
+#'   log loss, moving-window Boyce, legacy fixed-bin CBI, and the threshold used.
 #' @details The AUC fixes `pROC::roc(direction = "<")` so a predictor that
 #'   ranks absences above presences correctly reports AUC < 0.5 instead of
 #'   being silently flipped by `direction = "auto"`. The TSS threshold is the
-#'   max-Youden point chosen *on the evaluation set itself* (the usual
-#'   max-Youden convention for SDM evaluation), so TSS is mildly optimistic
-#'   when the same threshold is reused elsewhere.
+#'   max-Youden threshold. If no `threshold` is supplied this is optimized on
+#'   the supplied labels and is descriptive, not a held-out TSS estimate.
 #' @keywords internal
 #' @noRd
-evaluate_model_full <- function(pred, obs) {
-  pred <- pmin(pmax(as.numeric(pred), 1e-7), 1 - 1e-7)
-  obs  <- as.integer(obs)
+evaluate_model_full <- function(pred, obs, threshold = NULL,
+                                threshold_method = "max_tss") {
+  pred <- as.numeric(pred)
+  obs <- as.integer(obs)
+  ok <- is.finite(pred) & !is.na(obs) & obs %in% c(0L, 1L)
+  pred <- pred[ok]
+  obs <- obs[ok]
+  if (!length(pred) || !all(c(0L, 1L) %in% unique(obs))) {
+    return(c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
+             sedi = NA_real_, brier = NA_real_, logloss = NA_real_,
+             boyce = NA_real_, cbi = NA_real_, tss_threshold = NA_real_))
+  }
+  pred <- pmin(pmax(pred, 1e-7), 1 - 1e-7)
 
   # Fixed direction keeps worse-than-random AUC below 0.5.
   roc_obj <- tryCatch(
@@ -194,20 +207,37 @@ evaluate_model_full <- function(pred, obs) {
     as.numeric(pROC::auc(roc_obj))
   }, error = function(e) NA_real_)
 
-  tss_val <- tryCatch({
-    coords  <- pROC::coords(roc_obj, "best",
-                            ret = c("sensitivity", "specificity"))
-    as.numeric(coords$sensitivity[1] + coords$specificity[1] - 1)
-  }, error = function(e) NA_real_)
+  if (is.null(threshold)) {
+    threshold <- tryCatch(cast_threshold(pred, obs, method = threshold_method),
+                          error = function(e) NA_real_)
+  }
+  threshold <- if (length(threshold) == 1L && is.finite(threshold)) threshold else NA_real_
+  tss_val <- if (is.finite(threshold)) {
+    hit <- pred >= threshold
+    sum(hit & obs == 1L) / sum(obs == 1L) +
+      sum(!hit & obs == 0L) / sum(obs == 0L) - 1
+  } else NA_real_
 
   # -- CBI (Continuous Boyce Index) -------------------------------------------
   cbi_val <- tryCatch({
     compute_cbi(pred, obs)
   }, error = function(e) NA_real_)
 
+  boyce_val <- tryCatch(compute_boyce(pred, obs), error = function(e) NA_real_)
+  pr_auc_val <- compute_pr_auc(obs, pred)
+  sedi_val <- compute_sedi(obs, pred, threshold)
+  brier_val <- mean((pred - obs)^2)
+  logloss_val <- -mean(obs * log(pred) + (1 - obs) * log1p(-pred))
+
   c(auc = auc_val,
+    pr_auc = pr_auc_val,
     tss = tss_val,
-    cbi = cbi_val)
+    sedi = sedi_val,
+    brier = brier_val,
+    logloss = logloss_val,
+    boyce = boyce_val,
+    cbi = cbi_val,
+    tss_threshold = threshold)
 }
 
 
