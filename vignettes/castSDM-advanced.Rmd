@@ -1,0 +1,201 @@
+---
+title: "Beyond the defaults: tuning, weighting, replication, and diagnostics"
+author: "castSDM authors"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Beyond the defaults: tuning, weighting, replication, and diagnostics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Overview
+
+The [getting-started vignette](castSDM.html) walks the default pipeline. This
+vignette covers the options reviewers are most likely to ask about: per-engine
+hyperparameter tuning, prevalence weighting, background designs beyond random
+sampling, replicate pseudo-absence sets and replicated spatial
+cross-validation, coordinate thinning, response curves, and change-map
+coding that interchanges with biomod2.
+
+Everything below slots into the same object model: `cast_prepare()` /
+`cast_background()` produce data, `cast_fit()` produces a `cast_fit`,
+`cast_cv()` produces a `cast_cv`, and the ensemble, projection and effect
+products consume both. Nothing here changes the interpretation caveats in the
+getting-started vignette; presence-background outputs remain relative
+suitability on whatever reference the background defines.
+
+```{r data}
+library(castSDM)
+
+data_file <- system.file("extdata",
+  "CAST_Alces_alces_Res9_screened.csv", package = "castSDM")
+dat <- read.csv(data_file)
+
+set.seed(1)
+dat <- dat[c(
+  sample(which(dat$presence == 1), 150),
+  sample(which(dat$presence == 0), 150)
+), ]
+```
+
+## Coordinate thinning before anything else
+
+Clumped records over-weight locally sampled areas and inflate apparent
+performance under spatial CV. `cast_thin()` enforces a minimum great-circle
+distance between retained records; the greedy pass visits records in a seeded
+random order, so the seed decides which record of a conflicting cluster
+survives and rows come back in their original order.
+
+```{r thin}
+dat <- cast_thin(dat, min_dist_km = 5, seed = 42)
+```
+
+Thinning is deliberately unforgiving about coordinates: projected metres
+handed in as degrees are refused (a 10^5-fold thinning error, not a warning).
+
+## Background designs: user-defined, bias-weighted, SRE, disk
+
+`cast_background()` selects pseudo-absences by `strategy`. Beyond the default
+random draw:
+
+- `user_table` uses exactly the points you supply (Phillips et al. 2009
+  user-defined background) — for already-available species records used as
+  background, or expert-chosen controls.
+- `bias_raster` draws cells with probability proportional to a raster of
+  sampling effort (target-group background). Combine it only with
+  `strategy = "random"`; bias weighting and the structured designs are
+  competing designs, not layers.
+- `strategy = "sre"` restricts the pool to the presence environmental
+  envelope (each variable trimmed at `sre_quantile` on both sides;
+  Barbet-Massin et al. 2012): geographically unconstrained, environmentally
+  hard.
+- `strategy = "disk"` restricts the pool to a distance band around
+  presences: geographically close, hard pseudo-absences. Units follow the
+  raster's map units, consistent with `buffer` in `cast_cv()`.
+
+For `strategy = "environmental"` the stratification itself is now a choice:
+`bin_method = "pca2d"` (default) bins a PC1 x PC2 grid; `bin_method =
+"kmeans"` partitions the scaled environment space directly (the sdm
+convention), which adapts better when drivers are correlated and the first
+two PCs collapse them. `bin_k` sets the grid side or cluster count.
+
+```{r background}
+bg <- cast_background(dat, raster_stack = stk, strategy = "disk",
+                      disk_min = 1, disk_max = 3, n_rep = 3, seed = 42)
+```
+
+`n_rep = 3` returns three independent pseudo-absence sets (a named
+`cast_background_reps` list, `rep1`, `rep2`, ...). Fitting separately to
+each replicate propagates PA-selection uncertainty instead of freezing one
+arbitrary draw into the results. With `n_rep = 1` (default) the return is
+the plain data.frame.
+
+## Prevalence weighting
+
+Presence-background fits describe a ratio you did not choose. When a target
+prevalence matters for the application, `prevalence_target` weights the rows
+so the fitted prevalence equals the target (weight = target/n per class, the
+standard presence-background correction). RF, BRT and GAM accept the weights;
+MaxEnt has no row-weight interface and stays unweighted. Evaluation metrics
+remain unweighted — the target changes what is fitted, not what is scored.
+
+```{r prevalence}
+fit <- cast_fit(bg, models = c("rf", "brt", "gam", "maxent"),
+                prevalence_target = 0.3, tune = TRUE, seed = 42)
+```
+
+## Hyperparameter tuning
+
+`tune = TRUE` runs a small per-engine grid search: RF `mtry` scored by
+out-of-bag TSS, BRT `interaction.depth` x `shrinkage` by internal-CV TSS,
+MaxEnt feature classes x regularisation multiplier by stratified random-fold
+TSS. The grids are informed by biomod2 and flexsdm and trimmed for cost;
+combinations that fail to fit score `NA`, and a grid that fails entirely
+keeps the fixed defaults with a warning.
+
+Inside `cast_cv(tune = TRUE)` the grid runs again in every outer training
+fold — nested, leak-free: the held-out folds never influence the chosen
+hyperparameters. That multiplies compute by the grid size per fold; budget
+accordingly.
+
+## Replicated spatial cross-validation
+
+`cast_cv()` blocks by space, so its metrics mix two uncertainty sources:
+which rows landed in which fold, and where the block boundaries fell.
+`n_repeat` separates them — each repeat redraws the fold assignment under
+its own seed, metrics are averaged within each repeat, and the reported
+standard deviation is the **between-repeat** spread (blocking randomness),
+not fold noise.
+
+```{r cv}
+cv <- cast_cv(dat,
+              models = c("rf", "brt"),
+              select_method = "full",
+              k = 4,
+              n_repeat = 5,
+              buffer = 50, buffer_unit = "km",
+              tune = TRUE,
+              prevalence_target = 0.3,
+              threshold_method = "max_tss",
+              seed = 42, verbose = FALSE)
+
+cv$metrics[, c("auc_mean", "auc_sd", "tss_mean", "tss_sd")]
+```
+
+The buffer exclusion band also takes units now: `buffer_unit = "km"`
+measures great-circle kilometres (Haversine) and requires decimal-degree
+coordinates; `"deg"` keeps the planar-degree behaviour of previous
+versions. `fold_metrics` gains a `replicate` column, `selection_freq` pools
+all repeats, and the out-of-fold predictions refer to the first repeat.
+
+## Response curves
+
+`cast_response_curves()` traces how predicted suitability moves along one
+driver (`type = "fixed"`: other predictors at training medians) or averaged
+over them (`type = "pdp"`: partial dependence, Friedman 2001, with the
+background rows subsampled deterministically at 2000 for cost). A `pair`
+argument adds two-variable interaction grids. The `plot()` method handles
+both layouts.
+
+```{r curves}
+rc <- cast_response_curves(fit, cv = cv,
+                           variables = c("bio01", "bio12"),
+                           type = "pdp")
+plot(rc)
+
+rc_pair <- cast_response_curves(fit, cv = cv,
+                                pair = c("bio01", "bio12"))
+plot(rc_pair)
+```
+
+Read curves on the drivers the selection admitted; a curve along a dropped
+variable describes the model, not the species.
+
+## Projection with interchangeable change coding
+
+`cast_project()` and `cast_project_raster()` write change maps in either the
+package's internal encoding (`gain=1, loss=-1, stable_present=2,
+stable_absent=0`) or biomod2's `bm_RangeSize()` convention (`Gain=1,
+Loss=-2, Stable_Pres=-1, Stable_Abs=0`) via `coding = "biomod2"`, so saved
+GeoTIFFs feed BIOMOD_RangeSize visualisation scripts without remapping.
+Projection statistics report `n_current_range` / `n_future_range` pixel
+counts and the biomod2-convention `pct_loss` (loss over the current range)
+and `pct_gain` (gain over the future range).
+
+```{r projection}
+proj <- cast_project(fit, cv, current_env, future_envs,
+                     coding = "biomod2")
+proj$stats
+```
+
+## What the extra options do not buy
+
+Tuning, weighting, replication and buffers sharpen the model and its
+uncertainty bands; none of them identifies an adjustment set, detects
+unobserved confounding, or converts relative suitability to occurrence
+probability. The masking and interpretation notes in the getting-started
+vignette apply unchanged to every product shown here.
