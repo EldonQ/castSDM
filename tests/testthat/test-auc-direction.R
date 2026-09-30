@@ -45,6 +45,7 @@ test_that("failed ROC evaluation retains missing metrics", {
   skip_if_not_installed("pROC")
   metrics <- evaluate_model_full(c(0.2, 0.4, 0.6), rep(1, 3))
   expect_named(metrics, c("auc", "pr_auc", "tss", "sedi", "brier",
-                          "logloss", "boyce", "cbi", "tss_threshold"))
+                          "logloss", "boyce", "cbi", "kappa", "omission_5",
+                          "omission_10", "mpa", "tss_threshold"))
   expect_true(all(is.na(metrics)))
 })

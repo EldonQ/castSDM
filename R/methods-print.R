@@ -115,6 +115,34 @@ print.cast_ensemble <- function(x, ...) {
 }
 
 #' @export
+print.cast_ensemble_grouped <- function(x, ...) {
+  cli::cli_h1("castSDM Grouped Ensemble")
+  cli::cli_ul(c(
+    "Groups: {length(x$groups)} ({.val {names(x$groups)}})",
+    "Sites: {nrow(x$predictions)}"
+  ))
+  for (nm in names(x$ensembles)) {
+    ens <- x$ensembles[[nm]]
+    w <- ens$weights[ens$weights > 0]
+    cli::cli_li(
+      "{.field {nm}}: method {.val {ens$method}}, threshold {round(ens$threshold, 3)}, weights {paste(names(w), round(w, 3), sep='=', collapse=', ')}"
+    )
+  }
+  invisible(x)
+}
+
+#' @export
+print.cast_ensemble_importance <- function(x, ...) {
+  cli::cli_h1("castSDM Ensemble Permutation Importance")
+  cli::cli_ul(c(
+    "Permutations: {x$n_perm} per predictor",
+    "Correlation: {x$metric} (importance = 1 - cor)"
+  ))
+  print(x$importance, row.names = FALSE)
+  invisible(x)
+}
+
+#' @export
 print.cast_project <- function(x, ...) {
   n_scenarios <- length(x$future)
   cli::cli_h1("castSDM Future Projection")

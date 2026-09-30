@@ -98,9 +98,9 @@ prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
 | Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
 | Variable selection | `cast_select()`, `cast_importance()` |
 | Modelling | `cast_fit()` (optional per-engine hyperparameter tuning, prevalence weighting) |
-| Validation | `cast_cv()` (replicated blocking, km/degree buffers, nested tuning), `cast_evaluate()` |
-| Prediction | `cast_predict()`, `cast_predict_tiled()` |
-| Ensemble/projection | `cast_ensemble()`, `cast_project()`, `cast_project_raster()` (biomod2-compatible change coding) |
+| Validation | `cast_cv()` (replicated blocking, km/degree buffers, env blocking, AOA calibration, nested tuning), `cast_evaluate()` |
+| Prediction | `cast_predict()` (MESS + AOA extrapolation flags), `cast_predict_tiled()` |
+| Ensemble/projection | `cast_ensemble()` (score-power weighting), `cast_ensemble_by()`, `cast_ensemble_importance()`, `cast_project()`, `cast_project_raster()` (biomod2-compatible change coding) |
 | Diagnostics | `cast_response_curves()`, `cast_effect_table()`, `cast_effect_map()` |
 | Reporting | `cast_report_odmap()` |
 

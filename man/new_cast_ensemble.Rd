@@ -12,7 +12,8 @@ new_cast_ensemble(
   model_scores,
   weights_fallback = FALSE,
   fallback_reason = NULL,
-  score_components = NULL
+  score_components = NULL,
+  decay = 1
 )
 }
 \arguments{
@@ -34,6 +35,9 @@ fallback policy because no model met the minimum score.}
 \item{fallback_reason}{Character reason for the fallback, or \code{NULL}.}
 
 \item{score_components}{Named list of metrics used for each model score.}
+
+\item{decay}{Numeric. The score-power exponent used for weighting
+(\code{method = "weighted"}; \code{1} = linear).}
 }
 \value{
 A \code{cast_ensemble} object.

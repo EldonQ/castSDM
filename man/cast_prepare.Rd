@@ -10,7 +10,7 @@ cast_prepare(
   seed = NULL,
   env_vars = NULL,
   split = c("spatial", "stratified", "random"),
-  block_method = c("grid", "grid_random", "cluster"),
+  block_method = c("grid", "grid_random", "cluster", "env"),
   n_blocks = 20L,
   verbose = TRUE
 )
@@ -33,7 +33,9 @@ auto-detection picks up metadata columns (e.g., occurrence indicators).}
 \item{block_method}{Spatial blocking for \code{split = "spatial"}: \code{"grid"}
 (default; grid cells grouped into spatially contiguous blocks),
 \code{"grid_random"} (legacy count-balanced packing, ignores cell position),
-or \code{"cluster"}.}
+\code{"cluster"}, or \code{"env"} (k-means on the scaled predictor matrix, so
+blocks are contiguous in environmental space; Roberts et al. 2017-style
+environmental blocking).}
 
 \item{n_blocks}{Integer. Number of spatial blocks to form before assigning
 whole blocks to the test set. Default \code{20}.}

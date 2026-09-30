@@ -20,6 +20,13 @@
 #'   `NULL` (all fitted models).
 #' @param min_score Minimum composite score for weighted inclusion. Default
 #'   `0.5`.
+#' @param decay Numeric >= 0. Exponent applied to the composite scores before
+#'   weighting (`w = score^decay`, negative scores clamped at 0), then
+#'   renormalised. Only used by `method = "weighted"`: `1` (default)
+#'   reproduces linear score weighting, `0` degenerates to equal weights, and
+#'   values > 1 sharpen the ensemble towards the best-scoring models. The
+#'   raw (unpowered) scores are still reported in `model_scores`, and
+#'   `min_score` filters on the raw scores.
 #' @param fallback When no model reaches `min_score`: `"best"` retains the
 #'   highest-scoring finite model, `"equal"` uses equal weights, or `"error"`
 #'   aborts. The choice and reason are stored in the result. Default `"best"`.
@@ -40,6 +47,7 @@
 #'   \item{model_scores}{Named numeric vector of per-model composite scores.}
 #'   \item{weights_fallback}{Whether weighted selection needed a fallback.}
 #'   \item{fallback_reason}{Reason for the fallback, or `NULL`.}
+#'   \item{decay}{The decay exponent used for weighting.}
 #' }
 #'
 #' @details
@@ -86,10 +94,12 @@
 cast_ensemble <- function(fit, cv, new_data,
                           method = c("weighted", "best", "equal", "median", "committee"),
                           models = NULL, min_score = 0.5,
+                          decay = 1,
                           fallback = c("best", "equal", "error"),
                           min_metric_folds = 2L) {
   method <- match.arg(method)
   fallback <- match.arg(fallback)
+  decay <- .cast_check_decay(decay)
 
   # ---- Compute per-model composite scores from CV -------------------------
   cv_metrics <- cv$metrics
@@ -105,7 +115,8 @@ cast_ensemble <- function(fit, cv, new_data,
                                   min_metric_folds = min_metric_folds)
 
   # ---- Determine weights --------------------------------------------------
-  weights <- .cast_ensemble_weights(scores, method, min_score, fallback)
+  pw <- .cast_power_scores(scores, decay, method, min_score)
+  weights <- .cast_ensemble_weights(pw$scores, method, pw$min_score, fallback)
   weights_fallback <- isTRUE(attr(weights, "fallback_used"))
   fallback_reason <- attr(weights, "fallback_reason")
   score_components <- attr(scores, "components")
@@ -205,8 +216,43 @@ cast_ensemble <- function(fit, cv, new_data,
     model_scores = scores,
     weights_fallback = weights_fallback,
     fallback_reason = fallback_reason,
-    score_components = score_components
+    score_components = score_components,
+    decay = decay
   )
+}
+
+#' Validate the Decay Exponent
+#' @keywords internal
+#' @noRd
+.cast_check_decay <- function(decay) {
+  if (!is.numeric(decay) || length(decay) != 1L || !is.finite(decay) ||
+      decay < 0) {
+    cli::cli_abort("{.arg decay} must be a single finite non-negative number.")
+  }
+  decay
+}
+
+#' Power-Weight the Composite Scores (decay weighting)
+#'
+#' For `method = "weighted"` and `decay != 1`: `w = max(score, 0)^decay`,
+#' non-finite scores stay non-finite. The `min_score` filter keeps working on
+#' the **raw** scores (documented semantics), so models below the threshold
+#' are zeroed here and the caller passes `min_score = 0` to the weight
+#' builder, which then only excludes negative powered values. Any other
+#' method/decay combination returns the raw scores unchanged (the exponent
+#' is monotone for `best`, irrelevant for `equal`/`median`/`committee`).
+#'
+#' @return List with `scores` (possibly powered and pre-filtered) and the
+#'   `min_score` to use in [.cast_ensemble_weights()].
+#' @keywords internal
+#' @noRd
+.cast_power_scores <- function(scores, decay, method, min_score = 0.5) {
+  if (!identical(method, "weighted") || decay == 1) {
+    return(list(scores = scores, min_score = min_score))
+  }
+  pw <- ifelse(is.finite(scores), pmax(scores, 0), NA_real_)^decay
+  pw[is.finite(scores) & scores < min_score] <- 0
+  list(scores = pw, min_score = 0)
 }
 
 
@@ -434,6 +480,16 @@ cast_ensemble <- function(fit, cv, new_data,
 #'   Default `"best"`.
 #' @param min_metric_folds Minimum finite spatial-CV folds for a metric to
 #'   contribute to the composite score. Default `2`.
+#' @param decay Numeric >= 0. Score-power exponent for the `weighted` method,
+#'   as in [cast_ensemble()]. Default `1`.
+#' @param aoa_cv Optional `cast_cv` object from [cast_cv()] with `aoa = TRUE`. When
+#'   supplied, each valid cell is scored against the **area of applicability**
+#'   (Meyer & Pebesma 2021): the DI of the cell's standardized predictors to
+#'   the nearest training row is compared with the calibrated threshold, and
+#'   `<prefix>_aoa.tif` (flag, 1 = inside the AOA) and `<prefix>_aoa_di.tif`
+#'   (raw dissimilarity index) are written. The DI is computed on the
+#'   unclamped block input, so clamping never softens the flag. Requires the
+#'   \pkg{FNN} package.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
 #'   is restricted to cells where mask is non-NA. Only the first layer is
 #'   used; a mask whose geometry cannot be matched to `raster_stack` is
@@ -460,6 +516,8 @@ cast_ensemble <- function(fit, cv, new_data,
 #'   \item{binary_path}{File path to the binary raster.}
 #'   \item{mess_path}{File path to the MESS raster, or `NULL` when
 #'     `extrapolation = FALSE` or no training reference is available.}
+#'   \item{aoa_path, aoa_di_path}{File paths to the AOA flag and DI rasters,
+#'     or `NULL` when `aoa_cv` is not supplied.}
 #'   \item{weights}{Named numeric vector of per-model weights.}
 #'   \item{threshold}{Binary classification threshold.}
 #'   \item{n_valid_cells}{Number of cells predicted.}
@@ -484,11 +542,13 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
                                  method = c("weighted", "best", "equal", "median", "committee"),
                                  models = NULL,
                                  min_score = 0.5,
+                                 decay = 1,
                                  fallback = c("best", "equal", "error"),
                                  min_metric_folds = 2L,
                                  mask = NULL,
                                  clamp = FALSE,
                                  extrapolation = TRUE,
+                                 aoa_cv = NULL,
                                  max_memory_mb = 200,
                                  prefix = "",
                                  overwrite = FALSE,
@@ -497,6 +557,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   check_suggested("terra", "for raster prediction")
   method <- match.arg(method)
   fallback <- match.arg(fallback)
+  decay <- .cast_check_decay(decay)
 
   if (!inherits(raster_stack, "SpatRaster")) {
     if (is.character(raster_stack)) {
@@ -530,9 +591,41 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     output_dir,
     paste0(prefix, if (nzchar(prefix)) "_" else "", "mess.tif")
   )
+  aoa_path <- file.path(
+    output_dir,
+    paste0(prefix, if (nzchar(prefix)) "_" else "", "aoa.tif")
+  )
+  aoa_di_path <- file.path(
+    output_dir,
+    paste0(prefix, if (nzchar(prefix)) "_" else "", "aoa_di.tif")
+  )
 
   reference <- fit$scaling$reference
   want_mess <- isTRUE(extrapolation) && !is.null(reference)
+
+  # AOA setup: validate the calibration and project the training reference
+  # into the standardized DI space once, reused block by block.
+  want_aoa <- FALSE
+  aoa_threshold <- NA_real_
+  aoa_params <- NULL
+  if (!is.null(aoa_cv)) {
+    if (!isTRUE(aoa_cv$aoa$enabled) ||
+        !is.finite(aoa_cv$aoa$threshold %||% NA_real_)) {
+      cli::cli_abort(c(
+        "{.arg aoa_cv} must come from {.code cast_cv(aoa = TRUE)} with a finite threshold.",
+        "i" = "The supplied object carries no usable AOA calibration."
+      ))
+    }
+    if (is.null(reference)) {
+      cli::cli_abort("The fit carries no stored training reference; AOA cannot be computed.")
+    }
+    check_suggested("FNN", "for the area of applicability (aoa_cv)")
+    ref_m <- as.data.frame(reference, check.names = FALSE)
+    ref_m <- ref_m[, intersect(fit$env_vars, names(ref_m)), drop = FALSE]
+    aoa_params <- .cast_aoa_params(ref_m)
+    aoa_threshold <- aoa_cv$aoa$threshold
+    want_aoa <- TRUE
+  }
 
   # ---- Compute ensemble weights and threshold ---------------------------------
   # Computed before the skip check so a cached run still reports the
@@ -552,7 +645,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
 
   scores <- .cast_ensemble_scores(cv_sub, mdl_names,
                                   min_metric_folds = min_metric_folds)
-  weights <- .cast_ensemble_weights(scores, method, min_score, fallback)
+  pw <- .cast_power_scores(scores, decay, method, min_score)
+  weights <- .cast_ensemble_weights(pw$scores, method, pw$min_score, fallback)
   weights_fallback <- isTRUE(attr(weights, "fallback_used"))
   fallback_reason <- attr(weights, "fallback_reason")
   score_components <- attr(scores, "components")
@@ -560,16 +654,20 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     .ensemble_threshold(cv, mdl_names, weights, method)
 
   outputs_exist <- file.exists(hss_path) && file.exists(hss_sd_path) &&
-    file.exists(bin_path) && (!want_mess || file.exists(mess_path))
+    file.exists(bin_path) && (!want_mess || file.exists(mess_path)) &&
+    (!want_aoa || (file.exists(aoa_path) && file.exists(aoa_di_path)))
   if (!overwrite && outputs_exist) {
     if (verbose) cli::cli_inform("Ensemble rasters exist; skipping (overwrite = FALSE).")
     return(invisible(list(
       hss_path = hss_path, hss_sd_path = hss_sd_path,
        binary_path = bin_path,
        mess_path = if (want_mess) mess_path else NULL,
+       aoa_path = if (want_aoa) aoa_path else NULL,
+       aoa_di_path = if (want_aoa) aoa_di_path else NULL,
        weights = weights, threshold = threshold, n_valid_cells = NA_integer_,
        model_scores = scores, weights_fallback = weights_fallback,
-       fallback_reason = fallback_reason, score_components = score_components
+       fallback_reason = fallback_reason, score_components = score_components,
+       decay = decay
      )))
   }
 
@@ -647,6 +745,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   hss_sd_vec <- rep(NA_real_,  n_cells_total)
   bin_vec  <- rep(NA_integer_, n_cells_total)
   mess_vec <- if (want_mess) rep(NA_real_, n_cells_total) else NULL
+  aoa_vec <- if (want_aoa) rep(NA_integer_, n_cells_total) else NULL
+  aoa_di_vec <- if (want_aoa) rep(NA_real_, n_cells_total) else NULL
 
   n_valid <- 0L
   warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
@@ -709,6 +809,15 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
           .cast_mess(reference, X_raw),
           error = function(e) rep(NA_real_, n_ok)
         )
+      }
+      # AOA likewise on the unclamped input (same convention as MESS).
+      if (want_aoa) {
+        aoa_di_vec[valid_idx] <- tryCatch({
+          new_s <- .cast_aoa_apply(aoa_params, X_raw[, env_vars, drop = FALSE])
+          .cast_aoa_di(aoa_params$train, new_s)
+        }, error = function(e) rep(NA_real_, n_ok))
+        di_blk <- aoa_di_vec[valid_idx]
+        aoa_vec[valid_idx] <- as.integer(!is.na(di_blk) & di_blk <= aoa_threshold)
       }
       if (isTRUE(clamp) && !is.null(reference)) {
         X_raw <- .cast_clamp(X_raw, reference)
@@ -828,6 +937,23 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   }
   rm(mess_vec)
 
+  if (want_aoa) {
+    aoa_di_out <- terra::setValues(terra::rast(template), aoa_di_vec)
+    names(aoa_di_out) <- "aoa_di"
+    terra::writeRaster(aoa_di_out, aoa_di_path, overwrite = TRUE,
+      gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
+      wopt = list(datatype = "FLT4S"))
+    rm(aoa_di_out)
+
+    aoa_out <- terra::setValues(terra::rast(template), aoa_vec)
+    names(aoa_out) <- "aoa"
+    terra::writeRaster(aoa_out, aoa_path, overwrite = TRUE,
+      gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
+      wopt = list(datatype = "INT1U"))
+    rm(aoa_out)
+  }
+  rm(aoa_di_vec, aoa_vec)
+
   bin_out <- terra::setValues(terra::rast(template), bin_vec)
   names(bin_out) <- "binary_ensemble"
   terra::writeRaster(bin_out, bin_path, overwrite = TRUE,
@@ -843,6 +969,10 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       " " = "Binary: {.path {bin_path}}"
     )
     if (want_mess) msg <- c(msg, " " = "MESS: {.path {mess_path}}")
+    if (want_aoa) msg <- c(msg,
+      " " = "AOA: {.path {aoa_path}}",
+      " " = "AOA DI: {.path {aoa_di_path}}"
+    )
     cli::cli_inform(msg)
   }
 
@@ -851,12 +981,298 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     hss_sd_path  = hss_sd_path,
     binary_path  = bin_path,
     mess_path    = if (want_mess) mess_path else NULL,
+    aoa_path     = if (want_aoa) aoa_path else NULL,
+    aoa_di_path  = if (want_aoa) aoa_di_path else NULL,
     weights      = weights,
     threshold    = threshold,
     model_scores = scores,
     weights_fallback = weights_fallback,
     fallback_reason = fallback_reason,
     score_components = score_components,
+    decay = decay,
     n_valid_cells = n_valid
   ))
+}
+
+
+#' Grouped Ensemble Prediction
+#'
+#' Builds one ensemble per caller-specified group of models: the castSDM
+#' analogue of biomod2's `em.by` grouping, made explicit by the caller
+#' instead of inferred from model attributes. Each group is combined with
+#' [cast_ensemble()] independently, so every group carries its own weights,
+#' threshold, cross-model SD and binary map. Groups may overlap (a model can
+#' belong to several groups, e.g. a family ensemble plus a full ensemble).
+#'
+#' @param fit A [cast_fit] object.
+#' @param cv A [cast_cv] object providing per-model evaluation metrics.
+#' @param new_data A `data.frame` with `lon`, `lat`, and environmental
+#'   variables matching the training data.
+#' @param groups A **named** list of character vectors of model names; each
+#'   name becomes an output column suffix and must be unique and non-empty.
+#' @param ... Further arguments passed to [cast_ensemble()] (`method`,
+#'   `min_score`, `decay`, `fallback`, `min_metric_folds`).
+#'
+#' @return A `cast_ensemble_grouped` object with components:
+#' \describe{
+#'   \item{groups}{The groups as supplied (model names resolved).}
+#'   \item{ensembles}{Named list of `cast_ensemble` objects, one per group.}
+#'   \item{predictions}{A `data.frame` with the coordinate columns and, per
+#'     group, `hss_<group>`, `hss_sd_<group>` and `binary_<group>` columns.}
+#' }
+#'
+#' @seealso [cast_ensemble()], [cast_ensemble_raster()]
+#'
+#' @examples
+#' \dontrun{
+#' # One ensemble per algorithm family plus a consensus view
+#' cast_ensemble_by(fit, cv, preds,
+#'   groups = list(
+#'     trees   = c("rf", "brt"),
+#'     static  = c("glm", "maxent"),
+#'     full    = c("rf", "brt", "glm", "maxent")
+#'   ))
+#' }
+#'
+#' @export
+cast_ensemble_by <- function(fit, cv, new_data, groups, ...) {
+  if (!is.list(groups) || !length(groups) || is.null(names(groups)) ||
+      any(!nzchar(names(groups))) || anyDuplicated(names(groups))) {
+    cli::cli_abort(
+      "{.arg groups} must be a non-empty, uniquely named list of character vectors."
+    )
+  }
+  avail <- intersect(names(fit$models), cv$metrics$model)
+  resolved <- lapply(groups, function(g) {
+    if (!is.character(g) || !length(g)) {
+      cli::cli_abort("Every {.arg groups} element must be a non-empty character vector.")
+    }
+    hit <- intersect(g, avail)
+    if (!length(hit)) {
+      cli::cli_abort(
+        "Group {.val {g}} has no models in both {.arg fit} and {.arg cv}; available: {.val {avail}}."
+      )
+    }
+    hit
+  })
+
+  ensembles <- vector("list", length(resolved))
+  names(ensembles) <- names(resolved)
+  pieces <- vector("list", length(resolved))
+  names(pieces) <- names(resolved)
+  for (nm in names(resolved)) {
+    ens <- cast_ensemble(fit, cv, new_data, models = resolved[[nm]], ...)
+    ensembles[[nm]] <- ens
+    coords <- ens$predictions[, intersect(
+      c("lon", "lat", "site"), names(ens$predictions)), drop = FALSE]
+    pieces[[nm]] <- data.frame(
+      coords,
+      stats::setNames(
+        data.frame(
+          ens$predictions$hss_ensemble,
+          ens$predictions$hss_sd,
+          as.integer(ens$predictions$binary_ensemble)
+        ),
+        c(paste0("hss_", nm), paste0("hss_sd_", nm), paste0("binary_", nm))
+      ),
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+  }
+  # Align pieces row by row: all cast_ensemble calls receive the same
+  # new_data, so the coordinate blocks are identical; bind the model columns
+  # onto the first piece.
+  out <- pieces[[1L]]
+  if (length(pieces) > 1L) {
+    for (nm in names(pieces)[-1L]) {
+      extra <- pieces[[nm]][, setdiff(names(pieces[[nm]]), names(out)),
+                            drop = FALSE]
+      out <- cbind(out, extra)
+    }
+  }
+
+  structure(
+    list(groups = resolved, ensembles = ensembles, predictions = out),
+    class = "cast_ensemble_grouped"
+  )
+}
+
+
+#' Ensemble-Layer Permutation Importance
+#'
+#' Variable importance measured on the **ensemble** output rather than on
+#' individual models: each predictor is permuted `n_perm` times, the
+#' ensemble prediction is recomputed with the frozen per-model weights, and
+#' the importance of the predictor is `1 - cor(original, permuted)` averaged
+#' over permutations (the biomod2-style ensemble convention). A predictor
+#' the ensemble ignores yields values near 0; permuting an influential
+#' predictor decorrelates the surface and yields large values.
+#'
+#' The per-model weights are computed exactly as in [cast_ensemble()]
+#' (same composite scores, `min_score`, `decay` and fallback policy) and then
+#' frozen, so the importance reflects the ensemble that would actually be
+#' deployed. Per-model predictions are evaluated directly on the imputed
+#' input, skipping the MESS/clamp machinery of [cast_predict()] - this is a
+#' pure re-scoring loop, not a re-prediction of the full predict stack.
+#'
+#' @param fit A [cast_fit] object.
+#' @param cv A [cast_cv] object providing per-model evaluation metrics.
+#' @param new_data A `data.frame` with the environmental variables used in
+#'   fitting (coordinates optional). Use a manageable sample - background
+#'   points, a raster sub-sample or held-out records - not a full prediction
+#'   grid: every predictor permutation re-evaluates every model.
+#' @param models Character vector. Subset of models to include. Default
+#'   `NULL` (all models present in both `fit` and `cv`).
+#' @param method,min_score,decay,fallback,min_metric_folds Ensemble
+#'   weighting arguments, passed to the same internal logic as
+#'   [cast_ensemble()]. Default `method = "weighted"`, `min_score = 0.5`,
+#'   `decay = 1`.
+#' @param n_perm Integer >= 1. Permutations per predictor. Default `25`.
+#' @param metric Correlation used in `1 - cor`: `"pearson"` (default) or
+#'   `"spearman"`.
+#' @param seed Random seed for the permutations.
+#' @param verbose Print progress. Default `TRUE`.
+#'
+#' @return A `cast_ensemble_importance` object with components:
+#' \describe{
+#'   \item{importance}{A `data.frame` with `variable`, `importance_mean`
+#'     and `importance_sd` (across permutations), sorted descending by mean.}
+#'   \item{n_perm, metric, method, decay}{As supplied/resolved.}
+#'   \item{weights}{The frozen per-model weights used.}
+#'   \item{model_scores}{The raw composite scores.}
+#'   \item{baseline}{The unpermuted ensemble prediction.}
+#' }
+#'
+#' @seealso [cast_ensemble()], [cast_ensemble_by()]
+#'
+#' @export
+cast_ensemble_importance <- function(fit, cv, new_data,
+                                     models = NULL, method = "weighted",
+                                     min_score = 0.5, decay = 1,
+                                     fallback = "best",
+                                     min_metric_folds = 2L,
+                                     n_perm = 25L,
+                                     metric = c("pearson", "spearman"),
+                                     seed = NULL, verbose = TRUE) {
+  method <- match.arg(method)
+  fallback <- match.arg(fallback)
+  metric <- match.arg(metric)
+  decay <- .cast_check_decay(decay)
+  n_perm <- as.integer(n_perm)
+  if (is.na(n_perm) || n_perm < 1L) {
+    cli::cli_abort("{.arg n_perm} must be a positive integer.")
+  }
+  if (!is.data.frame(new_data) || nrow(new_data) < 3L) {
+    cli::cli_abort("{.arg new_data} needs at least 3 rows to correlate surfaces.")
+  }
+
+  # ---- Frozen weights, identical to cast_ensemble() ----------------------
+  cv_metrics <- cv$metrics
+  mdl_names <- models %||% names(fit$models)
+  mdl_names <- intersect(mdl_names, names(fit$models))
+  mdl_names <- intersect(mdl_names, cv_metrics$model)
+  if (!length(mdl_names)) {
+    cli::cli_abort("No models found in both {.arg fit} and {.arg cv}.")
+  }
+  cv_sub <- cv_metrics[cv_metrics$model %in% mdl_names, , drop = FALSE]
+  scores <- .cast_ensemble_scores(cv_sub, mdl_names,
+                                  min_metric_folds = min_metric_folds)
+  pw <- .cast_power_scores(scores, decay, method, min_score)
+  weights <- .cast_ensemble_weights(pw$scores, method, pw$min_score, fallback)
+  w <- weights[mdl_names]
+  w[!is.finite(w)] <- 0
+  if (sum(w) <= 0) w[] <- 1
+  w <- w / sum(w)
+
+  # ---- Baseline per-model predictions on the imputed input ---------------
+  env_vars <- fit$env_vars
+  missing <- setdiff(env_vars, names(new_data))
+  if (length(missing)) {
+    cli::cli_abort("{.arg new_data} is missing fitted predictor{?s}: {.val {missing}}.")
+  }
+  X_base <- as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE)
+  .cast_check_numeric_predictors(X_base)
+  for (col in names(X_base)) X_base[[col]] <- as.numeric(X_base[[col]])
+  X_base <- .cast_impute(X_base, fit$scaling$impute)
+
+  pred_one <- function(X) {
+    out <- matrix(NA_real_, nrow(X), length(mdl_names),
+                  dimnames = list(NULL, mdl_names))
+    for (m in mdl_names) {
+      out[, m] <- tryCatch(
+        predict_single_model(fit$models[[m]], X),
+        error = function(e) rep(NA_real_, nrow(X))
+      )
+    }
+    out
+  }
+
+  ens0 <- .ensemble_rowmean(pred_one(X_base), w)
+  ok0 <- is.finite(ens0)
+  if (sum(ok0) < 3L ||
+      stats::sd(ens0[ok0], na.rm = TRUE) %||% 0 == 0 ||
+      !is.finite(stats::sd(ens0[ok0]))) {
+    cli::cli_abort(
+      "The baseline ensemble prediction is constant or too sparse; permutation importance is undefined."
+    )
+  }
+
+  corr_fun <- if (identical(metric, "pearson")) {
+    function(a, b) stats::cor(a, b, method = "pearson")
+  } else {
+    function(a, b) stats::cor(a, b, method = "spearman")
+  }
+
+  if (!is.null(seed)) set.seed(seed)
+  imp <- matrix(NA_real_, nrow = length(env_vars), ncol = n_perm,
+                dimnames = list(env_vars, NULL))
+  if (verbose) {
+    cli::cli_inform(
+      "Ensemble permutation importance: {length(env_vars)} predictor{?s} x {n_perm} permutation{?s}."
+    )
+  }
+  for (vi in seq_along(env_vars)) {
+    v <- env_vars[vi]
+    vals <- X_base[[v]]
+    for (p in seq_len(n_perm)) {
+      X_p <- X_base
+      X_p[[v]] <- sample(vals, size = length(vals), replace = FALSE)
+      ens_p <- .ensemble_rowmean(pred_one(X_p), w)
+      ok <- ok0 & is.finite(ens_p)
+      imp[vi, p] <- if (sum(ok) >= 3L) {
+        r <- suppressWarnings(corr_fun(ens0[ok], ens_p[ok]))
+        if (is.finite(r)) 1 - r else NA_real_
+      } else NA_real_
+    }
+  }
+
+  importance <- data.frame(
+    variable = env_vars,
+    importance_mean = vapply(seq_along(env_vars), function(i) {
+      z <- imp[i, ][is.finite(imp[i, ])]
+      if (length(z)) mean(z) else NA_real_
+    }, numeric(1)),
+    importance_sd = vapply(seq_along(env_vars), function(i) {
+      z <- imp[i, ][is.finite(imp[i, ])]
+      if (length(z) >= 2L) stats::sd(z) else NA_real_
+    }, numeric(1)),
+    stringsAsFactors = FALSE
+  )
+  importance <- importance[order(
+    -xtfrm(importance$importance_mean), importance$variable), ,
+    drop = FALSE]
+  rownames(importance) <- NULL
+
+  structure(
+    list(
+      importance = importance,
+      n_perm = n_perm,
+      metric = metric,
+      method = method,
+      decay = decay,
+      weights = weights,
+      model_scores = scores,
+      baseline = ens0
+    ),
+    class = "cast_ensemble_importance"
+  )
 }

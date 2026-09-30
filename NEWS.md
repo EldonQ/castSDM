@@ -1,3 +1,56 @@
+# castSDM 0.18.0 (unreleased)
+
+## AOA applicability, grouped/decay ensembles, ensemble permutation importance, kappa/omission/MPA metrics, environmental blocking (A2 deep-review round)
+
+* **Area of Applicability (AOA; Meyer & Pebesma 2021)**: `cast_cv()` gains
+  `aoa = TRUE`, which calibrates the dissimilarity-index (DI) threshold from
+  the pooled held-out-fold DI values (95th percentile) in the standardized
+  predictor space (model-independent, uniform weights; requires `FNN`).
+  The calibration is stored in the `aoa` component of the `cast_cv` object
+  together with the per-row held-out DI (`di_oof`).
+* `cast_predict()` gains `cv`, `aoa` and `vi`: with `aoa = TRUE` each
+  prediction row is flagged against the calibrated threshold (`aoa` logical
+  column) and receives its raw dissimilarity index (`aoa_di`). The DI is
+  computed on the unclamped input (clamping never softens the flag, same
+  convention as MESS). Optional `vi` weights the standardized dimensions;
+  a warning is issued when the supplied `cv` threshold was calibrated
+  uniform.
+* `cast_ensemble_raster()` gains `aoa_cv`: writes `<prefix>_aoa.tif`
+  (flag) and `<prefix>_aoa_di.tif` (raw DI) block by block, on the
+  unclamped block input.
+* **Score-power ensemble weighting**: `cast_ensemble()` and
+  `cast_ensemble_raster()` gain `decay` (default 1). With
+  `method = "weighted"`, weights become `score^decay` (negative scores
+  clamped at 0) renormalised; `decay = 0` degenerates to equal weights and
+  `decay > 1` sharpens towards the best-scoring models. Raw scores are
+  still reported in `model_scores` and `min_score` filters on the raw
+  scores. The used exponent is stored in the `decay` field of the
+  `cast_ensemble` object.
+* `cast_ensemble_by()`: builds one ensemble per caller-specified group of
+  models (the explicit castSDM analogue of biomod2's `em.by` grouping),
+  returning a `cast_ensemble_grouped` object whose `predictions` carry
+  `hss_<group>`, `hss_sd_<group>` and `binary_<group>` columns; groups may
+  overlap. Print method included.
+* `cast_ensemble_importance()`: permutation importance on the ensemble
+  layer - each predictor is permuted `n_perm` times (default 25), the
+  ensemble is recomputed with frozen per-model weights, and importance is
+  `1 - cor(original, permuted)` averaged over permutations (Pearson or
+  Spearman). Returns a `cast_ensemble_importance` object sorted descending.
+* **Threshold-free evaluation metrics**: `evaluate_model_full()` and the
+  whole CV chain (`cast_cv()` fold metrics, `cast_evaluate()`) now also
+  report `kappa` (Cohen's kappa at the fold threshold, paired with TSS),
+  and the threshold-free `omission_5` / `omission_10` (proportion of
+  presence records below the 1-E quantile of all predictions; E = 5% / 10%)
+  and `mpa` (maximum predicted area at 90% training sensitivity; Pearson
+  2007-style). Aggregated columns `*_mean`/`*_sd`/`*_n_folds` follow the
+  existing convention.
+* **Environmental blocking**: `block_method = "env"` in `cast_cv()` and
+  `cast_prepare()` - k-means partitions the scaled numeric predictor
+  matrix (medians imputed, zero-variance columns dropped), so folds are
+  contiguous in environmental space rather than geographic space
+  (Roberts et al. 2017-style). Split labels distinguish
+  `"environmental block (env)"` from spatial blocking.
+
 # castSDM 0.17.0 (unreleased)
 
 ## Change-map coding, range-change statistics, binning and buffer units (P2 fast-win round)

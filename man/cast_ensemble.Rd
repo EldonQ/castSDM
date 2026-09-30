@@ -11,6 +11,7 @@ cast_ensemble(
   method = c("weighted", "best", "equal", "median", "committee"),
   models = NULL,
   min_score = 0.5,
+  decay = 1,
   fallback = c("best", "equal", "error"),
   min_metric_folds = 2L
 )
@@ -40,6 +41,14 @@ their outer-CV thresholds; the ensemble threshold is 0.5.
 \item{min_score}{Minimum composite score for weighted inclusion. Default
 \code{0.5}.}
 
+\item{decay}{Numeric >= 0. Exponent applied to the composite scores before
+weighting (\code{w = score^decay}, negative scores clamped at 0), then
+renormalised. Only used by \code{method = "weighted"}: \code{1} (default)
+reproduces linear score weighting, \code{0} degenerates to equal weights, and
+values > 1 sharpen the ensemble towards the best-scoring models. The
+raw (unpowered) scores are still reported in \code{model_scores}, and
+\code{min_score} filters on the raw scores.}
+
 \item{fallback}{When no model reaches \code{min_score}: \code{"best"} retains the
 highest-scoring finite model, \code{"equal"} uses equal weights, or \code{"error"}
 aborts. The choice and reason are stored in the result. Default \code{"best"}.}
@@ -62,6 +71,7 @@ reference, the MESS columns (\code{mess}, \code{extrapolating}) from
 \item{model_scores}{Named numeric vector of per-model composite scores.}
 \item{weights_fallback}{Whether weighted selection needed a fallback.}
 \item{fallback_reason}{Reason for the fallback, or \code{NULL}.}
+\item{decay}{The decay exponent used for weighting.}
 }
 }
 \description{

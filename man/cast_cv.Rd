@@ -11,7 +11,7 @@ cast_cv(
   select_args = list(),
   k = 5L,
   models = c("rf"),
-  block_method = c("grid", "grid_random", "cluster"),
+  block_method = c("grid", "grid_random", "cluster", "env"),
   buffer = 0,
   buffer_unit = c("deg", "km"),
   response = "presence",
@@ -23,6 +23,7 @@ cast_cv(
   prevalence_target = NULL,
   n_repeat = 1L,
   threshold_method = "max_tss",
+  aoa = FALSE,
   parallel = FALSE,
   seed = NULL,
   verbose = TRUE
@@ -50,8 +51,11 @@ Cannot override \code{data}, \code{response}, or \code{method}.}
 \item{block_method}{\code{"grid"} (default; grid cells grouped into spatially
 contiguous folds via k-means on cell centroids), \code{"grid_random"}
 (legacy behaviour: count-balanced greedy packing that ignores cell
-position and produces interleaved, non-contiguous folds), or \code{"cluster"}
-(k-means on point coordinates).}
+position and produces interleaved, non-contiguous folds), \code{"cluster"}
+(k-means on point coordinates), or \code{"env"} (k-means on the scaled
+predictor matrix, so every fold is contiguous in \strong{environmental}
+space rather than geographic space; Roberts et al. 2017-style
+environmental blocking).}
 
 \item{buffer}{Non-negative number. When \verb{> 0}, training rows closer than
 \code{buffer} to any test row are dropped for that fold, thinning
@@ -99,6 +103,17 @@ column; \code{selection_freq} pools all repeats; \code{oof}, \code{thresholds} a
 outer training fold. That threshold is then applied to the held-out fold.
 See \code{\link[=cast_threshold]{cast_threshold()}}. Default \code{"max_tss"}.}
 
+\item{aoa}{Logical. Calibrate the area-of-applicability (AOA)
+dissimilarity threshold (Meyer & Pebesma 2021). When \code{TRUE}, every fold
+computes the DI of its held-out rows against the fold's
+(buffer-thinned) training rows in the standardized predictor space, and
+the stored threshold is the 95th percentile of the pooled held-out DI
+values. The calibration is model-independent (uniform predictor
+weights). The result is stored in the \code{aoa} component of the returned
+object, together with the per-row held-out DI (\code{di_oof}), and is
+consumed by \code{\link[=cast_predict]{cast_predict()}} (\code{aoa = TRUE}) and
+\code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}} (\code{aoa_cv = TRUE}). Requires \pkg{FNN}.}
+
 \item{parallel}{Run folds with \code{future.apply}; requires the user to set a
 \code{\link[future:plan]{future::plan()}} first (a warning is issued when none is set).}
 
@@ -112,7 +127,9 @@ Metrics include \code{auc_n_folds}, \code{tss_n_folds}, and \code{cbi_n_folds} c
 finite values separately; \code{n_folds} counts model result rows.
 Empty or failed folds do not contribute predictive metrics. When no fold
 is evaluable, the \code{cast_cv_no_evaluable_folds} error carries \code{screens} and
-\code{fold_status} for inspection.
+\code{fold_status} for inspection. With \code{aoa = TRUE} the \code{aoa} component
+carries the calibrated \code{threshold} (NA when fewer than 10 finite
+held-out DI values were collected).
 }
 \description{
 Variable selection is re-fitted inside every outer training fold. This

@@ -41,7 +41,8 @@ test_that("CV reports finite fold counts separately for each metric", {
   )
   evaluated <- 0L
   local_mocked_bindings(
-    make_spatial_folds = function(lon, lat, k, method, seed) rep(1:4, each = 6),
+    make_spatial_folds = function(lon, lat, k, method, seed,
+                                  env = NULL) rep(1:4, each = 6),
     evaluate_model_full = function(pred, obs, threshold = NULL,
                                    threshold_method = "max_tss") {
       evaluated <<- evaluated + 1L

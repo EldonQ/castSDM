@@ -4,7 +4,16 @@
 \alias{cast_predict}
 \title{Generate Spatial Habitat Suitability Predictions}
 \usage{
-cast_predict(fit, new_data, models = NULL, clamp = FALSE, extrapolation = TRUE)
+cast_predict(
+  fit,
+  new_data,
+  models = NULL,
+  clamp = FALSE,
+  extrapolation = TRUE,
+  cv = NULL,
+  aoa = FALSE,
+  vi = NULL
+)
 }
 \arguments{
 \item{fit}{A \link{cast_fit} object.}
@@ -21,11 +30,24 @@ prediction. Default \code{FALSE}.}
 \item{extrapolation}{Logical. Append \code{mess} and \code{extrapolating} columns
 flagging out-of-envelope sites. Default \code{TRUE} (skipped if the fit lacks
 a stored reference).}
+
+\item{cv}{Optional \code{cast_cv} object. Required when \code{aoa = TRUE}; it must
+carry an AOA calibration (i.e. come from \code{\link[=cast_cv]{cast_cv()}} with \code{aoa = TRUE}).}
+
+\item{aoa}{Logical. Append \code{aoa_di} (dissimilarity index) and \code{aoa}
+(logical, \code{DI <= threshold}) columns. Default \code{FALSE}.}
+
+\item{vi}{Optional named numeric vector of variable importance (any non-negative scale, normalised internally)
+(any positive scale; normalised internally), used to weight the
+standardized predictor dimensions in the DI (Meyer & Pebesma 2021,
+weighted variant). Default \code{NULL} (uniform weights). A warning is issued
+when \code{vi} is supplied but the \code{cv} threshold was calibrated with uniform
+weights, because threshold and DI then use different metrics.}
 }
 \value{
 A \code{cast_predict} object containing a \code{predictions} data.frame
 with \code{lon}, \code{lat}, one \verb{HSS_*} column per model, and (when enabled)
-\code{mess} / \code{extrapolating} columns.
+\code{mess} / \code{extrapolating} and \code{aoa_di} / \code{aoa} columns.
 }
 \description{
 Predicts habitat suitability scores (HSS) for new environmental data using
@@ -51,11 +73,26 @@ model output is an extrapolation and should be treated cautiously. Optional
 \code{clamp}ing caps each predictor to its training range before prediction,
 which curbs runaway extrapolation without hiding it (the MESS flag is still
 computed on the unclamped input).
+
+On top of the univariate MESS envelope check, \code{aoa = TRUE} scores each
+prediction row against the \strong{area of applicability} (AOA; Meyer & Pebesma
+2021): the dissimilarity index (DI) is the distance from the site to its
+nearest training neighbour in the standardised predictor space, compared
+against a threshold calibrated by \code{\link[=cast_cv]{cast_cv()}} with \code{aoa = TRUE} as the 95th
+percentile of the held-out-fold DI values. Sites with \code{aoa = FALSE} (DI
+above the threshold) are more dissimilar from training conditions than any
+held-out training fold was from its own training data; model quality there
+is not covered by the cross-validation estimate and predictions should not
+be interpolated into those sites.
 }
 \references{
 Elith, J., Kearney, M. & Phillips, S. (2010). The art of modelling
 range-shifting species. \emph{Methods in Ecology and Evolution}, 1(4), 330-342.
+
+Meyer, H. & Pebesma, E. (2021). Predicting into unknown space? Estimating
+the area of applicability of spatial prediction models. \emph{Methods in
+Ecology and Evolution}, 12(9), 1620-1633.
 }
 \seealso{
-\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}
+\code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_ensemble]{cast_ensemble()}}, \code{\link[=cast_cv]{cast_cv()}}
 }

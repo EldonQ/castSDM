@@ -12,11 +12,13 @@ cast_ensemble_raster(
   method = c("weighted", "best", "equal", "median", "committee"),
   models = NULL,
   min_score = 0.5,
+  decay = 1,
   fallback = c("best", "equal", "error"),
   min_metric_folds = 2L,
   mask = NULL,
   clamp = FALSE,
   extrapolation = TRUE,
+  aoa_cv = NULL,
   max_memory_mb = 200,
   prefix = "",
   overwrite = FALSE,
@@ -43,6 +45,9 @@ it does not exist.}
 \item{min_score}{Minimum composite score for weighted inclusion. Default
 \code{0.5}.}
 
+\item{decay}{Numeric >= 0. Score-power exponent for the \code{weighted} method,
+as in \code{\link[=cast_ensemble]{cast_ensemble()}}. Default \code{1}.}
+
 \item{fallback}{Weighted-score fallback: \code{"best"}, \code{"equal"}, or \code{"error"}.
 Default \code{"best"}.}
 
@@ -64,6 +69,15 @@ al. 2010) block by block and write \verb{<prefix>_mess.tif}. Default
 \code{TRUE} (skipped, with \code{mess_path = NULL}, if the fit lacks a stored
 training reference).}
 
+\item{aoa_cv}{Optional \code{cast_cv} object from \code{\link[=cast_cv]{cast_cv()}} with \code{aoa = TRUE}. When
+supplied, each valid cell is scored against the \strong{area of applicability}
+(Meyer & Pebesma 2021): the DI of the cell's standardized predictors to
+the nearest training row is compared with the calibrated threshold, and
+\verb{<prefix>_aoa.tif} (flag, 1 = inside the AOA) and \verb{<prefix>_aoa_di.tif}
+(raw dissimilarity index) are written. The DI is computed on the
+unclamped block input, so clamping never softens the flag. Requires the
+\pkg{FNN} package.}
+
 \item{max_memory_mb}{Numeric. Approximate per-block memory budget in MB
 used to size the row blocks. Default \code{200}.}
 
@@ -83,6 +97,8 @@ A list with components:
 \item{binary_path}{File path to the binary raster.}
 \item{mess_path}{File path to the MESS raster, or \code{NULL} when
 \code{extrapolation = FALSE} or no training reference is available.}
+\item{aoa_path, aoa_di_path}{File paths to the AOA flag and DI rasters,
+or \code{NULL} when \code{aoa_cv} is not supplied.}
 \item{weights}{Named numeric vector of per-model weights.}
 \item{threshold}{Binary classification threshold.}
 \item{n_valid_cells}{Number of cells predicted.}

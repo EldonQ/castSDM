@@ -119,6 +119,9 @@ new_cast_eval <- function(metrics, cv_source = FALSE) {
 #'   statuses, one per scheduled fold.
 #' @param n_repeat Integer. Number of independent blocking repeats the
 #'   metrics were aggregated over (1 = single run).
+#' @param aoa Named list with the area-of-applicability calibration
+#'   (`threshold`, `di_oof`, `n_di`, `method`), or `NULL` when
+#'   [cast_cv()] ran with `aoa = FALSE`.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
@@ -127,7 +130,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
                         k, block_method, thresholds,
                         selections = list(), screens = list(),
                         selection_freq = NULL, oof = NULL, fold_status = NULL,
-                        threshold_method = "max_tss", n_repeat = 1L) {
+                        threshold_method = "max_tss", n_repeat = 1L,
+                        aoa = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -142,7 +146,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       oof          = oof,
       fold_status  = fold_status,
       threshold_method = threshold_method,
-      n_repeat     = n_repeat
+      n_repeat     = n_repeat,
+      aoa          = aoa
     ),
     class = "cast_cv"
   )
@@ -217,6 +222,8 @@ new_cast_result <- function(screen, fit, eval,
 #'   fallback policy because no model met the minimum score.
 #' @param fallback_reason Character reason for the fallback, or `NULL`.
 #' @param score_components Named list of metrics used for each model score.
+#' @param decay Numeric. The score-power exponent used for weighting
+#'   (`method = "weighted"`; `1` = linear).
 #'
 #' @return A `cast_ensemble` object.
 #' @keywords internal
@@ -225,7 +232,8 @@ new_cast_ensemble <- function(predictions, weights, method,
                               threshold, model_scores,
                               weights_fallback = FALSE,
                               fallback_reason = NULL,
-                              score_components = NULL) {
+                              score_components = NULL,
+                              decay = 1) {
   structure(
     list(
       predictions = predictions,
@@ -235,7 +243,8 @@ new_cast_ensemble <- function(predictions, weights, method,
       model_scores = model_scores,
       weights_fallback = isTRUE(weights_fallback),
       fallback_reason = fallback_reason,
-      score_components = score_components
+      score_components = score_components,
+      decay = decay
     ),
     class = "cast_ensemble"
   )

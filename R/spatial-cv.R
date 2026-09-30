@@ -18,8 +18,11 @@
 #' @param block_method `"grid"` (default; grid cells grouped into spatially
 #'   contiguous folds via k-means on cell centroids), `"grid_random"`
 #'   (legacy behaviour: count-balanced greedy packing that ignores cell
-#'   position and produces interleaved, non-contiguous folds), or `"cluster"`
-#'   (k-means on point coordinates).
+#'   position and produces interleaved, non-contiguous folds), `"cluster"`
+#'   (k-means on point coordinates), or `"env"` (k-means on the scaled
+#'   predictor matrix, so every fold is contiguous in **environmental**
+#'   space rather than geographic space; Roberts et al. 2017-style
+#'   environmental blocking).
 #' @param buffer Non-negative number. When `> 0`, training rows closer than
 #'   `buffer` to any test row are dropped for that fold, thinning
 #'   spatial-autocorrelation leakage at the fold boundary. Units follow
@@ -55,6 +58,16 @@
 #' @param threshold_method Rule for selecting the binary threshold inside each
 #'   outer training fold. That threshold is then applied to the held-out fold.
 #'   See [cast_threshold()]. Default `"max_tss"`.
+#' @param aoa Logical. Calibrate the area-of-applicability (AOA)
+#'   dissimilarity threshold (Meyer & Pebesma 2021). When `TRUE`, every fold
+#'   computes the DI of its held-out rows against the fold's
+#'   (buffer-thinned) training rows in the standardized predictor space, and
+#'   the stored threshold is the 95th percentile of the pooled held-out DI
+#'   values. The calibration is model-independent (uniform predictor
+#'   weights). The result is stored in the `aoa` component of the returned
+#'   object, together with the per-row held-out DI (`di_oof`), and is
+#'   consumed by [cast_predict()] (`aoa = TRUE`) and
+#'   [cast_ensemble_raster()] (`aoa_cv = TRUE`). Requires \pkg{FNN}.
 #' @param parallel Run folds with `future.apply`; requires the user to set a
 #'   [future::plan()] first (a warning is issued when none is set).
 #' @param seed Random seed.
@@ -65,7 +78,9 @@
 #'   finite values separately; `n_folds` counts model result rows.
 #'   Empty or failed folds do not contribute predictive metrics. When no fold
 #'   is evaluable, the `cast_cv_no_evaluable_folds` error carries `screens` and
-#'   `fold_status` for inspection.
+#'   `fold_status` for inspection. With `aoa = TRUE` the `aoa` component
+#'   carries the calibrated `threshold` (NA when fewer than 10 finite
+#'   held-out DI values were collected).
 #' @export
 cast_cv <- function(data,
                     screen = NULL,
@@ -73,7 +88,7 @@ cast_cv <- function(data,
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
-                    block_method = c("grid", "grid_random", "cluster"),
+                    block_method = c("grid", "grid_random", "cluster", "env"),
                     buffer = 0,
                     buffer_unit = c("deg", "km"),
                     response = "presence",
@@ -85,10 +100,15 @@ cast_cv <- function(data,
                     prevalence_target = NULL,
                     n_repeat = 1L,
                     threshold_method = "max_tss",
+                    aoa = FALSE,
                     parallel = FALSE,
                     seed = NULL,
                     verbose = TRUE) {
   block_method <- match.arg(block_method)
+  if (!is.logical(aoa) || length(aoa) != 1L || is.na(aoa)) {
+    cli::cli_abort("{.arg aoa} must be TRUE or FALSE.")
+  }
+  if (aoa) check_suggested("FNN", "for the area of applicability (aoa = TRUE)")
   if (!is.list(select_args) ||
       (length(select_args) && (is.null(names(select_args)) ||
        anyNA(names(select_args)) || any(!nzchar(names(select_args))) ||
@@ -131,6 +151,17 @@ cast_cv <- function(data,
       i = "That screen was selected on the full data set, so selection leaks into these CV metrics; treat them as optimistic."
     ))
   }
+
+  # Environmental blocking needs the numeric predictor matrix (coordinates
+  # and the response excluded); computed once, reused by every repeat.
+  env_block <- if (identical(block_method, "env")) {
+    cand <- setdiff(names(data), c("lon", "lat", response))
+    cand <- cand[vapply(data[cand], is.numeric, logical(1))]
+    if (length(cand) < 2L) {
+      cli::cli_abort("{.code block_method = \"env\"} needs at least two numeric predictor columns.")
+    }
+    as.matrix(data[, cand, drop = FALSE])
+  } else NULL
 
   cv_one <- function(folds, fold_i) {
     test_idx <- which(folds == fold_i)
@@ -185,6 +216,28 @@ cast_cv <- function(data,
                   screen = fold_screen))
     }
 
+    # Held-out AOA calibration (model-independent): DI of every test row to
+    # its nearest training-row neighbour in the standardized fold space. The
+    # training side uses the same buffer-thinned rows the models saw.
+    di_fold <- NULL
+    if (aoa) {
+      di_fold <- tryCatch({
+        x_tr <- as.data.frame(train[, fit$env_vars, drop = FALSE],
+                              check.names = FALSE)
+        x_te <- as.data.frame(test[, fit$env_vars, drop = FALSE],
+                              check.names = FALSE)
+        for (nm in fit$env_vars) {
+          x_tr[[nm]] <- as.numeric(x_tr[[nm]])
+          x_te[[nm]] <- as.numeric(x_te[[nm]])
+        }
+        prep <- .cast_aoa_prep(x_tr, x_te)
+        .cast_aoa_di(prep$train, prep$new)
+      }, error = function(e) {
+        warning(sprintf("AOA DI failed in fold %d: %s", fold_i, e$message))
+        rep(NA_real_, nrow(test))
+      })
+    }
+
     rows <- list()
     updates <- list()
     for (mdl in models) {
@@ -216,7 +269,8 @@ cast_cv <- function(data,
         },
         error = function(e) c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
           sedi = NA_real_, brier = NA_real_, logloss = NA_real_, boyce = NA_real_,
-          cbi = NA_real_, tss_threshold = NA_real_)
+          cbi = NA_real_, kappa = NA_real_, omission_5 = NA_real_,
+          omission_10 = NA_real_, mpa = NA_real_, tss_threshold = NA_real_)
       )
       metric_value <- function(nm) {
         if (nm %in% names(met)) unname(met[[nm]]) else NA_real_
@@ -226,21 +280,27 @@ cast_cv <- function(data,
         pr_auc = metric_value("pr_auc"), tss = metric_value("tss"),
         sedi = metric_value("sedi"), brier = metric_value("brier"),
         logloss = metric_value("logloss"), boyce = metric_value("boyce"),
-        cbi = metric_value("cbi"), tss_threshold = metric_value("tss_threshold"),
+        cbi = metric_value("cbi"), kappa = metric_value("kappa"),
+        omission_5 = metric_value("omission_5"),
+        omission_10 = metric_value("omission_10"),
+        mpa = metric_value("mpa"),
+        tss_threshold = metric_value("tss_threshold"),
         n_selected = length(fold_screen$selected),
         stringsAsFactors = FALSE
       )
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
     list(rows = rows, updates = updates, selected = fold_screen$selected,
-         screen = fold_screen, status = if (length(rows)) "evaluated" else "no_predictions")
+         screen = fold_screen, di = di_fold,
+         status = if (length(rows)) "evaluated" else "no_predictions")
   }
 
   run_once <- function(rep_i) {
     # Per-repeat fold assignment: seeds separated by a prime so distinct
     # repeats draw unrelated blockings under the same user seed.
     rep_seed <- if (!is.null(seed)) seed + (rep_i - 1L) * 7919L else NULL
-    folds <- make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed)
+    folds <- make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed,
+                                env = env_block)
     if (verbose && n_repeat > 1L) {
       cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
     }
@@ -261,6 +321,7 @@ cast_cv <- function(data,
 
     row_list <- list()
     oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
+    oof_di <- rep(NA_real_, nrow(data))
     selections <- vector("list", k)
     screens <- vector("list", k)
     fold_status <- rep("failed", k)
@@ -277,6 +338,7 @@ cast_cv <- function(data,
       selections[i] <- list(res$selected)
       screens[i] <- list(res$screen)
       fold_status[i] <- res$status
+      if (aoa && !is.null(res$di)) oof_di[which(folds == i)] <- res$di
       for (mdl in names(res$updates)) {
         upd <- res$updates[[mdl]]
         oof[[mdl]][upd$idx] <- upd$pred
@@ -299,7 +361,7 @@ cast_cv <- function(data,
     list(folds = folds, fold_df = fold_df, oof_df = oof_df,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
-         skipped_single = skipped_single)
+         skipped_single = skipped_single, di = oof_di)
   }
 
   if (verbose) {
@@ -374,13 +436,38 @@ cast_cv <- function(data,
     .cast_repeat_metrics(per_rep, models)
   }
 
+  # AOA calibration from the first repeat (same convention as the oof
+  # surface): the threshold is the 95th percentile of the pooled held-out
+  # fold DI values. Fewer than 10 finite values leaves the threshold NA -
+  # too sparse to be anything but noise.
+  aoa_info <- NULL
+  if (aoa) {
+    di <- reps[[1]]$di
+    vals <- di[is.finite(di)]
+    if (length(vals) < 10L) {
+      cli::cli_warn(
+        "Only {length(vals)} finite held-out DI value{?s}; the AOA threshold is NA."
+      )
+    }
+    aoa_info <- list(
+      enabled = TRUE,
+      weighted = FALSE,
+      threshold = if (length(vals) >= 10L) {
+        as.numeric(stats::quantile(vals, 0.95, names = FALSE))
+      } else NA_real_,
+      di_oof = di,
+      n_di = length(vals),
+      method = "cv_heldout_di_p95"
+    )
+  }
+
   new_cast_cv(
     metrics = metrics, fold_metrics = fold_df_all, folds = reps[[1]]$folds,
     k = k, block_method = block_method, thresholds = reps[[1]]$thresholds,
     selections = selections_all, screens = do.call(c, lapply(reps, `[[`, "screens")),
     selection_freq = selection_freq, oof = reps[[1]]$oof_df,
     fold_status = fold_status_final, threshold_method = threshold_method,
-    n_repeat = n_repeat
+    n_repeat = n_repeat, aoa = aoa_info
   )
 }
 
@@ -395,7 +482,8 @@ cast_cv <- function(data,
   agg <- lapply(models, function(mdl) {
     z <- fold_df[fold_df$model == mdl, , drop = FALSE]
     if (!nrow(z)) return(NULL)
-    metrics <- c("auc", "pr_auc", "tss", "sedi", "brier", "logloss", "boyce", "cbi")
+    metrics <- c("auc", "pr_auc", "tss", "sedi", "brier", "logloss", "boyce", "cbi",
+                 "kappa", "omission_5", "omission_10", "mpa")
     out <- list(model = mdl)
     for (metric in metrics) {
       vals <- z[[metric]][is.finite(z[[metric]])]
@@ -428,7 +516,7 @@ cast_cv <- function(data,
     }))
     if (!length(rows)) return(NULL)
     metric_names <- c("auc", "pr_auc", "tss", "sedi", "brier", "logloss",
-                      "boyce", "cbi")
+                      "boyce", "cbi", "kappa", "omission_5", "omission_10", "mpa")
     out <- list(model = mdl)
     for (metric in metric_names) {
       means <- vapply(rows, function(z) z[[paste0(metric, "_mean")]][1],
@@ -451,7 +539,7 @@ cast_cv <- function(data,
   do.call(rbind, Filter(Negate(is.null), agg))
 }
 
-#' Assign Spatial Folds
+#' Assign Spatial or Environmental Folds
 #'
 #' @param lon,lat Numeric coordinate vectors.
 #' @param k Number of folds.
@@ -460,14 +548,18 @@ cast_cv <- function(data,
 #'   so every fold is a connected region. `"grid_random"`: legacy behaviour
 #'   (greedy count-balanced packing that ignores cell position; kept for
 #'   backwards comparability). `"cluster"`: k-means on the (scaled) point
-#'   coordinates.
+#'   coordinates. `"env"`: k-means on the scaled predictor matrix (`env`),
+#'   so folds are contiguous in environmental space; gaps are imputed with
+#'   column medians and zero-variance columns dropped before scaling.
 #' @param seed Random seed.
+#' @param env Optional numeric matrix with one row per record, used only by
+#'   `method = "env"`.
 #' @return Integer fold ids in `1:k` (degenerate inputs collapse to `1L`).
 #' @keywords internal
 #' @noRd
 make_spatial_folds <- function(lon, lat, k,
-                               method = c("grid", "grid_random", "cluster"),
-                               seed = NULL) {
+                               method = c("grid", "grid_random", "cluster", "env"),
+                               seed = NULL, env = NULL) {
   method <- match.arg(method)
   if (!is.null(seed)) set.seed(seed)
   n <- length(lon)
@@ -476,6 +568,26 @@ make_spatial_folds <- function(lon, lat, k,
   if (method == "cluster") {
     return(as.integer(factor(stats::kmeans(
       scale(cbind(lon, lat)), centers = k_use, nstart = 10L
+    )$cluster)))
+  }
+  if (method == "env") {
+    if (is.null(env) || nrow(env) != n) {
+      cli::cli_abort("{.code block_method = \"env\"} requires a predictor matrix with one row per record.")
+    }
+    env <- as.matrix(env)
+    storage.mode(env) <- "numeric"
+    # Impute gaps with column medians and drop zero-variance columns so
+    # scale()/kmeans() stay defined on sparse or constant predictors.
+    med <- vapply(seq_len(ncol(env)), function(j) stats::median(env[, j], na.rm = TRUE),
+                  numeric(1))
+    med[!is.finite(med)] <- 0
+    for (j in seq_len(ncol(env))) env[!is.finite(env[, j]), j] <- med[j]
+    keep <- vapply(seq_len(ncol(env)), function(j) diff(range(env[, j])) > 0, logical(1))
+    if (sum(keep) < 2L) {
+      cli::cli_abort("{.code block_method = \"env\"} needs at least two predictors with non-zero variance.")
+    }
+    return(as.integer(factor(stats::kmeans(
+      scale(env[, keep, drop = FALSE]), centers = k_use, nstart = 10L
     )$cluster)))
   }
   # grid blocking; degenerate coordinates (few distinct values) collapse to

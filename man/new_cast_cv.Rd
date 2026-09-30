@@ -17,7 +17,8 @@ new_cast_cv(
   oof = NULL,
   fold_status = NULL,
   threshold_method = "max_tss",
-  n_repeat = 1L
+  n_repeat = 1L,
+  aoa = NULL
 )
 }
 \arguments{
@@ -52,6 +53,10 @@ outer training folds before scoring held-out folds.}
 
 \item{n_repeat}{Integer. Number of independent blocking repeats the
 metrics were aggregated over (1 = single run).}
+
+\item{aoa}{Named list with the area-of-applicability calibration
+(\code{threshold}, \code{di_oof}, \code{n_di}, \code{method}), or \code{NULL} when
+\code{\link[=cast_cv]{cast_cv()}} ran with \code{aoa = FALSE}.}
 }
 \value{
 A \code{cast_cv} object.

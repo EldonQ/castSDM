@@ -169,6 +169,86 @@ compute_auc <- function(y, pred) {
 }
 
 
+#' Cohen's Kappa at a Fixed Threshold
+#'
+#' Chance-corrected agreement between observed classes and the binary
+#' prediction at `threshold`. Reported alongside TSS/SEDI, which use the
+#' same threshold, so the three describe one operating point.
+#'
+#' @param obs Binary 0/1 observed outcomes.
+#' @param pred Numeric predicted probabilities.
+#' @param threshold Numeric cut; `NA` returns `NA`.
+#' @return Scalar kappa in [-1, 1]; `NA` when no class pair is available or
+#'   the expected agreement is degenerate.
+#' @keywords internal
+#' @noRd
+compute_kappa <- function(obs, pred, threshold) {
+  ok <- is.finite(pred) & !is.na(obs) & obs %in% c(0L, 1L)
+  obs <- obs[ok]; pred <- pred[ok]
+  if (!length(obs) || length(unique(obs)) < 2L ||
+      is.na(threshold) || !is.finite(threshold)) return(NA_real_)
+  hit <- pred >= threshold
+  tp <- sum(hit & obs == 1L); fn <- sum(!hit & obs == 1L)
+  fp <- sum(hit & obs == 0L); tn <- sum(!hit & obs == 0L)
+  n <- tp + fn + fp + tn
+  if (n == 0L) return(NA_real_)
+  po <- (tp + tn) / n
+  pe <- ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n^2
+  if (pe >= 1) return(NA_real_)
+  (po - pe) / (1 - pe)
+}
+
+
+#' Omission Rate at a Fixed Predicted-Positive Area
+#'
+#' Threshold-free evaluation in the style of the "omission at E% predicted
+#' area" diagnostics (Pearson et al. 2007; biomod2-style internal metric
+#' sets): the cut `t` is the inverse empirical quantile of ALL evaluation
+#' predictions at `1 - e`, so a fraction `e` of the evaluation surface is
+#' predicted present; the metric is the fraction of presences falling below
+#' `t`. Low values mean the model ranks most presences inside a small
+#' predicted area.
+#'
+#' @param pred Numeric predicted probabilities.
+#' @param obs Binary 0/1 observed outcomes.
+#' @param e Predicted-positive area fraction in (0, 1).
+#' @return Scalar omission rate in [0, 1]; `NA` when no presence is available.
+#' @keywords internal
+#' @noRd
+compute_omission_at <- function(pred, obs, e = 0.05) {
+  ok <- is.finite(pred) & !is.na(obs) & obs %in% c(0L, 1L)
+  pred <- pred[ok]; obs <- obs[ok]
+  pres <- pred[obs == 1L]
+  if (!length(pres) || e <= 0 || e >= 1) return(NA_real_)
+  t <- stats::quantile(pred, probs = 1 - e, names = FALSE, type = 1)
+  mean(pres < t)
+}
+
+
+#' Minimum Predicted Area Covering a Fraction of Presences
+#'
+#' Complement of the omission-at-E diagnostic: the cut `t` is the
+#' `1 - keep` quantile of the presence predictions, and the metric is the
+#' fraction of ALL evaluation predictions at or above `t` — the smallest
+#' predicted area that retains `keep` of the presences (Pearson et al.
+#' 2007-style MPA). Compact models score low.
+#'
+#' @param pred Numeric predicted probabilities.
+#' @param obs Binary 0/1 observed outcomes.
+#' @param keep Presence fraction the area must retain; default `0.9`.
+#' @return Scalar area fraction in (0, 1]; `NA` with fewer than 5 presences.
+#' @keywords internal
+#' @noRd
+compute_mpa <- function(pred, obs, keep = 0.9) {
+  ok <- is.finite(pred) & !is.na(obs) & obs %in% c(0L, 1L)
+  pred <- pred[ok]; obs <- obs[ok]
+  pres <- pred[obs == 1L]
+  if (length(pres) < 5L || keep <= 0 || keep >= 1) return(NA_real_)
+  t <- stats::quantile(pres, probs = 1 - keep, names = FALSE, type = 1)
+  mean(pred >= t)
+}
+
+
 #' Full Model Evaluation: discrimination, threshold, and probability-scale scores
 #'
 #' @param pred Numeric vector of predicted probabilities [0,1].
@@ -177,7 +257,9 @@ compute_auc <- function(y, pred) {
 #'   data. When `NULL`, `evaluate_model_full()` selects max-TSS on the supplied
 #'   data; predictive workflows should pass a training-fold threshold instead.
 #' @return Named numeric vector with ROC-AUC, PR-AUC, TSS, SEDI, Brier score,
-#'   log loss, moving-window Boyce, legacy fixed-bin CBI, and the threshold used.
+#'   log loss, moving-window Boyce, legacy fixed-bin CBI, threshold-based
+#'   Cohen's kappa, threshold-free omission@5%/10% predicted area and MPA, and
+#'   the threshold used.
 #' @details The AUC fixes `pROC::roc(direction = "<")` so a predictor that
 #'   ranks absences above presences correctly reports AUC < 0.5 instead of
 #'   being silently flipped by `direction = "auto"`. The TSS threshold is the
@@ -195,7 +277,9 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
   if (!length(pred) || !all(c(0L, 1L) %in% unique(obs))) {
     return(c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
              sedi = NA_real_, brier = NA_real_, logloss = NA_real_,
-             boyce = NA_real_, cbi = NA_real_, tss_threshold = NA_real_))
+             boyce = NA_real_, cbi = NA_real_, kappa = NA_real_,
+             omission_5 = NA_real_, omission_10 = NA_real_, mpa = NA_real_,
+             tss_threshold = NA_real_))
   }
   pred <- pmin(pmax(pred, 1e-7), 1 - 1e-7)
 
@@ -237,6 +321,13 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
     logloss = logloss_val,
     boyce = boyce_val,
     cbi = cbi_val,
+    kappa = compute_kappa(obs, pred, threshold),
+    # Threshold-free omission/area metrics: defined by the score
+    # distributions alone, so they stay defined even when no threshold
+    # could be selected on the training fold.
+    omission_5 = compute_omission_at(pred, obs, e = 0.05),
+    omission_10 = compute_omission_at(pred, obs, e = 0.10),
+    mpa = compute_mpa(pred, obs, keep = 0.9),
     tss_threshold = threshold)
 }
 

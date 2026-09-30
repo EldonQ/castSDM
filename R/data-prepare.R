@@ -217,7 +217,9 @@ cast_vif <- function(data,
 #' @param block_method Spatial blocking for `split = "spatial"`: `"grid"`
 #'   (default; grid cells grouped into spatially contiguous blocks),
 #'   `"grid_random"` (legacy count-balanced packing, ignores cell position),
-#'   or `"cluster"`.
+#'   `"cluster"`, or `"env"` (k-means on the scaled predictor matrix, so
+#'   blocks are contiguous in environmental space; Roberts et al. 2017-style
+#'   environmental blocking).
 #' @param n_blocks Integer. Number of spatial blocks to form before assigning
 #'   whole blocks to the test set. Default `20`.
 #' @param verbose Logical. Print detected variables and excluded columns.
@@ -240,7 +242,7 @@ cast_vif <- function(data,
 cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          env_vars = NULL,
                          split = c("spatial", "stratified", "random"),
-                         block_method = c("grid", "grid_random", "cluster"),
+                         block_method = c("grid", "grid_random", "cluster", "env"),
                          n_blocks = 20L, verbose = TRUE) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
@@ -366,17 +368,23 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     return(list(train = make_stratified(), method = "stratified"))
   }
 
-  # split == "spatial"
+  # split == "spatial" (block_method "env" partitions in environmental space)
   if (!has_coords) {
     if (verbose) cli::cli_warn("No {.val lon}/{.val lat}; using stratified hold-out.")
     return(list(train = make_stratified(), method = "stratified (no coords)"))
   }
+  env_block <- if (identical(block_method, "env")) {
+    cand <- setdiff(names(data), c("lon", "lat", response))
+    cand <- cand[vapply(data[cand], is.numeric, logical(1))]
+    as.matrix(data[, cand, drop = FALSE])
+  } else NULL
   blocks <- tryCatch(
-    make_spatial_folds(data$lon, data$lat, k = n_blocks, method = block_method),
+    make_spatial_folds(data$lon, data$lat, k = n_blocks, method = block_method,
+                       env = env_block),
     error = function(e) NULL
   )
   if (is.null(blocks) || length(unique(blocks)) < 2L) {
-    if (verbose) cli::cli_warn("Spatial blocking failed; using stratified hold-out.")
+    if (verbose) cli::cli_warn("Blocking failed; using stratified hold-out.")
     return(list(train = make_stratified(), method = "stratified (block failed)"))
   }
   ub <- sample(unique(blocks))
@@ -403,5 +411,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     return(list(train = make_stratified(), method = "stratified (spatial degenerate)"))
   }
   list(train = sort(train_idx),
-       method = sprintf("spatial block (%s)", block_method))
+       method = sprintf("%s block (%s)",
+                        if (identical(block_method, "env")) "environmental" else "spatial",
+                        block_method))
 }
