@@ -94,14 +94,14 @@ prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
 
 | Stage | Functions |
 |---|---|
-| Study design | `cast_study_area()`, `cast_background()` |
+| Study design | `cast_study_area()`, `cast_background()` (random, user-defined, bias-weighted, environmental, SRE, disk; replicate sets), `cast_thin()` |
 | Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
 | Variable selection | `cast_select()`, `cast_importance()` |
-| Modelling | `cast_fit()` |
-| Validation | `cast_cv()`, `cast_evaluate()` |
+| Modelling | `cast_fit()` (optional per-engine hyperparameter tuning, prevalence weighting) |
+| Validation | `cast_cv()` (replicated blocking, km/degree buffers, nested tuning), `cast_evaluate()` |
 | Prediction | `cast_predict()`, `cast_predict_tiled()` |
-| Ensemble/projection | `cast_ensemble()`, `cast_project()` |
-| Shift effects | `cast_effect_table()`, `cast_effect_map()` |
+| Ensemble/projection | `cast_ensemble()`, `cast_project()`, `cast_project_raster()` (biomod2-compatible change coding) |
+| Diagnostics | `cast_response_curves()`, `cast_effect_table()`, `cast_effect_map()` |
 | Reporting | `cast_report_odmap()` |
 
 ## Model backends
@@ -128,6 +128,12 @@ install.packages(c(
   "pROC", "ggplot2", "sf", "terra", "future", "future.apply"
 ))
 ```
+
+Two vignettes ship with the package: the getting-started walkthrough of the
+default pipeline, and *Beyond the defaults* (`vignette("castSDM-advanced")`)
+covering hyperparameter tuning, prevalence weighting, background designs and
+replicate sets, replicated spatial CV, response curves, and biomod2-compatible
+change coding.
 
 ## Interpretation
 

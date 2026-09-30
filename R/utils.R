@@ -249,6 +249,12 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
 #' the moving-window variant of Hirzel et al. (2006); results are therefore
 #' comparable across implementations only approximately.
 #'
+#' Note the 101-bin equal-width grid is itself a non-standard variant: the
+#' reference implementations (ecospat.boyce and friends) use a moving
+#' window over the prediction support. Treat this CBI strictly as an
+#' internal diagnostic for cross-validation scoring and model comparison
+#' *within* cast; do not quote it alongside ecospat-derived Boyce values.
+#'
 #' @param pred Numeric predicted probabilities.
 #' @param obs  Binary 0/1 observed.
 #' @param n_bins Integer. Number of fixed equal-width bins. Default 101.

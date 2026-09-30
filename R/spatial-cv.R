@@ -21,9 +21,13 @@
 #'   position and produces interleaved, non-contiguous folds), or `"cluster"`
 #'   (k-means on point coordinates).
 #' @param buffer Non-negative number. When `> 0`, training rows closer than
-#'   `buffer` (in coordinate units, e.g. degrees for lon/lat) to any test row
-#'   are dropped for that fold, thinning spatial-autocorrelation leakage at
-#'   the fold boundary. Default `0` (no exclusion band).
+#'   `buffer` to any test row are dropped for that fold, thinning
+#'   spatial-autocorrelation leakage at the fold boundary. Units follow
+#'   `buffer_unit`. Default `0` (no exclusion band).
+#' @param buffer_unit Unit of `buffer`: `"deg"` (default) planar degrees as
+#'   before, or `"km"` great-circle kilometres (Haversine).
+#'   `"km"` requires decimal-degree lon/lat coordinates and is refused on
+#'   projected inputs.
 #' @param response Binary response column.
 #' @param rf_ntree RF trees per fold. Default `500`.
 #' @param brt_n_trees BRT trees per fold. Default `2000`.
@@ -71,6 +75,7 @@ cast_cv <- function(data,
                     models = c("rf"),
                     block_method = c("grid", "grid_random", "cluster"),
                     buffer = 0,
+                    buffer_unit = c("deg", "km"),
                     response = "presence",
                     rf_ntree = 500L,
                     brt_n_trees = 2000L,
@@ -99,6 +104,21 @@ cast_cv <- function(data,
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
     cli::cli_abort("{.arg buffer} must be a single non-negative number.")
   }
+  buffer_unit <- match.arg(buffer_unit)
+  if (buffer_unit == "km" && buffer > 0) {
+    # Haversine is defined on decimal degrees; silently treating projected
+    # metres as degrees would inflate the exclusion band by orders of
+    # magnitude (same guard as cast_thin()).
+    bad_deg <- any(data$lon < -180 | data$lon > 180, na.rm = TRUE) ||
+      any(data$lat < -90 | data$lat > 90, na.rm = TRUE)
+    if (bad_deg) {
+      cli::cli_abort(c(
+        "{.code buffer_unit = \"km\"} requires decimal-degree lon/lat coordinates.",
+        "x" = "The data hold coordinates outside [-180, 180] / [-90, 90].",
+        "i" = "Reproject to lon/lat, or keep {.code buffer_unit = \"deg\"} on projected grids."
+      ))
+    }
+  }
   n_repeat <- as.integer(n_repeat)
   if (is.na(n_repeat) || n_repeat < 1L) {
     cli::cli_abort("{.arg n_repeat} must be an integer >= 1.")
@@ -114,7 +134,8 @@ cast_cv <- function(data,
 
   cv_one <- function(folds, fold_i) {
     test_idx <- which(folds == fold_i)
-    train_idx <- .cast_buffer_train_idx(data$lon, data$lat, test_idx, buffer)
+    train_idx <- .cast_buffer_train_idx(data$lon, data$lat, test_idx, buffer,
+                                        buffer_unit = buffer_unit)
     train <- data[train_idx, , drop = FALSE]
     test <- data[test_idx, , drop = FALSE]
     if (length(unique(train[[response]])) < 2L ||
@@ -494,24 +515,34 @@ make_spatial_folds <- function(lon, lat, k,
 #' Training Index with a Buffer Exclusion Band
 #'
 #' Returns the training-row indices for one CV fold: every row not in
-#' `test_idx` whose distance to the nearest test row is at least `buffer`
-#' (in coordinate units). Rows inside the band are dropped, thinning
-#' spatial-autocorrelation leakage at the fold boundary.
+#' `test_idx` whose distance to the nearest test row is at least `buffer`.
+#' Rows inside the band are dropped, thinning spatial-autocorrelation
+#' leakage at the fold boundary.
 #'
 #' @param lon,lat Numeric coordinate vectors.
 #' @param test_idx Integer indices of the held-out fold.
 #' @param buffer Non-negative exclusion distance; `0` keeps all non-test rows.
+#' @param buffer_unit `"deg"` planar degrees (default) or `"km"`
+#'   great-circle kilometres via Haversine.
 #' @keywords internal
 #' @noRd
-.cast_buffer_train_idx <- function(lon, lat, test_idx, buffer = 0) {
+.cast_buffer_train_idx <- function(lon, lat, test_idx, buffer = 0,
+                                   buffer_unit = "deg") {
   all_idx <- seq_along(lon)
   if (buffer <= 0) return(setdiff(all_idx, test_idx))
   # Only distances to the test rows matter; the full n x n matrix is quadratic
   # in the number of records and exhausts memory on national data sets.
   near <- rep(FALSE, length(all_idx))
-  buf2 <- buffer^2
-  for (i in test_idx) {
-    near <- near | ((lon - lon[i])^2 + (lat - lat[i])^2 < buf2)
+  if (identical(buffer_unit, "km")) {
+    for (i in test_idx) {
+      d <- .haversine_km(lat, lon, lat[i], lon[i])
+      near <- near | (d < buffer)
+    }
+  } else {
+    buf2 <- buffer^2
+    for (i in test_idx) {
+      near <- near | ((lon - lon[i])^2 + (lat - lat[i])^2 < buf2)
+    }
   }
   all_idx[!near & !(all_idx %in% test_idx)]
 }

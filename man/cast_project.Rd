@@ -14,7 +14,8 @@ cast_project(
   min_score = 0.5,
   fallback = c("best", "equal", "error"),
   min_metric_folds = 2L,
-  save_dir = NULL
+  save_dir = NULL,
+  coding = c("cast", "biomod2")
 )
 }
 \arguments{
@@ -52,6 +53,13 @@ Default \code{2}.}
 \item \code{projection_stats.csv}
 Default \code{NULL} (no file output).
 }}
+
+\item{coding}{Character. Numeric encoding of the change maps written to
+disk: \code{"cast"} (default) uses gain=1, loss=-1, stable_present=2,
+stable_absent=0; \code{"biomod2"} uses Gain=1, Loss=-2, Stable_Pres=-1,
+Stable_Abs=0, matching biomod2's \code{bm_RangeSize()} convention so the
+GeoTIFFs can be consumed by BIOMOD_RangeSize visualisation scripts
+without remapping.}
 }
 \value{
 A \code{cast_project} object with components:
@@ -61,7 +69,8 @@ A \code{cast_project} object with components:
 \item{changes}{Named list of change \code{data.frame}s with \code{lon}, \code{lat},
 \code{change} columns.}
 \item{stats}{A \code{data.frame} with columns \code{scenario}, \code{n_gain},
-\code{n_loss}, \code{n_stable_present}, \code{n_stable_absent}, \code{pct_change},
+\code{n_loss}, \code{n_stable_present}, \code{n_stable_absent}, \code{n_current_range},
+\code{n_future_range}, \code{pct_loss}, \code{pct_gain}, \code{pct_change},
 \code{centroid_shift_km}.}
 }
 }
@@ -78,6 +87,12 @@ Change categories per grid cell:
 \item \strong{stable_present}: present in both.
 \item \strong{stable_absent}: absent in both.
 }
+
+Range-change percentages follow the biomod2 \code{bm_RangeSize()}
+convention: \code{pct_loss} is the share of the \strong{current} range lost
+(\code{100 * n_loss / n_current_range}), and \code{pct_gain} is the share of the
+\strong{future} range newly gained (\code{100 * n_gain / n_future_range}).
+\code{pct_change} remains the net change relative to the current range.
 
 Every future grid must correspond row-for-row to \code{current_env}. A grid
 with a different number of rows aborts; a grid with the same rows in a

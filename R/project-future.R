@@ -27,6 +27,12 @@
 #'   - `{scenario}_change.csv` / `.tif`
 #'   - `projection_stats.csv`
 #'   Default `NULL` (no file output).
+#' @param coding Character. Numeric encoding of the change maps written to
+#'   disk: `"cast"` (default) uses gain=1, loss=-1, stable_present=2,
+#'   stable_absent=0; `"biomod2"` uses Gain=1, Loss=-2, Stable_Pres=-1,
+#'   Stable_Abs=0, matching biomod2's `bm_RangeSize()` convention so the
+#'   GeoTIFFs can be consumed by BIOMOD_RangeSize visualisation scripts
+#'   without remapping.
 #'
 #' @return A `cast_project` object with components:
 #' \describe{
@@ -35,7 +41,8 @@
 #'   \item{changes}{Named list of change `data.frame`s with `lon`, `lat`,
 #'     `change` columns.}
 #'   \item{stats}{A `data.frame` with columns `scenario`, `n_gain`,
-#'     `n_loss`, `n_stable_present`, `n_stable_absent`, `pct_change`,
+#'     `n_loss`, `n_stable_present`, `n_stable_absent`, `n_current_range`,
+#'     `n_future_range`, `pct_loss`, `pct_gain`, `pct_change`,
 #'     `centroid_shift_km`.}
 #' }
 #'
@@ -45,6 +52,12 @@
 #' - **loss**: present now, absent under future scenario.
 #' - **stable_present**: present in both.
 #' - **stable_absent**: absent in both.
+#'
+#' Range-change percentages follow the biomod2 `bm_RangeSize()`
+#' convention: `pct_loss` is the share of the **current** range lost
+#' (`100 * n_loss / n_current_range`), and `pct_gain` is the share of the
+#' **future** range newly gained (`100 * n_gain / n_future_range`).
+#' `pct_change` remains the net change relative to the current range.
 #'
 #' Every future grid must correspond row-for-row to `current_env`. A grid
 #' with a different number of rows aborts; a grid with the same rows in a
@@ -65,9 +78,11 @@ cast_project <- function(fit, cv, current_env, future_envs,
                          min_score = 0.5,
                          fallback = c("best", "equal", "error"),
                          min_metric_folds = 2L,
-                         save_dir = NULL) {
+                         save_dir = NULL,
+                         coding = c("cast", "biomod2")) {
   method <- match.arg(method)
   fallback <- match.arg(fallback)
+  coding <- match.arg(coding)
 
   if (!is.list(future_envs) || length(future_envs) == 0) {
     cli::cli_abort("{.arg future_envs} must be a non-empty named list of data.frames.")
@@ -133,6 +148,12 @@ cast_project <- function(fit, cv, current_env, future_envs,
       n_loss   <- sum(change == "loss", na.rm = TRUE)
       n_stable <- sum(change == "stable_present", na.rm = TRUE)
       n_absent <- sum(change == "stable_absent", na.rm = TRUE)
+      # Range sizes (pixel counts) and biomod2-convention percentages:
+      # loss relative to the current range, gain relative to the future range.
+      n_current_range <- n_loss + n_stable
+      n_future_range  <- n_gain + n_stable
+      pct_loss <- if (n_current_range > 0) 100 * n_loss / n_current_range else NA_real_
+      pct_gain <- if (n_future_range > 0) 100 * n_gain / n_future_range else NA_real_
       total_present_now <- sum(cur_bin == 1, na.rm = TRUE)
       pct_change <- if (total_present_now > 0) {
         100 * (n_gain - n_loss) / total_present_now
@@ -172,6 +193,10 @@ cast_project <- function(fit, cv, current_env, future_envs,
           n_loss          = n_loss,
           n_stable_present = n_stable,
           n_stable_absent  = n_absent,
+          n_current_range  = n_current_range,
+          n_future_range   = n_future_range,
+          pct_loss        = round(pct_loss, 2),
+          pct_gain        = round(pct_gain, 2),
           pct_change      = round(pct_change, 2),
           centroid_shift_km = round(centroid_km, 1),
           stringsAsFactors = FALSE
@@ -186,6 +211,8 @@ cast_project <- function(fit, cv, current_env, future_envs,
       stats_rows[[scen]] <- data.frame(
         scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
         n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
+        n_current_range = NA_integer_, n_future_range = NA_integer_,
+        pct_loss = NA_real_, pct_gain = NA_real_,
         pct_change = NA_real_, centroid_shift_km = NA_real_,
         stringsAsFactors = FALSE
       )
@@ -235,11 +262,14 @@ cast_project <- function(fit, cv, current_env, future_envs,
           future_list[[scen]]$predictions, "lon", "lat", "hss_ensemble",
           file.path(save_dir, paste0(scen, "_prediction.tif"))
         )
-        # Change map as numeric: gain=1, loss=-1, stable_present=2, stable_absent=0
+        # Change map as numeric raster; encoding follows `coding`
+        # (.cast_change_codes documents both conventions).
+        codes <- .cast_change_codes(coding)
         ch <- changes_list[[scen]]
-        ch$change_num <- ifelse(ch$change == "gain", 1L,
-                         ifelse(ch$change == "loss", -1L,
-                         ifelse(ch$change == "stable_present", 2L, 0L)))
+        ch$change_num <- ifelse(ch$change == "gain", codes$gain,
+                         ifelse(ch$change == "loss", codes$loss,
+                         ifelse(ch$change == "stable_present",
+                                codes$stable_present, codes$stable_absent)))
         .save_prediction_tif(
           ch, "lon", "lat", "change_num",
           file.path(save_dir, paste0(scen, "_change.tif"))
@@ -332,6 +362,27 @@ cast_project <- function(fit, cv, current_env, future_envs,
   change
 }
 
+
+#' Numeric codes for change classes
+#'
+#' `"cast"` (default): gain=1, loss=-1, stable_present=2, stable_absent=0.
+#' `"biomod2"`: Gain=1, Loss=-2, Stable_Pres=-1, Stable_Abs=0, matching
+#' biomod2's `bm_RangeSize()` / `.CompteurSp(comp, c(-2, 0, -1, 1))`
+#' convention so change rasters line up with BIOMOD_RangeSize outputs and
+#' existing visualisation scripts.
+#'
+#' @param coding `"cast"` or `"biomod2"`.
+#' @return Named integer list `gain`, `loss`, `stable_present`, `stable_absent`.
+#' @keywords internal
+#' @noRd
+.cast_change_codes <- function(coding) {
+  coding <- match.arg(coding, c("cast", "biomod2"))
+  if (identical(coding, "biomod2")) {
+    list(gain = 1L, loss = -2L, stable_present = -1L, stable_absent = 0L)
+  } else {
+    list(gain = 1L, loss = -1L, stable_present = 2L, stable_absent = 0L)
+  }
+}
 
 #' Haversine distance in km
 #' @keywords internal
@@ -427,21 +478,28 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #'   before predicting; forwarded to [cast_ensemble_raster()]. `NULL` (the
 #'   default) means no clamping.
 #' @param verbose Logical. Default `TRUE`.
+#' @param coding Character. Numeric encoding of the change-class raster:
+#'   `"cast"` (default) uses gain=1, loss=-1, stable_present=2,
+#'   stable_absent=0; `"biomod2"` uses Gain=1, Loss=-2, Stable_Pres=-1,
+#'   Stable_Abs=0, matching biomod2's `bm_RangeSize()` convention so the
+#'   change rasters align with BIOMOD_RangeSize outputs and existing
+#'   visualisation scripts without remapping.
 #'
 #' @return A list with components:
 #' \describe{
 #'   \item{current}{List with `hss_path`, `binary_path`, etc.}
 #'   \item{future}{Named list of per-scenario results.}
-#'   \item{stats}{A `data.frame` with per-scenario statistics.}
+#'   \item{stats}{A `data.frame` with per-scenario statistics, including
+#'     `n_current_range`/`n_future_range` pixel counts and biomod2-convention
+#'     `pct_loss` (loss over the current range) and `pct_gain` (gain over the
+#'     future range).}
 #'   \item{output_dir}{The output directory path.}
 #' }
 #'
 #' @details
-#' For each scenario, a change-class raster is computed:
-#' - `1` = gain (absent now, present in future)
-#' - `-1` = loss (present now, absent in future)
-#' - `2` = stable present
-#' - `0` = stable absent
+#' For each scenario, a change-class raster is computed and encoded per
+#' `coding` (`.cast_change_codes()` documents both conventions); the
+#' statistics table counts the classes under the chosen encoding.
 #'
 #' A scenario that fails is skipped with a warning and recorded as an `NA`
 #' row in the statistics table; remaining scenarios continue.
@@ -464,10 +522,12 @@ cast_project_raster <- function(fit, cv,
                                 overwrite = FALSE,
                                 compression = "LZW",
                                 clamp = NULL,
-                                verbose = TRUE) {
+                                verbose = TRUE,
+                                coding = c("cast", "biomod2")) {
   check_suggested("terra", "for raster projection")
   method <- match.arg(method)
   fallback <- match.arg(fallback)
+  coding <- match.arg(coding)
 
   if (!is.list(future_rasters) || length(future_rasters) == 0) {
     cli::cli_abort("{.arg future_rasters} must be a non-empty named list of SpatRasters.")
@@ -527,16 +587,17 @@ cast_project_raster <- function(fit, cv,
         fut_bin <- terra::rast(fut_result$binary_path)
         fut_hss <- terra::rast(fut_result$hss_path)
 
-        # Change class: gain=1, loss=-1, stable_present=2, stable_absent=0
+        # Change-class raster under the chosen `coding` convention.
+        codes <- .cast_change_codes(coding)
         change_r <- terra::lapp(
           c(cur_bin, fut_bin),
           fun = function(cur, fut) {
             out <- rep(NA_integer_, length(cur))
             valid <- !is.na(cur) & !is.na(fut)
-            out[valid & cur == 0 & fut == 1] <- 1L    # gain
-            out[valid & cur == 1 & fut == 0] <- -1L   # loss
-            out[valid & cur == 1 & fut == 1] <- 2L    # stable_present
-            out[valid & cur == 0 & fut == 0] <- 0L    # stable_absent
+            out[valid & cur == 0 & fut == 1] <- codes$gain
+            out[valid & cur == 1 & fut == 0] <- codes$loss
+            out[valid & cur == 1 & fut == 1] <- codes$stable_present
+            out[valid & cur == 0 & fut == 0] <- codes$stable_absent
             out
           }
         )
@@ -554,11 +615,17 @@ cast_project_raster <- function(fit, cv,
         hit <- class_freq$count[class_freq$value == v]
         if (length(hit)) sum(hit) else 0L
       }
-      n_gain   <- class_count(1L)
-      n_loss   <- class_count(-1L)
-      n_stable <- class_count(2L)
-      n_absent <- class_count(0L)
-      total_present_now <- n_loss + n_stable
+      codes <- .cast_change_codes(coding)
+      n_gain   <- class_count(codes$gain)
+      n_loss   <- class_count(codes$loss)
+      n_stable <- class_count(codes$stable_present)
+      n_absent <- class_count(codes$stable_absent)
+      # Range sizes (pixel counts) and biomod2-convention percentages.
+      n_current_range <- n_loss + n_stable
+      n_future_range  <- n_gain + n_stable
+      pct_loss <- if (n_current_range > 0) 100 * n_loss / n_current_range else NA_real_
+      pct_gain <- if (n_future_range > 0) 100 * n_gain / n_future_range else NA_real_
+      total_present_now <- n_current_range
 
       pct_change <- if (total_present_now > 0) {
         100 * (n_gain - n_loss) / total_present_now
@@ -603,6 +670,10 @@ cast_project_raster <- function(fit, cv,
           n_loss            = n_loss,
           n_stable_present  = n_stable,
           n_stable_absent   = n_absent,
+          n_current_range   = n_current_range,
+          n_future_range    = n_future_range,
+          pct_loss          = round(pct_loss, 2),
+          pct_gain          = round(pct_gain, 2),
           pct_change        = round(pct_change, 2),
           current_centroid_lon = round(cur_centroid$lon, 4),
           current_centroid_lat = round(cur_centroid$lat, 4),
@@ -621,6 +692,8 @@ cast_project_raster <- function(fit, cv,
       stats_rows[[scen]] <- data.frame(
         scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
         n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
+        n_current_range = NA_integer_, n_future_range = NA_integer_,
+        pct_loss = NA_real_, pct_gain = NA_real_,
         pct_change = NA_real_, current_centroid_lon = NA_real_,
         current_centroid_lat = NA_real_, future_centroid_lon = NA_real_,
         future_centroid_lat = NA_real_, centroid_shift_km = NA_real_,

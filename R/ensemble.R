@@ -43,11 +43,17 @@
 #' }
 #'
 #' @details
-#' The composite score for each model is:
+#' The composite score for each model is the mean of its finite score
+#' components among `2 x AUC - 1` (AUC skill), `maxTSS`, and Boyce/CBI:
 #'
-#' \deqn{Score = \frac{1}{3}(2 \times AUC - 1 + maxTSS + CBI)}
+#' \deqn{Score = mean(2 \times AUC - 1, maxTSS, Boyce)}
 #'
-#' following the N-SDM nested-modelling framework (Adde et al. 2023). A
+#' averaged over whichever components are finite, following the N-SDM
+#' nested-modelling framework (Adde et al. 2023), whose reference
+#' implementation takes the `na.omit` mean of the available components
+#' rather than a fixed divisor (the docstring formula \eqn{\frac{1}{3}}
+#' applies only when all three components are present). When the CV metrics
+#' carry Boyce it substitutes CBI as the ordination-aware component. A
 #' model with fewer than two finite score components scores `NA` and is
 #' dropped with a warning, because averaging over
 #' whichever components happen to be present would rescale the score and

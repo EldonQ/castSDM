@@ -14,6 +14,14 @@
 #'   VIF screening (domain-knowledge redundancies). Default `NULL`.
 #' @param verbose Logical. Print iteration details. Default `TRUE`.
 #'
+#' @details
+#' Removal stops early as a deliberate guard when fewer than five variables
+#' would remain: the function warns ("Fewer than 5 variables remaining") and
+#' returns the current set as `selected` instead of driving the collinearity
+#' purge to the point of a degenerate model. The stopping is therefore a
+#' documented behaviour, not a convergence failure; inspect `vif_log` to see
+#' how far the elimination got.
+#'
 #' @return A list with components:
 #' \describe{
 #'   \item{`selected`}{Character vector of retained variable names.}

@@ -37,7 +37,10 @@ This diagnostic cannot detect holes inside the box and does not establish
 joint positivity.}
 
 \item{min_support}{Numeric in \verb{[0, 1]}. Drivers with box coverage below
-this threshold are masked (\code{NA} estimates). Default \code{0.5}.}
+this threshold are masked (\code{NA} estimates). Default \code{0.5}. When drivers
+are strongly correlated their coverages fall together, so the default
+can mask several drivers at once; the print method reports the masking
+rate and the lowest observed support so the effect is visible.}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
 }

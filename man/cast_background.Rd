@@ -18,6 +18,8 @@ cast_background(
   sre_quantile = 0.025,
   disk_min = NULL,
   disk_max = NULL,
+  bin_method = c("pca2d", "kmeans"),
+  bin_k = 20L,
   cell_thin = TRUE,
   exclude_presence = TRUE,
   n_rep = 1L,
@@ -90,9 +92,20 @@ presences for \code{strategy = "disk"}. \code{disk_min} defaults to \code{0};
 \code{disk_max} to half the shortest raster extent side. Must satisfy
 \verb{0 <= disk_min < disk_max}.}
 
+\item{bin_method}{Binning method for \code{strategy = "environmental"}:
+\code{"pca2d"} (default) stratifies a PC1 x PC2 grid as before; \code{"kmeans"}
+partitions the scaled environment space with k-means (the sdm
+convention), which adapts to correlated drivers that collapse the
+first two PCs.}
+
+\item{bin_k}{Integer >= 2. Bin count: the grid side for \code{"pca2d"}
+(capped at \code{sqrt(n)}), the number of cluster centers for \code{"kmeans"}.
+Default \code{20}.}
+
 \item{cell_thin}{Logical. If \code{TRUE} (default), ensures only one
 occurrence per raster cell (removes spatial duplicates at raster
-resolution).}
+resolution). Occurrences falling outside the raster or on NA-valued
+cells are dropped with a warning reporting the lost share.}
 
 \item{exclude_presence}{Logical. If \code{TRUE} (default), background points
 cannot fall in cells occupied by occurrences.}

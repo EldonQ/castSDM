@@ -13,6 +13,7 @@ cast_cv(
   models = c("rf"),
   block_method = c("grid", "grid_random", "cluster"),
   buffer = 0,
+  buffer_unit = c("deg", "km"),
   response = "presence",
   rf_ntree = 500L,
   brt_n_trees = 2000L,
@@ -53,9 +54,14 @@ position and produces interleaved, non-contiguous folds), or \code{"cluster"}
 (k-means on point coordinates).}
 
 \item{buffer}{Non-negative number. When \verb{> 0}, training rows closer than
-\code{buffer} (in coordinate units, e.g. degrees for lon/lat) to any test row
-are dropped for that fold, thinning spatial-autocorrelation leakage at
-the fold boundary. Default \code{0} (no exclusion band).}
+\code{buffer} to any test row are dropped for that fold, thinning
+spatial-autocorrelation leakage at the fold boundary. Units follow
+\code{buffer_unit}. Default \code{0} (no exclusion band).}
+
+\item{buffer_unit}{Unit of \code{buffer}: \code{"deg"} (default) planar degrees as
+before, or \code{"km"} great-circle kilometres (Haversine).
+\code{"km"} requires decimal-degree lon/lat coordinates and is refused on
+projected inputs.}
 
 \item{response}{Binary response column.}
 

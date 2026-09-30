@@ -117,7 +117,10 @@
 #'   This diagnostic cannot detect holes inside the box and does not establish
 #'   joint positivity.
 #' @param min_support Numeric in `[0, 1]`. Drivers with box coverage below
-#'   this threshold are masked (`NA` estimates). Default `0.5`.
+#'   this threshold are masked (`NA` estimates). Default `0.5`. When drivers
+#'   are strongly correlated their coverages fall together, so the default
+#'   can mask several drivers at once; the print method reports the masking
+#'   rate and the lowest observed support so the effect is visible.
 #' @param verbose Print progress. Default `TRUE`.
 #'
 #' @return A `cast_effect_table` data.frame, one row per driver:
@@ -204,6 +207,24 @@ print.cast_effect_table <- function(x, ...) {
   iv <- attr(x, "intervention")
   if (!is.null(iv)) cli::cli_text("{.emph {iv}}")
   print(as.data.frame(x))
+  # S4: report the masking rate so the min_support default's effect is
+  # visible instead of silently hiding correlated drivers behind NA rows.
+  minsup <- attr(x, "min_support") %||% 0.5
+  n_masked <- sum(is.finite(x$support) & x$masked)
+  if (n_masked > 0) {
+    lo <- suppressWarnings(min(x$support[x$masked], na.rm = TRUE))
+    extra <- if (is.finite(lo)) {
+      sprintf(" (lowest observed support %.3f)", lo)
+    } else {
+      ""
+    }
+    cli::cli_text(paste0(
+      "Masked {n_masked}/{nrow(x)} driver{?s} at min_support = {.val {minsup}}{extra}",
+      ": strongly correlated drivers can push box coverage below the ",
+      "threshold together; lower {.arg min_support} to rank them at the ",
+      "cost of extrapolation exposure."
+    ))
+  }
   cli::cli_text("Rank supported drivers by {.field mean_abs_dHSS}; read {.field mean_signed_dHSS} for direction. Masked drivers ({.field masked}) carry {.code NA} estimates: the shift is not answerable inside the training box.")
   invisible(x)
 }

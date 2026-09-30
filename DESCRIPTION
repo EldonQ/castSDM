@@ -2,7 +2,7 @@ Package: castSDM
 Type: Package
 Title: Model Response and Interventional Effects for Species Distribution
     Models
-Version: 0.16.0
+Version: 0.17.0
 Authors@R: c(
     person(
             "Liqiang", "Q",

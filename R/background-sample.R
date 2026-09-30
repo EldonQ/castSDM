@@ -56,9 +56,18 @@
 #'   presences for `strategy = "disk"`. `disk_min` defaults to `0`;
 #'   `disk_max` to half the shortest raster extent side. Must satisfy
 #'   `0 <= disk_min < disk_max`.
+#' @param bin_method Binning method for `strategy = "environmental"`:
+#'   `"pca2d"` (default) stratifies a PC1 x PC2 grid as before; `"kmeans"`
+#'   partitions the scaled environment space with k-means (the sdm
+#'   convention), which adapts to correlated drivers that collapse the
+#'   first two PCs.
+#' @param bin_k Integer >= 2. Bin count: the grid side for `"pca2d"`
+#'   (capped at `sqrt(n)`), the number of cluster centers for `"kmeans"`.
+#'   Default `20`.
 #' @param cell_thin Logical. If `TRUE` (default), ensures only one
 #'   occurrence per raster cell (removes spatial duplicates at raster
-#'   resolution).
+#'   resolution). Occurrences falling outside the raster or on NA-valued
+#'   cells are dropped with a warning reporting the lost share.
 #' @param exclude_presence Logical. If `TRUE` (default), background points
 #'   cannot fall in cells occupied by occurrences.
 #' @param n_rep Integer >= 1. Number of independent pseudo-absence
@@ -115,6 +124,8 @@ cast_background <- function(occurrences,
                             sre_quantile = 0.025,
                             disk_min = NULL,
                             disk_max = NULL,
+                            bin_method = c("pca2d", "kmeans"),
+                            bin_k = 20L,
                             cell_thin = TRUE,
                             exclude_presence = TRUE,
                             n_rep = 1L,
@@ -122,6 +133,12 @@ cast_background <- function(occurrences,
                             verbose = TRUE) {
   check_suggested("terra", "for raster extraction")
   strategy <- match.arg(strategy)
+  bin_method <- match.arg(bin_method)
+  if (!is.numeric(bin_k) || length(bin_k) != 1L || !is.finite(bin_k) ||
+      bin_k < 2L) {
+    cli::cli_abort("{.arg bin_k} must be a single number >= 2.")
+  }
+  bin_k <- as.integer(bin_k)
 
   use_user <- !is.null(user_table)
   use_bias <- !is.null(bias_raster)
@@ -235,14 +252,30 @@ cast_background <- function(occurrences,
   occ_cells <- terra::cellFromXY(raster_stack, occ_xy)
 
   if (cell_thin) {
-    keep <- !duplicated(occ_cells) & !is.na(occ_cells)
+    # Accounting note: `duplicated()` treats NAs as matching values, so a
+    # duplicate NA cell would be counted both as outside and as duplicate.
+    # Split the flags to keep the two counts exact.
+    n_outside <- sum(is.na(occ_cells))
+    dup_flag <- duplicated(occ_cells) & !is.na(occ_cells)
+    n_dup <- sum(dup_flag)
+    keep <- !dup_flag & !is.na(occ_cells)
     occurrences <- occurrences[keep, , drop = FALSE]
     occ_xy <- occ_xy[keep, , drop = FALSE]
     occ_cells <- occ_cells[keep]
     if (verbose) {
       cli::cli_inform(
-        "Cell-thinned: {sum(!keep)} duplicate cell{?s} removed, {nrow(occurrences)} remain."
+        "Cell-thinned: {n_dup} duplicate cell{?s} removed, {nrow(occurrences)} remain."
       )
+    }
+    # Records outside the raster or on NA-valued cells used to vanish into
+    # the generic drop count; losing coverage is worth a warning with the
+    # lost share (S12).
+    if (n_outside > 0) {
+      pct_out <- round(100 * n_outside / (nrow(occurrences) + n_outside + n_dup), 1)
+      cli::cli_warn(c(
+        "{n_outside} occurrence{?s} ({pct_out}%) fall outside {.arg raster_stack} or on NA-valued cells and were dropped before sampling.",
+        "i" = "Check the raster extent/mask against the occurrence coordinates."
+      ))
     }
   }
 
@@ -381,9 +414,10 @@ cast_background <- function(occurrences,
       bg_cells <- sample(valid_cells, size = n_bg, replace = sample_replace)
 
     } else if (strategy == "environmental") {
-      # Environmental stratification via PCA binning
+      # Environmental stratification via PCA-grid or k-means binning
       bg_cells <- .sample_environmental(
-        raster_stack, valid_cells, n_bg, seed, sample_replace
+        raster_stack, valid_cells, n_bg, seed, sample_replace,
+        bin_method = bin_method, bin_k = bin_k
       )
     }
   }
@@ -565,7 +599,8 @@ cast_background <- function(occurrences,
 #' @keywords internal
 #' @noRd
 .sample_environmental <- function(raster_stack, valid_cells, n_bg,
-                                  seed, replace) {
+                                  seed, replace, bin_method = "pca2d",
+                                  bin_k = 20L) {
   # Extract env values at valid cells (sample subset if too many)
   max_extract <- min(length(valid_cells), 50000L)
   if (length(valid_cells) > max_extract) {
@@ -586,30 +621,47 @@ cast_background <- function(occurrences,
     return(sample(sub_cells_clean, size = n_bg, replace = TRUE))
   }
 
-  # PCA on env values
-  pca <- tryCatch(
-    stats::prcomp(env_vals, center = TRUE, scale. = TRUE, rank. = 2),
-    error = function(e) NULL
-  )
-
-  if (is.null(pca)) {
-    return(sample(sub_cells_clean, size = n_bg, replace = replace))
-  }
-
-  # Bin PC1 x PC2 space into grid
-  scores <- pca$x[, 1:min(2, ncol(pca$x)), drop = FALSE]
-  n_bins <- min(20L, ceiling(sqrt(nrow(scores))))
-
-  # Create bin IDs
-  bin_ids <- rep(1L, nrow(scores))
-  for (j in seq_len(ncol(scores))) {
-    breaks <- seq(
-      min(scores[, j]) - 1e-6,
-      max(scores[, j]) + 1e-6,
-      length.out = n_bins + 1
+  if (identical(bin_method, "kmeans")) {
+    # sdm-style k-means partition of the scaled environment space: the
+    # cluster id plays the role of the PCA-grid bin id in the stratified
+    # draw below. centers are capped at the number of rows; a degenerate
+    # partition (zero-variance space, duplicated rows) falls back to random.
+    km <- tryCatch(
+      stats::kmeans(scale(env_vals),
+                    centers = min(as.integer(bin_k), nrow(env_vals)),
+                    iter.max = 50, nstart = 3),
+      error = function(e) NULL
     )
-    bin_ids <- bin_ids + (as.integer(cut(scores[, j], breaks)) - 1L) *
-      (n_bins^(j - 1L))
+    if (is.null(km)) {
+      return(sample(sub_cells_clean, size = n_bg, replace = replace))
+    }
+    bin_ids <- as.integer(km$cluster)
+  } else {
+    # PCA on env values
+    pca <- tryCatch(
+      stats::prcomp(env_vals, center = TRUE, scale. = TRUE, rank. = 2),
+      error = function(e) NULL
+    )
+
+    if (is.null(pca)) {
+      return(sample(sub_cells_clean, size = n_bg, replace = replace))
+    }
+
+    # Bin PC1 x PC2 space into a grid
+    scores <- pca$x[, 1:min(2, ncol(pca$x)), drop = FALSE]
+    n_bins <- min(as.integer(bin_k), ceiling(sqrt(nrow(scores))))
+
+    # Create bin IDs
+    bin_ids <- rep(1L, nrow(scores))
+    for (j in seq_len(ncol(scores))) {
+      breaks <- seq(
+        min(scores[, j]) - 1e-6,
+        max(scores[, j]) + 1e-6,
+        length.out = n_bins + 1
+      )
+      bin_ids <- bin_ids + (as.integer(cut(scores[, j], breaks)) - 1L) *
+        (n_bins^(j - 1L))
+    }
   }
 
   # Sample evenly across bins

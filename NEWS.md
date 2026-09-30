@@ -1,3 +1,37 @@
+# castSDM 0.17.0 (unreleased)
+
+## Change-map coding, range-change statistics, binning and buffer units (P2 fast-win round)
+
+* `cast_project()` and `cast_project_raster()` gain `coding`: change maps
+  can be written with the package's internal encoding (`"cast"`: gain=1,
+  loss=-1, stable_present=2, stable_absent=0) or with biomod2's
+  `bm_RangeSize()` convention (`"biomod2"`: Gain=1, Loss=-2,
+  Stable_Pres=-1, Stable_Abs=0) so saved GeoTIFFs feed
+  BIOMOD_RangeSize visualisation scripts without remapping.
+* Projection statistics gain `n_current_range` / `n_future_range` pixel
+  counts and the biomod2-convention `pct_loss` (loss over the current
+  range) and `pct_gain` (gain over the future range), in both
+  `cast_project()` and `cast_project_raster()`.
+* `cast_background(strategy = "environmental")` gains `bin_method`
+  (`"pca2d"` PC1 x PC2 grid as before, or `"kmeans"` partitioning of the
+  scaled environment space, the sdm convention) and `bin_k` (bin/cluster
+  count, default 20).
+* `cast_background(cell_thin = TRUE)` now warns when occurrences fall
+  outside the raster or on NA-valued cells, reporting the lost share
+  (previously they silently merged into the generic duplicate count).
+* `cast_cv()` gains `buffer_unit`: the spatial exclusion band can be
+  `"deg"` (planar degrees, as before) or `"km"` (great-circle Haversine
+  kilometres). `"km"` requires decimal-degree coordinates and aborts on
+  projected inputs.
+* `print.cast_effect_table()` reports the masking rate (number of masked
+  drivers and the lowest observed support) so the `min_support` default's
+  effect on correlated drivers is visible.
+* Documentation: the ensemble Score is described accurately as the mean of
+  the finite components (N-SDM `na.omit` semantics) instead of a fixed
+  /3 formula; the fixed 101-bin CBI is flagged as an internal diagnostic
+  only, not comparable with ecospat-derived Boyce; `cast_vif()` documents
+  the fewer-than-five-variables stopping guard.
+
 # castSDM 0.16.0 (unreleased)
 
 ## Prevalence weighting, SRE/disk background, thinning, response curves, replication (P1 review round)

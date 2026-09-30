@@ -19,7 +19,8 @@ cast_project_raster(
   overwrite = FALSE,
   compression = "LZW",
   clamp = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  coding = c("cast", "biomod2")
 )
 }
 \arguments{
@@ -60,13 +61,23 @@ before predicting; forwarded to \code{\link[=cast_ensemble_raster]{cast_ensemble
 default) means no clamping.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
+
+\item{coding}{Character. Numeric encoding of the change-class raster:
+\code{"cast"} (default) uses gain=1, loss=-1, stable_present=2,
+stable_absent=0; \code{"biomod2"} uses Gain=1, Loss=-2, Stable_Pres=-1,
+Stable_Abs=0, matching biomod2's \code{bm_RangeSize()} convention so the
+change rasters align with BIOMOD_RangeSize outputs and existing
+visualisation scripts without remapping.}
 }
 \value{
 A list with components:
 \describe{
 \item{current}{List with \code{hss_path}, \code{binary_path}, etc.}
 \item{future}{Named list of per-scenario results.}
-\item{stats}{A \code{data.frame} with per-scenario statistics.}
+\item{stats}{A \code{data.frame} with per-scenario statistics, including
+\code{n_current_range}/\code{n_future_range} pixel counts and biomod2-convention
+\code{pct_loss} (loss over the current range) and \code{pct_gain} (gain over the
+future range).}
 \item{output_dir}{The output directory path.}
 }
 }
@@ -77,13 +88,9 @@ binary rasters, change-class rasters, and summary statistics for each
 scenario. This is the raster-native equivalent of \code{\link[=cast_project]{cast_project()}}.
 }
 \details{
-For each scenario, a change-class raster is computed:
-\itemize{
-\item \code{1} = gain (absent now, present in future)
-\item \code{-1} = loss (present now, absent in future)
-\item \code{2} = stable present
-\item \code{0} = stable absent
-}
+For each scenario, a change-class raster is computed and encoded per
+\code{coding} (\code{.cast_change_codes()} documents both conventions); the
+statistics table counts the classes under the chosen encoding.
 
 A scenario that fails is skipped with a warning and recorded as an \code{NA}
 row in the statistics table; remaining scenarios continue.
