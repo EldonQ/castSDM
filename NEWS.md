@@ -1,5 +1,18 @@
 # castSDM 0.18.0 (unreleased)
 
+## Fixed
+
+* `cast_ensemble()` / `cast_ensemble_raster()` no longer mislabel a
+  weighted-min_score fallback as a deliberate fit. The fallback branch used
+  `fallback_used <<- TRUE` inside the `switch()` block, which skips the
+  function's local frame in R and stored the flags in the enclosing
+  environment instead: the weights were correct, but `weights_fallback`
+  stayed `FALSE` and `fallback_reason` stayed `NULL`, hiding the fact that
+  the ensemble had collapsed to a single model (found in a production case
+  where all four engine composite scores were negative and only GAM was
+  silently retained). Plain assignment now records the fallback and the
+  `cli_warn` emitted at fallback time is unchanged.
+
 ## AOA applicability, grouped/decay ensembles, ensemble permutation importance, kappa/omission/MPA metrics, environmental blocking (A2 deep-review round)
 
 * **Area of Applicability (AOA; Meyer & Pebesma 2021)**: `cast_cv()` gains

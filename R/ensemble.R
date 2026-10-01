@@ -368,8 +368,12 @@ cast_ensemble <- function(fit, cv, new_data,
       if (total > 0) {
         w / total
       } else {
-        fallback_used <<- TRUE
-        fallback_reason <<- sprintf("No finite model score reached min_score = %g", min_score)
+        # Plain assignment: switch alternatives evaluate in this function's
+        # own frame, so `<<-` would SKIP these locals and store the flags in
+        # the namespace/global environment instead (the caller reads them
+        # from here, and would silently see FALSE/NULL after a fallback).
+        fallback_used <- TRUE
+        fallback_reason <- sprintf("No finite model score reached min_score = %g", min_score)
         if (fallback == "error") cli::cli_abort("{fallback_reason}.")
         w[] <- 0
         candidates <- which(finite)

@@ -270,3 +270,60 @@ test_that("the pipeline falls back to hold-out evaluation when spatial CV fails"
   expect_true(evaluated)
 })
 
+
+test_that("weighted fallback flags survive the switch frame (<<- scope bug)", {
+  # 2026-09-30 production case: all composite scores negative -> every model
+  # filtered by min_score -> fallback = "best" fired and produced correct
+  # weights (single best model = 1), but `fallback_used <<- TRUE` inside the
+  # switch block skipped the function's local frame, so the returned
+  # attributes silently stayed FALSE/NULL and the object mislabelled a
+  # collapsed ensemble as a deliberate weighted fit.
+  w <- .cast_ensemble_weights(c(rf = -0.02, gam = -0.01), method = "weighted",
+                              min_score = 0.5, fallback = "best")
+  expect_equal(unname(w), c(0, 1), ignore_attr = TRUE)
+  expect_true(isTRUE(attr(w, "fallback_used")))
+  expect_match(attr(w, "fallback_reason"), "min_score")
+})
+
+test_that("cast_ensemble records the fallback instead of hiding it", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("mgcv")
+  set.seed(11)
+  n <- 200
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, 0.3), x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
+  )
+  screen <- new_cast_select(c("x1", "x2", "x3"),
+                            data.frame(variable = c("x1", "x2", "x3")),
+                            method = "manual")
+  fit <- cast_fit(dat, screen = screen, models = c("rf", "gam"),
+                  rf_ntree = 40, seed = 4, verbose = FALSE)
+  # Negative composite scores for BOTH models -> weighted + min_score must
+  # fall back to the single best-scoring model and SAY SO.
+  cv <- new_cast_cv(
+    metrics = data.frame(
+      model = c("rf", "gam"),
+      auc_mean = c(0.40, 0.45), auc_sd = c(0.1, 0.1),
+      tss_mean = c(-0.10, -0.05), tss_sd = c(0.1, 0.1),
+      cbi_mean = c(-0.2, -0.1), cbi_sd = c(0.1, 0.1),
+      n_folds = c(3, 3), n_selected_mean = c(3, 3)
+    ),
+    fold_metrics = data.frame(), folds = integer(n), k = 3L,
+    block_method = "grid",
+    thresholds = c(rf = 0.5, gam = 0.5)
+  )
+  warnings_seen <- character()
+  ens <- withCallingHandlers(
+    cast_ensemble(fit, cv, dat, method = "weighted"),
+    warning = function(wm) {
+      warnings_seen <<- c(warnings_seen, conditionMessage(wm))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_true(any(grepl("min_score", warnings_seen)))
+  expect_equal(unname(ens$weights["gam"]), 1)
+  expect_equal(unname(ens$weights["rf"]), 0)
+  expect_true(isTRUE(ens$weights_fallback))
+  expect_match(ens$fallback_reason, "min_score")
+})
