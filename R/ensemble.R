@@ -180,6 +180,11 @@ cast_ensemble <- function(fit, cv, new_data,
     votes <- sweep(pred_mat, 2L, thr, FUN = ">=")
     votes[!is.finite(pred_mat)] <- NA
     ensemble_hss <- rowMeans(votes, na.rm = TRUE)
+    # A committee of one is not a committee. With a single valid vote the
+    # fraction collapses to 0/1, and the 0.5 binarisation then turns one
+    # model's opinion into a hard decision. Require two valid votes.
+    n_votes <- rowSums(!is.na(votes))
+    ensemble_hss[n_votes < 2L] <- NA_real_
     ensemble_hss[!is.finite(ensemble_hss)] <- NA_real_
   } else {
     ensemble_hss <- .ensemble_rowmean(pred_mat, w)

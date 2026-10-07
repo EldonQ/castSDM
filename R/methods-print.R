@@ -63,6 +63,7 @@ print.cast_eval <- function(x, ...) {
 
 #' @export
 print.cast_cv <- function(x, ...) {
+  tm <- x$threshold_method %||% "max TSS"
   cli::cli_h1("castSDM Spatial Cross-Validation")
   cli::cli_ul(c(
     "Folds (k): {x$k}",
@@ -79,7 +80,7 @@ print.cast_cv <- function(x, ...) {
       " CBI=", round(m$cbi_mean[i], 3)
     ))
   }
-  cli::cli_h2("Optimal thresholds (max TSS)")
+  cli::cli_h2("Optimal thresholds ({tm})")
   for (nm in names(x$thresholds)) {
     cli::cli_li("{nm}: {round(x$thresholds[nm], 3)}")
   }

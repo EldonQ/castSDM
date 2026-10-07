@@ -91,9 +91,16 @@ cast_predict <- function(fit, new_data, models = NULL,
   X_raw <- as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE)
   .cast_check_numeric_predictors(X_raw)
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
+  # Diagnostics run on the RAW input, before imputation: a cell that needed an
+  # imputed predictor is exactly the cell whose extrapolation is unknown, and
+  # measuring it after imputation reported it as ordinary. The imputation
+  # itself is kept (it is what lets a model score partially observed rows) but
+  # the count is returned so callers can drop or weight those cells.
+  reference <- fit$scaling$reference
+  n_imputed <- rowSums(!is.finite(as.matrix(
+    as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE))))
   X_raw <- .cast_impute(X_raw, fit$scaling$impute)
 
-  reference <- fit$scaling$reference
   # Extrapolation diagnostics on the (imputed, unclamped) input.
   mess_vals <- NULL
   if (isTRUE(extrapolation) && !is.null(reference)) {

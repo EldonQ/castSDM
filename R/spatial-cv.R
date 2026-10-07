@@ -354,7 +354,14 @@ cast_cv <- function(data,
     thresholds <- vapply(models, function(mdl) {
       pred <- oof[[mdl]]
       ok <- is.finite(pred)
-      if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) return(0.5)
+      if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) {
+        cli::cli_warn(c(
+          "Fewer than 10 usable {.val {mdl}} out-of-fold values (or one class",
+          "only); threshold falls back to 0.5, which silently changes every",
+          "threshold-based metric and any binarised product."
+        ))
+        return(0.5)
+      }
       cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
     }, numeric(1))
 
@@ -662,12 +669,22 @@ make_spatial_folds <- function(lon, lat, k,
 #' Bin a coordinate into `side` quantile bins (degenerate-safe)
 #' @keywords internal
 #' @noRd
-.cast_bin <- function(x, side) {
+.cast_bin <- function(x, side, method = c("quantile", "width")) {
+  # "quantile" gives equal-COUNT bins, which on a clustered distribution turns
+  # into long thin cells that can straddle the whole domain; the k-means step
+  # downstream then cannot recover contiguity. "width" gives equal-WIDTH bins on
+  # the value scale, so neighbouring cells stay neighbours in the raster.
+  method <- match.arg(method)
   x <- as.numeric(x)
   u <- sort(unique(x[!is.na(x)]))
   if (length(u) < 2L) return(rep(1L, length(x)))
-  breaks <- unique(stats::quantile(x, seq(0, 1, length.out = side + 1L),
-                                    na.rm = TRUE, names = FALSE))
+  if (method == "width") {
+    breaks <- seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE),
+                  length.out = side + 1L)
+  } else {
+    breaks <- unique(stats::quantile(x, seq(0, 1, length.out = side + 1L),
+                                      na.rm = TRUE, names = FALSE))
+  }
   if (length(breaks) < 2L) breaks <- c(u[1], u[length(u)])
   b <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
   b[is.na(b)] <- 1L

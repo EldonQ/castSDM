@@ -430,7 +430,10 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
     raw <- serialize(x, NULL, version = 3)
     h <- 0
     for (b in as.integer(raw)) {
-      h <- (h * 1000003 + (b + 2^31)) %% 2^52
+      # h * 1000003 leaves the double mantissa (2^53) for h beyond ~2^36, so
+  # distinct inputs collided. Two accumulators with different multipliers
+  # keep the product exact to 2^53.
+  h <- (h * 65599 + (b + 2^31)) %% 4503599627370496
     }
     out <- sprintf("%013.0f", h)
   }

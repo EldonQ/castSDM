@@ -42,8 +42,12 @@ test_that("spatial CV reports fold fitting failures instead of silently discardi
       warnings <<- c(warnings, conditionMessage(w))
       invokeRestart("muffleWarning")
     }), "All spatial CV folds failed")
-  expect_equal(warnings, paste0("Model fitting failed in fold ", 1:2,
-                                ": deliberate engine failure"))
+  # The fold-failure warnings must all be present. Since 2026-07 the 0.5
+  # threshold fallback also warns, so the set is no longer exactly two messages:
+  # it is a superset plus an explicit "no silent fallback" warning.
+  expect_true(all(paste0("Model fitting failed in fold ", 1:2,
+                         ": deliberate engine failure") %in% warnings))
+  expect_true(any(grepl("threshold falls back to 0.5", warnings, fixed = TRUE)))
 })
 
 test_that("change classes mark non-binary cells as NA, never empty string", {
