@@ -2,7 +2,9 @@
 % Please edit documentation in R/ensemble.R
 \name{cast_ensemble}
 \alias{cast_ensemble}
-\title{Performance-Weighted Ensemble Prediction}
+\title{Combines predictions from multiple SDM algorithms into a single
+ensemble habitat suitability map. Model weights are derived from
+cross-validation performance scores.}
 \usage{
 cast_ensemble(
   fit,

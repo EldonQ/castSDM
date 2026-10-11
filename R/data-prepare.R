@@ -42,6 +42,7 @@ cast_vif <- function(data,
                      exclude = NULL,
                      expert_filter = NULL,
                      verbose = TRUE) {
+  threshold <- .cast_check_scalar(threshold, "threshold", lower = 0)
   check_suggested("car", "for VIF computation")
   if (!is.data.frame(data)) {
     cli::cli_abort("{.arg data} must be a data.frame.")
@@ -207,7 +208,9 @@ cast_vif <- function(data,
 #'
 #' @param data A `data.frame` with columns: `lon`, `lat`, `presence` (0/1),
 #'   and environmental variables.
-#' @param train_fraction Numeric. Fraction for training set. Default `0.7`.
+#' @param train_fraction Numeric in (0, 1), strictly. Fraction for the
+#'   training set. Values outside the open interval are rejected.
+#'   Default `0.7`.
 #' @param seed Integer or `NULL`. Random seed for reproducible splitting.
 #' @param env_vars Character vector or `NULL`. Environmental variable names
 #'   to use. If `NULL` (default), auto-detected from `data`. Useful when
@@ -246,6 +249,13 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          n_blocks = 20L, verbose = TRUE) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
+  # Documented as a fraction; unenforced, 0 built an empty training set and 1
+  # produced all-NA evaluation metrics instead of an error.
+  train_fraction <- .cast_check_scalar(
+    train_fraction, "train_fraction", lower = 0, upper = 1,
+    min_inclusive = FALSE, max_inclusive = FALSE
+  )
+  n_blocks <- .cast_check_scalar(n_blocks, "n_blocks", lower = 1, integer = TRUE)
   validate_species_data(data)
 
   if (!is.null(env_vars)) {

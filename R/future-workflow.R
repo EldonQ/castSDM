@@ -91,6 +91,22 @@ cast_save_future_projection <- function(fit, cv, current_env, future_envs,
   if (is.null(cv)) {
     cli::cli_abort("Future projection requires a non-null {.cls cast_cv} object for ensemble weights.")
   }
+  # `prefix` is pasted into every saved filename below.
+  if (!is.character(prefix) || length(prefix) != 1L || is.na(prefix)) {
+    cli::cli_abort("{.arg prefix} must be a single character string.")
+  }
+  if (nzchar(prefix)) prefix <- .cast_safe_name(prefix, arg = "prefix")
+  if (!is.numeric(fig_dpi) || length(fig_dpi) != 1L || !is.finite(fig_dpi) ||
+      fig_dpi <= 0) {
+    cli::cli_abort("{.arg fig_dpi} must be a single positive number.")
+  }
+  if (!is.numeric(min_score) || length(min_score) != 1L || !is.finite(min_score)) {
+    cli::cli_abort("{.arg min_score} must be one finite number.")
+  }
+  if (!is.numeric(min_metric_folds) || length(min_metric_folds) != 1L ||
+      !is.finite(min_metric_folds) || min_metric_folds < 1) {
+    cli::cli_abort("{.arg min_metric_folds} must be a positive integer.")
+  }
   dir.create(save_dir, recursive = TRUE, showWarnings = FALSE)
 
   proj <- cast_project(

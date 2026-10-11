@@ -111,13 +111,27 @@ cast_fit <- function(data,
                      num_threads  = 1L,
                      seed         = NULL,
                      verbose      = TRUE) {
+  # Without this guard a matrix/tibble/NULL input reached `data[[response]]`
+  # and produced an opaque low-level error -- or, for NULL, passed the
+  # response check silently and fit on nothing.
+  if (!is.data.frame(data)) {
+    cli::cli_abort(
+      "{.arg data} must be a data.frame, not {.obj_type_friendly {data}}."
+    )
+  }
+  if (!response %in% names(data)) {
+    cli::cli_abort("{.arg data} is missing the response column {.val {response}}.")
+  }
   models <- tolower(models)
-  valid_models <- c("rf", "maxent", "brt", "gam")
+  valid_models <- .cast_engine_names()
   bad <- setdiff(models, valid_models)
   if (length(bad) > 0) {
     cli::cli_abort(
       "Unknown model(s): {.val {bad}}. Use one or more of: {.val {valid_models}}."
     )
+  }
+  if (!is.null(num_threads)) {
+    num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
   }
   if (!is.null(rf_mtry) &&
       (!is.numeric(rf_mtry) || length(rf_mtry) != 1L ||
@@ -431,10 +445,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   if (!length(pred) || !all(c(0L, 1L) %in% unique(obs))) return(NA_real_)
   thr <- tryCatch(cast_threshold(pred, obs, method = "max_tss"),
                   error = function(e) NA_real_)
-  if (!is.finite(thr)) return(NA_real_)
-  hit <- pred >= thr
-  sum(hit & obs == 1L) / sum(obs == 1L) +
-    sum(!hit & obs == 0L) / sum(obs == 0L) - 1
+  .cast_tss(pred, obs, thr)
 }
 
 #' Run the Per-Engine Hyperparameter Grid Search
@@ -580,11 +591,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       p_tr <- pred(tr); p_te <- pred(te)
       thr <- tryCatch(cast_threshold(p_tr, Y[tr], method = "max_tss"),
                       error = function(e) NA_real_)
-      if (!is.finite(thr)) return(NA_real_)
-      hit <- p_te >= thr
-      n1 <- sum(Y[te] == 1L); n0 <- sum(Y[te] == 0L)
-      if (!n1 || !n0) return(NA_real_)
-      sum(hit & Y[te] == 1L) / n1 + sum(!hit & Y[te] == 0L) / n0 - 1
+      .cast_tss(p_te, Y[te], thr)
     }, numeric(1))
     if (any(is.finite(fold_scores))) {
       mean(fold_scores[is.finite(fold_scores)])

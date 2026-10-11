@@ -2,6 +2,124 @@
 
 ## Fixed
 
+### Silent-wrong-result class (the audit's highest-severity findings)
+
+* `cast_cv()` no longer swallows a per-fold prediction failure. A model that
+  failed to predict in a fold produced an all-`NA` vector with **no warning**,
+  and that surface flowed into the out-of-fold predictions and thence into the
+  ensemble threshold — a model that never predicted looked like a model that
+  predicted poorly. Prediction, training-set prediction and threshold
+  calibration failures inside a fold now each warn with the fold index, the
+  engine name and the underlying message.
+* `cast_cv()` gained a **fold-coverage floor** on the threshold guard. The old
+  guard only checked that at least 10 out-of-fold values existed in total, so a
+  surface that was complete *within the folds that worked* but missing every
+  fold where the model failed still produced a "valid" threshold. At least 80%
+  of folds (never fewer than 2) must now produce predictions; otherwise a
+  warning names the shortfall. The per-model count is returned as
+  `cv$pred_folds`.
+* `cast_ensemble()` applies the same coverage test before thresholding the
+  ensemble mean, and falls back to the weighted mean of per-model thresholds
+  (with a warning) instead of deriving an operating point from a partial
+  surface.
+* `cast_ensemble_importance()` now records which models fail to predict, and
+  **refuses to score** when a model fails on the unpermuted baseline. It used
+  to let `.ensemble_rowmean()` silently reallocate that model's weight, so a
+  "4-model ensemble" was scored on 3 models and still reported as 4.
+  Permutations are additionally restricted to the same model set as the
+  baseline so the comparison keeps a fixed denominator.
+
+### Correctness and robustness
+
+* `cast_predict_tiled()` re-read the entire predictor stack from disk once per
+  model, because the model loop wrapped the tile loop. The loops are now
+  ordered tile-outer / model-inner, so each tile is read exactly once
+  (~4x less I/O for a four-model ensemble) while still holding one tile at a
+  time in memory.
+* `cast_predict_tiled()` no longer writes an all-`NA` prototype GeoTIFF before
+  the sweep. An interrupted run used to leave that prototype behind, and the
+  next `overwrite = FALSE` run would report "exists; skipping" and hand back a
+  raster of pure `NA`.
+* **All raster output is now written atomically** (`.cast_write_raster_atomic()`:
+  temporary sibling + rename) across `cast_predict_tiled()`,
+  `cast_ensemble_raster()`, `cast_effect_map()`, `cast_project()` and
+  `cast_project_raster()`. Resume logic keys off `file.exists()`, which
+  previously meant a half-written GeoTIFF was accepted as complete.
+* `cast_fit()` and `cast_evaluate()` now reject a non-`data.frame` input.
+  `cast_evaluate(fit, NULL)` used to pass validation silently (`NULL[["x"]]`
+  is `NULL`, `all(logical(0) %in% c(0, 1))` is `TRUE`) and return all-`NA`
+  metrics as though the evaluation had merely been inconclusive.
+* `drivers = character(0)` and `models = character(0)` no longer silently
+  expand to "every fitted predictor"/"every model". These used to be rewritten
+  by the package's own `%||%`, whose zero-length-is-absent rule made the
+  subsequent "must be non-empty" check unreachable. Both now use `is.null()`,
+  so an explicit empty vector is reported as the error it is.
+
+### Argument validation
+
+Documented ranges that were not enforced at runtime now abort instead of
+producing a wrong or empty result:
+
+* `train_fraction` in `cast()` / `cast_prepare()` must lie in the open
+  interval (0, 1). `0` built an empty training set and the whole pipeline ran
+  on it; `1` produced all-`NA` evaluation metrics.
+* `buffer` in `cast_cv()` must be finite. `Inf` passed the non-negative test
+  and then excluded every training row.
+* `tile_size` in `cast_predict_tiled()`, `buffer_km` / `min_cells` in
+  `cast_study_area()`, `n_blocks` in `cast_prepare()`, `threshold` in
+  `cast_vif()`, `num_threads` in `cast_fit()`, and `prefix` / `fig_dpi` /
+  `min_score` / `min_metric_folds` in `cast_save_future_projection()`.
+
+### Filename safety
+
+Scenario names and output prefixes are pasted into output filenames. A
+scenario named `../../etc/cron.d/x` escaped the output directory. Both are now
+sanitised by `.cast_safe_name()` in `cast_project()`, `cast_project_raster()`,
+`cast_ensemble_raster()` and `cast_save_future_projection()`, with a warning
+naming every scenario that was changed and an error on post-sanitisation
+collisions.
+
+## Performance
+
+* The cross-model SD and the `method = "median"` combination were computed with
+  `apply(mat, 1, <closure>)` — one R-level callback per cell. At product scale
+  (~3e7 cells) that is tens of millions of interpreted calls, which dominated
+  the cost of the ensemble itself. Both are now vectorised
+  (`.row_sd_finite()`, `.ensemble_rowmedian()`), using `matrixStats` when
+  available. Measured on a 2e6 x 4 block: **0.27 s versus 19.1 s (71x)**,
+  with values identical to the previous implementation.
+* `matrixStats` is a new (optional) Suggests dependency; the package falls back
+  to the original `apply()` form when it is absent, so results are unchanged
+  either way.
+
+## Internal structure
+
+* `R/engines.R` (new) holds a learner registry: engine key -> backing package,
+  label, plot colour, and the mapping from `tune$best` fields to the
+  `cast_fit()` formals. Adding a fifth learner previously required edits in
+  **four files and eleven dispatch sites**; a forgotten site silently produced
+  an `NA` model or an invisible plot colour rather than an error.
+* `R/ensemble.R` (1399 lines) was split into `ensemble.R` (core: scoring,
+  weights, thresholds, aggregation, grouped and permutation entry points) and
+  `ensemble-raster.R` (block engine and GeoTIFF output). The raster half is now
+  the only ensemble module performing low-level `terra` I/O.
+* TSS had three independent implementations that had already drifted in their
+  NA handling; they now share `.cast_tss()`. The two AUC implementations are
+  deliberately kept separate — `compute_auc()` serves the selector's inner
+  loop and `pROC` serves evaluation's documented `direction = "<"` fix — but
+  are now verified equal and documented as such.
+* `cast_ensemble_by()`'s example referenced a `"glm"` engine that does not
+  exist; corrected to the four supported engines.
+
+## Infrastructure
+
+* GitHub Actions are pinned to commit SHAs instead of floating tags (a tag can
+  be re-pointed upstream). `permissions: read-all` was already in place.
+* Version floors added for `cli (>= 3.6.0)`, `ggplot2 (>= 3.4.0)`,
+  `sf (>= 1.0.0)` and `terra (>= 1.7.0)`, whose APIs this package depends on.
+
+## Fixed (previous release notes retained below)
+
 * `cast_ensemble()` / `cast_ensemble_raster()` no longer mislabel a
   weighted-min_score fallback as a deliberate fit. The fallback branch used
   `fallback_used <<- TRUE` inside the `switch()` block, which skips the

@@ -43,7 +43,8 @@ the same environmental columns as \code{species_data}.}
 \item{models}{Character vector of models to fit. Options: \code{"rf"},
 \code{"maxent"}, \code{"brt"}, \code{"gam"}. Default \code{c("rf", "brt", "maxent", "gam")}.}
 
-\item{train_fraction}{Numeric. Fraction of data for training. Default \code{0.7}.}
+\item{train_fraction}{Numeric in (0, 1), strictly. Fraction of data for
+training. Values outside the open interval are rejected. Default \code{0.7}.}
 
 \item{select_method}{Character. Variable screening method passed to
 \code{\link[=cast_select]{cast_select()}}. Default \code{"two_stage"}.}

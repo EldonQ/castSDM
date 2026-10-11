@@ -295,9 +295,8 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
                          metric = "auc", basemap = "world", ...) {
   check_suggested("ggplot2", "for plotting")
 
-  model_colors <- c(
-    rf = "#4DBBD5", brt = "#3C5488", maxent = "#B09C85",
-    gam = "#00A087"
+  model_colors <- .cast_engine_colors(
+    c("rf", "brt", "maxent", "gam")
   )
   fold_colors <- c(
     "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",

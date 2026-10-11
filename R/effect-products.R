@@ -140,7 +140,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
   env_vars <- fit$env_vars
-  drivers <- drivers %||% env_vars
+  if (is.null(drivers)) drivers <- env_vars
   if (!length(drivers) || anyDuplicated(drivers)) {
     cli::cli_abort("{.arg drivers} must be non-empty and unique.")
   }
@@ -284,7 +284,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   if (!all(env_vars %in% names(current_stack))) {
     cli::cli_abort("{.arg current_stack} lacks fitted predictors: {.val {setdiff(env_vars, names(current_stack))}}.")
   }
-  drivers <- drivers %||% env_vars
+  if (is.null(drivers)) drivers <- env_vars
   if (!length(drivers) || anyDuplicated(drivers)) {
     cli::cli_abort("{.arg drivers} must be non-empty and unique.")
   }
@@ -388,8 +388,13 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   }))
   rownames(tab) <- NULL
   if (!is.null(filename)) {
-    terra::writeRaster(res, filename, overwrite = overwrite,
-                       gdal = c("COMPRESS=LZW", "TILED=YES"))
+    # `overwrite = FALSE` used to be passed straight through; the atomic
+    # helper renames into place, so guard the skip here instead.
+    if (!overwrite && file.exists(filename)) {
+      cli::cli_inform("{.path {basename(filename)}} exists; skipping (overwrite = FALSE).")
+    } else {
+      .cast_write_raster_atomic(res, filename)
+    }
   }
   attr(res, "effect_table") <- tab
   attr(res, "steps") <- steps

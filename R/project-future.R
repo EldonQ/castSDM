@@ -91,6 +91,28 @@ cast_project <- function(fit, cv, current_env, future_envs,
     cli::cli_abort("All elements of {.arg future_envs} must be named (scenario names).")
   }
 
+  # Scenario names are pasted straight into output filenames below
+  # (`paste0(scen, "_prediction.csv")`), so a name like "../../etc/x" would
+  # write outside `save_dir`. Sanitise once, up front, and key every lookup
+  # and output on the sanitised name.
+  scen_raw <- names(future_envs)
+  scen_safe <- vapply(scen_raw, .cast_safe_name, character(1),
+                      arg = "future_envs scenario name", USE.NAMES = FALSE)
+  if (anyDuplicated(scen_safe)) {
+    dup <- unique(scen_safe[duplicated(scen_safe)])
+    cli::cli_abort(c(
+      "Scenario name{?s} {.val {dup}} collide after filename sanitisation.",
+      i = "Rename them so each scenario maps to a distinct output file."
+    ))
+  }
+  if (!identical(scen_raw, scen_safe)) {
+    cli::cli_warn(c(
+      "Scenario name{?s} were changed to safe filename{?s}:",
+      "{.val {scen_raw[!scen_raw %in% scen_safe]}} -> {.val {scen_safe[!scen_raw %in% scen_safe]}}."
+    ))
+  }
+  names(future_envs) <- scen_safe
+
   # Align every future grid to the current grid before predicting (M16):
   # mismatched row counts abort, re-ordered grids are matched on lon/lat.
   for (scen in names(future_envs)) {
@@ -441,7 +463,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
       r <- terra::rast(tmpl)
       r[cell_id] <- df[[val_col]]
     }
-    terra::writeRaster(r, path, overwrite = TRUE)
+    .cast_write_raster_atomic(r, path)
   }, error = function(e) {
     cli::cli_warn("Failed to save GeoTIFF {.path {path}}: {e$message}")
   })
@@ -536,6 +558,26 @@ cast_project_raster <- function(fit, cv,
     cli::cli_abort("All elements of {.arg future_rasters} must be named.")
   }
 
+  # Same filename-traversal guard as cast_project(): scenario names become
+  # `<scen>_prediction.tif` and `<scen>_change_class.tif`.
+  scen_raw <- names(future_rasters)
+  scen_safe <- vapply(scen_raw, .cast_safe_name, character(1),
+                      arg = "future_rasters scenario name", USE.NAMES = FALSE)
+  if (anyDuplicated(scen_safe)) {
+    dup <- unique(scen_safe[duplicated(scen_safe)])
+    cli::cli_abort(c(
+      "Scenario name{?s} {.val {dup}} collide after filename sanitisation.",
+      i = "Rename them so each scenario maps to a distinct output file."
+    ))
+  }
+  if (!identical(scen_raw, scen_safe)) {
+    cli::cli_warn(c(
+      "Scenario name{?s} were changed to safe filename{?s}.",
+      x = "{.val {scen_raw[!scen_raw %in% scen_safe]}} -> {.val {scen_safe[!scen_raw %in% scen_safe]}}."
+    ))
+  }
+  names(future_rasters) <- scen_safe
+
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   raster_dir <- file.path(output_dir, "rasters")
   table_dir <- file.path(output_dir, "tables")
@@ -602,9 +644,9 @@ cast_project_raster <- function(fit, cv,
           }
         )
         names(change_r) <- "change_class"
-        terra::writeRaster(change_r, change_path, overwrite = TRUE,
-                           gdal = c(paste0("COMPRESS=", compression)),
-                           wopt = list(datatype = "INT2S"))
+        .cast_write_raster_atomic(change_r, change_path,
+                                  compression = compression,
+                                  datatype = "INT2S")
       }
 
       # ---- Statistics (from disk, also on the skip branch) --------------------

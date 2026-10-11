@@ -43,8 +43,8 @@ belong to several groups, e.g. a family ensemble plus a full ensemble).
 cast_ensemble_by(fit, cv, preds,
   groups = list(
     trees   = c("rf", "brt"),
-    static  = c("glm", "maxent"),
-    full    = c("rf", "brt", "glm", "maxent")
+    other   = c("maxent", "gam"),
+    full    = c("rf", "brt", "maxent", "gam")
   ))
 }
 

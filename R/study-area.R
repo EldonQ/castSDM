@@ -48,6 +48,10 @@ cast_study_area <- function(occurrences,
                             verbose = TRUE) {
   check_suggested("terra", "for raster operations")
   check_suggested("sf", "for spatial operations")
+  # `buffer_km <= 0` made the expansion loop's guard depend on its second
+  # term alone, and a non-positive `min_cells` skipped expansion entirely.
+  buffer_km <- .cast_check_scalar(buffer_km, "buffer_km", lower = 0)
+  min_cells <- .cast_check_scalar(min_cells, "min_cells", lower = 1, integer = TRUE)
   method <- match.arg(method)
 
   # ---- Validate inputs -------------------------------------------------------

@@ -154,6 +154,17 @@ get_env_vars <- function(data, response = "presence",
 #' where a Wilcoxon-Mann-Whitney AUC estimate is needed without the pROC
 #' dependency.
 #'
+#' @details
+#' `evaluate_model_full()` reports AUC through \pkg{pROC}. This function is
+#' the same statistic (the Wilcoxon-Mann-Whitney / rank formulation of the
+#' Mann-Whitney AUC with `direction = "<"`), verified to agree with
+#' `pROC::auc()` to within 1e-8 over randomised cases. It is kept separate
+#' because the stage-2 forward search calls it once per candidate per inner
+#' fold, where constructing a full ROC object is the dominant cost. The two
+#' paths are deliberately NOT merged: collapsing them would either make the
+#' selector depend on pROC or make evaluation stop honouring its documented
+#' `direction = "<"` fix (which keeps worse-than-random AUC below 0.5).
+#'
 #' @param y Binary integer vector (0/1).
 #' @param pred Numeric vector of predicted probabilities.
 #' @return Scalar AUC in \[0, 1\].
@@ -296,11 +307,7 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
                           error = function(e) NA_real_)
   }
   threshold <- if (length(threshold) == 1L && is.finite(threshold)) threshold else NA_real_
-  tss_val <- if (is.finite(threshold)) {
-    hit <- pred >= threshold
-    sum(hit & obs == 1L) / sum(obs == 1L) +
-      sum(!hit & obs == 0L) / sum(obs == 0L) - 1
-  } else NA_real_
+  tss_val <- .cast_tss(pred, obs, threshold)
 
   # -- CBI (Continuous Boyce Index) -------------------------------------------
   cbi_val <- tryCatch({
@@ -329,6 +336,31 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
     omission_10 = compute_omission_at(pred, obs, e = 0.10),
     mpa = compute_mpa(pred, obs, keep = 0.9),
     tss_threshold = threshold)
+}
+
+
+#' True Skill Statistic at a Given Threshold
+#'
+#' Single implementation of `TSS = sensitivity + specificity - 1`. Three
+#' separate copies existed (here, `.tss_score()`, and the GAM tuning loop) and
+#' they had already drifted in their NA handling, so changing one silently
+#' left the others reporting different numbers.
+#'
+#' @param pred Numeric predicted scores.
+#' @param obs Binary observed outcomes (0/1).
+#' @param threshold Numeric cut. `NA`/non-finite yields `NA_real_`.
+#' @return Scalar TSS in \[-1, 1\]; `NA_real_` when either class is absent.
+#' @keywords internal
+#' @noRd
+.cast_tss <- function(pred, obs, threshold) {
+  if (!length(threshold) || !is.finite(threshold)) return(NA_real_)
+  ok <- is.finite(pred) & !is.na(obs)
+  pred <- as.numeric(pred[ok])
+  obs <- as.integer(obs[ok])
+  if (!length(pred) || !all(c(0L, 1L) %in% unique(obs))) return(NA_real_)
+  hit <- pred >= threshold
+  sum(hit & obs == 1L) / sum(obs == 1L) +
+    sum(!hit & obs == 0L) / sum(obs == 0L) - 1
 }
 
 
@@ -375,6 +407,145 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
 
   ratio <- pred_f[keep] / exp_f[keep]
   as.numeric(stats::cor(mids[keep], ratio, method = "spearman"))
+}
+
+
+#' Out-of-Fold Fold-Coverage Check
+#'
+#' `cast_cv()` records `pred_folds`, the number of folds in which each model
+#' actually produced predictions. The total count of finite out-of-fold values
+#' cannot detect a surface that is complete *within the folds that worked* but
+#' missing every fold where the model failed, so both the CV threshold guard
+#' and the ensemble threshold guard consult this helper.
+#'
+#' A `cv` object without `pred_folds` (older objects, or a hand-built one) is
+#' treated as fully covered: the guard must not fire on information the object
+#' simply does not carry.
+#'
+#' @param cv A `cast_cv` object.
+#' @param mdl_names Character vector of contributing model names.
+#' @return List with `ok` (logical per model) and `n_folds` (integer per model).
+#' @keywords internal
+#' @noRd
+.cast_oof_fold_coverage <- function(cv, mdl_names) {
+n_folds <- cv$pred_folds
+  if (is.null(n_folds) || !length(n_folds)) {
+    return(list(ok = stats::setNames(rep(TRUE, length(mdl_names)), mdl_names),
+                n_folds = stats::setNames(rep(NA_integer_, length(mdl_names)), mdl_names)))
+  }
+  k <- length(unique(cv$fold_status))
+  min_ok <- max(2L, ceiling(k * 0.8))
+  n <- stats::setNames(as.integer(n_folds[mdl_names]), mdl_names)
+  list(ok = stats::setNames(n >= min_ok, mdl_names), n_folds = n)
+}
+
+
+#' Validate a Scalar Numeric Argument
+#'
+#' One shared guard for the numeric arguments that the package documents with
+#' a range but did not enforce at runtime. A missing check is not cosmetic:
+#' `train_fraction = 0` yields an empty training set and the whole pipeline
+#' then runs on it, and `train_fraction = 1` makes `cast_evaluate()` return
+#' all-`NA` metrics instead of failing.
+#'
+#' @param x Value to check.
+#' @param arg Argument name for messages.
+#' @param lower,upper Inclusive bounds; use `-Inf`/`Inf` for unbounded.
+#' @param integer Logical. Require a whole number.
+#' @param min_inclusive,max_inclusive Logical. Bound inclusivity.
+#' @keywords internal
+#' @noRd
+.cast_check_scalar <- function(x, arg, lower = -Inf, upper = Inf,
+                               integer = FALSE,
+                               min_inclusive = TRUE, max_inclusive = TRUE) {
+  if (!is.numeric(x) || length(x) != 1L || is.na(x) || !is.finite(x)) {
+    cli::cli_abort("{.arg {arg}} must be a single finite number.")
+  }
+  if (integer && x != round(x)) {
+    cli::cli_abort("{.arg {arg}} must be a whole number.")
+  }
+  lo_ok <- if (min_inclusive) x >= lower else x > lower
+  hi_ok <- if (max_inclusive) x <= upper else x < upper
+  if (!lo_ok || !hi_ok) {
+    brk <- function(op) if (op) "[" else "("
+    cli::cli_abort("{.arg {arg}} must be in {brk(min_inclusive)}{format(lower)}, {format(upper)}{brk(max_inclusive)}.")
+  }
+  if (integer) as.integer(x) else as.numeric(x)
+}
+
+
+#' Write a Raster Atomically
+#'
+#' Writes to a temporary sibling path and renames it into place, so an
+#' interrupted run can never leave a truncated GeoTIFF at the final path.
+#' Resume logic elsewhere keys off `file.exists()`, which previously meant a
+#' half-written output was silently accepted as a complete one on the next
+#' run. `file.rename()` is atomic within a filesystem on both POSIX and
+#' Windows, and the temp file is removed on failure.
+#'
+#' @param r A `terra::SpatRaster` to write.
+#' @param path Final output path.
+#' @param compression Character. GeoTIFF compression, default `"LZW"`.
+#' @param datatype Character. GDAL datatype, default `"FLT4S"`.
+#' @keywords internal
+#' @noRd
+.cast_write_raster_atomic <- function(r, path, compression = "LZW",
+                                      datatype = "FLT4S") {
+  # The temp name MUST keep the original extension: terra::writeRaster()
+  # infers the GDAL driver from it and refuses a suffix-less path.
+  ext <- tools::file_ext(path)
+  stem <- if (nzchar(ext)) tools::file_path_sans_ext(path) else path
+  tmp <- paste0(stem, ".cast-tmp-", Sys.getpid(),
+                if (nzchar(ext)) paste0(".", ext) else "")
+  ok <- FALSE
+  on.exit({
+    if (!ok && file.exists(tmp)) unlink(tmp)
+  }, add = TRUE)
+  terra::writeRaster(
+    r, tmp, overwrite = TRUE,
+    gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
+    wopt = list(datatype = datatype)
+  )
+  if (!file.rename(tmp, path)) {
+    # Cross-device or locked destination: fall back to copy + remove so the
+    # result is still complete, just not atomic.
+    if (!file.copy(tmp, path, overwrite = TRUE)) {
+      cli::cli_abort("Could not write raster to {.path {path}}.")
+    }
+    unlink(tmp)
+  }
+  ok <- TRUE
+  invisible(path)
+}
+
+
+#' Sanitise a User-Supplied Output Identifier
+#'
+#' Scenario names and output prefixes reach the filesystem through
+#' `paste0(prefix, "_prediction.csv")` and friends. Without this guard a
+#' scenario literally named `"../../etc/cron.d/x"` escapes the output
+#' directory. Any path separator, parent reference, or control character is
+#' replaced, and the result is rejected if nothing usable remains.
+#'
+#' @param x Character scalar to sanitise.
+#' @param arg Argument name used in messages.
+#' @keywords internal
+#' @noRd
+.cast_safe_name <- function(x, arg = "name") {
+  if (!is.character(x) || length(x) != 1L || is.na(x)) {
+    cli::cli_abort("{.arg {arg}} must be a single character string.")
+  }
+  out <- gsub("[/\\\\]", "_", x)
+  out <- gsub("^[.]+", "", out)
+  out <- gsub("[^A-Za-z0-9._-]", "_", out)
+  out <- gsub("_{2,}", "_", out)
+  if (!nzchar(out)) {
+    cli::cli_abort(c(
+      "{.arg {arg}} {.val {x}} contains no usable filename character{?s}.",
+      i = "Use letters, digits, dot, dash or underscore."
+    ))
+  }
+  out
 }
 
 

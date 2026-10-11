@@ -11,7 +11,8 @@
 #'   the same environmental columns as `species_data`.
 #' @param models Character vector of models to fit. Options: `"rf"`,
 #'   `"maxent"`, `"brt"`, `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
-#' @param train_fraction Numeric. Fraction of data for training. Default `0.7`.
+#' @param train_fraction Numeric in (0, 1), strictly. Fraction of data for
+#'   training. Values outside the open interval are rejected. Default `0.7`.
 #' @param select_method Character. Variable screening method passed to
 #'   [cast_select()]. Default `"two_stage"`.
 #' @param select_num_trees Integer. Trees per forest in the stage-2 forward
@@ -251,19 +252,22 @@ cast <- function(species_data,
 #' @keywords internal
 #' @noRd
 .cast_tuned_args <- function(fit) {
-  out <- list(rf_mtry = NULL, brt_depth = NULL, brt_shrinkage = NULL,
-              maxent_classes = NULL, maxent_regmult = NULL)
+  # Ask the registry which cast_fit() formals each engine contributes, and
+  # in which field of `tune$best` the tuned value lives. This used to be a
+  # chain of `if (mdl == "rf")` branches, so a new tunable engine silently
+  # refit at its default unless this function was also edited.
+  eng <- .cast_engines()
+  out <- list()
+  for (spec in eng) {
+    if (length(spec$tune_args)) out[unname(spec$tune_args)] <- list(NULL)
+  }
   for (mdl in names(fit$models %||% list())) {
     t <- fit$models[[mdl]]$tune
-    if (is.null(t) || is.null(t$best)) next
-    if (mdl == "rf") out$rf_mtry <- t$best$mtry
-    if (mdl == "brt") {
-      out$brt_depth <- t$best$depth
-      out$brt_shrinkage <- t$best$shrinkage
-    }
-    if (mdl == "maxent") {
-      out$maxent_classes <- t$best$classes
-      out$maxent_regmult <- t$best$regmult
+    spec <- eng[[mdl]]$tune_args
+    if (is.null(t) || is.null(t$best) || is.null(spec)) next
+    for (src in names(spec)) {
+      val <- t$best[[src]]
+      if (!is.null(val)) out[[unname(spec[[src]])]] <- val
     }
   }
   out

@@ -19,7 +19,9 @@ cast_prepare(
 \item{data}{A \code{data.frame} with columns: \code{lon}, \code{lat}, \code{presence} (0/1),
 and environmental variables.}
 
-\item{train_fraction}{Numeric. Fraction for training set. Default \code{0.7}.}
+\item{train_fraction}{Numeric in (0, 1), strictly. Fraction for the
+training set. Values outside the open interval are rejected.
+Default \code{0.7}.}
 
 \item{seed}{Integer or \code{NULL}. Random seed for reproducible splitting.}
 

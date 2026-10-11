@@ -32,6 +32,18 @@ cast_evaluate <- function(fit, test_data, response = "presence",
                           threshold_method = "max_tss") {
   check_suggested("pROC", "for AUC computation")
 
+  # `NULL[["presence"]]` is NULL, `sum(is.na(NULL))` is 0 and
+  # `all(logical(0) %in% c(0, 1))` is TRUE, so the response check below
+  # silently PASSED for a NULL test set and the function returned all-NA
+  # metrics as if the evaluation had merely been inconclusive.
+  if (!is.data.frame(test_data)) {
+    cli::cli_abort(
+      "{.arg test_data} must be a data.frame, not {.obj_type_friendly {test_data}}."
+    )
+  }
+  if (!response %in% names(test_data)) {
+    cli::cli_abort("{.arg test_data} is missing the response column {.val {response}}.")
+  }
   .cast_check_response(test_data[[response]], response)
   Y_test <- test_data[[response]]
   env_vars <- fit$env_vars
@@ -119,8 +131,7 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
   # stats::predict() with no S3 method registered. Loading the namespace
   # here registers the methods; without the package there is nothing to
   # predict with, so NA preserves the per-model robustness contract.
-  engine_pkg <- switch(nm, rf = "ranger", maxent = "maxnet", brt = "gbm",
-                       gam = "mgcv", NULL)
+  engine_pkg <- .cast_engine_package(nm)
   if (!is.null(engine_pkg) && !requireNamespace(engine_pkg, quietly = TRUE)) {
     return(rep(NA_real_, nrow(X_raw)))
   }

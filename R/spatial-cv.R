@@ -124,6 +124,11 @@ cast_cv <- function(data,
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
     cli::cli_abort("{.arg buffer} must be a single non-negative number.")
   }
+  # `Inf` passed the non-negative test above and then excluded every training
+  # row, silently emptying the model side of each fold.
+  if (!is.finite(buffer)) {
+    cli::cli_abort("{.arg buffer} must be finite; {.val Inf} would exclude every training row.")
+  }
   buffer_unit <- match.arg(buffer_unit)
   if (buffer_unit == "km" && buffer > 0) {
     # Haversine is defined on decimal degrees; silently treating projected
@@ -240,6 +245,7 @@ cast_cv <- function(data,
 
     rows <- list()
     updates <- list()
+    pred_ok <- list()
     for (mdl in models) {
       info <- fit$models[[mdl]]
       if (is.null(info) || is.null(info$model)) next
@@ -249,16 +255,39 @@ cast_cv <- function(data,
       x_test <- .cast_impute(x_test, fit$scaling$impute)
       pred <- tryCatch(
         predict_single_model(info, x_test),
-        error = function(e) rep(NA_real_, nrow(test))
+        error = function(e) {
+          # A silent NA vector here used to flow straight into the OOF
+          # surface and then into the ensemble threshold, so a model that
+          # never predicted looked like a model that predicted poorly.
+          warning(sprintf(
+            "Prediction failed in fold %d for %s: %s",
+            fold_i, mdl, conditionMessage(e)
+          ))
+          rep(NA_real_, nrow(test))
+        }
       )
+      pred_ok[[mdl]] <- length(pred) == nrow(test) && any(is.finite(pred))
       fold_threshold <- NULL
       if (!is.null(fit$scaling$response) && !is.null(fit$scaling$reference)) {
         train_pred <- tryCatch(
           predict_single_model(info, fit$scaling$reference),
-          error = function(e) rep(NA_real_, nrow(train)))
+          error = function(e) {
+            warning(sprintf(
+              "Training-set prediction failed in fold %d for %s: %s",
+              fold_i, mdl, conditionMessage(e)
+            ))
+            rep(NA_real_, nrow(train))
+          }
+        )
         fold_threshold <- tryCatch(cast_threshold(
           train_pred, fit$scaling$response, method = threshold_method),
-          error = function(e) NA_real_)
+          error = function(e) {
+            warning(sprintf(
+              "Threshold calibration failed in fold %d for %s: %s",
+              fold_i, mdl, conditionMessage(e)
+            ))
+            NA_real_
+          })
       }
       met <- tryCatch(
         if (is.null(fold_threshold)) {
@@ -291,7 +320,7 @@ cast_cv <- function(data,
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
     list(rows = rows, updates = updates, selected = fold_screen$selected,
-         screen = fold_screen, di = di_fold,
+         screen = fold_screen, di = di_fold, pred_ok = pred_ok,
          status = if (length(rows)) "evaluated" else "no_predictions")
   }
 
@@ -326,6 +355,12 @@ cast_cv <- function(data,
     screens <- vector("list", k)
     fold_status <- rep("failed", k)
     skipped_single <- integer(0)
+    # How many folds actually produced usable predictions per model. A model
+    # can be present in every fold's result list and still have failed to
+    # predict in some of them; without this counter the threshold guard below
+    # only saw the TOTAL number of finite values, so a surface missing 40% of
+    # its folds still produced a "valid" threshold.
+    pred_folds <- stats::setNames(integer(length(models)), models)
     for (i in seq_along(results)) {
       res <- results[[i]]
       if (is.null(res)) next
@@ -343,6 +378,9 @@ cast_cv <- function(data,
         upd <- res$updates[[mdl]]
         oof[[mdl]][upd$idx] <- upd$pred
       }
+      for (mdl in names(res$pred_ok %||% list())) {
+        if (isTRUE(res$pred_ok[[mdl]])) pred_folds[[mdl]] <- pred_folds[[mdl]] + 1L
+      }
     }
 
     fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
@@ -354,6 +392,22 @@ cast_cv <- function(data,
     thresholds <- vapply(models, function(mdl) {
       pred <- oof[[mdl]]
       ok <- is.finite(pred)
+      # Fold coverage floor: at least 80% of folds (and never fewer than 2)
+      # must have produced predictions. `sum(ok)` alone cannot detect a
+      # surface that is complete within the folds that worked but missing
+      # every fold where the model failed.
+      n_folds_ok <- pred_folds[[mdl]]
+      min_folds_ok <- max(2L, ceiling(k * 0.8))
+      if (n_folds_ok < min_folds_ok) {
+        cli::cli_warn(c(
+          "{.val {mdl}} produced predictions in only {n_folds_ok}/{k} fold{?s}",
+          i = "Fewer than the required {min_folds_ok} usable fold{?s}; the",
+          i = "out-of-fold surface is incomplete and its threshold is not",
+          i = "trustworthy. Threshold falls back to 0.5, which changes every",
+          i = "threshold-based metric and any binarised product."
+        ))
+        return(0.5)
+      }
       if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) {
         cli::cli_warn(c(
           "Fewer than 10 usable {.val {mdl}} out-of-fold values (or one class",
@@ -368,7 +422,8 @@ cast_cv <- function(data,
     list(folds = folds, fold_df = fold_df, oof_df = oof_df,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
-         skipped_single = skipped_single, di = oof_di)
+         skipped_single = skipped_single, di = oof_di,
+         pred_folds = pred_folds)
   }
 
   if (verbose) {

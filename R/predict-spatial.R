@@ -80,7 +80,7 @@ cast_predict <- function(fit, new_data, models = NULL,
       "{.arg new_data} is missing fitted predictor{?s}: {.val {missing_vars}}."
     )
   }
-  mdl_names <- models %||% names(fit$models)
+  mdl_names <- if (is.null(models)) names(fit$models) else models
   mdl_names <- intersect(mdl_names, names(fit$models))
 
   if (length(mdl_names) == 0) {
