@@ -529,7 +529,8 @@ cast_cv <- function(data,
     selections = selections_all, screens = do.call(c, lapply(reps, `[[`, "screens")),
     selection_freq = selection_freq, oof = reps[[1]]$oof_df,
     fold_status = fold_status_final, threshold_method = threshold_method,
-    n_repeat = n_repeat, aoa = aoa_info
+    n_repeat = n_repeat, aoa = aoa_info,
+    pred_folds = if (length(reps)) reps[[1]]$pred_folds else NULL
   )
 }
 

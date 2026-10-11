@@ -131,7 +131,7 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
                         selections = list(), screens = list(),
                         selection_freq = NULL, oof = NULL, fold_status = NULL,
                         threshold_method = "max_tss", n_repeat = 1L,
-                        aoa = NULL) {
+                        aoa = NULL, pred_folds = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -147,7 +147,11 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       fold_status  = fold_status,
       threshold_method = threshold_method,
       n_repeat     = n_repeat,
-      aoa          = aoa
+      aoa          = aoa,
+      # Per-model count of folds that actually produced predictions. Carried
+      # so a caller can see WHY a threshold fell back to 0.5 instead of
+      # having to infer it from a missing value.
+      pred_folds   = pred_folds
     ),
     class = "cast_cv"
   )
