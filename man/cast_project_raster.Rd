@@ -20,7 +20,10 @@ cast_project_raster(
   compression = "LZW",
   clamp = NULL,
   verbose = TRUE,
-  coding = c("cast", "biomod2")
+  coding = c("cast", "biomod2"),
+  decay = 1,
+  parallel = FALSE,
+  max_memory_mb = 200
 )
 }
 \arguments{
@@ -68,6 +71,15 @@ stable_absent=0; \code{"biomod2"} uses Gain=1, Loss=-2, Stable_Pres=-1,
 Stable_Abs=0, matching biomod2's \code{bm_RangeSize()} convention so the
 change rasters align with BIOMOD_RangeSize outputs and existing
 visualisation scripts without remapping.}
+
+\item{decay}{Score-power exponent passed unchanged to \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}.}
+
+\item{parallel}{Logical. Predict independent future scenarios with the
+caller's \code{future} plan. Default \code{FALSE}; raster inputs are explicitly
+packed for transport to workers. Scenario statistics are assembled in order.}
+
+\item{max_memory_mb}{Per-worker block budget for \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}.
+Default \code{200}; use a smaller budget when parallelizing scenarios.}
 }
 \value{
 A list with components:

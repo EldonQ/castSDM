@@ -1,0 +1,6 @@
+Current-source computation verified; original completion receipt preserved.
+4 engines; 18 future projections and attribution stacks; all expected rasters non-empty.
+Sampled projection/attribution equivalence; static drivers, weights and binary support checked.
+4/5 spatial folds evaluated: fold 3 single-class; this is a reported limitation.
+All 20 figure exports present; actual PDF pages rendered, visual inspection pending.
+Genus workflow demonstration; no species-level causal or independent ecological validation claim.

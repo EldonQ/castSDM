@@ -12,7 +12,8 @@ cast_effect_table(
   shift_type = "raw",
   support_probs = c(0.01, 0.99),
   min_support = 0.5,
-  verbose = TRUE
+  verbose = TRUE,
+  weights = NULL
 )
 }
 \arguments{
@@ -43,6 +44,9 @@ can mask several drivers at once; the print method reports the masking
 rate and the lowest observed support so the effect is visible.}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
+
+\item{weights}{Optional named model weights, frozen across both predictions.
+Default \code{NULL} retains the equally weighted comparison.}
 }
 \value{
 A \code{cast_effect_table} data.frame, one row per driver:

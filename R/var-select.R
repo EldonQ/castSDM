@@ -33,7 +33,45 @@
 #'   they are never selected, but `lon`/`lat` define the inner spatial folds
 #'   when both are present and finite).
 #' @param response Binary response column. Default `"presence"`.
-#' @param method `"two_stage"` (default) or `"full"` (keep every predictor).
+#' @param method `"two_stage"` (default), `"full"` (keep every predictor) or
+#'   `"covsel"` (the two-step embedded selection of Adde et al. 2023: a
+#'   hierarchical collinearity filter followed by elastic-net / GAM / guided-RF
+#'   embedding with a `ceiling(log2(n_presences)) - 1` count rule).
+#' @param corcut Correlation threshold for the `"covsel"` filter levels.
+#'   Default `0.7` (the community standard; Dormann et al. 2013).
+#' @param var_id Character vector aligned with the predictors giving the
+#'   variable-level identity (e.g. all years and focal scales of one covariate
+#'   share an id). At the variable level the filter keeps exactly one
+#'   covariate per id. `NULL` skips that level.
+#' @param category Character vector aligned with the predictors giving the
+#'   category-level identity (e.g. "climate", "terrain"). `NULL` skips it.
+#' @param algorithms Embedding learners for `"covsel"`: any of `"glm"`
+#'   (elastic net), `"gam"` (null-space penalisation), `"rf"` (guided
+#'   regularised random forest). Default all three.
+#' @param ncov Target number of covariates for `"covsel"`. Default `NULL` =
+#'   `ceiling(log2(n_presences)) - 1` (the Adde et al. rule), capped at
+#'   `maxncov`.
+#' @param maxncov Maximum number of covariates for `"covsel"`. Default `12`.
+#' @param weights Optional numeric row weights (e.g. prevalence targets) used
+#'   by the `"covsel"` filter and embedding steps.
+#' @param ensure Optional named list of logical flag vectors aligned with the
+#'   predictors, declaring coverage requirements the data-driven search cannot
+#'   guarantee. For each flag (e.g. `list(climate = c(TRUE, FALSE, ...))`), if
+#'   the final set contains no flagged covariate, the strongest Step-A-ranked
+#'   flagged survivor is admitted (reason `"ensured"`). This is the generic
+#'   mechanism behind "a scenario-projection model must contain at least one
+#'   time-varying driver": the flag comes from covariate provenance (e.g. the
+#'   pool manifest's climate declaration), never a hardcoded variable name, so
+#'   the rule is identical for every species while the admitted covariate is
+#'   whatever the data ranks strongest. Coverage is a purpose-adequacy
+#'   requirement, not an ecological claim; importance reporting stays honest
+#'   about how much the ensured covariate contributes.
+#' @param env_vars Optional explicit predictor set (a contract, as in
+#'   [cast_prepare()]). When supplied, selection runs on
+#'   `env_vars` intersected with what the data actually supports (a layer can
+#'   be constant inside a CV fold's training sample even when it varies in the
+#'   full data); `var_id`, `category` and `keep` are re-indexed to that
+#'   intersection by name. `NULL` keeps auto-detection.
 #' @param num_trees Trees per forest in the stage-2 forward search.
 #'   Default 300.
 #' @param max_rows Rows sampled (evenly, preserving order) before the
@@ -74,6 +112,11 @@
 #' Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 #' with it in ecological studies. \emph{Ecography} 36: 27-46.
 #'
+#' Adde, A. et al. (2023). Too many candidates: embedded covariate selection
+#' procedure for species distribution modelling with the covsel R package.
+#' \emph{Ecological Informatics} 75: 102080.
+#' \doi{10.1016/j.ecoinf.2023.102080}.
+#'
 #' Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
 #' learning models using forward feature selection and target-oriented
 #' validation. \emph{Environmental Modelling & Software} 101: 1-9.
@@ -86,14 +129,19 @@
 #' @seealso [cast_effect_table()], [cast_importance()]
 #' @export
 cast_select <- function(data, response = "presence",
-                         method = c("two_stage", "full"),
-                         num_trees = 300L, max_rows = 2000L,
-                         metric = c("brier", "auc"),
-                         tolerance = 0, n_folds = 3L,
-                         seed = NULL, verbose = TRUE, keep = character(0)) {
+                        method = c("two_stage", "full", "covsel"),
+                        num_trees = 300L, max_rows = 2000L,
+                        metric = c("brier", "auc"),
+                        tolerance = 0, n_folds = 3L,
+                        seed = NULL, verbose = TRUE, keep = character(0),
+                        corcut = 0.7, var_id = NULL, category = NULL,
+                        algorithms = c("glm", "gam", "rf"),
+                        ncov = NULL, maxncov = 12L, weights = NULL,
+                        ensure = NULL, env_vars = NULL) {
   if (!missing(method) && (!is.character(method) || length(method) != 1L ||
-                          is.na(method) || !method %in% c("two_stage", "full"))) {
-    cli::cli_abort("{.arg method} must be one of 'two_stage' or 'full'.")
+                          is.na(method) ||
+                          !method %in% c("two_stage", "full", "covsel"))) {
+    cli::cli_abort("{.arg method} must be one of 'two_stage', 'full' or 'covsel'.")
   }
   method <- match.arg(method)
   if (missing(metric)) metric <- "brier"
@@ -101,14 +149,39 @@ cast_select <- function(data, response = "presence",
       !metric %in% c("brier", "auc")) {
     cli::cli_abort("{.arg metric} must be {.val brier} or {.val auc}.")
   }
-  env_vars <- get_env_vars(data, response)
+  if (is.null(env_vars)) {
+    env_vars <- get_env_vars(data, response)
+  } else {
+    # Validate the caller's set before dropping fold-constant columns. Explicit
+    # names may override metadata auto-detection, but never response/coordinates.
+    if (!is.character(env_vars) || anyNA(env_vars) || anyDuplicated(env_vars) ||
+        !all(env_vars %in% setdiff(names(data), c(response, "lon", "lat")))) {
+      cli::cli_abort("{.arg env_vars} must be unique predictor names in {.arg data}, not coordinates or the response.")
+    }
+    .cast_check_numeric_predictors(data[, env_vars, drop = FALSE], arg = "env_vars")
+    supported <- vapply(env_vars, function(v) {
+      z <- data[[v]][!is.na(data[[v]])]
+      variance <- if (length(z) > 1L) stats::var(z) else NA_real_
+      is.finite(variance) && variance > 1e-10
+    }, logical(1))
+    unsupported <- env_vars[!supported]
+    if (length(unsupported)) {
+      cli::cli_warn(c(
+        "{length(unsupported)} variable{?s} in {.arg env_vars} lack supported variation in this sample and cannot be selected:",
+        " " = "{.val {unsupported}}"))
+      env_vars <- env_vars[supported]
+    }
+  }
   if (!is.character(keep) || anyNA(keep) || anyDuplicated(keep) ||
       !all(keep %in% env_vars)) {
     cli::cli_abort("{.arg keep} must contain unique numeric predictor names that vary in the training data, not coordinates or the response.")
   }
   .cast_check_response(data[[response]], response)
   .cast_check_numeric_predictors(data[, env_vars, drop = FALSE], arg = "data")
-  if (length(env_vars) < 3L) cli::cli_abort("Need at least three predictors.")
+  if (!length(env_vars)) cli::cli_abort("Need at least one varying numeric predictor.")
+  if (method != "full" && length(env_vars) < 3L) {
+    cli::cli_abort("Screening needs at least three predictors; use method = 'full' for a prespecified smaller set.")
+  }
   num_trees <- as.integer(num_trees)
   if (is.na(num_trees) || num_trees < 1L) {
     cli::cli_abort("{.arg num_trees} must be at least 1.")
@@ -125,6 +198,63 @@ cast_select <- function(data, response = "presence",
   if (is.na(n_folds) || n_folds < 2L) {
     cli::cli_abort("{.arg n_folds} must be at least 2.")
   }
+  if (!is.numeric(corcut) || length(corcut) != 1L || is.na(corcut) ||
+      corcut < 0 || corcut > 1) {
+    cli::cli_abort("{.arg corcut} must be a single number in [0, 1].")
+  }
+  align_metadata <- function(x, arg) {
+    if (is.null(x)) return(NULL)
+    if (!is.character(x) || anyNA(x)) {
+      cli::cli_abort("{.arg {arg}} must be NULL or an NA-free character vector aligned with the predictors.")
+    }
+    # Named vectors are re-indexed to the supported predictors; unnamed vectors
+    # must already match the (possibly intersected) predictor set in order.
+    if (!is.null(names(x))) {
+      x <- x[match(env_vars, names(x))]
+    } else if (length(x) != length(env_vars)) {
+      cli::cli_abort("{.arg {arg}} must be NULL, named, or a character vector of length {length(env_vars)} aligned with the predictors.")
+    }
+    if (anyNA(x)) {
+      cli::cli_abort("{.arg {arg}} does not cover all predictors: {.val {env_vars[is.na(x)]}}.")
+    }
+    x
+  }
+  var_id <- align_metadata(var_id, "var_id")
+  category <- align_metadata(category, "category")
+  if (!is.null(ncov) && (!is.numeric(ncov) || length(ncov) != 1L ||
+                         is.na(ncov) || ncov < 1)) {
+    cli::cli_abort("{.arg ncov} must be NULL or a single positive integer.")
+  }
+  maxncov <- as.integer(maxncov)
+  if (is.na(maxncov) || maxncov < 1L) {
+    cli::cli_abort("{.arg maxncov} must be a positive integer.")
+  }
+  if (!is.null(weights) && (!is.numeric(weights) || length(weights) != nrow(data))) {
+    cli::cli_abort("{.arg weights} must be NULL or a numeric vector with one value per row of {.arg data}.")
+  }
+  if (!is.null(ensure)) {
+    if (!is.list(ensure) || !length(ensure) || is.null(names(ensure)) ||
+        any(!nzchar(names(ensure))) || anyDuplicated(names(ensure))) {
+      cli::cli_abort("{.arg ensure} must be NULL or a uniquely named list of logical flag vectors.")
+    }
+    for (nm in names(ensure)) {
+      f <- ensure[[nm]]
+      if (!is.logical(f) || anyNA(f)) {
+        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] must be a NA-free logical vector aligned with the predictors.")
+      }
+      # Named flags are re-indexed to the supported predictors; unnamed flags
+      # must already match the (possibly intersected) predictor set in order.
+      if (!is.null(names(f))) {
+        f <- f[match(env_vars, names(f))]
+      } else if (length(f) != length(env_vars)) {
+        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] must be a logical vector of length {length(env_vars)} aligned with the predictors.")
+      }
+      if (anyNA(f)) {
+        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] does not cover all predictors.")
+      }
+      ensure[[nm]] <- f
+    }
+  }
 
   if (identical(method, "full")) {
     scores <- data.frame(variable = env_vars, assoc = NA_real_,
@@ -139,6 +269,11 @@ cast_select <- function(data, response = "presence",
                            method = "full", diagnostics = list(keep = keep)))
   }
 
+  if (identical(method, "covsel")) {
+    return(.cast_covsel_select(data, response, env_vars, keep, corcut,
+                               var_id, category, algorithms, ncov, maxncov,
+                               weights, ensure, seed, verbose))
+  }
   # ---- Stage 1: quadratic-logistic ranking + greedy pairwise |r| <= 0.7 ----
   assoc <- vapply(env_vars, function(v)
     abs(suppressWarnings(stats::cor(data[[v]], data[[response]],
@@ -540,4 +675,351 @@ cast_select <- function(data, response = "presence",
        diagnostics = list(inner_method = inner$method, null_loss = null_res$loss,
                           final_loss = cur$loss, n_fits = n_fits,
                           status = "selected"))
+}
+
+# ========================================================================
+# method = "covsel": the two-step embedded selection of Adde et al. (2023)
+# Step A (filter): hierarchical collinearity thinning -- one covariate per
+#   variable (corcut = 0), then per category (corcut), then globally (corcut),
+#   ranking by the smaller p of the two poly(x, 2) logistic terms. Forced
+#   covariates (`keep`) bypass thinning and drop their collinear partners.
+# Step B (embed): model-specific embedded selection -- GLM elastic net,
+#   GAM null-space penalisation, guided regularised RF -- each ranking the
+#   survivors; the average-rank table keeps covariates selected by every
+#   algorithm first, then the union, subset to ncov = ceiling(log2(n_pres)) - 1
+#   (capped at maxncov). If no algorithm retains anything, the filtered set is
+#   returned (the sabinaNSDM "nocorr" default).
+# ========================================================================
+
+.cast_covsel_select <- function(data, response, env_vars, keep, corcut,
+                                var_id, category, algorithms, ncov, maxncov,
+                                weights, ensure, seed, verbose) {
+  pa <- as.integer(data[[response]])
+  w <- if (is.null(weights)) rep(1, length(pa)) else as.numeric(weights)
+  assoc <- vapply(env_vars, function(v)
+    abs(suppressWarnings(stats::cor(data[[v]], data[[response]],
+        use = "pairwise.complete.obs"))), numeric(1))
+  assoc[!is.finite(assoc)] <- 0
+  stage1_p <- vapply(env_vars, function(v) .cast_stage1_p(data, response, v),
+                     numeric(1))
+
+  # ---- Step A: hierarchical collinearity filter --------------------------
+  X <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
+  for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
+  thinned <- stats::setNames(rep(FALSE, length(env_vars)), env_vars)
+  filter_level <- stats::setNames(rep(NA_character_, length(env_vars)), env_vars)
+  pool <- env_vars
+  # Level 1 -- one covariate per variable (corcut = 0 is structural: a
+  # "representative" is exactly one measurement of the same construct).
+  if (!is.null(var_id)) {
+    grp <- split(pool, var_id[match(pool, env_vars)])
+    out <- .cast_filter_group(grp, X, pa, w, keep, corcut = 0)
+    pool <- unlist(out$kept, use.names = FALSE)
+    dropped <- setdiff(unlist(grp, use.names = FALSE), pool)
+    dropped <- setdiff(dropped, keep)
+    thinned[dropped] <- TRUE
+    filter_level[dropped] <- "variable"
+    if (verbose) {
+      cli::cli_inform("covsel Step A (variable level): {length(unlist(grp, use.names = FALSE))} -> {length(pool)} covariates (one per variable).")
+    }
+  }
+  # Level 2 -- per category
+  if (!is.null(category)) {
+    grp <- split(pool, category[match(pool, env_vars)])
+    out <- .cast_filter_group(grp, X, pa, w, keep, corcut = corcut)
+    pool <- unlist(out$kept, use.names = FALSE)
+    dropped <- setdiff(unlist(grp, use.names = FALSE), pool)
+    dropped <- setdiff(dropped, keep)
+    thinned[dropped] <- TRUE
+    filter_level[dropped] <- "category"
+    if (verbose) {
+      cli::cli_inform("covsel Step A (category level): -> {length(pool)} covariates (|r| <= {corcut}).")
+    }
+  }
+  # Level 3 -- global remainder
+  if (length(pool) > 1L) {
+    kept <- .cast_filteralgo(X[, pool, drop = FALSE], pa, w, keep, corcut)
+    dropped <- setdiff(pool, kept)
+    dropped <- setdiff(dropped, keep)
+    thinned[dropped] <- TRUE
+    filter_level[dropped] <- "global"
+    pool <- c(setdiff(kept, keep), keep)
+  }
+  filtered <- pool
+  if (verbose) {
+    cli::cli_inform("covsel Step A done: {length(env_vars)} -> {length(filtered)} non-collinear covariates.")
+  }
+
+  # ---- Step B: embedded selection ----------------------------------------
+  n_pres <- sum(pa == 1L)
+  ncov_use <- if (is.null(ncov)) max(1L, ceiling(log2(n_pres)) - 1L) else as.integer(ncov)
+  ncov_use <- min(ncov_use, maxncov)
+  embed <- .cast_embed_select(X[, filtered, drop = FALSE], pa, w,
+                              algorithms = algorithms, ncov = ncov_use,
+                              seed = seed, verbose = verbose)
+  if (is.null(embed)) {
+    cli::cli_warn(c(
+      "No covariate survived the embedded selection; keeping the filtered set.",
+      "i" = "This mirrors the sabinaNSDM default (maxncov = 'nocorr')."))
+    selected <- filtered
+    reason <- stats::setNames(rep("filter", length(selected)), selected)
+    ranks_2 <- data.frame(covariate = filtered, rank.f = seq_along(filtered))
+  } else {
+    selected <- embed$selected
+    reason <- stats::setNames(rep("embed", length(selected)), selected)
+    ranks_2 <- embed$ranks_2
+  }
+  reason[keep] <- "prespecified"
+  # ---- Coverage requirements (ensure) --------------------------------------
+  # A declared flag (e.g. climate, from covariate provenance) that the final
+  # set does not cover is topped up with its strongest Step-A-ranked survivor.
+  # The rule names no variable: the admitted covariate is whatever the data
+  # ranks strongest, so the mechanism is species-agnostic while the outcome
+  # adapts. Coverage guarantees the projection is answerable; it is not a
+  # claim that the ensured covariate matters (importance reporting decides).
+  ensured <- character(0)
+  if (!is.null(ensure)) {
+    for (nm in names(ensure)) {
+      flag <- ensure[[nm]]
+      covered <- any(flag[match(union(keep, selected), env_vars)])
+      if (covered) next
+      cand <- intersect(filtered, env_vars[flag])
+      if (!length(cand)) cand <- env_vars[flag]
+      if (!length(cand)) {
+        cli::cli_warn("ensure[[{.val {nm}]] matches no predictor; coverage cannot be satisfied.")
+        next
+      }
+      p <- stage1_p[match(cand, env_vars)]
+      pick <- cand[order(is.na(p), p, cand)][1]
+      selected <- c(selected, pick)
+      ensured <- c(ensured, pick)
+      reason[pick] <- "ensured"
+      if (verbose) {
+        cli::cli_inform("covsel ensure: no {.val {nm}} covariate admitted; adding the strongest-ranked survivor {.val {pick}}.")
+      }
+    }
+  }
+  selected <- union(keep, selected)
+
+  step_added <- stats::setNames(rep(NA_integer_, length(env_vars)), env_vars)
+  rk <- ranks_2$rank.f
+  names(rk) <- ranks_2$covariate
+  common <- intersect(names(rk), env_vars)
+  step_added[common] <- as.integer(rk[common])
+  scores <- data.frame(
+    variable = env_vars,
+    assoc = unname(assoc[env_vars]),
+    stage1_p = unname(stage1_p[env_vars]),
+    stage1_rank = NA_integer_,
+    collinear_thinned = unname(thinned[env_vars]),
+    step_added = unname(step_added[env_vars]),
+    loss_gain = NA_real_,
+    kept_by_design = env_vars %in% keep,
+    selected_reason = unname(ifelse(
+      env_vars %in% keep, "prespecified",
+      ifelse(env_vars %in% selected, unname(reason[env_vars]), "excluded"))),
+    selected = env_vars %in% selected,
+    stringsAsFactors = FALSE)
+  scores$selected_reason[is.na(scores$selected_reason)] <- "excluded"
+  new_cast_select(selected = selected, scores = scores, method = "covsel",
+                  diagnostics = list(
+                    keep = keep, corcut = corcut, algorithms = algorithms,
+                    ncov = ncov_use, maxncov = maxncov, ensured = ensured,
+                    filter_level = filter_level, filtered = filtered,
+                    embed_ranks = if (is.null(embed)) NULL else embed$ranks_1,
+                    final_ranks = ranks_2, n_pres = n_pres))
+}
+
+# ---- covsel Step A: greedy collinearity thinning (covsel.filteralgo) ------
+# Ranks candidates by the smaller p of the two poly(x, 2) logistic terms,
+# then greedily keeps the top-ranked covariate and drops everything
+# correlated with it beyond `corcut`, repeating on the remainder. Forced
+# covariates are kept and their collinear partners removed up front.
+.cast_filteralgo <- function(covdata, pa, weights = NULL, force = NULL,
+                             corcut = 0.7) {
+  candidates <- names(covdata)
+  if (ncol(covdata) <= 1L) return(candidates)
+  # Drop covariates with fewer than 10 unique values (unless forced): the
+  # embedding step needs variation to fit.
+  nuniq <- vapply(covdata, function(x) length(unique(stats::na.omit(x))), integer(1))
+  drop <- setdiff(candidates[nuniq < 10L], force)
+  if (length(drop)) covdata <- covdata[, setdiff(candidates, drop), drop = FALSE]
+  if (ncol(covdata) <= 1L) return(names(covdata))
+  # Forced covariates: keep, and remove their collinear partners.
+  force_in <- intersect(force, names(covdata))
+  if (length(force_in)) {
+    cm <- abs(stats::cor(covdata, use = "pairwise.complete.obs"))
+    partners <- unique(unlist(lapply(force_in, function(f)
+      setdiff(names(which(cm[, f] > corcut)), force_in))))
+    if (length(partners)) covdata <- covdata[, setdiff(names(covdata), partners), drop = FALSE]
+  }
+  if (ncol(covdata) <= 1L) return(names(covdata))
+  # Rank by the quadratic-logistic signal (same statistic as stage 1).
+  res <- sort(vapply(names(covdata), function(v) {
+    x <- suppressWarnings(as.numeric(covdata[[v]]))
+    ok <- is.finite(x) & !is.na(pa)
+    if (sum(ok) < 10L || stats::sd(x[ok]) <= 0) return(NA_real_)
+    fit <- suppressWarnings(stats::glm(pa[ok] ~ stats::poly(x[ok], degree = 2),
+                                       family = stats::binomial(),
+                                       weights = if (is.null(weights)) NULL else weights[ok]))
+    co <- suppressWarnings(summary(fit)$coefficients)
+    if (is.null(co) || nrow(co) < 3L) return(NA_real_)
+    p <- suppressWarnings(min(co[2:3, 4], na.rm = TRUE))
+    if (!is.finite(p)) NA_real_ else p
+  }, numeric(1)))
+  ord <- names(res)   # sort() already orders by p (NA last), ties by name
+  covdata <- covdata[, ord, drop = FALSE]
+  # Greedy thinning: keep the head, drop its correlated partners, repeat.
+  sanctuaire <- character(0)
+  cm <- abs(stats::cor(covdata, use = "pairwise.complete.obs"))
+  if (all(cm[cm != 1] < corcut)) {
+    sanctuaire <- names(covdata)
+  } else {
+    while (ncol(cm) > 1L) {
+      var.name <- colnames(cm)[1]
+      sanctuaire <- c(sanctuaire, var.name)
+      ix <- which(cm[, 1] <= corcut)
+      cm <- cm[ix, ix, drop = FALSE]
+      if (all(cm[cm != 1] < corcut)) {
+        sanctuaire <- c(sanctuaire, colnames(cm))
+        break
+      }
+    }
+    if (!length(sanctuaire)) sanctuaire <- colnames(cm)
+  }
+  # Forced covariates are always retained.
+  c(setdiff(sanctuaire, force), force_in)
+}
+
+# Apply .cast_filteralgo per group and re-label the results.
+.cast_filter_group <- function(grp, X, pa, weights, force, corcut) {
+  kept <- lapply(grp, function(vs) {
+    vs <- vs[vs %in% names(X)]
+    .cast_filteralgo(X[, vs, drop = FALSE], pa, weights, force, corcut)
+  })
+  list(kept = kept)
+}
+
+# ---- covsel Step B: model-specific embedded selection --------------------
+# Three regularised learners rank the filtered covariates; the aggregate
+# table prefers covariates selected by every learner, then the union.
+.cast_embed_select <- function(covdata, pa, weights = NULL,
+                               algorithms = c("glm", "gam", "rf"), ncov = 10L,
+                               seed = NULL, verbose = FALSE) {
+  algorithms <- tolower(algorithms)
+  # glmnet and mgcv are deterministic; the guided RRF is not. Seed once here
+  # so the whole embedding (and therefore the selection) is reproducible.
+  if (!is.null(seed)) set.seed(seed)
+  ranks_1 <- data.frame(covariate = character(0), rank = integer(0),
+                        model = character(0), stringsAsFactors = FALSE)
+  if ("glm" %in% algorithms) {
+    r <- try({
+      check_suggested("glmnet", "for the covsel elastic-net embedding")
+      form <- stats::as.formula(paste0(
+        "as.factor(pa) ~ ",
+        paste(paste0("poly(`", names(covdata), "`, 2)"), collapse = " + "), "-1"))
+      x <- stats::model.matrix(form, cbind(covdata, pa = pa))
+      mdl <- suppressWarnings(glmnet::cv.glmnet(
+        x, as.factor(pa), alpha = 0.5, weights = weights, family = "binomial",
+        type.measure = "deviance"))
+      b <- as.matrix(stats::coef(mdl, s = mdl$lambda.1se))
+      b <- data.frame(covariate = rownames(b), coef = abs(as.numeric(b[, 1])))
+      b <- b[b$coef > 0 & b$covariate != "(Intercept)", , drop = FALSE]
+      if (nrow(b) < 1L) {
+        b <- as.matrix(stats::coef(mdl, s = mdl$lambda.min))
+        b <- data.frame(covariate = rownames(b), coef = abs(as.numeric(b[, 1])))
+        b <- b[b$coef > 0 & b$covariate != "(Intercept)", , drop = FALSE]
+      }
+      if (nrow(b) >= 1L) {
+        b$covariate <- sub("^poly\\(`?(.*)`?,\\s*2\\)[0-9]+$", "\\1", b$covariate)
+        b <- b[order(-b$coef), , drop = FALSE]
+        b <- b[!duplicated(b$covariate), , drop = FALSE]
+        data.frame(covariate = b$covariate, rank = seq_len(nrow(b)),
+                   model = "glm", stringsAsFactors = FALSE)
+      } else NULL
+    }, silent = TRUE)
+    if (!inherits(r, "try-error") && !is.null(r)) {
+      ranks_1 <- rbind(ranks_1, r)
+    } else if (verbose) {
+      cli::cli_inform("covsel embed: glm branch produced no selection.")
+    }
+  }
+  if ("gam" %in% algorithms) {
+    r <- try({
+      check_suggested("mgcv", "for the covsel GAM embedding")
+      form <- stats::as.formula(paste0(
+        "pa ~ ", paste(paste0("s(`", names(covdata), "`, bs = 'cr')"),
+                       collapse = " + ")))
+      mdl <- suppressWarnings(mgcv::bam(
+        form, data = cbind(covdata, pa = pa), weights = weights,
+        family = stats::binomial(), method = "fREML", select = TRUE,
+        discrete = TRUE))
+      tb <- summary(mdl)$s.table
+      keep <- rownames(tb)[tb[, "p-value"] < 0.9]
+      if (length(keep)) {
+        ord <- keep[order(-abs(tb[keep, "Chi.sq"]))]
+        ord <- sub("^s\\(`?(.*)`?\\)$", "\\1", ord)
+        data.frame(covariate = ord, rank = seq_along(ord), model = "gam",
+                   stringsAsFactors = FALSE)
+      } else NULL
+    }, silent = TRUE)
+    if (!inherits(r, "try-error") && !is.null(r)) {
+      ranks_1 <- rbind(ranks_1, r)
+    } else if (verbose) {
+      cli::cli_inform("covsel embed: gam branch produced no selection.")
+    }
+  }
+  if ("rf" %in% algorithms) {
+    r <- try({
+      check_suggested("RRF", "for the covsel guided-RF embedding")
+      w <- if (is.null(weights)) rep(1, length(pa)) else weights
+      rf0 <- RRF::RRF(covdata, as.factor(pa), flagReg = 0)
+      imp <- rf0$importance[, "MeanDecreaseGini"]
+      gamma <- 0.5
+      coefReg <- (1 - gamma) + gamma * (imp / max(imp))
+      mdl <- RRF::RRF(covdata, as.factor(pa),
+                      classwt = c("0" = min(w), "1" = max(w)),
+                      coefReg = coefReg, flagReg = 1)
+      imp2 <- mdl$importance[, "MeanDecreaseGini"]
+      keep <- names(imp2)[imp2 > 0]
+      if (length(keep)) {
+        ord <- keep[order(-imp2[keep])]
+        data.frame(covariate = ord, rank = seq_along(ord), model = "rf",
+                   stringsAsFactors = FALSE)
+      } else NULL
+    }, silent = TRUE)
+    if (!inherits(r, "try-error") && !is.null(r)) {
+      ranks_1 <- rbind(ranks_1, r)
+    } else if (verbose) {
+      cli::cli_inform("covsel embed: rf branch produced no selection.")
+    }
+  }
+  if (!nrow(ranks_1)) return(NULL)
+  # Aggregate: covariates selected by every learner first (by summed rank),
+  # then the union-ranked remainder.
+  n_models <- length(unique(ranks_1$model))
+  in_all <- names(which(table(ranks_1$covariate) == n_models))
+  parts <- list()
+  if (length(in_all)) {
+    inter <- ranks_1[ranks_1$covariate %in% in_all, , drop = FALSE]
+    inter <- stats::aggregate(rank ~ covariate, data = inter, FUN = sum)
+    inter <- inter[order(inter$rank), , drop = FALSE]
+    inter$rank.f <- seq_len(nrow(inter))
+    parts[["inter"]] <- inter[, c("covariate", "rank.f")]
+  }
+  rest <- ranks_1[!ranks_1$covariate %in% in_all, , drop = FALSE]
+  if (nrow(rest)) {
+    rest <- stats::aggregate(rank ~ covariate, data = rest, FUN = sum)
+    rest <- rest[order(rest$rank), , drop = FALSE]
+    start <- if (length(parts)) max(parts[["inter"]]$rank.f) + 1L else 1L
+    rest$rank.f <- seq.int(start, length.out = nrow(rest))
+    parts[["rest"]] <- rest[, c("covariate", "rank.f")]
+  }
+  if (!length(parts)) return(NULL)
+  ranks_2 <- do.call(rbind, parts)
+  ncov <- min(ncov, nrow(ranks_2))
+  sel <- ranks_2$covariate[seq_len(ncov)]
+  # Keep only covariates that exist in the input set (label hygiene).
+  sel <- intersect(sel, names(covdata))
+  list(selected = sel, ranks_1 = ranks_1, ranks_2 = ranks_2)
 }

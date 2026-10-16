@@ -1,118 +1,55 @@
 # castSDM
 
-`castSDM` is a species distribution modelling package built around one
-question: **if a driver moved, what would happen to predicted suitability, and
-where is that answer actually supported by data?**
+**Environmental drivers and spatial attribution of habitat change.**
 
-Two products carry that:
+中文入口：[castSDM回答什么、四张结果图怎么读](tools/workflows/START_HERE_ZH.md)。
 
-- **Shift effects.** `cast_effect_table()` and `cast_effect_map()`
-  apply a single raw-unit shift to one driver while holding every other
-  driver at its observed value (for example `bio01 + 2` degrees), and
-  report the resulting change in predicted suitability as a magnitude and a
-  direction, per driver and per input raster cell.
-- **Hard range-masking.** Rows or cells outside the training quantile box —
-  at baseline or after shifting — are masked, not ranked. Masked drivers
-  report `NA` estimates. High coverage does not establish joint positivity
-  or causal identification.
-
-## Variable selection is a spatial forward search
-
-`cast_select()` is a two-stage screen:
-
-1. **Collinearity thinning.** Rank predictors by a univariate
-   quadratic-logistic signal, then greedily keep predictors whose pairwise
-   correlation with all kept predictors is at most 0.7 (Dormann et al. 2013).
-2. **Forward selection on inner spatial-CV loss.** Starting from prespecified
-   predictors (if any), repeatedly admit the survivor that most improves the
-   held-out loss of a probability random forest — spatial folds when
-   coordinates exist — and stop when no candidate passes a paired 2-SE
-   improvement guard. A redundant proxy adds nothing once its parents are in,
-   so it is never admitted. There is no predictor-count cap and no fallback
-   set: an empty selection honestly means nothing beat the intercept-only
-   model (Meyer et al. 2018, 2019).
-
-Stopping is performance-driven, not count-driven. The screen serves
-parsimony for interpretation and projection; it does not identify a causal
-adjustment set.
-
-Selection is re-run inside every outer spatial training fold, so held-out folds
-never influence variable choice or tuning.
-
-## Core workflow
+castSDM asks where an environmental change improves or reduces predicted
+habitat suitability, and how individual drivers contribute to future habitat
+change. Use one fitted SDM, paired current/future environments and frozen model
+weights throughout each comparison.
 
 ```r
-library(castSDM)
-
-result <- cast(
-  species_data,
-  env_data = prediction_grid,
-  models = c("rf", "brt", "maxent", "gam"),
-  tune = TRUE,   # per-engine hyperparameter grid search inside the CV folds
-  do_cv = TRUE,
-  seed = 42
-)
-
-summary(result)
-plot(result$screen)          # forward-selection path: admission steps and gains
+# Models can be fitted in another tool; supply its prediction method.
+fit <- cast_as_fit(list(gam = fitted_gam), training_predictors,
+  function(model, newdata) predict(model, newdata, type = "response"))
+attribution <- cast_attribution(fit, current, future)
+plot(attribution, contrast = "retained")
+plot(attribution, type = "map", driver = "temperature")
 ```
 
-Background sampling supports user-defined points (`cast_background(user_table =)`)
-and bias-surface (target-group) weighting (`cast_background(bias_raster =)`,
-Phillips et al. 2009), plus the Barbet-Massin et al. (2012) designs
-`strategy = "sre"` (environmental envelope) and `strategy = "disk"`
-(distance band around presences), and `n_rep =` replicate pseudo-absence
-sets. Clumped occurrence records can be thinned first with
-`cast_thin(occurrences, min_dist_km = 5)`.
+`effect_<driver>` changes only that predictor to its actual future values.
+`retained_<driver>` compares the full future with a future where that predictor
+stays current. Their difference exposes context-dependent responses; individual
+effects are not additive. `total_change` is the complete future/current contrast.
+The remainder also includes changes in any drivers omitted from the comparison.
 
-Fitted models accept `prevalence_target =` (presence-background weighting,
-weight = target/n per class) in `cast_fit()`, `cast_cv()` and `cast()`.
-Interpret the fits with `cast_response_curves()` (fixed-profile or partial
-dependence curves, plus optional two-variable interaction grids and a
-`plot()` method), and quantify blocking uncertainty with
-`cast_cv(n_repeat =)` (between-repeat standard deviation of the metrics).
+Tables and aligned rasters use the same numerical implementation. Raster outputs
+are written in bounded blocks; plots use the package's existing cartographic
+assets. Raw comparisons and within-range summaries are reported separately.
+Cross-model standard deviations describe model disagreement, not confidence
+intervals. Presence/background predictions are relative suitability; these
+comparisons do not identify ecological causal effects or realized colonisation.
 
-Attribution (give ecologically meaningful raw-unit shifts where possible):
+Existing fitting, spatial validation, projection and single-shift effect APIs
+remain available. Mature engine packages perform model fitting.
+`cast_as_fit()` accepts an explicit prediction callback; `cast_cv(fold_ids = ...)`
+accepts spatial groups designed with tools such as blockCV. External fits need
+an explicit training reference and comparable suitability scales; they do not
+automatically inherit valid evaluation scores.
 
-```r
-eff <- cast_effect_table(result$fit, newdata = current_grid,
-                         shift = list(bio01 = 2))
-eff                                  # rank supported drivers; masked read NA
-
-emap <- cast_effect_map(result$fit, current_stack,
-                        shift = list(bio01 = 2))   # dHSS_* / absdHSS_* / support_*
-```
-
-The pipeline runs:
-
-```text
-prepare -> two-stage selection -> fit -> nested spatial CV -> evaluate
-        -> predict -> ensemble -> projection -> shift attribution
-```
-
-## Main functions
-
-| Stage | Functions |
-|---|---|
-| Study design | `cast_study_area()`, `cast_background()` (random, user-defined, bias-weighted, environmental, SRE, disk; replicate sets), `cast_thin()` |
-| Preparation | `cast_prepare()`, `get_env_vars()`, `cast_vif()` |
-| Variable selection | `cast_select()`, `cast_importance()` |
-| Modelling | `cast_fit()` (optional per-engine hyperparameter tuning, prevalence weighting) |
-| Validation | `cast_cv()` (replicated blocking, km/degree buffers, env blocking, AOA calibration, nested tuning), `cast_evaluate()` |
-| Prediction | `cast_predict()` (MESS + AOA extrapolation flags), `cast_predict_tiled()` |
-| Ensemble/projection | `cast_ensemble()` (score-power weighting), `cast_ensemble_by()`, `cast_ensemble_importance()`, `cast_project()`, `cast_project_raster()` (biomod2-compatible change coding) |
-| Diagnostics | `cast_response_curves()`, `cast_effect_table()`, `cast_effect_map()` |
-| Reporting | `cast_report_odmap()` |
-
-## Model backends
-
-- Random Forest: `ranger`
-- BRT: `gbm`
-- MaxEnt: `maxnet`
-- GAM: `mgcv`
-
-Optional functionality is activated only when its suggested package is
-installed. Package installation is never attempted during a model run.
+The [research workflows](tools/workflows/README.md) include the complete
+Schizopygopsis case configuration, the independent method-validation protocol
+and R figure scripts. The [validation results](tools/workflows/core_method_validation/RESULTS_20261016.md)
+retain negative cases and model-dependent limitations.
+The [development review](tools/workflows/POSITIONING_AND_CODE_AUDIT_20261016.md) records
+the repaired code paths, remaining scientific limits and retained assets.
+The maintained case report has four main figures: model evaluation, habitat
+change, environmental driver comparisons, and range/model disagreement.
+Detailed optional diagnostics remain available without filling the default report.
+Schizopygopsis is a genus-level workflow demonstration. The separate
+[species validation plan](tools/workflows/core_method_validation/ECOLOGICAL_VALIDATION_PLAN_20261016.md)
+records candidate data quality and the independent ecological evidence still needed.
 
 ## Installation
 
@@ -137,36 +74,25 @@ change coding.
 
 ## Interpretation
 
-- Effect tables and maps are **model-based shift
-  contrasts** (g-computation / standardization) for one stated raw-unit
-  shift. A causal interpretation needs consistency of that shift, a
-  justified adjustment set, no uncontrolled confounding, joint
-  positivity, and adequate response and observation models. These assumptions
-  are not established by the software. The estimator is not doubly robust.
-- Masking reports the fraction of evaluated rows or cells whose baseline
-  and shifted predictor vectors both fall inside the training quantile box;
-  masked units carry `NA` estimates instead of extrapolated rankings.
-  This range diagnostic cannot detect holes inside the box or establish joint
-  positivity. `min_support` (default 0.5) is a descriptive coverage rule,
-  not causal estimability.
-- Holding other predictors fixed does not guarantee a feasible intervention.
-  In particular, mediators, colliders and deterministically linked predictors
-  need scientific treatment rather than automatic inclusion or selection.
-- On presence/background data the scale is **relative suitability, not
-  occurrence probability**.
-- `cast_select(keep = c("exposure", "confounder"))` protects a prespecified
-  exposure/adjustment set from thinning and from the forward search: kept
-  predictors enter at step 0 no matter what the data say.
-  `cast(select_keep = ...)` also protects it inside nested CV. Optional
-  candidates must still be scientifically admissible. `kept_by_design` is not
-  statistical evidence, and screening does not identify a sufficient
-  adjustment set.
-- Selected variables are ordered by forward-admission step.
-  Selection is a model-based screen, not a list of causes.
-- Future projections assume the learned response relationship remains
-  applicable under the projected environment.
-- `cast_report_odmap()` renders the analysis settings as an ODMAP-aligned
-  report (Zurell et al. 2020).
+- Driver-only maps answer: how would suitability change if this predictor took
+  its future values while the others stayed current? Retained-driver maps ask
+  how much the complete future differs when that predictor stays current.
+- These are comparisons of a fitted response. Correlated predictors, missing
+  ecological processes and observation bias can change their meaning; the
+  software does not establish which environmental factor caused observed habitat change.
+- Training-range flags show whether the compared environments fall within each
+  predictor's training quantiles. They cannot detect every unsupported joint
+  combination. Raw scenario contrasts and supported summaries are separate.
+- Single-shift effect products use one declared raw-unit or training-SD shift.
+  Their hard masking can produce `NA`; this records insufficient coverage.
+- `cast_select(keep = ...)` preserves scientifically chosen predictors.
+  Variable selection and embedded ranks describe a predictive screen, not evidence
+  that an environmental variable causes the distribution.
+- Future projections assume the learned response remains applicable. Static
+  layers stay static unless supplied with future values. Thresholded habitat
+  area additionally depends on the chosen operating threshold and spatial mask.
+- `cast_report_odmap()` records the analysis settings in an ODMAP-aligned report
+  (Zurell et al. 2020).
 
 ## References
 

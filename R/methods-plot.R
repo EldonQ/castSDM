@@ -18,7 +18,17 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  imp_candidates <- c("loss_gain", "freq", "assoc")
+  # The score to plot must be the ONE the method actually ranked by. A
+  # method-blind fallback chain (loss_gain -> freq -> assoc) silently plotted
+  # |marginal association| for covsel, whose filter ranks on the poly(x, 2)
+  # logistic term instead -- so the panel advertised a ranking the method
+  # never used. stage1_p is the covsel filter's ranking statistic; loss_gain
+  # is the two_stage forward-search's; freq is the CV-selection frequency.
+  imp_candidates <- if (identical(x$method, "covsel")) {
+    c("stage1_p", "assoc")
+  } else {
+    c("loss_gain", "freq", "assoc")
+  }
   imp_col <- imp_candidates[imp_candidates %in% names(scr)]
   imp_col <- imp_col[vapply(imp_col, function(nm)
     any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
@@ -26,7 +36,17 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
     scr$importance_plot <- as.numeric(scr$is_selected)
     imp_col <- "importance_plot"
   }
-  scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
+  # p-values span orders of magnitude; plot them on a log10 axis so the
+  # ranking is readable while the legend keeps true values.
+  log10_p <- identical(imp_col, "stage1_p")
+  if (log10_p) {
+    p_raw <- suppressWarnings(as.numeric(scr$stage1_p))
+    p_raw[!is.finite(p_raw) | p_raw <= 0] <- NA_real_
+    scr$filter_score <- -log10(p_raw)
+    imp_col <- "filter_score"
+  } else {
+    scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
+  }
 
   n_total <- nrow(scr)
   n_sel <- sum(scr$is_selected)
@@ -56,13 +76,14 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr$category <- factor(.cast_var_category(scr$variable), levels = names(pal))
 
   sub_txt <- sprintf(
-    "%d / %d predictors retained \u00b7 %d scored by %s",
+    "%d of %d predictors retained \u00b7 %d scored by the %s filter",
     n_sel, n_total, n_tested, x$method %||% "unknown method"
   )
 
   x_lab <- switch(imp_col,
     loss_gain = "CV loss improvement",
     freq = "Fold selection frequency",
+    filter_score = "Filter score  (-log10 p of the quadratic-logistic term)",
     assoc = "|marginal association|",
     importance_plot = "Selection indicator",
     "Predictor score"
@@ -328,22 +349,44 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
   }
   score_range <- range(c(0, 1, fd[[mcol]]), na.rm = TRUE)
   pd <- ggplot2::position_dodge(width = 0.6)
+  # Shaded band behind every unusable fold. The label already carried the
+  # status, but a two-line tick is easy to skim past; the band makes "this
+  # fold produced no metric" visible without reading.
+  band <- NULL
+  if (!is.null(x$fold_status)) {
+    unav <- which(!is.na(x$fold_status) & x$fold_status != "evaluated")
+    if (length(unav)) {
+      band <- ggplot2::geom_rect(
+        data = data.frame(fold = factor(unav, levels = seq_len(x$k))),
+        mapping = ggplot2::aes(xmin = as.numeric(.data$fold) - 0.5,
+                               xmax = as.numeric(.data$fold) + 0.5,
+                               ymin = -Inf, ymax = Inf),
+        fill = "grey90", alpha = 0.45, inherit.aes = FALSE)
+    }
+  }
   p_metric <- ggplot2::ggplot(
     fd,
     ggplot2::aes(x = .data$fold, y = .data[[mcol]],
                  color = .data$model, group = .data$model)
   ) +
+    band +
     ggplot2::geom_point(size = 2.5, position = pd, na.rm = TRUE) +
     ggplot2::geom_text(
-      ggplot2::aes(y = score_range[1], label = .data$tag), position = pd,
-      angle = 90, hjust = 0, size = 2.2, show.legend = FALSE
+      ggplot2::aes(y = score_range[1] +
+        (as.numeric(.data$model) - 1) * diff(score_range) * 0.035,
+        label = .data$tag), position = pd,
+      angle = 0, hjust = 0.5, size = 2.2, show.legend = FALSE
     ) +
     ggplot2::scale_color_manual(values = model_colors, breaks = models,
                                 labels = model_labels, name = NULL, drop = FALSE) +
     ggplot2::scale_x_discrete(drop = FALSE, labels = fold_labels) +
     ggplot2::labs(
       title = sprintf("Per-fold %s", toupper(mcol)),
-      subtitle = sprintf("%d-fold spatial block CV (%s)", x$k, x$block_method),
+      subtitle = sprintf("%d-fold spatial block CV (%s)%s", x$k, x$block_method,
+        if (!is.null(x$fold_status) &&
+            any(x$fold_status != "evaluated", na.rm = TRUE))
+          sprintf("; %d fold(s) unusable (shaded)",
+                  sum(x$fold_status != "evaluated", na.rm = TRUE)) else ""),
       x = "Spatial fold", y = toupper(mcol),
       caption = "n.a. = metric unavailable\nLegend: finite / planned folds"
     ) +
@@ -618,12 +661,38 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   eff <- x$effects
-  eff <- eff[!is.na(eff$step_added) & is.finite(eff$loss_gain), , drop = FALSE]
-  if (!is.null(top) && is.finite(top)) {
-    eff <- utils::head(eff[order(-eff$loss_gain), , drop = FALSE],
-                       as.integer(top))
-  }
   n_out <- sum(is.na(x$effects$step_added))
+  has_gain <- "loss_gain" %in% names(eff) && any(is.finite(eff$loss_gain))
+  if (has_gain) {
+    # two_stage screens: the inner-CV loss improvement at admission.
+    eff <- eff[!is.na(eff$step_added) & is.finite(eff$loss_gain), , drop = FALSE]
+    if (!is.null(top) && is.finite(top)) {
+      eff <- utils::head(eff[order(-eff$loss_gain), , drop = FALSE],
+                         as.integer(top))
+    }
+    eff <- eff[order(eff$loss_gain), ]
+    x_measure <- eff$loss_gain
+    x_label <- "Inner-CV loss improvement at admission"
+    plot_title <- "Forward-selection path"
+    plot_subtitle <- sprintf(
+      "Inner-CV %s improvement at admission | %d admitted, %d screened out",
+      x$metric %||% "loss", nrow(eff), n_out)
+  } else {
+    # covsel screens: no loss path exists; the admission order is the
+    # Adde et al. (2023) aggregate rank (1 = strongest).
+    eff <- eff[!is.na(eff$step_added), , drop = FALSE]
+    if (!is.null(top) && is.finite(top)) {
+      eff <- utils::head(eff[order(eff$step_added), , drop = FALSE],
+                         as.integer(top))
+    }
+    eff <- eff[order(eff$step_added), ]
+    x_measure <- eff$step_added
+    x_label <- "Embedded-selection rank (1 = strongest)"
+    plot_title <- "Embedded-selection path"
+    plot_subtitle <- sprintf(
+      "%s | %d admitted, %d screened out",
+      x$metric %||% "aggregate rank", nrow(eff), n_out)
+  }
   if (!is.null(var_labels)) {
     eff$display <- ifelse(eff$variable %in% names(var_labels),
                           var_labels[eff$variable], eff$variable)
@@ -639,20 +708,20 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   )
 
   ggplot2::ggplot(eff, ggplot2::aes(
-    x = .data$loss_gain, y = .data$display
+    x = x_measure, y = .data$display
   )) +
-    ggplot2::geom_vline(xintercept = 0, linetype = "solid",
+    ggplot2::geom_vline(xintercept = if (has_gain) 0 else 0.5, linetype = "solid",
                         color = "grey50", linewidth = 0.4) +
     ggplot2::geom_segment(
-      ggplot2::aes(x = 0, xend = .data$loss_gain,
+      ggplot2::aes(x = if (has_gain) 0 else 0.5, xend = x_measure,
                    y = .data$display, yend = .data$display),
       linewidth = 0.6, color = "#B2182B"
     ) +
     ggplot2::geom_point(size = 2.6, color = "#B2182B") +
     ggplot2::labs(
-      title = "Forward-selection path",
+      title = plot_title,
       subtitle = plot_subtitle,
-      x = "Inner-CV loss improvement at admission", y = ""
+      x = x_label, y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(
@@ -681,13 +750,13 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
   d <- d[order(d$mean_abs_dHSS, na.last = TRUE), , drop = FALSE]
   d$display <- if (!is.null(var_labels)) {
     ifelse(d$driver %in% names(var_labels), var_labels[d$driver], d$driver)
-  } else d$driver
+  } else .cast_var_label(d$driver)
   d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
   d$direction <- ifelse(!is.finite(d$mean_signed_dHSS), "masked",
                         ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
                         "lowers suitability"))
   d$mask <- ifelse(is.finite(d$mean_abs_dHSS), "supported", "masked")
-  ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
+  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
                                   color = .data$direction)) +
     ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data$mean_abs_dHSS,
                                        y = .data$display, yend = .data$display),
@@ -696,10 +765,6 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
                         fill = "white") +
     ggplot2::scale_shape_manual(values = c(supported = 16, masked = 4),
                                 name = NULL) +
-    ggplot2::scale_color_manual(values = c(`raises suitability` = "#B2182B",
-                                           `lowers suitability` = "#2166AC",
-                                           masked = "grey50"),
-                                name = NULL) +
     ggplot2::labs(
       title = "Shift effect by driver",
       subtitle = "Magnitude with direction; cross = masked (shift not answerable in-box)",
@@ -707,6 +772,7 @@ plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(legend.position = "bottom")
+  .cast_effect_table_display(p, x, attr(x, "shift_type") %||% "raw")
 }
 
 
@@ -935,7 +1001,8 @@ load_basemap <- function(type = "world") {
 #' @noRd
 .add_china_south_sea_inset <- function(plot, basemap, data = NULL,
                                        value_var = NULL, scale = NULL,
-                                       raster = FALSE, bg_fill = "#F7F8F8") {
+                                       raster = FALSE, bg_fill = "#F7F8F8",
+                                       cell_size = NULL, alpha_col = NULL) {
   if (!identical(basemap, "china") ||
       !requireNamespace("sf", quietly = TRUE) ||
       !requireNamespace("ggplot2", quietly = TRUE)) return(plot)
@@ -954,10 +1021,23 @@ load_basemap <- function(type = "world") {
                   data$lat >= 1 & data$lat <= 27, , drop = FALSE]
     if (nrow(sub) > 0) {
       if (isTRUE(raster)) {
-        inset <- inset + ggplot2::geom_raster(
-          data = sub,
+        raster_aes <- if (!is.null(alpha_col) && alpha_col %in% names(sub)) {
+          ggplot2::aes(x = .data$lon, y = .data$lat,
+                       fill = .data[[value_var]], alpha = .data[[alpha_col]])
+        } else {
           ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[value_var]])
-        )
+        }
+        # Sparse display grids need their declared cell size; otherwise the
+        # raster geom infers spacing from gaps and may shift painted cells.
+        inset <- inset + if (is.null(cell_size)) {
+          ggplot2::geom_raster(data = sub, mapping = raster_aes)
+        } else {
+          ggplot2::geom_tile(data = sub, mapping = raster_aes,
+                             width = cell_size[1], height = utils::tail(cell_size, 1))
+        }
+        if (!is.null(alpha_col) && alpha_col %in% names(sub)) {
+          inset <- inset + ggplot2::scale_alpha_identity(guide = "none")
+        }
       } else {
         inset <- inset + ggplot2::geom_point(
           data = sub,
@@ -992,4 +1072,43 @@ load_basemap <- function(type = "world") {
     grob = ggplot2::ggplotGrob(inset),
     xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax
   )
+}
+
+.cast_effect_table_display <- function(p, tab, shift_type = "raw") {
+  d <- p$data
+  fin <- is.finite(d$mean_abs_dHSS)
+  if (!any(fin)) { d$mean_abs_dHSS[] <- NA_real_; r <- c(0, 1) } else r <- range(d$mean_abs_dHSS[fin])
+  span <- diff(r)
+  if (!is.finite(span) || span <= 0) span <- max(abs(r), 1)
+  gutter <- r[1] - 0.24 * span
+  d$.x_plot <- ifelse(fin, d$mean_abs_dHSS, gutter)
+  br <- pretty(r, n = 3)
+  br <- br[br >= r[1] & br <= r[2]]
+  sup <- ""
+  if (!is.null(tab) && "support" %in% names(tab)) {
+    s <- suppressWarnings(as.numeric(tab$support))
+    if (any(is.finite(s))) {
+      sup <- sprintf(" Training-range coverage %.0f-%.0f%%.",
+                     100 * min(s, na.rm = TRUE), 100 * max(s, na.rm = TRUE))
+      n <- suppressWarnings(as.numeric(tab$n))
+      if (length(n) && any(is.finite(n))) {
+        sup <- paste0(sup, " Evaluated records: ",
+                      format(max(n, na.rm = TRUE), big.mark = ","), ".")
+      }
+    }
+  }
+  p$data <- d
+  p +
+    ggplot2::aes(x = .data$.x_plot) +
+    ggplot2::scale_x_continuous(breaks = c(gutter, br),
+      labels = c("Not\nevaluated", format(br, trim = TRUE, digits = 3)),
+      expand = ggplot2::expansion(mult = c(0.03, 0.05))) +
+    ggplot2::scale_color_manual(
+      values = c(`raises suitability` = "#2166AC", `lowers suitability` = "#B35806", masked = "grey50"),
+      breaks = c("raises suitability", "lowers suitability"),
+      na.value = "grey50", name = NULL, drop = FALSE) +
+    ggplot2::labs(
+      x = if (shift_type == "sd") "Mean |suitability change| under the stated SD shift" else "Mean |suitability change| under the stated raw-unit shift",
+      subtitle = paste0("Magnitude with direction; cross = masked",
+        "(shift not answerable inside the training box).", sup))
 }

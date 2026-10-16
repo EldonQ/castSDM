@@ -66,3 +66,18 @@ test_that("cast_background preserves extra occurrence columns (M19)", {
   expect_identical(out$source[out$presence == 1], letters[1:5])
   expect_true(all(is.na(out$source[out$presence == 0])))
 })
+
+test_that("random rejection sampling fills the requested finite domain without duplicates", {
+  skip_if_not_installed("terra")
+  r <- .test_bg_raster(na_cells = 1:80)
+  terra::values(r[[2]])[81] <- Inf
+  xy <- terra::xyFromCell(r, 100)
+  occ <- data.frame(lon = xy[, 1], lat = xy[, 2])
+  out <- cast_background(occ, raster_stack = r, n_bg = 12, seed = 1, verbose = FALSE)
+  expect_equal(sum(out$presence == 0), 12)
+  expect_true(all(is.finite(as.matrix(out[, c("x1", "x2")]))))
+  expect_equal(anyDuplicated(out[out$presence == 0, c("lon", "lat")]), 0L)
+  expect_equal(out, cast_background(occ, raster_stack = r, n_bg = 12, seed = 1, verbose = FALSE))
+  terra::values(r[[2]]) <- NA_real_
+  expect_error(cast_background(occ, raster_stack = r, n_bg = 12, seed = 1, verbose = FALSE), "No complete finite")
+})

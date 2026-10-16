@@ -15,7 +15,8 @@ cast_project(
   fallback = c("best", "equal", "error"),
   min_metric_folds = 2L,
   save_dir = NULL,
-  coding = c("cast", "biomod2")
+  coding = c("cast", "biomod2"),
+  decay = 1
 )
 }
 \arguments{
@@ -60,6 +61,8 @@ stable_absent=0; \code{"biomod2"} uses Gain=1, Loss=-2, Stable_Pres=-1,
 Stable_Abs=0, matching biomod2's \code{bm_RangeSize()} convention so the
 GeoTIFFs can be consumed by BIOMOD_RangeSize visualisation scripts
 without remapping.}
+
+\item{decay}{Score-power exponent passed unchanged to \code{\link[=cast_ensemble]{cast_ensemble()}}.}
 }
 \value{
 A \code{cast_project} object with components:

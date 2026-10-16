@@ -14,51 +14,52 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 
 ## Overview
 
-`castSDM` is an end-to-end species distribution modelling (SDM) toolkit built
-around one question: if a driver moved, what would happen to predicted
-suitability, and where is that answer supported by data?
+`castSDM` explains environmental drivers and the spatial pattern of predicted
+habitat change. Its central question is: where would suitability improve or
+decline under an environmental change, and how does each driver contribute?
 
-Two concerns stay separate:
+`cast_attribution()` compares paired current and future environments with one
+fitted SDM and fixed ensemble weights. It returns overall change, driver-only
+effects, retained-driver contrasts, training-range flags and model disagreement.
+The same numerical implementation serves tables and aligned rasters.
 
-- **Default selection is a spatial forward search.** `cast_select()` runs a
-  two-stage screen: collinearity thinning at \|r\| <= 0.7 (Dormann et al.
-  2013), then forward selection on the inner cross-validated loss of a
-  probability random forest — spatial folds when coordinates exist. Each
-  addition must improve held-out loss beyond a paired 2-SE guard, so the
-  search stops by itself: no predictor-count cap, no fallback set, and an
-  empty selection honestly means nothing beat the intercept model (Meyer et
-  al. 2018, 2019). Selection is re-run inside every spatial
-  cross-validation fold, so held-out data never influence variable choice.
-- **One shift, one map, hard masking.** The shift response to each driver is
-  reported as a table and a spatial map for a single raw-unit shift (for
-  example `bio01 + 2` degrees). Rows or cells outside the training quantile
-  box — at baseline or after shifting — are masked, not ranked.
+When models are already fitted with a mature tool, use its prediction method
+directly instead of repeating fitting in castSDM:
 
-The rest of the pipeline is standard SDM engineering: RF / BRT / MaxEnt / GAM
-learners, nested spatial CV, MESS extrapolation flags, performance-weighted
-ensembles (N-SDM score), and CMIP6 projection.
+```{r external-model}
+fit <- cast_as_fit(list(gam = fitted_gam), training_predictors,
+  function(model, newdata) predict(model, newdata, type = "response"))
+attribution <- cast_attribution(fit, current_predictors, future_predictors)
+plot(attribution, contrast = "retained")
+```
+
+The training reference contains predictors in the original modelling units.
+The callback owns preprocessing and returns one comparable suitability per row.
+Use explicit externally validated weights for multiple models when needed;
+the adapter does not create evaluation evidence. To evaluate internally fitted
+models with an existing spatial design, supply its integer assignments through
+`cast_cv(fold_ids = ..., k = ..., n_repeat = 1)`.
+
+The existing fitting, selection and spatial-validation APIs remain available.
+RF / BRT / MaxEnt / GAM engine packages perform fitting. This walkthrough uses
+the standard pipeline to obtain a fitted model, then explains environmental
+scenarios. When variable selection is used, re-run it inside validation folds.
 
 ## Data
 
 Species data are presence/background tables with `lon`, `lat`, `presence`
-(0/1) and environmental predictors. `inst/extdata` ships a small example
-table (a 2000-row subset of the full screening table):
+(0/1) and environmental predictors. The following synthetic table demonstrates the API:
 
 ```{r data}
 library(castSDM)
 
-data_file <- system.file("extdata",
-  "CAST_Alces_alces_Res9_screened.csv", package = "castSDM")
-dat <- read.csv(data_file)
-
-# Keep the workflow light for this vignette: subsample rows.
+# Synthetic demonstration data; not an empirical case or validation result.
 set.seed(1)
-dat <- dat[c(
-  sample(which(dat$presence == 1), 150),
-  sample(which(dat$presence == 0), 150)
-), ]
+n <- 400L
+dat <- data.frame(lon = runif(n, 90, 100), lat = runif(n, 25, 35),
+  bio01 = rnorm(n, 12, 3), bio12 = runif(n, 300, 1200), elevation = runif(n, 500, 4000))
+dat$presence <- rbinom(n, 1, plogis((dat$bio01 - 12) / 3 + (dat$bio12 - 700) / 400))
 
-head(dat[, c("lon", "lat", "presence", "bio01", "bio12", "elevation")])
 ```
 
 ## One-step pipeline
@@ -79,6 +80,34 @@ result <- cast(
 summary(result)
 plot(result$screen)
 ```
+
+## Environmental scenarios
+
+Supply future values for every fitted predictor. Unchanged predictors stay at
+their current values; do not manufacture future values for static layers.
+This synthetic example changes one fitted predictor by one fifth of its SD.
+
+```{r paired-scenarios}
+future <- dat
+driver <- result$fit$env_vars[1]
+future[[driver]] <- dat[[driver]] + 0.2 * sd(dat[[driver]])
+attribution <- cast_attribution(result$fit, dat, future,
+                               cv = result$cv, method = "weighted",
+                               verbose = FALSE)
+attribution$summary
+plot(attribution, contrast = "retained")
+plot(attribution, type = "map", driver = driver)
+```
+
+The driver-only contrast changes that predictor while keeping all others
+current. The retained-driver contrast compares the full future with a future
+where that predictor stays current. They can differ when the response depends
+on the other predictors. Individual effects need not add to overall change;
+the remainder includes joint responses and changes in omitted drivers.
+
+For rasters, supply stacks with identical grid geometry and CRS; `filename`
+sets the output GeoTIFF. Raw scenario comparisons remain available outside
+the marginal training ranges, with supported summaries reported separately.
 
 ## What each stage measured
 
@@ -125,14 +154,17 @@ pred <- cast_predict(result$fit, grid)
 plot(pred, basemap = "none")
 ```
 
-## What the numbers are not
+## Interpretation
 
-Every effect product is a **model-based shift contrast**
-(g-computation / standardization). A causal interpretation requires consistency
-of the stated shift, a justified adjustment set, no uncontrolled confounding,
-joint positivity, and adequate response and observation models. Masking checks
-only training-quantile-box coverage of baseline and shifted rows: it cannot
-detect unobserved combinations inside the box or establish positivity.
-Automatic predictor selection does not identify an adjustment set. The
-estimator is not doubly robust. On presence/background data the scale
-is relative suitability, not occurrence probability.
+These maps explain the fitted model under stated environmental scenarios.
+They do not establish which factor caused an observed distribution change.
+Observation bias, correlated predictors and missing ecological processes can
+affect the explanation. Future projection assumes the fitted response remains
+applicable and does not model dispersal or colonisation.
+
+On presence/background data the scale is relative suitability, not occurrence
+probability. Training-range flags check each predictor separately; they do not
+detect every unsupported joint combination. Cross-model SD reports disagreement,
+not sampling uncertainty or a confidence interval. Single-shift products use
+hard masking, whereas paired attribution retains raw contrasts and separately
+reports their range coverage.

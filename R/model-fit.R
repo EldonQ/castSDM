@@ -20,8 +20,8 @@
 #' @param brt_depth Integer. BRT tree depth. Default `5`. Ignored when
 #'   `tune = TRUE` (the depth enters the search grid).
 #' @param brt_shrinkage Numeric. BRT learning rate. Default `0.005`
-#'   (with 2000 trees, the Elith et al. 2008 recipe for presence-background
-#'   data; larger rates underfit unless the tree count grows with them).
+#'   as a starting value; jointly assess learning rate, tree count and depth
+#'   for the dataset rather than assuming a universal SDM recipe.
 #'   Ignored when `tune = TRUE` (the rate enters the search grid).
 #' @param maxent_classes Character. MaxEnt feature classes as a single string
 #'   of class letters, e.g. `"l"`, `"lq"`, `"lqh"`, `"lqhp"`. Default `NULL`
@@ -35,7 +35,9 @@
 #'   multiplier) and fit with the best-scoring combination. Default `FALSE`.
 #'   See Details.
 #' @param tune_folds Integer. Folds used by the inner grid-search scoring
-#'   (BRT internal CV; MaxEnt stratified random folds). Default `3`.
+#'   (BRT internal CV; MaxEnt stratified random folds). When tuning BRT,
+#'   also controls final tree-count selection. Default `3`; untuned BRT
+#'   keeps its existing 5-fold tree-count selection.
 #' @param prevalence_target Numeric in (0, 1), or `NULL`. When supplied,
 #'   presence and background rows are weighted so that the *weighted*
 #'   prevalence equals `prevalence_target` (weight = target/n per class),
@@ -60,7 +62,8 @@
 #'   clamps predictions internally; clamping to the training range is a
 #'   package-level decision (see [cast_predict()] and
 #'   [cast_ensemble_raster()], argument `clamp`).
-#' - **BRT**: [gbm::gbm()] with Bernoulli loss and 5-fold CV.
+#' - **BRT**: [gbm::gbm()] with Bernoulli loss and 5-fold tree-count selection
+#'   by default (`tune_folds` when `tune = TRUE`).
 #' - **GAM**: [mgcv::gam()] with thin-plate splines.
 #'
 #' ## Hyperparameter grids (`tune = TRUE`)
@@ -77,7 +80,8 @@
 #'
 #' Combinations that fail to fit (e.g. very small folds) score `NA`; if no
 #' combination scores, the fixed defaults are kept with a warning.
-#' Hyperparameters supplied explicitly are held fixed rather than searched.
+#' Explicit RF `mtry` and MaxEnt feature/regularisation values are held fixed.
+#' BRT depth and shrinkage are replaced by the documented grid when tuning.
 #' Selecting hyperparameters on inner data and evaluating on outer folds is
 #' the nested-selection principle of Cawley & Talbot (2010): pass
 #' `tune = TRUE` to [cast_cv()] to run the grid inside every outer training
@@ -123,6 +127,9 @@ cast_fit <- function(data,
     cli::cli_abort("{.arg data} is missing the response column {.val {response}}.")
   }
   models <- tolower(models)
+  if (!length(models) || anyNA(models) || anyDuplicated(models)) {
+    cli::cli_abort("{.arg models} must name at least one unique model.")
+  }
   valid_models <- .cast_engine_names()
   bad <- setdiff(models, valid_models)
   if (length(bad) > 0) {
@@ -133,10 +140,13 @@ cast_fit <- function(data,
   if (!is.null(num_threads)) {
     num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
   }
-  if (!is.null(rf_mtry) &&
-      (!is.numeric(rf_mtry) || length(rf_mtry) != 1L ||
-       !is.finite(rf_mtry) || rf_mtry < 1)) {
-    cli::cli_abort("{.arg rf_mtry} must be a single positive integer or NULL.")
+  rf_ntree <- .cast_check_scalar(rf_ntree, "rf_ntree", lower = 1, integer = TRUE)
+  brt_n_trees <- .cast_check_scalar(brt_n_trees, "brt_n_trees", lower = 1, integer = TRUE)
+  brt_depth <- .cast_check_scalar(brt_depth, "brt_depth", lower = 1, integer = TRUE)
+  brt_shrinkage <- .cast_check_scalar(brt_shrinkage, "brt_shrinkage", lower = 0,
+                                    upper = 1, min_inclusive = FALSE)
+  if (!is.null(rf_mtry)) {
+    rf_mtry <- .cast_check_scalar(rf_mtry, "rf_mtry", lower = 1, integer = TRUE)
   }
   if (!is.null(maxent_classes) &&
       (!is.character(maxent_classes) || length(maxent_classes) != 1L ||
@@ -151,12 +161,7 @@ cast_fit <- function(data,
        !is.finite(maxent_regmult) || maxent_regmult <= 0)) {
     cli::cli_abort("{.arg maxent_regmult} must be a single positive number.")
   }
-  if (isTRUE(tune)) {
-    tune_folds <- as.integer(tune_folds)
-    if (is.na(tune_folds) || tune_folds < 2L) {
-      cli::cli_abort("{.arg tune_folds} must be an integer >= 2.")
-    }
-  }
+  tune_folds <- .cast_check_scalar(tune_folds, "tune_folds", lower = 2, integer = TRUE)
   if (!is.null(prevalence_target) &&
       (!is.numeric(prevalence_target) || length(prevalence_target) != 1L ||
        !is.finite(prevalence_target) ||
@@ -177,18 +182,24 @@ cast_fit <- function(data,
     get_env_vars(data, response)
   }
   cast_vars <- env_vars
+  if (!length(env_vars)) cli::cli_abort("No varying numeric environmental predictors are available for fitting.")
 
   .cast_check_response(data[[response]], response)
   Y <- as.integer(data[[response]])
+  if (anyNA(Y) || !all(c(0L, 1L) %in% unique(Y))) {
+    cli::cli_abort("Model fitting requires non-missing responses and both response classes.")
+  }
   X_raw <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
   # Reject non-numeric / factor predictors explicitly: silently coercing a
   # factor with as.numeric() would model its level codes, not its values.
   .cast_check_numeric_predictors(X_raw, arg = "data")
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
+  empty <- names(X_raw)[!vapply(X_raw, function(v) any(is.finite(v)), logical(1))]
+  if (length(empty)) cli::cli_abort("Predictors with no finite training values: {.val {empty}}.")
 
   # -- Training-set median imputation, reused by evaluate/predict/CV --
   X_impute <- vapply(X_raw, function(v) {
-    m <- stats::median(v, na.rm = TRUE)
+    m <- stats::median(v[is.finite(v)])
     if (is.finite(m)) m else 0
   }, numeric(1))
   X_raw <- .cast_impute(X_raw, X_impute)
@@ -232,7 +243,7 @@ cast_fit <- function(data,
           tune_folds = tune_folds,
           rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
           case_weights = case_weights,
-          fixed = list(maxent_classes = maxent_classes,
+          fixed = list(rf_mtry = rf_mtry, maxent_classes = maxent_classes,
                        maxent_regmult = maxent_regmult),
           seed = seed, num_threads = num_threads, verbose = verbose
         ),
@@ -258,7 +269,8 @@ cast_fit <- function(data,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
                       rf_mtry = p_rf_mtry,
-                      case_weights = case_weights),
+                      case_weights = case_weights,
+                      brt_cv_folds = if (isTRUE(tune)) tune_folds else 5L),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -298,7 +310,7 @@ cast_fit <- function(data,
   X <- as.data.frame(X)
   for (col in names(X)) {
     if (!is.numeric(X[[col]])) X[[col]] <- as.numeric(X[[col]])
-    na <- is.na(X[[col]])
+    na <- !is.finite(X[[col]])
     if (any(na)) {
       fill <- if (!is.null(impute) && col %in% names(impute) &&
                   is.finite(impute[[col]])) impute[[col]] else 0
@@ -321,7 +333,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                              maxent_classes = NULL,
                              maxent_regmult = NULL,
                              rf_mtry = NULL,
-                             case_weights = NULL) {
+                             case_weights = NULL, brt_cv_folds = 5L) {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
@@ -350,7 +362,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         n.trees = brt_n_trees,
         interaction.depth = brt_depth,
         shrinkage = brt_shrinkage,
-        cv.folds = 5L,
+        cv.folds = brt_cv_folds,
         weights = case_weights,  # NULL -> unweighted
         # gbm() defaults n.cores to a parallel cluster. On a small CI runner
         # (or inside an already-parallel cross-validation) spawning workers
@@ -382,6 +394,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         mgcv::gam(f, data = df, family = stats::binomial(),
                   weights = case_weights, method = "REML"),
         error = function(e) {
+          cli::cli_warn("GAM smooth fit failed ({e$message}); fitting a linear-only fallback. Inspect the fitted formula before interpreting responses.")
           flin <- stats::as.formula(
             paste("presence ~",
                   paste(vapply(colnames(X), qname, character(1)),
@@ -468,7 +481,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   p <- ncol(X)
   grid <- switch(name,
     rf = data.frame(
-      mtry = unique(pmax(1L, pmin(p,
+      mtry = fixed$rf_mtry %||% unique(pmax(1L, pmin(p,
         as.integer(round(sqrt(p) * c(0.5, 1, 2)))))),
       stringsAsFactors = FALSE
     ),
@@ -555,7 +568,8 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         cv.folds = tune_folds, n.cores = 1L, verbose = FALSE
       )
       if (is.null(m$cv.fitted)) return(NA_real_)
-      .tss_score(as.numeric(m$cv.fitted), Y)
+      # gbmCrossValPredictions() returns Bernoulli predictions on the link scale.
+      .tss_score(stats::plogis(as.numeric(m$cv.fitted)), Y)
     }, error = function(e) NA_real_)
   }, numeric(1))
 }

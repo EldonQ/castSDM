@@ -31,15 +31,13 @@ suitability on whatever reference the background defines.
 ```{r data}
 library(castSDM)
 
-data_file <- system.file("extdata",
-  "CAST_Alces_alces_Res9_screened.csv", package = "castSDM")
-dat <- read.csv(data_file)
-
+# Synthetic demonstration data; not an empirical case or validation result.
 set.seed(1)
-dat <- dat[c(
-  sample(which(dat$presence == 1), 150),
-  sample(which(dat$presence == 0), 150)
-), ]
+n <- 400L
+dat <- data.frame(lon = runif(n, 90, 100), lat = runif(n, 25, 35),
+  bio01 = rnorm(n, 12, 3), bio12 = runif(n, 300, 1200), elevation = runif(n, 500, 4000))
+dat$presence <- rbinom(n, 1, plogis((dat$bio01 - 12) / 3 + (dat$bio12 - 700) / 400))
+
 ```
 
 ## Coordinate thinning before anything else

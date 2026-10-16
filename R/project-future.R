@@ -16,6 +16,7 @@
 #'   `"best"`, `"equal"`, `"median"`, or `"committee"`. See [cast_ensemble()].
 #' @param models Character vector. Models to use. Default `NULL` (all).
 #' @param min_score Minimum composite score for weighted inclusion. Default `0.5`.
+#' @param decay Score-power exponent passed unchanged to [cast_ensemble()].
 #' @param fallback Weighted-score fallback (`"best"`, `"equal"`, or `"error"`).
 #'   Default `"best"`.
 #' @param min_metric_folds Minimum finite CV folds for a score component.
@@ -79,7 +80,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
                          fallback = c("best", "equal", "error"),
                          min_metric_folds = 2L,
                          save_dir = NULL,
-                         coding = c("cast", "biomod2")) {
+                         coding = c("cast", "biomod2"), decay = 1) {
   method <- match.arg(method)
   fallback <- match.arg(fallback)
   coding <- match.arg(coding)
@@ -123,7 +124,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
   # ---- Current prediction -------------------------------------------------
   current <- cast_ensemble(fit, cv, current_env,
                            method = method,
-                           models = models, min_score = min_score,
+                           models = models, min_score = min_score, decay = decay,
                            fallback = fallback,
                            min_metric_folds = min_metric_folds)
 
@@ -141,7 +142,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
       # Predict using the same ensemble configuration
       fut <- cast_ensemble(fit, cv, fut_env,
                            method = method,
-                           models = models, min_score = min_score,
+                           models = models, min_score = min_score, decay = decay,
                            fallback = fallback,
                            min_metric_folds = min_metric_folds)
 
@@ -484,6 +485,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #'   environmental variables (layer names must match `fit$env_vars`).
 #' @param future_rasters A named list of `terra::SpatRaster` stacks,
 #'   each for a future scenario (e.g., `list(ssp126_2050 = rast1, ...)`).
+#' @param decay Score-power exponent passed unchanged to [cast_ensemble_raster()].
 #' @param output_dir Character. Output directory for all rasters and CSV.
 #' @param method Character. Ensemble method (`"weighted"`, `"best"`,
 #'   `"equal"`, `"median"`, or `"committee"`). Default `"weighted"`.
@@ -506,6 +508,11 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #'   Stable_Abs=0, matching biomod2's `bm_RangeSize()` convention so the
 #'   change rasters align with BIOMOD_RangeSize outputs and existing
 #'   visualisation scripts without remapping.
+#' @param parallel Logical. Predict independent future scenarios with the
+#'   caller's `future` plan. Default `FALSE`; raster inputs are explicitly
+#'   packed for transport to workers. Scenario statistics are assembled in order.
+#' @param max_memory_mb Per-worker block budget for [cast_ensemble_raster()].
+#'   Default `200`; use a smaller budget when parallelizing scenarios.
 #'
 #' @return A list with components:
 #' \describe{
@@ -545,7 +552,8 @@ cast_project_raster <- function(fit, cv,
                                 compression = "LZW",
                                 clamp = NULL,
                                 verbose = TRUE,
-                                coding = c("cast", "biomod2")) {
+                                coding = c("cast", "biomod2"), decay = 1,
+                                parallel = FALSE, max_memory_mb = 200) {
   check_suggested("terra", "for raster projection")
   method <- match.arg(method)
   fallback <- match.arg(fallback)
@@ -587,9 +595,10 @@ cast_project_raster <- function(fit, cv,
   er_call <- function(r, prefix) {
     cast_ensemble_raster(
       fit = fit, cv = cv, raster_stack = r, output_dir = raster_dir,
-      method = method, models = models, min_score = min_score,
+      method = method, models = models, min_score = min_score, decay = decay,
       fallback = fallback, min_metric_folds = min_metric_folds,
       mask = mask, prefix = prefix,
+      max_memory_mb = max_memory_mb,
       overwrite = overwrite, compression = compression,
       clamp = isTRUE(clamp), verbose = verbose
     )
@@ -607,6 +616,31 @@ cast_project_raster <- function(fit, cv,
   # Compute current centroid once
   cur_centroid <- .weighted_centroid_raster(cur_hss, cur_bin)
 
+  projected <- NULL
+  if (isTRUE(parallel)) {
+    check_suggested("future.apply", "for parallel scenario projection")
+    packed <- lapply(future_rasters, function(r) {
+      if (is.character(r)) r <- terra::rast(r)
+      terra::wrap(r, proxy = TRUE)
+    })
+    packed_mask <- if (is.null(mask)) NULL else terra::wrap(mask, proxy = TRUE)
+    projected <- future.apply::future_lapply(seq_along(packed), function(i) {
+      scenario <- names(packed)[i]
+      tryCatch(cast_ensemble_raster(fit, cv, terra::unwrap(packed[[i]]),
+        output_dir = raster_dir, method = method, models = models,
+        min_score = min_score, decay = decay, fallback = fallback,
+        min_metric_folds = min_metric_folds,
+        mask = if (is.null(packed_mask)) NULL else terra::unwrap(packed_mask),
+        prefix = scenario, overwrite = overwrite, compression = compression,
+        clamp = isTRUE(clamp), max_memory_mb = max_memory_mb, verbose = verbose),
+        error = function(e) {
+          cli::cli_warn("Scenario {.val {scenario}} failed: {conditionMessage(e)}")
+          NULL
+        })
+    }, future.seed = TRUE)
+    names(projected) <- names(future_rasters)
+  }
+
   # ---- Future predictions -----------------------------------------------------
   future_results <- list()
   stats_rows <- list()
@@ -618,7 +652,8 @@ cast_project_raster <- function(fit, cv,
       fut_raster <- future_rasters[[scen]]
       if (is.character(fut_raster)) fut_raster <- terra::rast(fut_raster)
 
-      fut_result <- er_call(fut_raster, scen)
+      fut_result <- if (is.null(projected)) er_call(fut_raster, scen) else projected[[scen]]
+      if (is.null(fut_result)) stop("Scenario prediction failed")
 
       # ---- Change map ---------------------------------------------------------
       change_path <- file.path(raster_dir, paste0(scen, "_change_class.tif"))

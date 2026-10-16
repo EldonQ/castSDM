@@ -1,0 +1,6 @@
+Package computation sources match both completed core and case receipts except three audited plotting-only revisions.
+120 independent core datasets; 492 checks; 4 engines and 18 case scenarios accepted.
+Actual exported core/case and revised case PDF pages visually inspected; original receipts preserved.
+17 mirrored R scripts match active scripts byte-for-byte.
+Copied evidence matches original artifacts; R sources parse successfully.
+Short R check completed separately with 0 errors, 0 warnings, 0 notes.

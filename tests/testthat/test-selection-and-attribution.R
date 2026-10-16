@@ -65,8 +65,15 @@ test_that("no count cap exists: tolerance alone stops the search", {
   scr <- cast_select(dat, method = "two_stage", num_trees = 60,
                      seed = 33, verbose = FALSE)
   # Stopping is performance-driven; there is no ncov/maxncov argument left.
-  expect_error(cast_select(dat, ncov = 1L, verbose = FALSE), "unused argument")
-  expect_error(cast_select(dat, maxncov = 1L, verbose = FALSE), "unused argument")
+  # ncov / maxncov exist only for the covsel procedure (Adde et al. 2023:
+  # the ceiling(log2(n_presences)) - 1 count rule). Passing them must NOT
+  # cap a two_stage search -- "no count cap" is about behaviour, not about
+  # the argument being absent.
+  expect_equal(
+    cast_select(dat, method = "two_stage", seed = 33, verbose = FALSE)$selected,
+    cast_select(dat, method = "two_stage", ncov = 1L, maxncov = 1L,
+                seed = 33, verbose = FALSE)$selected)
+  expect_true(length(scr$selected) > 1L)
   expect_true(all(scr$scores$selected_reason[scr$scores$selected] %in%
                     c("forward", "prespecified")))
 })
@@ -196,4 +203,59 @@ test_that("the high-level pipeline forwards prespecified retention to CV", {
   expect_true(all(vapply(result$cv$screens, function(s) {
     !is.null(s) && identical(s$diagnostics$keep, required) && all(required %in% s$selected)
   }, logical(1))))
+})
+
+test_that("explicit predictor sets preserve membership and caller order", {
+  dat <- make_collinear_data(n = 120)
+  requested <- c("x3", "x1", "x2")
+  scr <- cast_select(dat, method = "full", env_vars = requested, verbose = FALSE)
+  expect_identical(scr$selected, requested)
+  expect_identical(scr$scores$variable, requested)
+  # A real numeric predictor may deliberately override a reserved metadata name.
+  dat$fraction <- dat$x4
+  requested <- c("fraction", "x1", "x2")
+  expect_identical(cast_select(dat, method = "full", env_vars = requested,
+                               verbose = FALSE)$selected, requested)
+})
+
+test_that("invalid explicit predictor sets fail before selection", {
+  dat <- make_collinear_data(n = 120)
+  for (bad in list(c("x1", "x2", "missing"), c("x1", "x1", "x2"),
+                   c("x1", "x2", "lon"), c("x1", "x2", "presence"),
+                   c("x1", "x2", NA_character_), 1:3)) {
+    expect_error(cast_select(dat, method = "full", env_vars = bad,
+                             verbose = FALSE), "env_vars")
+  }
+  dat$label <- rep("river", nrow(dat))
+  expect_error(cast_select(dat, method = "full",
+                           env_vars = c("x1", "x2", "label"), verbose = FALSE),
+                "Non-numeric predictor")
+})
+
+test_that("fold-constant predictors are dropped and metadata follow survivors", {
+  dat <- make_collinear_data(n = 120)
+  dat$x5 <- 0
+  requested <- c("x3", "x1", "x2", "x5")
+  local_mocked_bindings(.cast_covsel_select = function(
+      data, response, env_vars, keep, corcut, var_id, category, algorithms,
+      ncov, maxncov, weights, ensure, seed, verbose) {
+    list(env_vars = env_vars, var_id = var_id, category = category, ensure = ensure)
+  })
+  ids <- c(x5 = "id5", x2 = "id2", x1 = "id1", x3 = "id3")
+  categories <- c(x1 = "climate", x2 = "terrain", x5 = "other", x3 = "water")
+  flags <- c(x2 = FALSE, x5 = FALSE, x3 = FALSE, x1 = TRUE)
+  expect_warning(scr <- cast_select(dat, method = "covsel", env_vars = requested,
+    var_id = ids, category = categories, ensure = list(climate = flags),
+    verbose = FALSE), "lack supported variation")
+  survivors <- c("x3", "x1", "x2")
+  expect_identical(scr$env_vars, survivors)
+  expect_identical(scr$var_id, ids[survivors])
+  expect_identical(scr$category, categories[survivors])
+  expect_identical(scr$ensure$climate, flags[survivors])
+  expect_error(suppressWarnings(cast_select(dat, env_vars = requested,
+    keep = "x5", verbose = FALSE)), "vary in the training data")
+  expect_error(cast_select(dat, method = "full", env_vars = survivors,
+    var_id = c(x3 = "id3", x1 = "id1"), verbose = FALSE), "var_id.*cover")
+  expect_error(cast_select(dat, method = "full", env_vars = survivors,
+    category = c(x3 = "water", x1 = "climate"), verbose = FALSE), "category.*cover")
 })

@@ -1,0 +1,9 @@
+All four actual PDF pages rendered in R at 150 dpi and visually inspected.
+183 mm width; 600 dpi PNG/TIFF; editable SVG text checked.
+No figure-level statistical significance is claimed. Four valid spatial folds, one single-class fold.
+WGS84 display reprojection; nearest-neighbour binary coverage, bilinear continuous values.
+p99.5 display clipping is labelled; original numeric rasters retained.
+Source preflight: 0 fails; syntax checked by R parse; dynamic 600 dpi export verified.
+National background and genus data limit ecological interpretation. Maps are a workflow demonstration.
+PDF tiled maps can show viewer seams; these are absent in raster exports.
+Use plot_revision/figures for corrected labels and binary legend. Original receipt remains unchanged.

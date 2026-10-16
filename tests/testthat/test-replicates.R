@@ -37,7 +37,7 @@ test_that("cast_background(n_rep > 1) returns independent replicate sets", {
 
   expect_error(
     cast_background(occ, raster_stack = stk, n_rep = 0, verbose = FALSE),
-    "integer >= 1"
+    "n_rep"
   )
 })
 
@@ -90,6 +90,6 @@ test_that("cast_cv(n_repeat = 1) keeps the legacy fold_metrics format", {
 
   expect_error(
     cast_cv(dat, models = "rf", k = 3L, n_repeat = 0, verbose = FALSE),
-    "integer >= 1"
+    "n_repeat"
   )
 })

@@ -72,6 +72,8 @@
 #'   [future::plan()] first (a warning is issued when none is set).
 #' @param seed Random seed.
 #' @param verbose Print progress.
+#' @param rf_mtry,brt_depth,maxent_classes,maxent_regmult,num_threads Engine
+#'   settings as in [cast_fit()], applied in every outer training fold.
 #'
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
 #'   Metrics include `auc_n_folds`, `tss_n_folds`, and `cbi_n_folds` counting
@@ -82,6 +84,11 @@
 #'   carries the calibrated `threshold` (NA when fewer than 10 finite
 #'   held-out DI values were collected).
 #' @export
+#' @param fold_ids Optional integer fold assignments from an external design
+#'   such as `blockCV`, aligned with data rows. Values must cover `1:k`.
+#'   Use `n_repeat = 1` for a fixed external design. This allows physical block
+#'   sizes or basin groups to be chosen independently of castSDM's automatic
+#'   blocking; supplied assignments are returned unchanged.
 cast_cv <- function(data,
                     screen = NULL,
                     select_method = "two_stage",
@@ -103,7 +110,10 @@ cast_cv <- function(data,
                     aoa = FALSE,
                     parallel = FALSE,
                     seed = NULL,
-                    verbose = TRUE) {
+                    verbose = TRUE,
+                    rf_mtry = NULL, brt_depth = 5L,
+                    maxent_classes = NULL, maxent_regmult = NULL,
+                    num_threads = 1L, fold_ids = NULL) {
   block_method <- match.arg(block_method)
   if (!is.logical(aoa) || length(aoa) != 1L || is.na(aoa)) {
     cli::cli_abort("{.arg aoa} must be TRUE or FALSE.")
@@ -119,8 +129,7 @@ cast_cv <- function(data,
     cli::cli_abort("{.arg select_args} cannot override data, response, or method; selection must use the outer training fold.")
   }
   check_suggested("pROC", "for fold evaluation metrics")
-  k <- as.integer(k)
-  if (k < 2L) cli::cli_abort("{.arg k} must be at least 2.")
+  k <- .cast_check_scalar(k, "k", lower = 2, integer = TRUE)
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
     cli::cli_abort("{.arg buffer} must be a single non-negative number.")
   }
@@ -144,12 +153,19 @@ cast_cv <- function(data,
       ))
     }
   }
-  n_repeat <- as.integer(n_repeat)
-  if (is.na(n_repeat) || n_repeat < 1L) {
-    cli::cli_abort("{.arg n_repeat} must be an integer >= 1.")
-  }
+  n_repeat <- .cast_check_scalar(n_repeat, "n_repeat", lower = 1, integer = TRUE)
   validate_species_data(data, required_cols = c("lon", "lat", response),
                         response = response)
+  if (!is.null(fold_ids)) {
+    if (!is.numeric(fold_ids) || length(fold_ids) != nrow(data) ||
+        any(!is.finite(fold_ids)) || any(fold_ids != as.integer(fold_ids)) ||
+        !setequal(unique(fold_ids), seq_len(k))) {
+      cli::cli_abort("{.arg fold_ids} must assign every data row to an integer in 1:k, with all folds present.")
+    }
+    if (n_repeat != 1L) cli::cli_abort("Fixed {.arg fold_ids} require n_repeat = 1; evaluate different external designs separately.")
+    fold_ids <- as.integer(fold_ids)
+    block_method <- "external"
+  }
   if (is.null(select_method) && !is.null(screen)) {
     cli::cli_warn(c(
       "{.code select_method = NULL} reuses the supplied {.arg screen} in every fold.",
@@ -205,7 +221,9 @@ cast_cv <- function(data,
       cast_fit(
         train, screen = fold_screen, models = models, response = response,
         rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
-        brt_shrinkage = brt_shrinkage,
+        rf_mtry = rf_mtry, brt_depth = brt_depth, brt_shrinkage = brt_shrinkage,
+        maxent_classes = maxent_classes, maxent_regmult = maxent_regmult,
+        num_threads = num_threads,
         tune = tune, tune_folds = tune_folds,
         prevalence_target = prevalence_target,
         seed = if (is.null(seed)) NULL else seed + 100L + fold_i,
@@ -319,6 +337,7 @@ cast_cv <- function(data,
       )
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
+    if (!any(unlist(pred_ok))) rows <- list()
     list(rows = rows, updates = updates, selected = fold_screen$selected,
          screen = fold_screen, di = di_fold, pred_ok = pred_ok,
          status = if (length(rows)) "evaluated" else "no_predictions")
@@ -328,8 +347,9 @@ cast_cv <- function(data,
     # Per-repeat fold assignment: seeds separated by a prime so distinct
     # repeats draw unrelated blockings under the same user seed.
     rep_seed <- if (!is.null(seed)) seed + (rep_i - 1L) * 7919L else NULL
-    folds <- make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed,
-                                env = env_block)
+    folds <- if (is.null(fold_ids)) {
+      make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed, env = env_block)
+    } else fold_ids
     if (verbose && n_repeat > 1L) {
       cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
     }

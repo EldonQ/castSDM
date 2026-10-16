@@ -143,7 +143,7 @@ test_that("invalid hyperparameter arguments abort informatively", {
   )
   expect_error(
     cast_fit(dat, models = "rf", rf_mtry = 0),
-    "positive integer"
+    "rf_mtry"
   )
 })
 

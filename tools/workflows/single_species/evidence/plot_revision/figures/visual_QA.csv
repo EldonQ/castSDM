@@ -1,0 +1,5 @@
+"figure","status","pdf_md5","note"
+"01_model_validation","inspected","fad34568c4da68f22012de5f5420562b","Unavailable labels staggered and legible"
+"02_habitat_change","inspected","5d72837712afc289f7462c142717b829","No clipped labels"
+"03_environmental_driver","inspected","3a14db4d1e5ec419c9b265c7eb167bbe","Square-window labels corrected"
+"04_support_and_disagreement","inspected","5340de44f280ffe513cdd25ad4a6e066","Binary nearest-neighbour layer has discrete legend"

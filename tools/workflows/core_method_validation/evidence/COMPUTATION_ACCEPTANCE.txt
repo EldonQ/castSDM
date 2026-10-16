@@ -1,0 +1,4 @@
+Computation verified against current source manifest.
+120 independent datasets; 492 checks passed; 0 run errors.
+Matched prior inspected numerical tables; preview QA status in figures/visual_QA.csv.
+Partial methodological advantages only; no comparison to all explanation packages.

@@ -53,16 +53,17 @@
 cast_importance <- function(object) {
   screen <- .cast_extract_screen(object)
   sc <- screen$scores
-  needed <- c("step_added", "loss_gain")
+  needed <- "step_added"
   if (!all(needed %in% names(sc))) {
     cli::cli_abort(c(
-      "{.fn cast_importance} needs a two-stage screen carrying a forward-selection path.",
-      i = "Run {.code cast_select(..., method = \"two_stage\")} first."))
+      "{.fn cast_importance} needs a screen carrying an admission path.",
+      i = "Run {.code cast_select()} first."))
   }
+  loss_gain <- if ("loss_gain" %in% names(sc)) sc$loss_gain else rep(NA_real_, nrow(sc))
   effects <- data.frame(
     variable              = sc$variable,
     step_added            = sc$step_added,
-    loss_gain             = sc$loss_gain,
+    loss_gain             = loss_gain,
     selected              = sc$selected,
     kept_by_design        = sc$kept_by_design,
     selected_reason       = sc$selected_reason,
@@ -73,9 +74,16 @@ cast_importance <- function(object) {
 
   diagnostics <- screen$diagnostics
   diagnostics$measure <- "loss_gain"
+  # The covsel screen has no inner-CV loss path; its admission order is the
+  # Adde et al. (2023) aggregate rank, and loss_gain stays NA by design.
+  metric <- if (identical(screen$method, "covsel")) {
+    "embedded-selection rank"
+  } else {
+    screen$diagnostics$metric %||% "brier"
+  }
   new_cast_importance(
     effects = effects,
-    metric = screen$diagnostics$metric %||% "brier",
+    metric = metric,
     diagnostics = diagnostics
   )
 }

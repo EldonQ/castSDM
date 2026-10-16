@@ -343,8 +343,11 @@ cast_background <- function(occurrences,
 
     # Get all valid cell indices: inside the mask AND non-NA in every layer
     # (per-cell anyNA across layers, not just the first).
-    n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
-    valid_r <- !is.na(ref_mask) & (n_na_layers == 0)
+    lazy_random <- strategy == "random" && !use_bias
+    valid_r <- if (lazy_random) !is.na(ref_mask) else {
+      n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
+      !is.na(ref_mask) & (n_na_layers == 0)
+    }
     valid_cells <- which(as.logical(terra::values(valid_r, mat = FALSE)))
 
     # Exclude presence cells if requested
@@ -411,7 +414,9 @@ cast_background <- function(occurrences,
                          replace = sample_replace)
     } else if (strategy == "random" || strategy == "sre" || strategy == "disk") {
       # sre / disk pools are already restricted; the draw is uniform within.
-      bg_cells <- sample(valid_cells, size = n_bg, replace = sample_replace)
+      bg_cells <- if (lazy_random) {
+        .cast_random_complete_cells(raster_stack, valid_cells, n_bg, verbose)
+      } else sample(valid_cells, size = n_bg, replace = sample_replace)
 
     } else if (strategy == "environmental") {
       # Environmental stratification via PCA-grid or k-means binning
@@ -535,6 +540,32 @@ cast_background <- function(occurrences,
 #' geographically unconstrained pseudo-absences.
 #' @keywords internal
 #' @noRd
+.cast_random_complete_cells <- function(raster_stack, candidates, n, verbose) {
+  # Uniform proposals without replacement, accepted only if every predictor is
+  # finite. This samples uniformly from the complete-case domain without
+  # scanning/writing every layer of a national raster just to draw a few points.
+  remaining <- candidates
+  accepted <- integer(0)
+  rounds <- 0L
+  while (length(accepted) < n && length(remaining)) {
+    need <- n - length(accepted)
+    size <- min(length(remaining), max(64L, ceiling(1.25 * need)))
+    proposals <- remaining[sample.int(length(remaining), size)]
+    remaining <- setdiff(remaining, proposals)
+    X <- as.matrix(raster_stack[proposals])
+    complete <- rowSums(!is.finite(X)) == 0L
+    accepted <- c(accepted, proposals[complete])
+    rounds <- rounds + 1L
+    if (verbose) cli::cli_inform("Random background: {length(accepted)} complete candidates after batch {rounds}.")
+  }
+  if (!length(accepted)) cli::cli_abort("No complete finite background cells inside the sampling domain.")
+  if (length(accepted) < n) {
+    cli::cli_warn("Only {length(accepted)} complete background cells; sampling with replacement.")
+    return(accepted[sample.int(length(accepted), n, replace = TRUE)])
+  }
+  accepted[seq_len(n)]
+}
+
 .sre_pool <- function(raster_stack, occ_cells, valid_cells, sre_quantile) {
   occ_cells <- occ_cells[!is.na(occ_cells)]
   pres_env <- as.data.frame(raster_stack[occ_cells])

@@ -123,6 +123,14 @@ cast_evaluate <- function(fit, test_data, response = "presence",
 #' @keywords internal
 #' @noRd
 predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
+  if (identical(mdl_info$type, "external")) {
+    p <- mdl_info$predict_function(mdl_info$model, X_raw)
+    if (!is.numeric(p) || !is.null(dim(p)) || length(p) != nrow(X_raw) ||
+        any(is.infinite(p)) || any(p[is.finite(p)] < 0 | p[is.finite(p)] > 1)) {
+      cli::cli_abort("External model {.val {mdl_info$name}} must return one suitability in [0, 1] per row.")
+    }
+    return(as.numeric(p))
+  }
   if (is.null(mdl_info$model)) return(rep(NA_real_, nrow(X_raw)))
 
   nm <- mdl_info$name

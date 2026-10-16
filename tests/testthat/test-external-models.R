@@ -1,0 +1,32 @@
+test_that("an external GLM reproduces paired contrasts without internal fitting", {
+  set.seed(1604)
+  x <- data.frame(x = rnorm(100), z = rnorm(100))
+  y <- rbinom(100, 1, plogis(x$x + .5 * x$x * x$z))
+  m <- stats::glm(y ~ x * z, x, family = stats::binomial())
+  callback <- function(model, newdata) stats::predict(model, newdata, type = "response")
+  fit <- cast_as_fit(list(glm = m), x, callback)
+  a <- x[1:10, ]; b <- a; b$x <- b$x + .2; b$z <- b$z + .3
+  at <- cast_attribution(fit, a, b, verbose = FALSE)
+  held <- b; held$x <- a$x
+  expect_equal(at$data$total_change, unname(callback(m, b) - callback(m, a)))
+  expect_equal(at$data$retained_x, unname(callback(m, b) - callback(m, held)))
+  expect_equal(at$weights, c(glm = 1))
+  expect_equal(cast_predict(fit, a)$predictions$HSS_glm, unname(callback(m, a)))
+  skip_if_not_installed("terra")
+  r <- terra::rast(nrows = 5, ncols = 2, nlyrs = 2)
+  names(r) <- names(a); terra::values(r) <- as.matrix(a)
+  s <- r; terra::values(s) <- as.matrix(b)
+  mapped <- cast_attribution(fit, r, s, block_size = 4, verbose = FALSE)
+  expect_equal(unname(terra::values(terra::rast(mapped$raster_file))), unname(as.matrix(at$data)), tolerance = 1e-12)
+})
+
+test_that("external prediction failures cannot produce a misleading attribution", {
+  ref <- data.frame(x = -2:2)
+  expect_error(cast_as_fit(list(a = 1), ref, list(b = identity)), "predict_function")
+  expect_error(cast_as_fit(list(a = 1, a = 2), ref, identity), "unique")
+  expect_error(cast_as_fit(list(a = 1), data.frame(x = NA_real_), identity), "finite")
+  bad <- cast_as_fit(list(a = 1), ref, function(model, newdata) rep(2, nrow(newdata)))
+  expect_error(cast_attribution(bad, ref, ref + 1), "one suitability")
+  wrong <- cast_as_fit(list(a = 1), ref, function(model, newdata) .5)
+  expect_error(cast_attribution(wrong, ref, ref + 1), "one suitability")
+})

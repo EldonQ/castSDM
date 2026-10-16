@@ -4,12 +4,15 @@
 \alias{plot.cast_response}
 \title{Plot Response Curves}
 \usage{
-\method{plot}{cast_response}(x, ...)
+\method{plot}{cast_response}(x, ..., ensemble = FALSE)
 }
 \arguments{
 \item{x}{A \code{cast_response} object from \code{\link[=cast_response_curves]{cast_response_curves()}}.}
 
 \item{...}{Unused.}
+
+\item{ensemble}{Whether to show an equal-weight mean and cross-model range.
+Default \code{FALSE} draws individual model curves. The range is not a confidence interval.}
 }
 \value{
 A \code{ggplot} object.

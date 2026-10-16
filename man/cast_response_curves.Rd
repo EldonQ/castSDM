@@ -30,8 +30,7 @@ the training medians.}
 
 \item{type}{Character. \code{"fixed"} (default): all other predictors held at
 their training median. \code{"pdp"}: predictions averaged over the training
-background of the other predictors (partial dependence; more honest
-about correlations, and more expensive).}
+background of the other predictors (partial dependence; more expensive).}
 
 \item{grid_size}{Integer >= 2. Points per variable curve. Default \code{50}.}
 
@@ -61,12 +60,12 @@ An optional two-variable grid exposes pairwise interaction surfaces.
 The result is a tidy long-format data frame with a \code{\link[=plot]{plot()}} method.
 }
 \details{
-Grids span the observed training range of each predictor, so with the
-default \code{clamp = TRUE} no curve section relies on extrapolation.
-Partial-dependence curves average over the joint training distribution,
-which for correlated predictors yields more realistic statements than
-the fixed-profile variant; neither establishes causality (see the
-package-level note on interventional effects).
+Grids span each predictor's marginal range in the supplied background.
+Clamping to training ranges does not guarantee joint environmental support.
+Partial dependence replaces the profiled predictor while retaining the
+background values of the others, which can create unsupported combinations
+when predictors are correlated. Neither profile establishes causality (see
+the package-level note on interventional effects).
 }
 \references{
 Friedman, J. H. (2001). Greedy function approximation: a gradient

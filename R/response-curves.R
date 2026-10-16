@@ -16,8 +16,7 @@
 #'   the training medians.
 #' @param type Character. `"fixed"` (default): all other predictors held at
 #'   their training median. `"pdp"`: predictions averaged over the training
-#'   background of the other predictors (partial dependence; more honest
-#'   about correlations, and more expensive).
+#'   background of the other predictors (partial dependence; more expensive).
 #' @param grid_size Integer >= 2. Points per variable curve. Default `50`.
 #' @param pair Optional length-2 character vector of distinct predictors.
 #'   When supplied, a two-variable interaction grid is produced instead of
@@ -34,12 +33,12 @@
 #'   Bivariate: `var1`, `value1`, `var2`, `value2`, `model`, `prediction`.
 #'
 #' @details
-#' Grids span the observed training range of each predictor, so with the
-#' default `clamp = TRUE` no curve section relies on extrapolation.
-#' Partial-dependence curves average over the joint training distribution,
-#' which for correlated predictors yields more realistic statements than
-#' the fixed-profile variant; neither establishes causality (see the
-#' package-level note on interventional effects).
+#' Grids span each predictor's marginal range in the supplied background.
+#' Clamping to training ranges does not guarantee joint environmental support.
+#' Partial dependence replaces the profiled predictor while retaining the
+#' background values of the others, which can create unsupported combinations
+#' when predictors are correlated. Neither profile establishes causality (see
+#' the package-level note on interventional effects).
 #'
 #' @references
 #' Friedman, J. H. (2001). Greedy function approximation: a gradient
@@ -150,37 +149,32 @@ cast_response_curves <- function(fit,
       g <- seq(min(vals, na.rm = TRUE), max(vals, na.rm = TRUE),
                length.out = grid_size)
       other <- setdiff(env_vars, v)
-      base <- if (type == "fixed") {
+      if (type == "fixed") {
         # Fixed profile: others at their training medians.
         X <- bg[rep(1L, length(g)), , drop = FALSE]
         for (o in other) X[[o]] <- stats::median(bg[[o]], na.rm = TRUE)
-        X
+        X[[v]] <- g
+        # Predict the whole grid once per engine instead of repeating each
+        # value across a grid-sized frame and then averaging identical rows.
+        pmat <- do.call(cbind, lapply(models, function(m) {
+          .predict_mean_or_vec(m, X)
+        }))
       } else {
-        NULL
-      }
-      preds <- lapply(g, function(val) {
-        if (type == "fixed") {
-          X <- base
-          X[[v]] <- val
-          p <- vapply(models, function(m) {
-            mean(.predict_mean_or_vec(m, X))
-          }, numeric(1))
-          stats::setNames(p, models)
-        } else {
-          # Partial dependence: swap the profiled column into the whole
-          # background and average predictions per engine.
+        # Partial dependence: replace the profiled column in the background
+        # and average predictions per engine at each grid value.
+        preds <- lapply(g, function(val) {
           X <- bg
           X[[v]] <- val
           vapply(models, function(m) {
             mean(.predict_mean_or_vec(m, X))
           }, numeric(1))
-        }
-      })
-      pmat <- do.call(rbind, preds)  # grid_size x models
+        })
+        pmat <- do.call(rbind, preds)
+      }
       data.frame(
         variable = v, value = g,
         model = rep(models, each = length(g)),
-        prediction = as.numeric(t(pmat)),
+        prediction = as.numeric(pmat),  # model columns, each in grid order
         stringsAsFactors = FALSE
       )
     })
@@ -199,11 +193,32 @@ cast_response_curves <- function(fit,
 #'
 #' @param x A `cast_response` object from [cast_response_curves()].
 #' @param ... Unused.
+#' @param ensemble Whether to show an equal-weight mean and cross-model range.
+#'   Default `FALSE` draws individual model curves. The range is not a confidence interval.
 #' @return A `ggplot` object.
 #' @export
-plot.cast_response <- function(x, ...) {
+plot.cast_response <- function(x, ..., ensemble = FALSE) {
   check_suggested("ggplot2", "for plotting")
   if ("variable" %in% names(x)) {
+    if (ensemble) {
+      d <- do.call(rbind, lapply(split(x, x$variable), function(z) {
+        values <- sort(unique(z$value))
+        do.call(rbind, lapply(values, function(v) {
+          p <- z$prediction[z$value == v]; p <- p[is.finite(p)]
+          data.frame(variable = z$variable[1], value = v,
+            mean = if (length(p)) mean(p) else NA_real_,
+            lo = if (length(p)) min(p) else NA_real_, hi = if (length(p)) max(p) else NA_real_)
+        }))
+      }))
+      return(ggplot2::ggplot(d, ggplot2::aes(.data$value, .data$mean)) +
+        ggplot2::geom_ribbon(ggplot2::aes(ymin = .data$lo, ymax = .data$hi), fill = "#9FD3DB", alpha = .4) +
+        ggplot2::geom_line(colour = "#256E92", linewidth = .5) +
+        ggplot2::facet_wrap(~ .data$variable, scales = "free_x", ncol = 2,
+          labeller = ggplot2::as_labeller(.cast_var_label)) +
+        ggplot2::labs(x = "Predictor value", y = "Predicted suitability", title = "Model response curves",
+          caption = "Equal-weight model mean; band = model range, not a confidence interval. No smoothing.") +
+        theme_cast(base_size = 8))
+    }
     ggplot2::ggplot(
       x,
       ggplot2::aes(x = .data$value, y = .data$prediction,
@@ -215,7 +230,8 @@ plot.cast_response <- function(x, ...) {
         x = NULL, y = "Predicted suitability",
         color = "Model", title = "Response curves"
       ) +
-      ggplot2::theme_bw()
+      ggplot2::scale_colour_manual(values = .cast_engine_colors(unique(x$model))) +
+      theme_cast(base_size = 8)
   } else {
     ggplot2::ggplot(
       x,

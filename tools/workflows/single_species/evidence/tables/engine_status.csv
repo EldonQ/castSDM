@@ -1,0 +1,5 @@
+model,fitted
+rf,TRUE
+brt,TRUE
+maxent,TRUE
+gam,TRUE

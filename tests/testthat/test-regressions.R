@@ -47,7 +47,7 @@ test_that("spatial CV reports fold fitting failures instead of silently discardi
   # it is a superset plus an explicit "no silent fallback" warning.
   expect_true(all(paste0("Model fitting failed in fold ", 1:2,
                          ": deliberate engine failure") %in% warnings))
-  expect_true(any(grepl("threshold falls back to 0.5", warnings, fixed = TRUE)))
+  expect_true(any(grepl("threshold falls back to 0.5", warnings, ignore.case = TRUE)))
 })
 
 test_that("change classes mark non-binary cells as NA, never empty string", {
@@ -258,7 +258,7 @@ test_that("the high-level pipeline forwards selection settings", {
   expect_identical(seen_cv$args$keep, "x")
 })
 
-test_that("the pipeline falls back to hold-out evaluation when spatial CV fails", {
+test_that("the pipeline stops when requested spatial CV fails", {
   dat <- data.frame(lon = 1:100, lat = 0, presence = rep(0:1, 50),
                     x = sin(1:100))
   evaluated <- FALSE
@@ -268,10 +268,9 @@ test_that("the pipeline falls back to hold-out evaluation when spatial CV fails"
     cast_cv = function(...) stop("deliberate CV failure"),
     cast_evaluate = function(...) { evaluated <<- TRUE; list() }
   )
-  expect_warning(result <- cast(dat, do_predict = FALSE, verbose = FALSE, seed = 8),
-                 "Falling back to hold-out")
-  expect_null(result$cv)
-  expect_true(evaluated)
+  expect_error(cast(dat, do_predict = FALSE, verbose = FALSE, seed = 8),
+               "deliberate CV failure")
+  expect_false(evaluated)
 })
 
 

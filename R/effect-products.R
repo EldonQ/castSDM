@@ -3,8 +3,8 @@
 # Single-shift stub: one raw-unit shift per driver, signed delta, paired
 # model averaging BEFORE any absolute value (per-engine abs would measure
 # disagreement, not the ensemble effect).
-.effect_predictions <- function(fit, X, driver, step, base = NULL) {
-  models <- names(fit$models)
+.effect_predictions <- function(fit, X, driver, step, base = NULL, weights = NULL) {
+  models <- if (is.null(weights)) names(fit$models) else names(weights)
   if (!length(models)) cli::cli_abort("No fitted models available.")
   if (length(step) != 1L || !is.finite(step) || step == 0) {
     cli::cli_abort("{.arg step} must be one non-zero finite raw-unit shift.")
@@ -15,7 +15,7 @@
   cf <- .cast_predict_matrix(fit, shifted, models)
   delta <- cf - base
   delta[!is.finite(cf) | !is.finite(base)] <- NA_real_
-  rowMeans(delta, na.rm = TRUE)
+  if (is.null(weights)) rowMeans(delta, na.rm = TRUE) else .ensemble_rowmean(delta, weights)
 }
 
 # Resolve one raw-unit shift per driver. Accepts a single unnamed numeric
@@ -122,6 +122,8 @@
 #'   can mask several drivers at once; the print method reports the masking
 #'   rate and the lowest observed support so the effect is visible.
 #' @param verbose Print progress. Default `TRUE`.
+#' @param weights Optional named model weights, frozen across both predictions.
+#'   Default `NULL` retains the equally weighted comparison.
 #'
 #' @return A `cast_effect_table` data.frame, one row per driver:
 #'   `shift_raw` (applied raw-unit shift), `mean_abs_dHSS` (magnitude: mean
@@ -135,11 +137,13 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
                               shift = 1, shift_type = "raw",
                               support_probs = c(0.01, 0.99),
                               min_support = 0.5,
-                              verbose = TRUE) {
+                              verbose = TRUE, weights = NULL) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
   env_vars <- fit$env_vars
+  if (!is.null(weights)) weights <- .cast_attribution_weights(fit, NULL,
+    names(weights), weights, "equal", 0.5, 1, "best", 2L)
   if (is.null(drivers)) drivers <- env_vars
   if (!length(drivers) || anyDuplicated(drivers)) {
     cli::cli_abort("{.arg drivers} must be non-empty and unique.")
@@ -160,7 +164,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   ok <- rowSums(!is.finite(as.matrix(X))) == 0L
   X <- X[ok, , drop = FALSE]
   if (!nrow(X)) cli::cli_abort("No complete finite predictor rows in {.arg newdata}.")
-  base <- .cast_predict_matrix(fit, X, names(fit$models))
+  base <- .cast_predict_matrix(fit, X, if (is.null(weights)) names(fit$models) else names(weights))
   ref <- tryCatch(.cast_reference(fit, env_vars), error = function(e) NULL)
   bounds <- if (!is.null(ref)) .cast_support_bounds(ref, support_probs) else NULL
   out <- vector("list", length(drivers))
@@ -169,7 +173,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
     st <- steps[[v]]
     .cast_check_shift_reachable(ref, v, st)
     if (verbose) cli::cli_inform("Intervening on {.val {v}} ({.val {st}} raw units)...")
-    delta <- .effect_predictions(fit, X, v, st, base)
+    delta <- .effect_predictions(fit, X, v, st, base, weights)
     covered <- if (!is.null(bounds)) {
       as.logical(.cast_support_rows(X, v, st, bounds)[, 1L])
     } else {
@@ -248,6 +252,7 @@ print.cast_effect_table <- function(x, ...) {
 #' @param shift_type `"raw"` (default) or `"sd"`.
 #' @param block_rows Integer rows per processing block. Default 512.
 #' @param filename Optional GeoTIFF path for the effect and coverage stack (LZW).
+#' @param weights Optional named model weights, as in [cast_effect_table()].
 #' @param overwrite Logical. Overwrite `filename`. Default `FALSE`.
 #' @param verbose Print block progress. Default `TRUE`.
 #' @param support_probs Length-2 numeric. Increasing training quantiles in
@@ -273,7 +278,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
                             block_rows = 512L, filename = NULL,
                             overwrite = FALSE, verbose = TRUE,
                             support_probs = c(0.01, 0.99),
-                            min_support = 0.5) {
+                            min_support = 0.5, weights = NULL) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
@@ -281,6 +286,8 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     cli::cli_abort("Package {.pkg terra} is required for effect maps.")
   }
   env_vars <- fit$env_vars
+  if (!is.null(weights)) weights <- .cast_attribution_weights(fit, NULL,
+    names(weights), weights, "equal", 0.5, 1, "best", 2L)
   if (!all(env_vars %in% names(current_stack))) {
     cli::cli_abort("{.arg current_stack} lacks fitted predictors: {.val {setdiff(env_vars, names(current_stack))}}.")
   }
@@ -335,16 +342,27 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     # block on each intervention step.
     Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
     n_complete <- n_complete + nrow(Xi)
-    base <- .cast_predict_matrix(fit, Xi, names(fit$models))
-    for (v in drivers) {
-      delta <- .effect_predictions(fit, Xi, v, steps[[v]], base)
-      covered <- if (bounds_ok) {
+    coverage <- lapply(drivers, function(v) {
+      if (bounds_ok) {
         as.logical(.cast_support_rows(Xi, v, steps[[v]], bounds)[, 1L])
       } else {
         # Unknown coverage: never counted as supported.
         rep(NA, nrow(Xi))
       }
-      covered[!is.finite(delta)] <- FALSE
+    })
+    names(coverage) <- drivers
+    needed <- Reduce(`|`, lapply(coverage, function(x) !is.na(x) & x))
+    models <- if (is.null(weights)) names(fit$models) else names(weights)
+    base <- matrix(NA_real_, nrow(Xi), length(models))
+    if (any(needed)) base[needed, ] <- .cast_predict_matrix(fit,
+      Xi[needed, , drop = FALSE], models)
+    for (v in drivers) {
+      covered <- coverage[[v]]
+      k <- !is.na(covered) & covered
+      delta <- rep(NA_real_, nrow(Xi))
+      if (any(k)) delta[k] <- .effect_predictions(fit, Xi[k, , drop = FALSE], v,
+        steps[[v]], base[k, , drop = FALSE], weights)
+      covered[!is.finite(delta) & !is.na(covered)] <- FALSE
       s <- rep(NA_real_, length(cells))
       a <- rep(NA_real_, length(cells))
       cvg <- rep(NA_real_, length(cells))

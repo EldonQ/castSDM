@@ -275,6 +275,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
       )
       env_vars <- setdiff(env_vars, non_numeric)
     }
+    declared_vars <- env_vars
     final_vars <- env_vars
     if (verbose) {
       cli::cli_inform(c(
@@ -340,9 +341,45 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     )
   }
 
+  # Variance screening runs on the TRAINING rows, after the split: a layer can
+  # vary across the full study area yet be constant inside the hold-out
+  # training sample (e.g. land-cover patch statistics over a uniform plateau
+  # window). Screening before the split would keep such a column here and then
+  # lose it again in get_env_vars() downstream, so var_id/category vectors
+  # built for the declared set would no longer match the predictors seen by
+  # cast_select(). One rule for both branches: declared = upper bound,
+  # final_vars = what the training rows actually support.
+  const_in_train <- final_vars[vapply(final_vars, function(v) {
+    vals <- data[[v]][train_idx]
+    vals <- vals[!is.na(vals)]
+    if (length(vals) <= 1L) return(TRUE)
+    vv <- stats::var(vals)
+    !is.finite(vv) || vv <= 1e-10
+  }, logical(1))]
+  if (length(const_in_train) > 0L) {
+    if (verbose) {
+      cli::cli_inform(c(
+        "i" = "{length(const_in_train)} declared variable{?s} constant in the training sample and cannot be fitted; dropping:",
+        " " = "{.val {const_in_train}}"
+      ))
+    }
+    final_vars <- setdiff(final_vars, const_in_train)
+  }
+
+  # env_vars is a contract, not a label: when the caller names the predictors,
+  # the returned splits carry exactly those that survived (plus coordinates
+  # and the response). Before this, `train`/`test` were row-slices of the FULL
+  # data frame, so a caller that pre-filtered the pool (e.g. temporally
+  # matched layers) passed var_id/category vectors that no longer matched
+  # get_env_vars(split$train).
+  keep_cols <- unique(c(
+    final_vars,
+    intersect(c("lon", "lat", "presence"), names(data))
+  ))
+
   list(
-    train    = data[train_idx, , drop = FALSE],
-    test     = data[-train_idx, , drop = FALSE],
+    train    = data[train_idx, keep_cols, drop = FALSE],
+    test     = data[-train_idx, keep_cols, drop = FALSE],
     env_vars = final_vars,
     split    = sp$method
   )

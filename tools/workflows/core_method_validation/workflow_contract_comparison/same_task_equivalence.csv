@@ -1,0 +1,5 @@
+"check","max_abs_difference","interpretation"
+"aligned_iml_loop_equivalence",0,"equivalent_correct_comparison"
+"explicitly_aligned_iml_loop",0,"equivalent_correct_comparison"
+"cast_coordinate_alignment",0,"equivalent_correct_comparison"
+"naive_rowwise_loop_after_shuffle",0.859795682809616,"missing_spatial_alignment_in_naive_example_not_an_iml_bug"

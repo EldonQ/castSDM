@@ -1,0 +1,1112 @@
+# Plot Methods ----------------------------------------------------------------
+
+#' Plot Variable Selection
+#'
+#' Bar chart showing predictor score and selection status.
+#'
+#' @param x A `cast_select` object (from [cast_select()]).
+#' @param var_labels Optional named character vector for display labels.
+#' @param top Integer. Show only the `top` highest-scoring predictors (union
+#'   with the retained set). Default `20`; use `NULL` for all tested predictors.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
+  check_suggested("ggplot2", "for plotting")
+
+  scr <- x$scores
+  scr$is_selected <- scr$variable %in% x$selected
+
+  # The score to plot must be the ONE the method actually ranked by. A
+  # method-blind fallback chain (loss_gain -> freq -> assoc) silently plotted
+  # |marginal association| for covsel, whose filter ranks on the poly(x, 2)
+  # logistic term instead -- so the panel advertised a ranking the method
+  # never used. stage1_p is the covsel filter's ranking statistic; loss_gain
+  # is the two_stage forward-search's; freq is the CV-selection frequency.
+  imp_candidates <- if (identical(x$method, "covsel")) {
+    c("stage1_p", "assoc")
+  } else {
+    c("loss_gain", "freq", "assoc")
+  }
+  imp_col <- imp_candidates[imp_candidates %in% names(scr)]
+  imp_col <- imp_col[vapply(imp_col, function(nm)
+    any(is.finite(suppressWarnings(as.numeric(scr[[nm]])))), logical(1))][1]
+  if (is.na(imp_col) || !length(imp_col)) {
+    scr$importance_plot <- as.numeric(scr$is_selected)
+    imp_col <- "importance_plot"
+  }
+  # p-values span orders of magnitude; plot them on a log10 axis so the
+  # ranking is readable while the legend keeps true values.
+  log10_p <- identical(imp_col, "stage1_p")
+  if (log10_p) {
+    p_raw <- suppressWarnings(as.numeric(scr$stage1_p))
+    p_raw[!is.finite(p_raw) | p_raw <= 0] <- NA_real_
+    scr$filter_score <- -log10(p_raw)
+    imp_col <- "filter_score"
+  } else {
+    scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
+  }
+
+  n_total <- nrow(scr)
+  n_sel <- sum(scr$is_selected)
+
+  # Stage 2 scores only the stage-1 survivors, so thinned predictors carry no
+  # score. Plotting all of them crushes the axis into an unreadable band; keep
+  # only the scored predictors, then the top-scoring slice.
+  tested <- scr[is.finite(scr[[imp_col]]), , drop = FALSE]
+  n_tested <- nrow(tested)
+  tested <- tested[order(-tested[[imp_col]]), , drop = FALSE]
+
+  n_top <- if (is.null(top) || !is.finite(top)) n_tested else as.integer(top)
+  keep <- union(utils::head(tested$variable, n_top),
+                tested$variable[tested$is_selected])
+  scr <- tested[tested$variable %in% keep, , drop = FALSE]
+  scr <- scr[order(-scr[[imp_col]]), , drop = FALSE]
+
+  raw_disp <- .cast_var_label(scr$variable)
+  if (!is.null(var_labels)) {
+    hit <- scr$variable %in% names(var_labels)
+    raw_disp[hit] <- var_labels[scr$variable[hit]]
+  }
+  raw_disp <- make.unique(as.character(raw_disp))
+  scr$display <- factor(raw_disp, levels = rev(raw_disp))
+
+  pal <- .cast_category_palette()
+  scr$category <- factor(.cast_var_category(scr$variable), levels = names(pal))
+
+  sub_txt <- sprintf(
+    "%d of %d predictors retained \u00b7 %d scored by the %s filter",
+    n_sel, n_total, n_tested, x$method %||% "unknown method"
+  )
+
+  x_lab <- switch(imp_col,
+    loss_gain = "CV loss improvement",
+    freq = "Fold selection frequency",
+    filter_score = "Filter score  (-log10 p of the quadratic-logistic term)",
+    assoc = "|marginal association|",
+    importance_plot = "Selection indicator",
+    "Predictor score"
+  )
+
+  p <- ggplot2::ggplot(scr, ggplot2::aes(
+    x = .data[[imp_col]], y = .data$display,
+    fill = .data$category, alpha = .data$is_selected
+  )) +
+    ggplot2::geom_col(width = 0.72) +
+    ggplot2::scale_fill_manual(
+      values = pal, name = "Predictor class", drop = TRUE
+    ) +
+    ggplot2::scale_alpha_manual(
+      values = c("TRUE" = 1, "FALSE" = 0.32),
+      breaks = c("TRUE", "FALSE"),
+      labels = c("retained", "screened out"),
+      name = "Selection"
+    ) +
+    ggplot2::guides(
+      alpha = ggplot2::guide_legend(override.aes = list(fill = "grey35"))
+    ) +
+    ggplot2::labs(
+      title = "Variable screening",
+      subtitle = sub_txt,
+      x = x_lab,
+      y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "right",
+      panel.grid.major.y = ggplot2::element_line(
+        color = "grey93", linewidth = 0.3
+      )
+    )
+  p
+}
+
+
+#' Plot Spatial Habitat Suitability Map
+#'
+#' @param x A `cast_predict` object.
+#' @param model Character. Which model's HSS to plot. Default is the first
+#'   model.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param title Optional character string for plot title.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_predict <- function(x, model = NULL, basemap = "world",
+                              title = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  pred <- x$predictions
+  model <- model %||% x$models[1]
+  hss_col <- paste0("HSS_", model)
+
+  if (!hss_col %in% names(pred)) {
+    cli::cli_abort(c(
+      "Model {.val {model}} not found in predictions.",
+      i = "Available models: {.val {x$models}}.",
+      i = "Use {.code plot(pred, model = \"{x$models[1]}\")}."
+    ))
+  }
+
+  title <- title %||% sprintf("Habitat Suitability - %s", toupper(model))
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = .cast_map_bg(), color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  large_grid <- nrow(pred) > 2e5
+  if (large_grid) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[hss_col]])
+      ) +
+      .cast_suitability_scale("fill", name = "HSS")
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[hss_col]]),
+        size = 0.4, alpha = 0.85
+      ) +
+      .cast_suitability_scale("colour", name = "HSS")
+  }
+  p <- p +
+    ggplot2::labs(title = title) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "sans")
+    ) +
+    ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right",
+      legend.key.width = ggplot2::unit(0.5, "cm"),
+      legend.key.height = ggplot2::unit(1.5, "cm")
+    )
+
+  p <- .add_china_dashline(p, basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = pred, value_var = hss_col, bg_fill = .cast_map_bg(),
+    raster = large_grid,
+    scale = .cast_suitability_scale(
+      if (large_grid) "fill" else "colour", guide = "none"
+    )
+  )
+}
+
+
+#' Plot Evaluation Metrics Comparison
+#'
+#' Cleveland-style dot plot comparing AUC, TSS, and CBI across fitted models:
+#' one row per model, one dodged dot per metric, values labelled directly.
+#'
+#' @param x A `cast_eval` object.
+#' @param metrics Character vector. Which metrics to show. Default
+#'   `c("auc","tss","cbi")`.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_eval <- function(x, metrics = c("auc", "tss", "cbi"), ...) {
+  check_suggested("ggplot2", "for plotting")
+
+  m <- x$metrics
+  metric_colors <- c(
+    AUC = "#0072B2", TSS = "#D55E00", CBI = "#009E73",
+    LOGLOSS = "#CC79A7"
+  )
+
+  src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test"
+
+  mean_cols <- paste0(metrics, "_mean")
+  present   <- intersect(mean_cols, names(m))
+  if (length(present) == 0) {
+    present <- intersect(c("auc_mean", "tss_mean"), names(m))
+  }
+
+  rows <- list()
+  for (col in present) {
+    metric_nm <- sub("_mean$", "", col)
+    rows[[col]] <- data.frame(
+      model  = m$model,
+      metric = toupper(metric_nm),
+      value  = m[[col]],
+      stringsAsFactors = FALSE
+    )
+  }
+  if (!length(rows)) cli::cli_abort("No requested evaluation metrics are available.")
+  long <- do.call(rbind, rows)
+  long$value[!is.finite(long$value)] <- NA_real_
+  long$label <- ifelse(is.na(long$value), "n.a.", sprintf("%.3f", long$value))
+  long$metric <- factor(long$metric, levels = toupper(sub("_mean$", "", present)))
+  long$model  <- factor(long$model, levels = rev(m$model))
+  score_range <- range(c(0, 1, long$value), na.rm = TRUE)
+
+  # Numeric y positions with manual per-metric offsets keep stems horizontal
+  n_metric <- nlevels(long$metric)
+  long$y_pos <- as.numeric(long$model) +
+    (as.integer(long$metric) - (n_metric + 1) / 2) * 0.18
+
+  ggplot2::ggplot(long, ggplot2::aes(
+    x = .data$value, y = .data$y_pos, color = .data$metric
+  )) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = 0, xend = .data$value, yend = .data$y_pos),
+      linewidth = 0.5, alpha = 0.45, na.rm = TRUE
+    ) +
+    ggplot2::geom_point(size = 2.6, na.rm = TRUE) +
+    ggplot2::geom_text(
+      ggplot2::aes(x = ifelse(is.na(.data$value), 0, .data$value), label = .data$label,
+                   hjust = ifelse(!is.na(.data$value) & .data$value < 0, 1.3, -0.3)),
+      size = 2.6,
+      family = getOption("castSDM.font_family", "sans"),
+      show.legend = FALSE
+    ) +
+    ggplot2::scale_color_manual(values = metric_colors, name = NULL) +
+    ggplot2::scale_y_continuous(
+      breaks = seq_along(levels(long$model)), labels = levels(long$model),
+      expand = ggplot2::expansion(mult = c(0.12, 0.12))
+    ) +
+    ggplot2::scale_x_continuous(
+      limits = score_range,
+      expand = ggplot2::expansion(mult = c(0.16, 0.16))
+    ) +
+    ggplot2::labs(
+      title = "Model Performance Comparison", subtitle = src,
+      x = "Score", y = NULL, caption = "n.a. = metric unavailable"
+    ) +
+    theme_cast() +
+    ggplot2::theme(
+      legend.position = "bottom",
+      panel.grid.major.y = ggplot2::element_blank()
+    )
+}
+
+
+#' Plot Spatial CV Fold Map and Metrics
+#'
+#' Two-panel figure: (left) geographic fold assignment map; (right) per-fold
+#' metric dots with unavailable folds retained and finite fold counts by model.
+#'
+#' @param x A `cast_cv` object.
+#' @param lon Numeric vector. Longitudes of the data used in [cast_cv()].
+#' @param lat Numeric vector. Latitudes of the data used in [cast_cv()].
+#' @param metric Character. Metric to show in right panel. Default `"auc"`.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param ... Ignored.
+#'
+#' @return A `patchwork` combined plot, or single ggplot if patchwork absent.
+#' @export
+plot.cast_cv <- function(x, lon = NULL, lat = NULL,
+                         metric = "auc", basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+
+  model_colors <- .cast_engine_colors(
+    c("rf", "brt", "maxent", "gam")
+  )
+  fold_colors <- c(
+    "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
+    "#A65628", "#F781BF", "#999999", "#66C2A5", "#FC8D62"
+  )
+
+  fd   <- x$fold_metrics
+  mcol <- metric
+  if (!mcol %in% names(fd)) {
+    cli::cli_warn("Metric '{metric}' not in fold_metrics. Using 'auc'.")
+    mcol <- "auc"
+  }
+
+  models <- unique(c(names(x$thresholds), as.character(fd$model)))
+  fd <- merge(expand.grid(fold = seq_len(x$k), model = models,
+                          stringsAsFactors = FALSE), fd,
+              by = c("fold", "model"), all.x = TRUE, sort = TRUE)
+  fd$model <- factor(fd$model, levels = models)
+  fd$fold <- factor(fd$fold, levels = seq_len(x$k))
+  fd[[mcol]][!is.finite(fd[[mcol]])] <- NA_real_
+  fd$tag <- ifelse(is.na(fd[[mcol]]), "n.a.", "")
+  counts <- vapply(models, function(m) sum(is.finite(fd[fd$model == m, mcol])), integer(1))
+  model_labels <- stats::setNames(sprintf("%s (%d/%d)", models, counts, x$k), models)
+  fold_labels <- as.character(seq_len(x$k))
+  if (!is.null(x$fold_status)) {
+    unavailable <- which(!is.na(x$fold_status) & x$fold_status != "evaluated")
+    fold_labels[unavailable] <- paste0(fold_labels[unavailable], "\n",
+      gsub("_", " ", x$fold_status[unavailable], fixed = TRUE))
+  }
+  score_range <- range(c(0, 1, fd[[mcol]]), na.rm = TRUE)
+  pd <- ggplot2::position_dodge(width = 0.6)
+  # Shaded band behind every unusable fold. The label already carried the
+  # status, but a two-line tick is easy to skim past; the band makes "this
+  # fold produced no metric" visible without reading.
+  band <- NULL
+  if (!is.null(x$fold_status)) {
+    unav <- which(!is.na(x$fold_status) & x$fold_status != "evaluated")
+    if (length(unav)) {
+      band <- ggplot2::geom_rect(
+        data = data.frame(fold = factor(unav, levels = seq_len(x$k))),
+        mapping = ggplot2::aes(xmin = as.numeric(.data$fold) - 0.5,
+                               xmax = as.numeric(.data$fold) + 0.5,
+                               ymin = -Inf, ymax = Inf),
+        fill = "grey90", alpha = 0.45, inherit.aes = FALSE)
+    }
+  }
+  p_metric <- ggplot2::ggplot(
+    fd,
+    ggplot2::aes(x = .data$fold, y = .data[[mcol]],
+                 color = .data$model, group = .data$model)
+  ) +
+    band +
+    ggplot2::geom_point(size = 2.5, position = pd, na.rm = TRUE) +
+    ggplot2::geom_text(
+      ggplot2::aes(y = score_range[1], label = .data$tag), position = pd,
+      angle = 90, hjust = 0, size = 2.2, show.legend = FALSE
+    ) +
+    ggplot2::scale_color_manual(values = model_colors, breaks = models,
+                                labels = model_labels, name = NULL, drop = FALSE) +
+    ggplot2::scale_x_discrete(drop = FALSE, labels = fold_labels) +
+    ggplot2::labs(
+      title = sprintf("Per-fold %s", toupper(mcol)),
+      subtitle = sprintf("%d-fold spatial block CV (%s)%s", x$k, x$block_method,
+        if (!is.null(x$fold_status) &&
+            any(x$fold_status != "evaluated", na.rm = TRUE))
+          sprintf("; %d fold(s) unusable (shaded)",
+                  sum(x$fold_status != "evaluated", na.rm = TRUE)) else ""),
+      x = "Spatial fold", y = toupper(mcol),
+      caption = "n.a. = metric unavailable\nLegend: finite / planned folds"
+    ) +
+    ggplot2::scale_y_continuous(limits = score_range,
+                               expand = ggplot2::expansion(mult = c(0.05, 0.08))) +
+    ggplot2::guides(colour = ggplot2::guide_legend(ncol = 2)) +
+    theme_cast() + ggplot2::theme(legend.position = "bottom",
+                                 legend.text = ggplot2::element_text(size = 8))
+
+  if (is.null(lon) || is.null(lat)) return(p_metric)
+
+  map_df <- data.frame(lon = lon, lat = lat, fold = factor(x$folds))
+  p_map <- ggplot2::ggplot()
+  if (basemap != "none") {
+    bm <- load_basemap(basemap)
+    if (!is.null(bm)) {
+      p_map <- p_map + ggplot2::geom_sf(
+        data = bm, fill = .cast_map_bg(),
+        color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  # Extend the palette for k > 10 folds instead of yielding NA colours.
+  fold_pal <- if (x$k <= length(fold_colors)) {
+    fold_colors[seq_len(x$k)]
+  } else {
+    grDevices::colorRampPalette(fold_colors)(x$k)
+  }
+
+  p_map <- p_map +
+    ggplot2::geom_point(
+      data = map_df,
+      ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$fold),
+      size = 0.8, alpha = 0.7
+    ) +
+    ggplot2::scale_color_manual(values = fold_pal, name = "Fold") +
+    ggplot2::labs(
+      title = "Spatial block folds",
+      subtitle = sprintf("Fold assignment: %s", x$block_method)
+    ) +
+    ggplot2::theme_void(base_size = 10) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 8),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA)
+    )
+
+  p_map <- .add_china_dashline(p_map, basemap)
+  p_map <- .add_china_outline(p_map, basemap) + .coord_for_map(basemap)
+  p_map <- .add_china_south_sea_inset(
+    p_map, basemap, data = map_df, value_var = "fold", bg_fill = .cast_map_bg(),
+    scale = ggplot2::scale_color_manual(values = fold_pal, guide = "none")
+  )
+
+  if (requireNamespace("patchwork", quietly = TRUE)) {
+    p_map + p_metric + patchwork::plot_layout(widths = c(1.4, 1))
+  } else {
+    p_metric
+  }
+}
+
+
+#' Plot castSDM Pipeline Result
+#'
+#' Currently renders the variable-selection panel.
+#'
+#' @param x A `cast_result` object.
+#' @param var_labels Optional named character vector for display labels.
+#' @param top Integer passed to [plot.cast_select()]. Default `20`.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_result <- function(x, var_labels = NULL, top = 20L, ...) {
+  check_suggested("ggplot2", "for plotting")
+  plot.cast_select(x$screen, var_labels = var_labels, top = top)
+}
+
+
+
+#' Plot Ensemble Prediction Map
+#'
+#' @param x A `cast_ensemble` object.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param ... Ignored.
+#' @return A `ggplot` object.
+#' @export
+plot.cast_ensemble <- function(x, basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  pred <- x$predictions
+  if (!all(c("lon", "lat", "hss_ensemble") %in% names(pred))) {
+    cli::cli_abort("Ensemble predictions must contain lon, lat, hss_ensemble.")
+  }
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = .cast_map_bg(), color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  large_grid <- nrow(pred) > 2e5
+  if (large_grid) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$hss_ensemble)
+      ) +
+      .cast_suitability_scale("fill", name = "Ensemble\nHSS")
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = pred,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$hss_ensemble),
+        size = 0.4, alpha = 0.85
+      ) +
+      .cast_suitability_scale("colour", name = "Ensemble\nHSS")
+  }
+  p <- p +
+    ggplot2::labs(
+      title = sprintf("Ensemble Habitat Suitability (%s)", x$method),
+      subtitle = if (is.finite(x$threshold %||% NA_real_)) sprintf("Threshold = %.3f", x$threshold)
+    ) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "sans")
+    ) +
+    ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right",
+      legend.key.width = ggplot2::unit(0.5, "cm"),
+      legend.key.height = ggplot2::unit(1.5, "cm")
+    )
+
+  p <- .add_china_dashline(p, basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = pred, value_var = "hss_ensemble", raster = large_grid,
+    bg_fill = .cast_map_bg(),
+    scale = if (large_grid) {
+      .cast_suitability_scale("fill", guide = "none")
+    } else {
+      .cast_suitability_scale("colour", guide = "none")
+    }
+  )
+}
+
+
+#' Plot Future Climate Projection
+#'
+#' @param x A `cast_project` object.
+#' @param scenario Character. Which scenario to plot. Default is the first.
+#' @param basemap Character. `"world"`, `"china"`, or `"none"`.
+#' @param ... Ignored.
+#' @return A `ggplot` object.
+#' @export
+plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
+  check_suggested("ggplot2", "for plotting")
+  check_suggested("sf", "for geographic mapping")
+
+  scenario <- scenario %||% names(x$future)[1]
+  if (!scenario %in% names(x$future)) {
+    cli::cli_abort("Scenario {.val {scenario}} not found. Available: {.val {names(x$future)}}.")
+  }
+
+  fut <- x$future[[scenario]]
+  change <- x$changes[[scenario]]
+  if (!all(c("lon", "lat", "change") %in% names(change))) {
+    cli::cli_abort("Change data must contain lon, lat, change columns.")
+  }
+
+  change_bg <- "#E6E9ED"
+  change_colors <- c(
+    gain = "#2E9E5B", loss = "#CB4335", stable_present = "#2E86C1",
+    stable_absent = change_bg
+  )
+
+  p <- ggplot2::ggplot()
+  if (basemap != "none") {
+    basemap_sf <- load_basemap(basemap)
+    if (!is.null(basemap_sf)) {
+      p <- p + ggplot2::geom_sf(
+        data = basemap_sf,
+        fill = change_bg, color = "#bdc3c7", linewidth = 0.2
+      )
+    }
+  }
+  large_grid <- nrow(change) > 2e5
+  if (large_grid) {
+    p <- p +
+      ggplot2::geom_raster(
+        data = change,
+        ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data$change)
+      ) +
+      ggplot2::scale_fill_manual(values = change_colors, name = "Range\nChange")
+  } else {
+    p <- p +
+      ggplot2::geom_point(
+        data = change,
+        ggplot2::aes(x = .data$lon, y = .data$lat, color = .data$change),
+        size = 0.4, alpha = 0.8
+      ) +
+      ggplot2::scale_color_manual(values = change_colors, name = "Range\nChange")
+  }
+  p <- p +
+    ggplot2::labs(
+      title = sprintf("Range Change: %s", scenario),
+      subtitle = {
+        s <- x$stats[x$stats$scenario == scenario, ]
+        if (nrow(s) > 0)
+          sprintf("Gain=%d | Loss=%d | Stable=%d | Shift=%.1f km",
+                  s$n_gain[1], s$n_loss[1], s$n_stable_present[1], s$centroid_shift_km[1])
+        else ""
+      }
+    ) +
+    ggplot2::theme_void(
+      base_size = 10,
+      base_family = getOption("castSDM.font_family", "sans")
+    ) +
+    ggplot2::theme(
+      text = ggplot2::element_text(family = getOption("castSDM.font_family", "sans")),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 12),
+      plot.subtitle = ggplot2::element_text(hjust = 0.5, color = "grey40", size = 9),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.position = "right"
+    )
+
+  p <- .add_china_dashline(p, basemap)
+  p <- .add_china_outline(p, basemap) + .coord_for_map(basemap)
+  .add_china_south_sea_inset(
+    p, basemap, data = change, value_var = "change", raster = large_grid,
+    bg_fill = change_bg,
+    scale = if (large_grid) {
+      ggplot2::scale_fill_manual(values = change_colors, guide = "none")
+    } else {
+      ggplot2::scale_color_manual(values = change_colors, guide = "none")
+    }
+  )
+}
+
+
+#' Plot Predictor Importance
+#'
+#' Lollipop plot of the forward-selection path: each admitted predictor with
+#' the inner-CV loss improvement at admission. Excluded survivors are listed
+#' with missing steps and gains, not plotted.
+#'
+#' @param x A `cast_importance` object (from [cast_importance()]).
+#' @param var_labels Optional named character vector for display labels.
+#' @param top Optional integer. Show only the `top` largest gains.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  eff <- x$effects
+  n_out <- sum(is.na(x$effects$step_added))
+  has_gain <- "loss_gain" %in% names(eff) && any(is.finite(eff$loss_gain))
+  if (has_gain) {
+    # two_stage screens: the inner-CV loss improvement at admission.
+    eff <- eff[!is.na(eff$step_added) & is.finite(eff$loss_gain), , drop = FALSE]
+    if (!is.null(top) && is.finite(top)) {
+      eff <- utils::head(eff[order(-eff$loss_gain), , drop = FALSE],
+                         as.integer(top))
+    }
+    eff <- eff[order(eff$loss_gain), ]
+    x_measure <- eff$loss_gain
+    x_label <- "Inner-CV loss improvement at admission"
+    plot_title <- "Forward-selection path"
+    plot_subtitle <- sprintf(
+      "Inner-CV %s improvement at admission | %d admitted, %d screened out",
+      x$metric %||% "loss", nrow(eff), n_out)
+  } else {
+    # covsel screens: no loss path exists; the admission order is the
+    # Adde et al. (2023) aggregate rank (1 = strongest).
+    eff <- eff[!is.na(eff$step_added), , drop = FALSE]
+    if (!is.null(top) && is.finite(top)) {
+      eff <- utils::head(eff[order(eff$step_added), , drop = FALSE],
+                         as.integer(top))
+    }
+    eff <- eff[order(eff$step_added), ]
+    x_measure <- eff$step_added
+    x_label <- "Embedded-selection rank (1 = strongest)"
+    plot_title <- "Embedded-selection path"
+    plot_subtitle <- sprintf(
+      "%s | %d admitted, %d screened out",
+      x$metric %||% "aggregate rank", nrow(eff), n_out)
+  }
+  if (!is.null(var_labels)) {
+    eff$display <- ifelse(eff$variable %in% names(var_labels),
+                          var_labels[eff$variable], eff$variable)
+  } else {
+    eff$display <- eff$variable
+  }
+  eff <- eff[order(eff$loss_gain), ]
+  eff$display <- factor(make.unique(eff$display), levels = make.unique(eff$display))
+
+  plot_subtitle <- sprintf(
+    "Inner-CV %s improvement at admission | %d admitted, %d screened out",
+    x$metric %||% "loss", nrow(eff), n_out
+  )
+
+  ggplot2::ggplot(eff, ggplot2::aes(
+    x = x_measure, y = .data$display
+  )) +
+    ggplot2::geom_vline(xintercept = if (has_gain) 0 else 0.5, linetype = "solid",
+                        color = "grey50", linewidth = 0.4) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = if (has_gain) 0 else 0.5, xend = x_measure,
+                   y = .data$display, yend = .data$display),
+      linewidth = 0.6, color = "#B2182B"
+    ) +
+    ggplot2::geom_point(size = 2.6, color = "#B2182B") +
+    ggplot2::labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = x_label, y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(
+      legend.position = "none",
+      panel.grid.major.y = ggplot2::element_line(color = "grey93", linewidth = 0.3)
+    )
+}
+
+
+#' Plot an Effect Table: Magnitude, Direction and Masking
+#'
+#' Lollipop chart of per-driver shift effects: position shows the
+#' magnitude (`mean_abs_dHSS`), colour shows the direction
+#' (`mean_signed_dHSS`), crosses mark masked drivers (`NA` estimates:
+#' box coverage below `min_support`). Coverage is not joint positivity.
+#'
+#' @param x A `cast_effect_table` object (from [cast_effect_table()]).
+#' @param var_labels Optional named character vector of display labels.
+#' @param ... Ignored.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.cast_effect_table <- function(x, var_labels = NULL, ...) {
+  check_suggested("ggplot2", "for plotting")
+  d <- as.data.frame(x)
+  d <- d[order(d$mean_abs_dHSS, na.last = TRUE), , drop = FALSE]
+  d$display <- if (!is.null(var_labels)) {
+    ifelse(d$driver %in% names(var_labels), var_labels[d$driver], d$driver)
+  } else .cast_var_label(d$driver)
+  d$display <- factor(make.unique(d$display), levels = make.unique(d$display))
+  d$direction <- ifelse(!is.finite(d$mean_signed_dHSS), "masked",
+                        ifelse(d$mean_signed_dHSS >= 0, "raises suitability",
+                        "lowers suitability"))
+  d$mask <- ifelse(is.finite(d$mean_abs_dHSS), "supported", "masked")
+  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$mean_abs_dHSS, y = .data$display,
+                                  color = .data$direction)) +
+    ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data$mean_abs_dHSS,
+                                       y = .data$display, yend = .data$display),
+                          linewidth = 0.6) +
+    ggplot2::geom_point(ggplot2::aes(shape = .data$mask), size = 2.8,
+                        fill = "white") +
+    ggplot2::scale_shape_manual(values = c(supported = 16, masked = 4),
+                                name = NULL) +
+    ggplot2::labs(
+      title = "Shift effect by driver",
+      subtitle = "Magnitude with direction; cross = masked (shift not answerable in-box)",
+      x = "Mean |change in suitability| at the stated raw-unit shift", y = ""
+    ) +
+    theme_cast(base_size = 11) +
+    ggplot2::theme(legend.position = "bottom")
+  .cast_effect_table_display(p, x, attr(x, "shift_type") %||% "raw")
+}
+
+
+# ========================================================================
+# Internal helpers
+# ========================================================================
+
+#' castSDM Publication Theme
+#' @keywords internal
+#' @noRd
+theme_cast <- function(base_size = 11) {
+  ggplot2::theme_minimal(
+    base_size = base_size,
+    base_family = getOption("castSDM.font_family", "sans")
+  ) +
+    ggplot2::theme(
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.title = ggplot2::element_text(face = "bold"),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0, size = base_size),
+      plot.subtitle = ggplot2::element_text(hjust = 0, color = "grey40", size = base_size - 2),
+      plot.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      legend.box.background = ggplot2::element_rect(fill = "transparent", color = NA),
+      strip.background = ggplot2::element_rect(fill = "transparent", color = NA)
+    )
+}
+
+.basemap_cache <- new.env(parent = emptyenv())
+
+#' Load Basemap Shapefile from Package
+#'
+#' @param type `"world"`, `"china"`, or `"dashline"`.
+#' @return An `sf` object or `NULL`.
+#' @keywords internal
+#' @noRd
+load_basemap <- function(type = "world") {
+  if (!requireNamespace("sf", quietly = TRUE)) return(NULL)
+
+  shp_name <- switch(type,
+    world = "countries.shp",
+    china = "china.shp",
+    dashline = "dashline.shp",
+    NULL
+  )
+  if (is.null(shp_name)) return(NULL)
+
+  # A single map draws the same basemap several times; reading and validating
+  # the shapefile once per session keeps that from dominating plot time.
+  if (exists(type, envir = .basemap_cache, inherits = FALSE)) {
+    return(get(type, envir = .basemap_cache, inherits = FALSE))
+  }
+
+  shp_path <- system.file("basemap", shp_name, package = "castSDM")
+  if (shp_path == "") return(NULL)
+
+  # Toggle spherical geometry off for the read only; restore the user's
+  # global s2 setting on exit so plotting never mutates session state.
+  prev_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(prev_s2), add = TRUE)
+  basemap <- tryCatch(
+    sf::st_read(shp_path, quiet = TRUE),
+    error = function(e) NULL
+  )
+
+  if (!is.null(basemap)) {
+    crs <- sf::st_crs(basemap)
+    # `crs$epsg` is NA for a CRS carrying no EPSG code, so comparing it
+    # numerically would make the guard itself error.
+    if (is.na(crs) || !identical(crs, sf::st_crs(4326))) {
+      basemap <- sf::st_transform(basemap, 4326)
+    }
+    basemap <- sf::st_make_valid(basemap)
+    assign(type, basemap, envir = .basemap_cache)
+  }
+  basemap
+}
+
+#' Get standard bounds for China maps
+#' @keywords internal
+#' @noRd
+.china_main_bounds <- function() {
+  china <- load_basemap("china")
+  if (is.null(china)) return(NULL)
+  as.numeric(sf::st_bbox(china))
+}
+
+#' Full national extent for China plots
+#'
+#' China maps always show the complete, standard national frame; a
+#' range-restricted species is never cropped to its coloured cells. Seamless
+#' colour across the country is achieved instead by filling the whole basemap
+#' with each map's null/background colour (see the per-map `fill`), so cells
+#' outside the accessible area continue the surface rather than cutting it.
+#' @keywords internal
+#' @noRd
+.coord_for_map <- function(basemap) {
+  if (!identical(basemap, "china")) return(ggplot2::coord_sf(expand = FALSE))
+  bounds <- .china_main_bounds()
+  if (is.null(bounds)) return(ggplot2::coord_sf(expand = FALSE))
+  ggplot2::coord_sf(xlim = bounds[c(1, 3)], ylim = bounds[c(2, 4)],
+                    expand = FALSE, datum = NA)
+}
+
+#' Shared neutral background fill for suitability maps
+#'
+#' Equal to the low anchor of the suitability ramp, so near-zero-suitability
+#' cells inside the accessible area are indistinguishable from the unmodelled
+#' country outside it and the map reads as one continuous surface.
+#' @keywords internal
+#' @noRd
+.cast_map_bg <- function() "#EDF2F4"
+
+#' Sequential suitability colour ramp (pale grey -> deep teal-blue)
+#' @keywords internal
+#' @noRd
+.cast_suitability_scale <- function(aesthetic = c("fill", "colour"),
+                                    name = "HSS", guide = "colourbar") {
+  aesthetic <- match.arg(aesthetic)
+  cols <- c("#EDF2F4", "#9FD3DB", "#4FA3BE", "#256E92", "#0B3D5C")
+  if (aesthetic == "fill") {
+    ggplot2::scale_fill_gradientn(colours = cols, limits = c(0, 1),
+                                  name = name, guide = guide)
+  } else {
+    ggplot2::scale_colour_gradientn(colours = cols, limits = c(0, 1),
+                                    name = name, guide = guide)
+  }
+}
+
+#' Group a raw predictor name into a broad ecological theme
+#'
+#' Keyword rules over the CHECO26 naming scheme so the variable-selection
+#' figure can colour predictors by class without a user-supplied dictionary.
+#' @keywords internal
+#' @noRd
+.cast_var_category <- function(vars) {
+  v <- tolower(vars)
+  cat <- rep("Other", length(v))
+  is_set <- rep(FALSE, length(v))
+  assign_cat <- function(pattern, label) {
+    hit <- !is_set & grepl(pattern, v)
+    cat[hit] <<- label
+    is_set[hit] <<- TRUE
+  }
+  assign_cat("landcover|land_cover|^lu_|_lu_|cropland|urban|forest|igbp|water_prop", "Land use / cover")
+  assign_cat("^anthro|landscan|popn|population|human|hfp|footprint|nightlight", "Anthropogenic")
+  assign_cat("^soil|_soil|clay|sand|silt|_ph|ocdens|bulkdens|_oc_|cec", "Soil")
+  assign_cat("^hydro|river|stream|flow|discharge|topowet|_cwd|wetland|water", "Hydrology")
+  assign_cat("elev|slope|aspect|^tri$|terrain|roughness|topo", "Terrain")
+  assign_cat("^vege|ndvi|lai|gpp|npp|canopy", "Vegetation")
+  assign_cat("bio[0-9]|temp|precip|prec_|aridity|thornthwaite|etccdi|clim|frost|gdd|season", "Climate")
+  cat
+}
+
+#' Fixed palette for predictor classes
+#' @keywords internal
+#' @noRd
+.cast_category_palette <- function() {
+  c(
+    "Climate"          = "#4C72B0",
+    "Land use / cover" = "#55A868",
+    "Soil"             = "#8C6D31",
+    "Hydrology"        = "#4BB6C6",
+    "Terrain"          = "#C44E52",
+    "Vegetation"       = "#8172B3",
+    "Anthropogenic"    = "#CCB974",
+    "Other"            = "grey70"
+  )
+}
+
+#' Compact human-readable label for a raw CHECO26 predictor name
+#' @keywords internal
+#' @noRd
+.cast_var_label <- function(vars) {
+  lab <- vars
+  lab <- gsub("_r[0-9]+cell$", "", lab)
+  repl <- c(
+    "aridityindexthornthwaite" = "aridity index",
+    "maxtempcoldest" = "max temp coldest month",
+    "mintempwarmest" = "min temp warmest month",
+    "etccdi_cwd" = "consecutive wet days",
+    "topowet" = "topographic wetness",
+    "landcover_igbp" = "land cover (IGBP)",
+    "lu_water_prop" = "surface water proportion",
+    "lu_urban" = "urban proportion",
+    "lu_cropland" = "cropland proportion"
+  )
+  for (nm in names(repl)) lab <- gsub(nm, repl[[nm]], lab, fixed = TRUE)
+  lab <- gsub("^lu_", "", lab)
+  lab <- gsub("^anthro_", "human ", lab)
+  lab <- gsub("_", " ", lab)
+  lab <- trimws(gsub("\\s+", " ", lab))
+  substr(lab, 1, 1) <- toupper(substr(lab, 1, 1))
+  lab
+}
+
+#' Redraw the China outline above prediction layers
+#' @keywords internal
+#' @noRd
+.add_china_outline <- function(plot, basemap) {
+  if (!identical(basemap, "china")) return(plot)
+  china <- load_basemap("china")
+  if (is.null(china)) return(plot)
+  plot + ggplot2::geom_sf(data = china, fill = NA, colour = "#4E5963", linewidth = 0.30)
+}
+
+#' Redraw the South China Sea dashed line on the China main map
+#' @keywords internal
+#' @noRd
+.add_china_dashline <- function(plot, basemap) {
+  if (!identical(basemap, "china")) return(plot)
+  dashline <- load_basemap("dashline")
+  if (is.null(dashline)) return(plot)
+  plot + ggplot2::geom_sf(
+    data = dashline, fill = NA, colour = "#4E5963", linewidth = 0.28, linetype = "solid"
+  )
+}
+
+#' Draw the South China Sea dashed-line inset inside a China map
+#'
+#' When `data` and `value_var` are given, the inset renders the same data
+#' layer as the main map (cropped to the inset extent) so colours match.
+#'
+#' @keywords internal
+#' @noRd
+.add_china_south_sea_inset <- function(plot, basemap, data = NULL,
+                                       value_var = NULL, scale = NULL,
+                                       raster = FALSE, bg_fill = "#F7F8F8",
+                                       cell_size = NULL, alpha_col = NULL) {
+  if (!identical(basemap, "china") ||
+      !requireNamespace("sf", quietly = TRUE) ||
+      !requireNamespace("ggplot2", quietly = TRUE)) return(plot)
+
+  china <- load_basemap("china")
+  dashline <- load_basemap("dashline")
+  bounds <- .china_main_bounds()
+  if (is.null(china) || is.null(dashline) || is.null(bounds)) return(plot)
+
+  inset <- ggplot2::ggplot() +
+    ggplot2::geom_sf(data = china, fill = bg_fill, colour = NA)
+
+  if (!is.null(data) && !is.null(value_var) &&
+      all(c("lon", "lat", value_var) %in% names(data))) {
+    sub <- data[data$lon >= 104 & data$lon <= 127 &
+                  data$lat >= 1 & data$lat <= 27, , drop = FALSE]
+    if (nrow(sub) > 0) {
+      if (isTRUE(raster)) {
+        raster_aes <- if (!is.null(alpha_col) && alpha_col %in% names(sub)) {
+          ggplot2::aes(x = .data$lon, y = .data$lat,
+                       fill = .data[[value_var]], alpha = .data[[alpha_col]])
+        } else {
+          ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[value_var]])
+        }
+        # Sparse display grids need their declared cell size; otherwise the
+        # raster geom infers spacing from gaps and may shift painted cells.
+        inset <- inset + if (is.null(cell_size)) {
+          ggplot2::geom_raster(data = sub, mapping = raster_aes)
+        } else {
+          ggplot2::geom_tile(data = sub, mapping = raster_aes,
+                             width = cell_size[1], height = utils::tail(cell_size, 1))
+        }
+        if (!is.null(alpha_col) && alpha_col %in% names(sub)) {
+          inset <- inset + ggplot2::scale_alpha_identity(guide = "none")
+        }
+      } else {
+        inset <- inset + ggplot2::geom_point(
+          data = sub,
+          ggplot2::aes(x = .data$lon, y = .data$lat, color = .data[[value_var]]),
+          size = 0.2, alpha = 0.85
+        )
+      }
+      if (!is.null(scale)) inset <- inset + scale
+    }
+  }
+
+  inset <- inset +
+    ggplot2::geom_sf(data = china, fill = NA, colour = "#4E5963", linewidth = 0.20) +
+    ggplot2::geom_sf(
+      data = dashline, fill = NA, colour = "#4E5963", linewidth = 0.22, linetype = "solid"
+    ) +
+    ggplot2::coord_sf(xlim = c(105, 126), ylim = c(2, 26), expand = FALSE, datum = NA) +
+    ggplot2::theme_void(base_family = getOption("castSDM.font_family", "sans")) +
+    ggplot2::theme(
+      legend.position = "none",
+      panel.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+      panel.border = ggplot2::element_rect(fill = NA, colour = "#4E5963", linewidth = 0.35),
+      plot.margin = ggplot2::margin(0, 0, 0, 0)
+    )
+
+  xmin <- bounds[3] - 10.6
+  xmax <- bounds[3] - 0.7
+  ymin <- bounds[2] + 0.7
+  ymax <- bounds[2] + 10.6
+
+  plot + ggplot2::annotation_custom(
+    grob = ggplot2::ggplotGrob(inset),
+    xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax
+  )
+}
+
+.cast_effect_table_display <- function(p, tab, shift_type = "raw") {
+  d <- p$data
+  fin <- is.finite(d$mean_abs_dHSS)
+  if (!any(fin)) { d$mean_abs_dHSS[] <- NA_real_; r <- c(0, 1) } else r <- range(d$mean_abs_dHSS[fin])
+  span <- diff(r)
+  if (!is.finite(span) || span <= 0) span <- max(abs(r), 1)
+  gutter <- r[1] - 0.24 * span
+  d$.x_plot <- ifelse(fin, d$mean_abs_dHSS, gutter)
+  br <- pretty(r, n = 3)
+  br <- br[br >= r[1] & br <= r[2]]
+  sup <- ""
+  if (!is.null(tab) && "support" %in% names(tab)) {
+    s <- suppressWarnings(as.numeric(tab$support))
+    if (any(is.finite(s))) {
+      sup <- sprintf(" Training-range coverage %.0f-%.0f%%.",
+                     100 * min(s, na.rm = TRUE), 100 * max(s, na.rm = TRUE))
+      n <- suppressWarnings(as.numeric(tab$n))
+      if (length(n) && any(is.finite(n))) {
+        sup <- paste0(sup, " Evaluated records: ",
+                      format(max(n, na.rm = TRUE), big.mark = ","), ".")
+      }
+    }
+  }
+  p$data <- d
+  p +
+    ggplot2::aes(x = .data$.x_plot) +
+    ggplot2::scale_x_continuous(breaks = c(gutter, br),
+      labels = c("Not\nevaluated", format(br, trim = TRUE, digits = 3)),
+      expand = ggplot2::expansion(mult = c(0.03, 0.05))) +
+    ggplot2::scale_color_manual(
+      values = c(`raises suitability` = "#2166AC", `lowers suitability` = "#B35806", masked = "grey50"),
+      breaks = c("raises suitability", "lowers suitability"),
+      na.value = "grey50", name = NULL, drop = FALSE) +
+    ggplot2::labs(
+      x = if (shift_type == "sd") "Mean |suitability change| under the stated SD shift" else "Mean |suitability change| under the stated raw-unit shift",
+      subtitle = paste0("Magnitude with direction; cross = masked",
+        "(shift not answerable inside the training box).", sup))
+}

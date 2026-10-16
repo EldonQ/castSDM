@@ -45,8 +45,8 @@ cast_fit(
 \code{tune = TRUE} (the depth enters the search grid).}
 
 \item{brt_shrinkage}{Numeric. BRT learning rate. Default \code{0.005}
-(with 2000 trees, the Elith et al. 2008 recipe for presence-background
-data; larger rates underfit unless the tree count grows with them).
+as a starting value; jointly assess learning rate, tree count and depth
+for the dataset rather than assuming a universal SDM recipe.
 Ignored when \code{tune = TRUE} (the rate enters the search grid).}
 
 \item{maxent_classes}{Character. MaxEnt feature classes as a single string
@@ -64,7 +64,9 @@ multiplier) and fit with the best-scoring combination. Default \code{FALSE}.
 See Details.}
 
 \item{tune_folds}{Integer. Folds used by the inner grid-search scoring
-(BRT internal CV; MaxEnt stratified random folds). Default \code{3}.}
+(BRT internal CV; MaxEnt stratified random folds). When tuning BRT,
+also controls final tree-count selection. Default \code{3}; untuned BRT
+keeps its existing 5-fold tree-count selection.}
 
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. When supplied,
 presence and background rows are weighted so that the \emph{weighted}
@@ -103,7 +105,8 @@ detected in \code{data} are used.
 clamps predictions internally; clamping to the training range is a
 package-level decision (see \code{\link[=cast_predict]{cast_predict()}} and
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}, argument \code{clamp}).
-\item \strong{BRT}: \code{\link[gbm:gbm]{gbm::gbm()}} with Bernoulli loss and 5-fold CV.
+\item \strong{BRT}: \code{\link[gbm:gbm]{gbm::gbm()}} with Bernoulli loss and 5-fold tree-count selection
+by default (\code{tune_folds} when \code{tune = TRUE}).
 \item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
@@ -125,7 +128,8 @@ training part of each fold.
 
 Combinations that fail to fit (e.g. very small folds) score \code{NA}; if no
 combination scores, the fixed defaults are kept with a warning.
-Hyperparameters supplied explicitly are held fixed rather than searched.
+Explicit RF \code{mtry} and MaxEnt feature/regularisation values are held fixed.
+BRT depth and shrinkage are replaced by the documented grid when tuning.
 Selecting hyperparameters on inner data and evaluating on outer folds is
 the nested-selection principle of Cawley & Talbot (2010): pass
 \code{tune = TRUE} to \code{\link[=cast_cv]{cast_cv()}} to run the grid inside every outer training

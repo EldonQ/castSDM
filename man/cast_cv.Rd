@@ -26,7 +26,13 @@ cast_cv(
   aoa = FALSE,
   parallel = FALSE,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  rf_mtry = NULL,
+  brt_depth = 5L,
+  maxent_classes = NULL,
+  maxent_regmult = NULL,
+  num_threads = 1L,
+  fold_ids = NULL
 )
 }
 \arguments{
@@ -120,6 +126,15 @@ consumed by \code{\link[=cast_predict]{cast_predict()}} (\code{aoa = TRUE}) and
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
+
+\item{rf_mtry, brt_depth, maxent_classes, maxent_regmult, num_threads}{Engine
+settings as in \code{\link[=cast_fit]{cast_fit()}}, applied in every outer training fold.}
+
+\item{fold_ids}{Optional integer fold assignments from an external design
+such as \code{blockCV}, aligned with data rows. Values must cover \code{1:k}.
+Use \code{n_repeat = 1} for a fixed external design. This allows physical block
+sizes or basin groups to be chosen independently of castSDM's automatic
+blocking; supplied assignments are returned unchanged.}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.

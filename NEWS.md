@@ -1,3 +1,33 @@
+# castSDM 0.19.0
+
+- Accept external fitted models through `cast_as_fit()` with explicit prediction
+  callbacks and training references; accept external `fold_ids` in `cast_cv()`.
+- Preserve explicit RF mtry during tuning and refitting; forward engine settings
+  through spatial CV and validate integer parameter ranges before fitting.
+- Reject missing/one-class fitting responses and entirely nonfinite predictors;
+  report imputation counts without claiming observed environmental support.
+- Required pipeline CV/refit/ensemble stages now stop on failure. GAM smooth
+  failures warn when a linear-only fallback is used.
+- Reduce the maintained case report to four main figures; single-shift audits
+  and ensemble permutation are explicit optional diagnostics. Add nearest-neighbour
+  display resampling for binary/categorical maps. Retain `inst` assets and examples.
+- Add paired current/future spatial attribution with frozen model weights,
+  driver-only and retained-driver contrasts, range flags and model disagreement.
+- Add source-native attribution plots and share cartographic rendering with
+  the single-species workflow. Preserve all cartographic assets.
+- Correct unavailable-CV label overlap and binary range legends; the case
+  replot entry records original computation and revised plotting sources separately.
+- Allow single-shift effects to use the same model weights as projection.
+- Reframe the package around environmental drivers of habitat change.
+- Allow independent future raster scenarios to use the caller's future plan,
+  with explicit raster transport and a per-worker memory budget. Reuse exactly
+  equivalent driver comparisons when only one predictor changes.
+- Uniform background sampling now proposes mask cells without replacement and
+  accepts only complete finite environments, avoiding a full multi-layer scan.
+  The design is unchanged but seeded sample sequences differ from earlier versions.
+- Single-shift maps evaluate only rows retained by their existing hard range
+  mask, avoiding predictions that would immediately be discarded.
+
 # castSDM 0.18.0 (unreleased)
 
 ## Fixed
@@ -40,11 +70,13 @@
   the sweep. An interrupted run used to leave that prototype behind, and the
   next `overwrite = FALSE` run would report "exists; skipping" and hand back a
   raster of pure `NA`.
-* **All raster output is now written atomically** (`.cast_write_raster_atomic()`:
-  temporary sibling + rename) across `cast_predict_tiled()`,
+* Raster output is staged in a temporary sibling file before publication
+  (`.cast_write_raster_atomic()`) across `cast_predict_tiled()`,
   `cast_ensemble_raster()`, `cast_effect_map()`, `cast_project()` and
   `cast_project_raster()`. Resume logic keys off `file.exists()`, which
-  previously meant a half-written GeoTIFF was accepted as complete.
+  previously meant a half-written GeoTIFF was accepted as complete. Rename
+  is the normal publication path; the copy fallback is not atomic, so this
+  is not a guarantee for every filesystem or interruption condition.
 * `cast_fit()` and `cast_evaluate()` now reject a non-`data.frame` input.
   `cast_evaluate(fit, NULL)` used to pass validation silently (`NULL[["x"]]`
   is `NULL`, `all(logical(0) %in% c(0, 1))` is `TRUE`) and return all-`NA`

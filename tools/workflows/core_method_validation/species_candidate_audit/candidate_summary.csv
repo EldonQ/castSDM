@@ -1,0 +1,6 @@
+"species","records","unique_coordinates","records_inside_mask","unique_1km_cells","identifiable_references","records_missing_reference","publication_date_proxies","true_dated_pre2018_cells","true_dated_post2017_cells","post2017_cells_not_in_pre2018","unknown_year"
+"Schizopygopsis pylzovi",144,125,144,119,40,0,21,98,5,5,0
+"Schizopygopsis thermalis",741,99,741,97,18,656,3,52,50,44,0
+"Schizothorax prenanti",141,83,141,81,42,5,23,59,9,2,0
+"Schizothorax nukiangensis",752,105,752,89,16,647,2,55,44,32,0
+"Ptychobarbus kaznakovi",382,101,382,95,30,273,8,62,34,26,0

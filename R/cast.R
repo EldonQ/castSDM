@@ -2,7 +2,8 @@
 #'
 #' One-step pipeline that executes the entire workflow: data splitting,
 #' variable screening, model fitting, spatial cross-validation,
-#' evaluation, ensemble prediction, and future projection.
+#' evaluation and ensemble prediction. Use [cast_attribution()] and
+#' [cast_project()] to compare current and future environments afterwards.
 #'
 #' @param species_data A `data.frame` with columns: `lon`, `lat`, `presence`
 #'   (0/1), and environmental variables.
@@ -23,6 +24,17 @@
 #'   to admit a predictor, on top of the 2-SE guard. Default `0`.
 #' @param select_n_folds Integer. Inner folds for the stage-2 forward search.
 #'   Default `3`.
+#' @param select_corcut Correlation threshold for the `"covsel"` filter
+#'   levels. Default `0.7` (Dormann et al. 2013).
+#' @param select_var_id Character vector of variable-level identities aligned
+#'   with the predictors (for `"covsel"`; `NULL` skips the variable level).
+#' @param select_category Character vector of category-level identities
+#'   aligned with the predictors (for `"covsel"`; `NULL` skips it).
+#' @param select_algorithms Embedding learners for `"covsel"`: any of
+#'   `"glm"`, `"gam"`, `"rf"`. Default all three.
+#' @param select_ncov Target covariate count for `"covsel"`. Default `NULL` =
+#'   `ceiling(log2(n_presences)) - 1` (Adde et al. 2023).
+#' @param select_maxncov Maximum covariate count for `"covsel"`. Default `12`.
 #' @param threshold_method Binary threshold rule, selected on training data and
 #'   then applied to held-out predictions. See [cast_threshold()]. Default
 #'   `"max_tss"`.
@@ -76,6 +88,12 @@ cast <- function(species_data,
                    select_metric = "brier",
                    select_tolerance = 0,
                    select_n_folds = 3L,
+                  select_corcut = 0.7,
+                  select_var_id = NULL,
+                  select_category = NULL,
+                  select_algorithms = c("glm", "gam", "rf"),
+                  select_ncov = NULL,
+                  select_maxncov = 12L,
                   threshold_method = "max_tss",
                   tune = FALSE,
                   tune_folds = 3L,
@@ -120,6 +138,12 @@ cast <- function(species_data,
     metric = select_metric,
     tolerance = select_tolerance,
     n_folds = select_n_folds,
+    corcut = select_corcut,
+    var_id = select_var_id,
+    category = select_category,
+    algorithms = select_algorithms,
+    ncov = select_ncov,
+    maxncov = select_maxncov,
     keep = select_keep,
     seed = seed, verbose = verbose
   )
@@ -140,32 +164,27 @@ cast <- function(species_data,
   cv_result <- NULL
   if (do_cv) {
     if (verbose) cli::cli_h2("Step 4: Spatial Cross-Validation")
-    cv_result <- tryCatch(
-      cast_cv(
+    cv_select_args <- switch(select_method,
+      covsel = list(corcut = select_corcut, var_id = select_var_id,
+                    category = select_category, algorithms = select_algorithms,
+                    ncov = select_ncov, maxncov = select_maxncov,
+                    keep = select_keep),
+      list(num_trees = select_num_trees, metric = select_metric,
+           tolerance = select_tolerance, n_folds = select_n_folds,
+           keep = select_keep))
+    cv_result <- cast_cv(
         species_data,
         screen = screen,
         select_method = select_method,
-         select_args = list(
-          num_trees = select_num_trees,
-          metric = select_metric,
-          tolerance = select_tolerance,
-          n_folds = select_n_folds,
-           keep = select_keep
-         ),
+         select_args = cv_select_args,
          k = cv_k, models = models,
          block_method = cv_block_method,
          n_repeat = n_repeat,
          threshold_method = threshold_method,
          tune = tune, tune_folds = tune_folds,
          prevalence_target = prevalence_target,
+         num_threads = num_threads,
          seed = seed, verbose = verbose
-      ),
-      error = function(e) {
-        cli::cli_warn(
-          "Spatial CV failed ({e$message}). Falling back to hold-out eval."
-        )
-        NULL
-      }
     )
   }
 
@@ -190,20 +209,15 @@ cast <- function(species_data,
       # grid on the full data would double grid compute and could silently
       # change the configuration of the published maps.
       tuned <- .cast_tuned_args(fit)
-      fit_full <- tryCatch(
-        cast_fit(
+      fit_full <- cast_fit(
           species_data, screen = screen, models = models,
           rf_mtry = tuned$rf_mtry,
-          brt_depth = tuned$brt_depth, brt_shrinkage = tuned$brt_shrinkage,
+          brt_depth = tuned$brt_depth %||% 5L,
+          brt_shrinkage = tuned$brt_shrinkage %||% 0.005,
           maxent_classes = tuned$maxent_classes,
           maxent_regmult = tuned$maxent_regmult,
           prevalence_target = prevalence_target,
           num_threads = num_threads, seed = seed, verbose = verbose
-        ),
-        error = function(e) {
-          cli::cli_warn("Full-data refit failed ({e$message}); using the training fit.")
-          NULL
-        }
       )
     }
     fit_use <- if (!is.null(fit_full)) fit_full else fit
@@ -216,13 +230,8 @@ cast <- function(species_data,
 
     if (do_ensemble && !is.null(cv_result)) {
       if (verbose) cli::cli_inform("Building ensemble ({ensemble_method})...")
-      ensemble_result <- tryCatch(
-        cast_ensemble(fit_use, cv_result, env_data, method = ensemble_method),
-        error = function(e) {
-          cli::cli_warn("Ensemble failed: {e$message}")
-          NULL
-        }
-      )
+      ensemble_result <- cast_ensemble(fit_use, cv_result, env_data,
+                                       method = ensemble_method)
     } else if (do_ensemble) {
       if (verbose) {
         cli::cli_inform("Ensemble skipped: spatial CV unavailable (do_cv = FALSE or CV failed).")
@@ -245,9 +254,8 @@ cast <- function(species_data,
 
 #' Extract Tuned Hyperparameters from a cast_fit
 #'
-#' Returns the per-engine best combinations chosen by `cast_fit(tune = TRUE)`
-#' so a full-data refit can reuse the training-split configuration instead of
-#' re-running the grid.
+#' Returns the fitted configuration, including explicit settings, so full-data
+#' refitting preserves the configuration used for evaluation.
 #'
 #' @keywords internal
 #' @noRd
@@ -262,6 +270,12 @@ cast <- function(species_data,
     if (length(spec$tune_args)) out[unname(spec$tune_args)] <- list(NULL)
   }
   for (mdl in names(fit$models %||% list())) {
+    info <- fit$models[[mdl]]
+    if (mdl == "rf" && !is.null(info$model$mtry)) out$rf_mtry <- info$model$mtry
+    if (mdl == "brt" && !is.null(info$model$interaction.depth)) {
+      out$brt_depth <- info$model$interaction.depth
+      out$brt_shrinkage <- info$model$shrinkage
+    }
     t <- fit$models[[mdl]]$tune
     spec <- eng[[mdl]]$tune_args
     if (is.null(t) || is.null(t$best) || is.null(spec)) next

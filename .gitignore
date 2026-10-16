@@ -24,7 +24,10 @@ cast_ovis_ammon_figures/
 inst/extdata/*
 !inst/extdata/CAST_Alces_alces_Res9_screened.csv
 
-tools/
+tools/*
+!tools/workflows/
+tools/workflows/**/output/
+tools/workflows/**/attribution_output/
 /extdata/
 tests/testthat/_problems/
 tests/testthat/testthat-problems.rds

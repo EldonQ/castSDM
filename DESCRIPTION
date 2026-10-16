@@ -1,8 +1,7 @@
 Package: castSDM
 Type: Package
-Title: Model Response and Interventional Effects for Species Distribution
-    Models
-Version: 0.18.0
+Title: Environmental Drivers and Spatial Attribution of Habitat Change
+Version: 0.19.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -11,21 +10,15 @@ Authors@R: c(
       comment = c(ORCID = "0009-0002-6966-4633")
     )
   )
-Description: Audits model-based environmental responses in species
-    distribution modelling. A single raw-unit predictor shift evaluated
-    over a fitted model produces a shift effect size and a spatial effect
-    map with hard range-masking. Variable selection is a two-stage screen
-    whose second stage is a spatial forward search on inner cross-validated
-    loss, with no predictor-count cap and no fallback set.
-    The effect products carry a hard range diagnostic: rows or cells
-    outside the training quantile box are masked, not ranked. This does
-    not establish conditional positivity or causal identification. The
-    package provides a complete workflow - Random Forest, BRT, MaxEnt and
-    GAM learners, nested spatial cross-validation, ensemble prediction,
-    and future climate projection with extrapolation control. The package
-    targets interpretable interventional attribution under stated
-    assumptions. Outputs do not establish ecological causality or convert
-    presence-background suitability to occurrence probability.
+Description: Explains where environmental changes improve or reduce fitted
+    habitat suitability. Paired current and future scenarios produce spatial
+    driver-only effects, retained-driver comparisons and overall habitat
+    change using frozen model weights. Range diagnostics and model disagreement
+    accompany the comparisons. Existing random forest, boosted regression
+    tree, MaxEnt and generalized additive model engines support variable
+    selection, spatial cross-validation, ensemble prediction and projection.
+    Scenario attribution is a predictive explanation; presence-background
+    suitability is not an occurrence probability or an identified causal effect.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
 BugReports: https://github.com/EldonQ/castSDM/issues
@@ -44,6 +37,7 @@ Suggests:
     future.apply,
     gbm,
     ggplot2 (>= 3.4.0),
+    glmnet,
     knitr,
     maxnet,
     matrixStats,
@@ -52,7 +46,9 @@ Suggests:
     pROC,
     ragg,
     ranger,
+    scales,
     rmarkdown,
+    RRF,
     sf (>= 1.0.0),
     terra (>= 1.7.0),
     testthat (>= 3.0.0),

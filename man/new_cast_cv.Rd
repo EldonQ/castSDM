@@ -18,7 +18,8 @@ new_cast_cv(
   fold_status = NULL,
   threshold_method = "max_tss",
   n_repeat = 1L,
-  aoa = NULL
+  aoa = NULL,
+  pred_folds = NULL
 )
 }
 \arguments{

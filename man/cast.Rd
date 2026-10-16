@@ -14,6 +14,12 @@ cast(
   select_metric = "brier",
   select_tolerance = 0,
   select_n_folds = 3L,
+  select_corcut = 0.7,
+  select_var_id = NULL,
+  select_category = NULL,
+  select_algorithms = c("glm", "gam", "rf"),
+  select_ncov = NULL,
+  select_maxncov = 12L,
   threshold_method = "max_tss",
   tune = FALSE,
   tune_folds = 3L,
@@ -60,6 +66,23 @@ to admit a predictor, on top of the 2-SE guard. Default \code{0}.}
 
 \item{select_n_folds}{Integer. Inner folds for the stage-2 forward search.
 Default \code{3}.}
+
+\item{select_corcut}{Correlation threshold for the \code{"covsel"} filter
+levels. Default \code{0.7} (Dormann et al. 2013).}
+
+\item{select_var_id}{Character vector of variable-level identities aligned
+with the predictors (for \code{"covsel"}; \code{NULL} skips the variable level).}
+
+\item{select_category}{Character vector of category-level identities
+aligned with the predictors (for \code{"covsel"}; \code{NULL} skips it).}
+
+\item{select_algorithms}{Embedding learners for \code{"covsel"}: any of
+\code{"glm"}, \code{"gam"}, \code{"rf"}. Default all three.}
+
+\item{select_ncov}{Target covariate count for \code{"covsel"}. Default \code{NULL} =
+\code{ceiling(log2(n_presences)) - 1} (Adde et al. 2023).}
+
+\item{select_maxncov}{Maximum covariate count for \code{"covsel"}. Default \code{12}.}
 
 \item{threshold_method}{Binary threshold rule, selected on training data and
 then applied to held-out predictions. See \code{\link[=cast_threshold]{cast_threshold()}}. Default
@@ -120,7 +143,8 @@ Use \code{\link[=print]{print()}}, \code{\link[=summary]{summary()}}, \code{\lin
 \description{
 One-step pipeline that executes the entire workflow: data splitting,
 variable screening, model fitting, spatial cross-validation,
-evaluation, ensemble prediction, and future projection.
+evaluation and ensemble prediction. Use \code{\link[=cast_attribution]{cast_attribution()}} and
+\code{\link[=cast_project]{cast_project()}} to compare current and future environments afterwards.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_fit]{cast_fit()}}, \code{\link[=cast_ensemble]{cast_ensemble()}},

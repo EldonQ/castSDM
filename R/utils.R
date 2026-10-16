@@ -433,7 +433,14 @@ n_folds <- cv$pred_folds
     return(list(ok = stats::setNames(rep(TRUE, length(mdl_names)), mdl_names),
                 n_folds = stats::setNames(rep(NA_integer_, length(mdl_names)), mdl_names)))
   }
-  k <- length(unique(cv$fold_status))
+  # `fold_status` is a length-k vector of per-fold states (evaluated /
+  # single_class / selection_error / ...): its LENGTH is the fold count.
+  # `length(unique(fold_status))` counts distinct STATES -- three states over
+  # five folds reads as k = 3, which silently lowers the coverage floor to 3
+  # of 5 and lets an incomplete out-of-fold surface set the ensemble
+  # threshold. The same guard in cast_cv() uses the real k.
+  k <- length(cv$fold_status)
+  if (!is.finite(k) || k < 1L) k <- max(as.integer(n_folds), na.rm = TRUE)
   min_ok <- max(2L, ceiling(k * 0.8))
   n <- stats::setNames(as.integer(n_folds[mdl_names]), mdl_names)
   list(ok = stats::setNames(n >= min_ok, mdl_names), n_folds = n)
@@ -699,4 +706,58 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
   )
   do.call(ggplot2::ggsave, args)
   invisible(filename)
+}
+
+# ---- Spatial thinning of occurrence coordinates ---------------------------
+#' Greedy minimum-distance thinning (spThin / N-SDM disaggregate style)
+#'
+#' Keeps a point only when it lies more than `min_dist_km` from every
+#' already-kept point, scanning in the requested order. Grid-cell
+#' deduplication (one record per covariate cell) is NOT distance thinning:
+#' two records in adjacent cells can still sit metres apart, so spatial
+#' autocorrelation survives the cell filter. This is the standard remedy
+#' (Aiello-Lammens et al. 2015; N-SDM's `nsdm.disaggregate`).
+#'
+#' @param lon,lat Numeric coordinate vectors in METRES (Albers or any
+#'   projected CRS; degrees would need a different distance).
+#' @param min_dist_km Positive minimum separation in kilometres.
+#' @param order `"random"` (seeded; the spThin default) or `"year_desc"`
+#'   (newest records first, on the argument that recent records carry more
+#'   precise coordinates -- deterministic, no seed needed).
+#' @param year Optional numeric year vector, required for `"year_desc"`.
+#' @param seed Seed for the `"random"` order.
+#' @return A logical vector marking the kept points.
+#' @keywords internal
+#' @noRd
+.cast_thin_points <- function(lon, lat, min_dist_km,
+                              order = c("random", "year_desc"),
+                              year = NULL, seed = NULL) {
+  order <- match.arg(order)
+  stopifnot(is.numeric(lon), is.numeric(lat), length(lon) == length(lat),
+            is.numeric(min_dist_km), length(min_dist_km) == 1L,
+            min_dist_km > 0)
+  n <- length(lon)
+  ok <- is.finite(lon) & is.finite(lat)
+  if (order == "year_desc") {
+    if (is.null(year) || length(year) != n) {
+      stop("order = 'year_desc' requires a year vector of the same length.")
+    }
+    ord <- order(ifelse(is.finite(year), -year, -Inf), method = "radix")
+  } else {
+    if (!is.null(seed)) set.seed(seed)
+    ord <- sample.int(n)
+  }
+  min_dist_m <- min_dist_km * 1000
+  keep <- rep(FALSE, n)
+  kx <- numeric(0); ky <- numeric(0)
+  for (i in ord) {
+    if (!ok[i]) next
+    if (length(kx)) {
+      d2 <- (lon[i] - kx)^2 + (lat[i] - ky)^2
+      if (min(d2) <= min_dist_m^2) next
+    }
+    keep[i] <- TRUE
+    kx <- c(kx, lon[i]); ky <- c(ky, lat[i])
+  }
+  keep
 }

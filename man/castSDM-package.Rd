@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Model Response and Interventional Effects for Species Distribution Models}
+\title{castSDM: Environmental Drivers and Spatial Attribution of Habitat Change}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Audits model-based environmental responses in species distribution modelling. A single raw-unit predictor shift evaluated over a fitted model produces a shift effect size and a spatial effect map with hard range-masking. Variable selection is a two-stage screen whose second stage is a spatial forward search on inner cross-validated loss, with no predictor-count cap and no fallback set. The effect products carry a hard range diagnostic: rows or cells outside the training quantile box are masked, not ranked. This does not establish conditional positivity or causal identification. The package provides a complete workflow - Random Forest, BRT, MaxEnt and GAM learners, nested spatial cross-validation, ensemble prediction, and future climate projection with extrapolation control. The package targets interpretable interventional attribution under stated assumptions. Outputs do not establish ecological causality or convert presence-background suitability to occurrence probability.
+Explains where environmental changes improve or reduce fitted habitat suitability. Paired current and future scenarios produce spatial driver-only effects, retained-driver comparisons and overall habitat change using frozen model weights. Range diagnostics and model disagreement accompany the comparisons. Existing random forest, boosted regression tree, MaxEnt and generalized additive model engines support variable selection, spatial cross-validation, ensemble prediction and projection. Scenario attribution is a predictive explanation; presence-background suitability is not an occurrence probability or an identified causal effect.
 }
 \seealso{
 Useful links:

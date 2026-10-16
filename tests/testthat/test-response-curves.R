@@ -67,3 +67,48 @@ test_that("plot.cast_response builds a ggplot for both layouts", {
   p2 <- plot(rb)
   expect_s3_class(p2, "ggplot")
 })
+
+test_that("each response row agrees with its named model and grid value", {
+  bg <- data.frame(x1 = c(0, 1, 2), x2 = c(0, 1, 5))
+  fit <- new_cast_fit(
+    models = list(a = list(model = "a"), b = list(model = "b")),
+    cast_vars = names(bg), env_vars = names(bg), scaling = list(reference = bg))
+  local_mocked_bindings(predict_single_model = function(model, X, ...) {
+    if (model$model == "a") 0.1 + 0.05 * X$x1 + 0.02 * X$x2
+    else 0.8 - 0.04 * X$x1 - 0.03 * X$x2
+  })
+  for (type in c("fixed", "pdp")) {
+    for (models in list(c("a", "b"), c("b", "a"))) {
+      for (size in c(3L, 5L)) {
+        rc <- cast_response_curves(fit, type = type, grid_size = size,
+                                   models = models)
+        x1 <- ifelse(rc$variable == "x1", rc$value,
+                     if (type == "fixed") median(bg$x1) else mean(bg$x1))
+        x2 <- ifelse(rc$variable == "x2", rc$value,
+                     if (type == "fixed") median(bg$x2) else mean(bg$x2))
+        expected <- ifelse(rc$model == "a", 0.1 + 0.05 * x1 + 0.02 * x2,
+                           0.8 - 0.04 * x1 - 0.03 * x2)
+        expect_equal(rc$prediction, expected)
+        expect_identical(rc$model, rep(rep(models, each = size), 2L))
+        expect_equal(nrow(rc), 2L * size * length(models))
+      }
+    }
+  }
+})
+
+test_that("fixed profiles predict one grid per engine and variable", {
+  bg <- data.frame(x1 = c(0, 1, 2), x2 = c(0, 1, 5))
+  fit <- new_cast_fit(
+    models = list(a = list(model = "a"), b = list(model = "b")),
+    cast_vars = names(bg), env_vars = names(bg), scaling = list(reference = bg))
+  calls <- list()
+  local_mocked_bindings(predict_single_model = function(model, X, ...) {
+    calls[[length(calls) + 1L]] <<- X
+    plogis(X$x1 - X$x2)
+  })
+  cast_response_curves(fit, grid_size = 5L)
+  expect_length(calls, 4L)
+  expect_true(all(vapply(calls, nrow, integer(1)) == 5L))
+  expect_equal(calls[[1]]$x1, seq(0, 2, length.out = 5L))
+  expect_equal(calls[[1]]$x2, rep(median(bg$x2), 5L))
+})

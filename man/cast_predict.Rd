@@ -47,7 +47,9 @@ weights, because threshold and DI then use different metrics.}
 \value{
 A \code{cast_predict} object containing a \code{predictions} data.frame
 with \code{lon}, \code{lat}, one \verb{HSS_*} column per model, and (when enabled)
-\code{mess} / \code{extrapolating} and \code{aoa_di} / \code{aoa} columns.
+\code{n_imputed} (number of missing predictors per row), and (when enabled)
+\code{mess} / \code{extrapolating} and \code{aoa_di} / \code{aoa} columns. Environmental
+diagnostics are \code{NA} for rows requiring imputation.
 }
 \description{
 Predicts habitat suitability scores (HSS) for new environmental data using

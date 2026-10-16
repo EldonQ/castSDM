@@ -15,7 +15,8 @@ cast_effect_map(
   overwrite = FALSE,
   verbose = TRUE,
   support_probs = c(0.01, 0.99),
-  min_support = 0.5
+  min_support = 0.5,
+  weights = NULL
 )
 }
 \arguments{
@@ -45,6 +46,8 @@ with one value per driver. Default \code{1}.}
 
 \item{min_support}{Numeric in \verb{[0, 1]}. Drivers with grid coverage below
 this threshold report \code{NA} in the attached table. Default \code{0.5}.}
+
+\item{weights}{Optional named model weights, as in \code{\link[=cast_effect_table]{cast_effect_table()}}.}
 }
 \value{
 A \code{SpatRaster} with three layers per driver (NA where any fitted

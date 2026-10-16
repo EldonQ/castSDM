@@ -1,0 +1,5 @@
+"figure","status","pdf_md5","note"
+"01_model_validation","inspected","29ae7a1c7db249026565c8c60a04ce27","Unavailable labels crowded; revised separately"
+"02_habitat_change","inspected","afaace9d063accbbfc3e88ff20669ea7","No clipped labels"
+"03_environmental_driver","inspected","51b7ee5976ee3ddc0889c3a563eda879","Window labels corrected in revision"
+"04_support_and_disagreement","inspected","f5cfd6b4ae898454671677cccaba76b7","Continuous binary legend corrected in revision"

@@ -1,0 +1,4 @@
+"check","observed","classification"
+"zero_mask_cell","legacy predicts; paired attribution masks","documented legacy contract differs from paired contract"
+"infinite_predictor_cell","legacy predicts; paired attribution drops","nonfinite handling inconsistent across prediction interfaces"
+"year_desc_missing_vs_known","missing year retained before year 2020","confirmed ordering defect"

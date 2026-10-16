@@ -57,7 +57,9 @@
 #'
 #' @return A `cast_predict` object containing a `predictions` data.frame
 #'   with `lon`, `lat`, one `HSS_*` column per model, and (when enabled)
-#'   `mess` / `extrapolating` and `aoa_di` / `aoa` columns.
+#'   `n_imputed` (number of missing predictors per row), and (when enabled)
+#'   `mess` / `extrapolating` and `aoa_di` / `aoa` columns. Environmental
+#'   diagnostics are `NA` for rows requiring imputation.
 #'
 #' @references
 #' Elith, J., Kearney, M. & Phillips, S. (2010). The art of modelling
@@ -91,17 +93,14 @@ cast_predict <- function(fit, new_data, models = NULL,
   X_raw <- as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE)
   .cast_check_numeric_predictors(X_raw)
   for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
-  # Diagnostics run on the RAW input, before imputation: a cell that needed an
-  # imputed predictor is exactly the cell whose extrapolation is unknown, and
-  # measuring it after imputation reported it as ordinary. The imputation
-  # itself is kept (it is what lets a model score partially observed rows) but
-  # the count is returned so callers can drop or weight those cells.
+  # Track raw missingness before filling values for prediction. Diagnostics
+  # computed below are invalidated for these rows before being returned.
   reference <- fit$scaling$reference
   n_imputed <- rowSums(!is.finite(as.matrix(
     as.data.frame(new_data[, env_vars, drop = FALSE], check.names = FALSE))))
   X_raw <- .cast_impute(X_raw, fit$scaling$impute)
 
-  # Extrapolation diagnostics on the (imputed, unclamped) input.
+  # Imputation permits prediction, but does not establish environmental support.
   mess_vals <- NULL
   if (isTRUE(extrapolation) && !is.null(reference)) {
     mess_vals <- tryCatch(.cast_mess(reference, X_raw),
@@ -167,13 +166,16 @@ cast_predict <- function(fit, new_data, models = NULL,
   }
 
   if (!is.null(mess_vals) && length(mess_vals) == nrow(pred_df)) {
+    mess_vals[n_imputed > 0L] <- NA_real_
     pred_df$mess <- mess_vals
     pred_df$extrapolating <- mess_vals < 0
   }
   if (!is.null(aoa_di_vals) && length(aoa_di_vals) == nrow(pred_df)) {
+    aoa_di_vals[n_imputed > 0L] <- NA_real_
     pred_df$aoa_di <- aoa_di_vals
     pred_df$aoa <- aoa_di_vals <= cv$aoa$threshold
   }
+  pred_df$n_imputed <- as.integer(n_imputed)
 
   new_cast_predict(
     predictions = pred_df,
