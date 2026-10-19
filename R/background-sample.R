@@ -283,12 +283,10 @@ cast_background <- function(occurrences,
 
   # One sampling replicate. With n_rep = 1 the plain user seed is kept for
   # backwards compatibility; with n_rep > 1 each replicate draws under its
-  # own sub-seed so the sets are independent.
+  # own sub-seed so the sets are independent. The seed is applied at the
+  # call site through .cast_with_seed(), so the caller's RNG state is
+  # restored afterwards.
   bg_once <- function(rep_i) {
-    if (!is.null(seed)) {
-      set.seed(if (n_rep == 1L) seed else seed + rep_i - 1L)
-    }
-
   # ---- Background cell selection -----------------------------------------------
   if (use_user) {
     # User-defined background: exactly the supplied points. Filtered only by
@@ -517,7 +515,10 @@ cast_background <- function(occurrences,
     out_df
   }
 
-  reps <- lapply(seq_len(n_rep), bg_once)
+  reps <- lapply(seq_len(n_rep), function(rep_i) {
+    rep_seed <- if (is.null(seed)) NULL else if (n_rep == 1L) seed else seed + rep_i - 1L
+    .cast_with_seed(rep_seed, bg_once(rep_i))
+  })
   if (n_rep == 1L) return(reps[[1]])
   reps <- stats::setNames(reps, sprintf("rep%d", seq_len(n_rep)))
   class(reps) <- c("cast_background_reps", "list")

@@ -4,14 +4,25 @@
 \alias{new_cast_eval}
 \title{Create a cast_eval Object}
 \usage{
-new_cast_eval(metrics, cv_source = FALSE)
+new_cast_eval(
+  metrics,
+  cv_source = FALSE,
+  thresholds = NULL,
+  threshold_source = NULL
+)
 }
 \arguments{
 \item{metrics}{A \code{data.frame} with per-model evaluation metrics.
-Columns: \code{model}, \code{auc_mean}, \code{tss_mean}, \code{cbi_mean}.}
+Columns: \code{model}, \code{auc_mean}, \code{tss_mean}, \code{cbi_mean}, ...}
 
 \item{cv_source}{Logical. Whether metrics came from spatial CV.
 Default \code{FALSE}.}
+
+\item{thresholds}{Named numeric vector of the thresholds actually applied.}
+
+\item{threshold_source}{Character. \code{"out_of_fold_cv"} when thresholds were
+caller-supplied (e.g. \code{cv$thresholds}), \code{"in_sample_training"} when
+selected on the fit's own training predictions, or \code{"mixed"}.}
 }
 \value{
 A \code{cast_eval} object.

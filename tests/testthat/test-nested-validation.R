@@ -1,5 +1,8 @@
 test_that("cast_cv stores fold selection frequency and cast_consensus aggregates", {
   skip_if_not_installed("ranger")
+  skip_if_not_installed("glmnet")
+  skip_if_not_installed("mgcv")
+  skip_if_not_installed("RRF")
   set.seed(80)
   n <- 300
   x1 <- rnorm(n)
@@ -9,8 +12,8 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
     x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
   cv <- cast_cv(
-    dat, select_method = "two_stage",
-    select_args = list(num_trees = 40, metric = "brier"),
+    dat, select_method = "covsel",
+    select_args = list(corcut = 0.7),
     k = 3, models = "rf", rf_ntree = 40, seed = 81, verbose = FALSE
   )
   expect_true(all(c("variable", "freq") %in% names(cv$selection_freq)))
@@ -42,7 +45,8 @@ test_that("CV reports finite fold counts separately for each metric", {
   evaluated <- 0L
   local_mocked_bindings(
     make_spatial_folds = function(lon, lat, k, method, seed,
-                                  env = NULL) rep(1:4, each = 6),
+                                  env = NULL, y = NULL,
+                                  block_size = NULL) rep(1:4, each = 6),
     evaluate_model_full = function(pred, obs, threshold = NULL,
                                    threshold_method = "max_tss") {
       evaluated <<- evaluated + 1L

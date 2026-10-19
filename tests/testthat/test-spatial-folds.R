@@ -1,8 +1,8 @@
-# Contiguous spatial blocking (C2) and the buffer exclusion band -------------
+# Spatial blocking (blockCV + grid fallback) and the buffer exclusion band -----
 
 # Same-fold rate among horizontally/vertically adjacent grid cells.
-adjacent_same_fold <- function(lon, lat, k, method, seed = 1) {
-  folds <- make_spatial_folds(lon, lat, k, method = method, seed = seed)
+adjacent_same_fold <- function(lon, lat, k, seed = 1) {
+  folds <- make_spatial_folds(lon, lat, k, method = "grid", seed = seed)
   side <- ceiling(sqrt(k * 2))
   xb <- castSDM:::.cast_bin(lon, side)
   yb <- castSDM:::.cast_bin(lat, side)
@@ -22,23 +22,36 @@ adjacent_same_fold <- function(lon, lat, k, method, seed = 1) {
   same / total
 }
 
-test_that("grid folds are spatially contiguous, unlike legacy grid_random", {
+test_that("grid folds are spatially contiguous", {
   g <- expand.grid(x = seq_len(20), y = seq_len(20))
-  rate_new <- adjacent_same_fold(g$x, g$y, k = 5L, method = "grid")
-  rate_old <- adjacent_same_fold(g$x, g$y, k = 5L, method = "grid_random")
-  expect_gt(rate_new, rate_old)
-  expect_gte(rate_new, 0.4)  # contiguous blocks share most cell borders
-  expect_lte(rate_old, 0.2)  # legacy packing interleaves folds
+  rate_grid <- adjacent_same_fold(g$x, g$y, k = 5L)
+  expect_gte(rate_grid, 0.4)  # contiguous blocks share most cell borders
 })
 
-test_that("grid_random preserves the legacy count-balanced packing", {
-  g <- expand.grid(x = seq_len(12), y = seq_len(12))
-  f1 <- make_spatial_folds(g$x, g$y, 4L, method = "grid_random")
-  f2 <- make_spatial_folds(g$x, g$y, 4L, method = "grid_random")
-  expect_identical(f1, f2)  # deterministic
-  sizes <- as.numeric(table(f1))
-  expect_equal(sum(sizes), nrow(g))
-  expect_lte(max(sizes) - min(sizes), 16L)  # balanced up to one grid cell
+test_that("blockcv folds are a valid, reproducible k-fold partition", {
+  skip_if_not_installed("blockCV")
+  skip_if_not_installed("sf")
+  g <- expand.grid(x = seq_len(20), y = seq_len(20))
+  set.seed(4)
+  y <- rep(c(1L, 0L), length.out = nrow(g))
+  f1 <- make_spatial_folds(g$x, g$y, k = 4L, method = "blockcv",
+                           seed = 7, y = y, block_size = 111325)
+  expect_length(f1, nrow(g))
+  expect_true(all(f1 %in% 1:4))
+  expect_setequal(unique(f1), 1:4)
+  f2 <- make_spatial_folds(g$x, g$y, k = 4L, method = "blockcv",
+                           seed = 7, y = y, block_size = 111325)
+  expect_identical(f1, f2)
+})
+
+test_that("blockcv falls back to grid blocking on degenerate input", {
+  # Two coincident points cannot be split into two spatial folds; the
+  # function must warn and fall back rather than abort.
+  expect_warning(
+    f <- make_spatial_folds(c(0, 0), c(0, 0), k = 2L, method = "blockcv"),
+    "falling back to grid"
+  )
+  expect_length(f, 2L)
 })
 
 test_that("buffer drops training rows inside the exclusion band", {

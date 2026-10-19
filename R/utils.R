@@ -152,18 +152,18 @@ get_env_vars <- function(data, response = "presence",
 #'
 #' A lightweight AUC computation that does not require pROC. Used internally
 #' where a Wilcoxon-Mann-Whitney AUC estimate is needed without the pROC
-#' dependency.
+#' dependency, and exported for tests validating the direction convention.
 #'
 #' @details
 #' `evaluate_model_full()` reports AUC through \pkg{pROC}. This function is
 #' the same statistic (the Wilcoxon-Mann-Whitney / rank formulation of the
 #' Mann-Whitney AUC with `direction = "<"`), verified to agree with
 #' `pROC::auc()` to within 1e-8 over randomised cases. It is kept separate
-#' because the stage-2 forward search calls it once per candidate per inner
-#' fold, where constructing a full ROC object is the dominant cost. The two
-#' paths are deliberately NOT merged: collapsing them would either make the
-#' selector depend on pROC or make evaluation stop honouring its documented
-#' `direction = "<"` fix (which keeps worse-than-random AUC below 0.5).
+#' because building a full ROC object is unnecessary for the lightweight
+#' internal checks. The two paths are deliberately NOT merged: collapsing
+#' them would either make the internal checks depend on pROC or make
+#' evaluation stop honouring its documented `direction = "<"` fix (which
+#' keeps worse-than-random AUC below 0.5).
 #'
 #' @param y Binary integer vector (0/1).
 #' @param pred Numeric vector of predicted probabilities.
@@ -207,6 +207,100 @@ compute_kappa <- function(obs, pred, threshold) {
   pe <- ((tp + fp) * (tp + fn) + (fn + tn) * (fp + tn)) / n^2
   if (pe >= 1) return(NA_real_)
   (po - pe) / (1 - pe)
+}
+
+
+#' All-NA Full-Metric Vector
+#'
+#' The named NA vector [evaluate_model_full()] returns on degenerate input,
+#' shared so callers always receive the identical metric schema.
+#'
+#' @return Named numeric vector of length 13.
+#' @keywords internal
+#' @noRd
+.cast_na_full_metrics <- function() {
+  stats::setNames(
+    rep(NA_real_, 13L),
+    c("auc", "pr_auc", "tss", "sedi", "brier", "logloss", "boyce", "cbi",
+      "kappa", "omission_5", "omission_10", "mpa", "tss_threshold")
+  )
+}
+
+
+#' Evaluate an Expression Under a Local Random Seed
+#'
+#' Sets the seed for `expr` and restores the previous RNG state afterwards,
+#' so package functions never leak a global `set.seed()` side effect into
+#' the caller's session. Uses \pkg{withr} when available; otherwise saves
+#' and restores `.Random.seed` manually.
+#'
+#' @param seed Integer seed, or `NULL` (evaluates `expr` untouched).
+#' @param expr Expression (lazily evaluated).
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+.cast_with_seed <- function(seed, expr) {
+  if (is.null(seed)) return(expr)
+  if (requireNamespace("withr", quietly = TRUE)) {
+    return(withr::with_seed(seed, expr))
+  }
+  has_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old <- if (has_seed) get(".Random.seed", envir = globalenv(), inherits = FALSE)
+  on.exit({
+    if (has_seed) {
+      assign(".Random.seed", old, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+  }, add = TRUE)
+  set.seed(seed)
+  expr
+}
+
+
+#' Logit- and Probability-Scale Calibration Helpers
+#'
+#' Presence-background engines produce scores on different implicit scales
+#' (probability forest, Bernoulli GBM, maxnet logistic, binomial GAM). When a
+#' prevalence target is requested, every engine is shifted on the logit scale
+#' by a single constant `b` chosen so that the weighted mean prediction on the
+#' training sample equals the target -- the same estimand for every engine,
+#' including maxnet, which accepts no row weights at fit time. Fitted
+#' offsets are stored on the fit and applied inside
+#' `predict_single_model()`, so every consumer (CV folds, evaluation,
+#' prediction, effects, permutation importance) sees the calibrated scores.
+#'
+#' @param p Numeric probability-scale predictions.
+#' @param offset Logit-scale shift; `0`/`NULL` is the identity.
+#' @keywords internal
+#' @noRd
+.cast_logit <- function(p) {
+  stats::qlogis(pmin(pmax(as.numeric(p), 1e-7), 1 - 1e-7))
+}
+
+#' @keywords internal
+#' @noRd
+.cast_apply_offset <- function(p, offset) {
+  if (is.null(offset) || !length(offset) || !is.finite(offset) || offset == 0) {
+    return(as.numeric(p))
+  }
+  stats::plogis(.cast_logit(p) + offset)
+}
+
+#' @keywords internal
+#' @noRd
+.cast_prevalence_offset <- function(p, w, target) {
+  ok <- is.finite(p) & is.finite(w) & w > 0
+  if (sum(ok) < 10L) return(0)
+  p <- p[ok]
+  w <- w[ok]
+  f <- function(b) sum(w * stats::plogis(.cast_logit(p) + b)) / sum(w) - target
+  lo <- -50
+  hi <- 50
+  flo <- f(lo)
+  fhi <- f(hi)
+  if (!is.finite(flo) || !is.finite(fhi) || flo > 0 || fhi < 0) return(0)
+  stats::uniroot(f, c(lo, hi), tol = 1e-6)$root
 }
 
 
@@ -744,8 +838,7 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
     }
     ord <- order(ifelse(is.finite(year), -year, -Inf), method = "radix")
   } else {
-    if (!is.null(seed)) set.seed(seed)
-    ord <- sample.int(n)
+    ord <- .cast_with_seed(seed, sample.int(n))
   }
   min_dist_m <- min_dist_km * 1000
   keep <- rep(FALSE, n)

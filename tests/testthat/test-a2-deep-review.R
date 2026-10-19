@@ -170,17 +170,24 @@ test_that("AOA DI separates coincident from distant points", {
   expect_true(all(di_far > 50))
 })
 
-test_that("cast_cv(aoa = TRUE) calibrates a threshold from held-out folds", {
+test_that("cast_cv(aoa = TRUE) calibrates the threshold on training-side DI", {
   skip_if_not_installed("ranger")
   dat <- .make_a2_data(seed = 61, n = 240)
   cv <- cast_cv(dat, select_method = "full", k = 3, models = "rf",
                 rf_ntree = 40, aoa = TRUE, seed = 62, verbose = FALSE)
   expect_true(isTRUE(cv$aoa$enabled))
-  expect_identical(cv$aoa$method, "cv_heldout_di_p95")
+  expect_identical(cv$aoa$method, "train_di_q3_plus_1.5iqr")
   expect_true(is.finite(cv$aoa$threshold) && cv$aoa$threshold >= 0)
   expect_length(cv$aoa$di_oof, nrow(dat))
   expect_true(all(cv$aoa$di_oof[is.finite(cv$aoa$di_oof)] >= 0))
   expect_true(cv$aoa$n_di > 0)
+  expect_true(length(cv$aoa$di_train) > 0)
+  # Q3 + 1.5 * IQR of the pooled training-side DI is the threshold
+  qs <- unname(stats::quantile(cv$aoa$di_train[is.finite(cv$aoa$di_train)],
+                               c(0.25, 0.75)))
+  expect_equal(cv$aoa$threshold, qs[2] + 1.5 * (qs[2] - qs[1]),
+               tolerance = 1e-8)
+  expect_true(is.finite(cv$aoa$share_outside_oof))
   expect_false(cv$aoa$weighted)
   # plain cv carries no calibration
   cv0 <- cast_cv(dat, select_method = "full", k = 3, models = "rf",

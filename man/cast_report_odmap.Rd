@@ -12,7 +12,7 @@ cast_report_odmap(
 )
 }
 \arguments{
-\item{object}{A \code{cast_result} object (from \code{\link[=cast]{cast()}}).}
+\item{object}{A \code{cast_result} object (from \code{\link[=cast_run]{cast_run()}}).}
 
 \item{path}{Output file path. Default \code{"odmap_report.md"}.}
 
@@ -38,5 +38,5 @@ Zurell, D. et al. (2020). A standard protocol for reporting species
 distribution models. \emph{Ecography}, 43(9), 1261-1277.
 }
 \seealso{
-\code{\link[=cast]{cast()}}
+\code{\link[=cast_run]{cast_run()}}
 }

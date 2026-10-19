@@ -7,11 +7,12 @@
 cast_cv(
   data,
   screen = NULL,
-  select_method = "two_stage",
+  select_method = "covsel",
   select_args = list(),
   k = 5L,
   models = c("rf"),
-  block_method = c("grid", "grid_random", "cluster", "env"),
+  block_method = c("blockcv", "grid", "env"),
+  block_size = NULL,
   buffer = 0,
   buffer_unit = c("deg", "km"),
   response = "presence",
@@ -45,7 +46,7 @@ selection into the CV metrics (a warning is issued); treat those metrics
 as optimistic.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
-\code{"two_stage"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
+\code{"covsel"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.
 Cannot override \code{data}, \code{response}, or \code{method}.}
@@ -54,14 +55,26 @@ Cannot override \code{data}, \code{response}, or \code{method}.}
 
 \item{models}{Models passed to \code{\link[=cast_fit]{cast_fit()}}.}
 
-\item{block_method}{\code{"grid"} (default; grid cells grouped into spatially
-contiguous folds via k-means on cell centroids), \code{"grid_random"}
-(legacy behaviour: count-balanced greedy packing that ignores cell
-position and produces interleaved, non-contiguous folds), \code{"cluster"}
-(k-means on point coordinates), or \code{"env"} (k-means on the scaled
-predictor matrix, so every fold is contiguous in \strong{environmental}
-space rather than geographic space; Roberts et al. 2017-style
-environmental blocking).}
+\item{block_method}{Spatial blocking strategy:
+\itemize{
+\item \code{"blockcv"} (default): \pkg{blockCV} spatial blocks
+(\code{\link[blockCV:cv_spatial]{blockCV::cv_spatial()}}) with square blocks. The block size follows
+the range of spatial autocorrelation estimated by
+\code{\link[blockCV:cv_spatial_autocor]{blockCV::cv_spatial_autocor()}} (Roberts et al. 2017), or the
+user-supplied \code{block_size}. Falls back to \code{"grid"} with a warning when
+\pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
+\item \code{"grid"}: grid cells grouped into spatially contiguous folds via
+k-means on cell centroids (dependency-free fallback).
+\item \code{"env"}: k-means on the scaled predictor matrix, so every fold is
+contiguous in \strong{environmental} space rather than geographic space
+(Roberts et al. 2017-style environmental blocking).
+\item \code{"external"}: set internally when \code{fold_ids} is supplied.
+}}
+
+\item{block_size}{Optional numeric block edge length in \strong{metres}, passed
+to \code{\link[blockCV:cv_spatial]{blockCV::cv_spatial()}} (it converts to degrees automatically for
+geographic coordinates). \code{NULL} (default) estimates the size from the
+range of spatial autocorrelation.}
 
 \item{buffer}{Non-negative number. When \verb{> 0}, training rows closer than
 \code{buffer} to any test row are dropped for that fold, thinning
@@ -105,19 +118,25 @@ within each repeat, then reports the mean across repeats and the
 column; \code{selection_freq} pools all repeats; \code{oof}, \code{thresholds} and
 \code{folds} refer to the first repeat.}
 
-\item{threshold_method}{Rule for selecting the binary threshold inside each
-outer training fold. That threshold is then applied to the held-out fold.
-See \code{\link[=cast_threshold]{cast_threshold()}}. Default \code{"max_tss"}.}
+\item{threshold_method}{Rule for selecting the binary threshold. Thresholds
+are computed once per model from the pooled \strong{out-of-fold} predictions
+after all folds finish, then applied to every fold's held-out rows and to
+downstream products. Selecting a threshold on a fold's own in-sample
+training predictions inflates it for flexible learners and collapses the
+held-out TSS; see \code{\link[=cast_threshold]{cast_threshold()}}. Default \code{"max_tss"}.}
 
 \item{aoa}{Logical. Calibrate the area-of-applicability (AOA)
 dissimilarity threshold (Meyer & Pebesma 2021). When \code{TRUE}, every fold
-computes the DI of its held-out rows against the fold's
-(buffer-thinned) training rows in the standardized predictor space, and
-the stored threshold is the 95th percentile of the pooled held-out DI
-values. The calibration is model-independent (uniform predictor
-weights). The result is stored in the \code{aoa} component of the returned
-object, together with the per-row held-out DI (\code{di_oof}), and is
-consumed by \code{\link[=cast_predict]{cast_predict()}} (\code{aoa = TRUE}) and
+computes, in the standardized (optionally weighted) predictor space:
+the held-out DI of each test row to its nearest training neighbour, and
+the training-side DI of each training row to its nearest \emph{other}
+training neighbour. The stored threshold is \code{Q3 + 1.5 * IQR} of the
+pooled training-side DI values (the published rule); the held-out DI
+(\code{di_oof}) and the share of held-out rows above the threshold
+(\code{share_outside_oof}) are validation evidence. The calibration is
+model-independent (uniform predictor weights). The result is stored in
+the \code{aoa} component of the returned object and is consumed by
+\code{\link[=cast_predict]{cast_predict()}} (\code{aoa = TRUE}) and
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}} (\code{aoa_cv = TRUE}). Requires \pkg{FNN}.}
 
 \item{parallel}{Run folds with \code{future.apply}; requires the user to set a
@@ -144,7 +163,8 @@ Empty or failed folds do not contribute predictive metrics. When no fold
 is evaluable, the \code{cast_cv_no_evaluable_folds} error carries \code{screens} and
 \code{fold_status} for inspection. With \code{aoa = TRUE} the \code{aoa} component
 carries the calibrated \code{threshold} (NA when fewer than 10 finite
-held-out DI values were collected).
+training-side DI values were collected), \code{di_oof}, \code{di_train} and
+\code{share_outside_oof}.
 }
 \description{
 Variable selection is re-fitted inside every outer training fold. This

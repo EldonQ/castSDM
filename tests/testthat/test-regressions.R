@@ -130,7 +130,7 @@ test_that("ensemble excludes models with non-finite predictions and warns", {
 
 test_that("cast_effect_map drives every engine, not only the matrix-tolerant one", {
   skip_if_not_installed("ranger")
-  skip_if_not_installed("gbm")
+  skip_if_not_installed("xgboost")
   skip_if_not_installed("terra")
   set.seed(5)
   n <- 240
@@ -142,9 +142,9 @@ test_that("cast_effect_map drives every engine, not only the matrix-tolerant one
   screen <- new_cast_select(c("x1", "x2"),
                             data.frame(variable = c("x1", "x2")),
                             method = "manual")
-  # brt and gam predict via model.frame(), which rejects a matrix; rf does not.
+  # brt (DMatrix) and gam (model.frame) reject a plain matrix; rf does not.
   fit <- cast_fit(dat, screen = screen, models = c("rf", "brt"),
-                  rf_ntree = 40, seed = 6, verbose = FALSE)
+                  rf_ntree = 40, brt_n_trees = 80L, seed = 6, verbose = FALSE)
 
   stack <- terra::rast(nrows = 12, ncols = 12, nlyrs = 2,
                        xmin = 70, xmax = 130, ymin = 20, ymax = 50)
@@ -183,7 +183,7 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     cast_select = function(data, response, method, ...) {
       i <- length(seen) + 1L
       seen[[i]] <<- data
-      expect_identical(method, "two_stage")
+      expect_identical(method, "covsel")
       if (i == 2L) stop("test backend failure")
       selected <- if (i == 1L) character(0) else "x"
       new_cast_select(selected, data.frame(variable = "x"), method = method,
@@ -195,7 +195,7 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     evaluate_model_full = function(...) c(auc = .7, tss = .4, cbi = .3)
   )
   expect_warning(cv <- cast_cv(dat, k = 3, models = "gam", buffer = 1.5,
-    select_method = "two_stage", verbose = FALSE), "test backend failure")
+    select_method = "covsel", verbose = FALSE), "test backend failure")
   for (i in 1:3) {
     idx <- .cast_buffer_train_idx(dat$lon, dat$lat, which(folds == i), 1.5)
     expect_identical(seen[[i]], dat[idx, , drop = FALSE])
@@ -218,59 +218,12 @@ test_that("CV all-empty errors retain the selection diagnostics", {
   testthat::local_mocked_bindings(
     make_spatial_folds = function(...) rep(1:2, each = 20),
     cast_select = function(...) new_cast_select(character(0), data.frame(variable = "x"),
-      method = "two_stage", diagnostics = list(status = "empty_selection"))
+      method = "covsel", diagnostics = list(status = "empty_selection"))
   )
   err <- tryCatch(cast_cv(dat, k = 2L, verbose = FALSE), error = identity)
   expect_s3_class(err, "cast_cv_no_evaluable_folds")
   expect_identical(err$fold_status, rep("empty_selection", 2))
   expect_length(err$screens, 2)
-})
-
-test_that("the high-level pipeline forwards selection settings", {
-  dat <- data.frame(lon = 1:100, lat = 0, presence = rep(0:1, 50),
-                    x = sin(1:100))
-  seen_select <- NULL
-  seen_cv <- NULL
-  testthat::local_mocked_bindings(
-    cast_select = function(data, ..., num_trees, metric, tolerance, keep) {
-      seen_select <<- list(data = data, num_trees = num_trees,
-                           metric = metric, tolerance = tolerance, keep = keep)
-      new_cast_select("x", data.frame(variable = "x"), method = "two_stage")
-    },
-    cast_fit = function(...) list(),
-    cast_cv = function(data, ..., select_args) {
-      seen_cv <<- list(data = data, args = select_args)
-      NULL
-    },
-    cast_evaluate = function(...) list()
-  )
-  cast(dat, select_num_trees = 111L, select_metric = "auc", select_tolerance = 0.01,
-       select_n_folds = 4L, select_keep = "x", do_predict = FALSE,
-       verbose = FALSE, seed = 8)
-  expect_lt(nrow(seen_select$data), nrow(dat))
-  expect_identical(seen_select$num_trees, 111L)
-  expect_identical(seen_select$metric, "auc")
-  expect_identical(seen_select$tolerance, 0.01)
-  expect_identical(seen_select$keep, "x")
-  expect_identical(seen_cv$args$num_trees, 111L)
-  expect_identical(seen_cv$args$metric, "auc")
-  expect_identical(seen_cv$args$tolerance, 0.01)
-  expect_identical(seen_cv$args$keep, "x")
-})
-
-test_that("the pipeline stops when requested spatial CV fails", {
-  dat <- data.frame(lon = 1:100, lat = 0, presence = rep(0:1, 50),
-                    x = sin(1:100))
-  evaluated <- FALSE
-  local_mocked_bindings(
-    cast_select = function(...) new_cast_select("x", data.frame(variable = "x")),
-    cast_fit = function(...) list(),
-    cast_cv = function(...) stop("deliberate CV failure"),
-    cast_evaluate = function(...) { evaluated <<- TRUE; list() }
-  )
-  expect_error(cast(dat, do_predict = FALSE, verbose = FALSE, seed = 8),
-               "deliberate CV failure")
-  expect_false(evaluated)
 })
 
 

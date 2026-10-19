@@ -117,7 +117,7 @@ test_that("per-driver shifts keep their names through SD conversion", {
 test_that("real multiengine maps agree with tabular ensemble magnitudes", {
   skip_if_not_installed("terra")
   skip_if_not_installed("ranger")
-  skip_if_not_installed("gbm")
+  skip_if_not_installed("xgboost")
   set.seed(91)
   x <- rnorm(220); z <- rnorm(220)
   d <- data.frame(lon = runif(220), lat = runif(220), x = x, z = z,

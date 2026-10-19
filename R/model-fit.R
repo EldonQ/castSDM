@@ -16,7 +16,12 @@
 #' @param rf_ntree Integer. Number of RF trees. Default `500`.
 #' @param rf_mtry Integer. RF variables considered at each split. Default
 #'   `NULL` (the ranger default, `floor(sqrt(p))`).
-#' @param brt_n_trees Integer. Number of BRT trees. Default `2000`.
+#' @param brt_n_trees Integer. Number of boosting rounds (trees) for the
+#'   xgboost BRT. Default `2000` at the default `brt_shrinkage = 0.005`;
+#'   jointly assess rounds, learning rate and depth for the dataset rather
+#'   than assuming a universal SDM recipe. The round count is a
+#'   prespecified setting: it is never selected by an internal random-fold
+#'   cross-validation inside the fit.
 #' @param brt_depth Integer. BRT tree depth. Default `5`. Ignored when
 #'   `tune = TRUE` (the depth enters the search grid).
 #' @param brt_shrinkage Numeric. BRT learning rate. Default `0.005`
@@ -31,13 +36,11 @@
 #'   `NULL` (i.e. `1`, the maxnet default). When `tune = TRUE`, a supplied
 #'   value is held fixed while the feature classes are searched.
 #' @param tune Logical. Run a small grid search per engine (RF `mtry`; BRT
-#'   `interaction.depth` x `shrinkage`; MaxEnt feature classes x regularisation
+#'   `max_depth` x `eta`; MaxEnt feature classes x regularisation
 #'   multiplier) and fit with the best-scoring combination. Default `FALSE`.
 #'   See Details.
-#' @param tune_folds Integer. Folds used by the inner grid-search scoring
-#'   (BRT internal CV; MaxEnt stratified random folds). When tuning BRT,
-#'   also controls final tree-count selection. Default `3`; untuned BRT
-#'   keeps its existing 5-fold tree-count selection.
+#' @param tune_folds Integer. Stratified folds used by the inner grid-search
+#'   scoring (BRT and MaxEnt; RF scores out-of-bag). Default `3`.
 #' @param prevalence_target Numeric in (0, 1), or `NULL`. When supplied,
 #'   presence and background rows are weighted so that the *weighted*
 #'   prevalence equals `prevalence_target` (weight = target/n per class),
@@ -62,8 +65,9 @@
 #'   clamps predictions internally; clamping to the training range is a
 #'   package-level decision (see [cast_predict()] and
 #'   [cast_ensemble_raster()], argument `clamp`).
-#' - **BRT**: [gbm::gbm()] with Bernoulli loss and 5-fold tree-count selection
-#'   by default (`tune_folds` when `tune = TRUE`).
+#' - **BRT**: [xgboost::xgb.train()] with logloss (binary:logistic) and a
+#'   prespecified round count (`brt_n_trees`). No internal
+#'   cross-validation folds are drawn inside the fit.
 #' - **GAM**: [mgcv::gam()] with thin-plate splines.
 #'
 #' ## Hyperparameter grids (`tune = TRUE`)
@@ -71,9 +75,9 @@
 #' flexsdm) but trimmed for cost:
 #' - **RF** searches `mtry` around `sqrt(p)` and is scored by out-of-bag TSS
 #'   (no extra refits beyond the grid itself).
-#' - **BRT** searches `interaction.depth` x `shrinkage`; the tree count stays
-#'   adaptive via [gbm::gbm.perf()]. Each combination is scored by the TSS of
-#'   its internal cross-validated predictions.
+#' - **BRT** searches `max_depth` x `eta` at the configured round count,
+#'   scored by TSS on stratified inner folds whose threshold is selected on
+#'   the fold's training part.
 #' - **MaxEnt** searches feature classes x regularisation multiplier, scored
 #'   by stratified random-fold TSS with the threshold selected on the
 #'   training part of each fold.
@@ -269,8 +273,7 @@ cast_fit <- function(data,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
                       rf_mtry = p_rf_mtry,
-                      case_weights = case_weights,
-                      brt_cv_folds = if (isTRUE(tune)) tune_folds else 5L),
+                      case_weights = case_weights),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -285,6 +288,43 @@ cast_fit <- function(data,
     }
   }
 
+  # ---- Prevalence calibration (fitted offsets) ----------------------------
+  # With a prevalence target, every engine is shifted on the logit scale so
+  # the weighted mean training prediction equals the target. Engines fitted
+  # with case weights land near zero shift on their own; maxnet has no row
+  # weights and needs the shift to reach the same calibration scale as the
+  # rest of the ensemble. The offsets are applied inside
+  # predict_single_model(), so CV folds, evaluation, projection, effects and
+  # importance all consume the calibrated scores.
+  calibration <- NULL
+  if (!is.null(prevalence_target)) {
+    offsets <- stats::setNames(rep(0, length(fitted_models)),
+                               names(fitted_models))
+    for (mdl in names(fitted_models)) {
+      info <- fitted_models[[mdl]]
+      if (is.null(info$model)) next
+      p_tr <- tryCatch(
+        predict_single_model(info, X_raw),
+        error = function(e) rep(NA_real_, nrow(X_raw))
+      )
+      b <- .cast_prevalence_offset(p_tr, case_weights, prevalence_target)
+      info$offset <- b
+      fitted_models[[mdl]] <- info
+      offsets[[mdl]] <- b
+    }
+    calibration <- list(
+      method = "logit_shift",
+      prevalence_target = prevalence_target,
+      offsets = offsets
+    )
+    if (verbose) {
+      shown <- paste0(names(offsets), " = ",
+                      formatC(offsets, digits = 3, format = "f"),
+                      collapse = ", ")
+      cli::cli_inform("Prevalence calibration (target {prevalence_target}): {shown}.")
+    }
+  }
+
   new_cast_fit(
     models    = fitted_models,
     cast_vars = cast_vars,
@@ -292,8 +332,44 @@ cast_fit <- function(data,
     scaling   = list(means = X_means, sds = X_sds, impute = X_impute,
                      reference = X_raw, response = Y, response_name = response,
                      prevalence_target = prevalence_target),
-    screen    = screen
+    screen    = screen,
+    calibration = calibration
   )
+}
+
+#' Extract Tuned Hyperparameters from a cast_fit
+#'
+#' Returns the fitted configuration, including explicit settings, so full-data
+#' refitting preserves the configuration used for evaluation.
+#'
+#' @keywords internal
+#' @noRd
+.cast_tuned_args <- function(fit) {
+  # Ask the registry which cast_fit() formals each engine contributes, and
+  # in which field of `tune$best` the tuned value lives. This used to be a
+  # chain of `if (mdl == "rf")` branches, so a new tunable engine silently
+  # refit at its default unless this function was also edited.
+  eng <- .cast_engines()
+  out <- list()
+  for (spec in eng) {
+    if (length(spec$tune_args)) out[unname(spec$tune_args)] <- list(NULL)
+  }
+  for (mdl in names(fit$models %||% list())) {
+    info <- fit$models[[mdl]]
+    if (mdl == "rf" && !is.null(info$model$mtry)) out$rf_mtry <- info$model$mtry
+    if (mdl == "brt" && !is.null(info$depth)) {
+      out$brt_depth <- info$depth
+      out$brt_shrinkage <- info$shrinkage
+    }
+    t <- fit$models[[mdl]]$tune
+    spec <- eng[[mdl]]$tune_args
+    if (is.null(t) || is.null(t$best) || is.null(spec)) next
+    for (src in names(spec)) {
+      val <- t$best[[src]]
+      if (!is.null(val)) out[[unname(spec[[src]])]] <- val
+    }
+  }
+  out
 }
 
 #' Impute missing predictor values from stored training statistics
@@ -333,11 +409,11 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                              maxent_classes = NULL,
                              maxent_regmult = NULL,
                              rf_mtry = NULL,
-                             case_weights = NULL, brt_cv_folds = 5L) {
+                             case_weights = NULL) {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
-      if (!is.null(seed)) set.seed(seed)
+      # ranger takes its own seed; no global set.seed() side effect.
       m <- ranger::ranger(
         presence ~ .,
         data = cbind(presence = as.factor(Y), X),
@@ -353,26 +429,13 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       list(type = "traditional", model = m, name = "maxent")
     },
     "brt" = {
-      check_suggested("gbm", "for BRT")
-      if (!is.null(seed)) set.seed(seed)
-      m <- gbm::gbm(
-        presence ~ .,
-        data = cbind(presence = Y, X),
-        distribution = "bernoulli",
-        n.trees = brt_n_trees,
-        interaction.depth = brt_depth,
-        shrinkage = brt_shrinkage,
-        cv.folds = brt_cv_folds,
-        weights = case_weights,  # NULL -> unweighted
-        # gbm() defaults n.cores to a parallel cluster. On a small CI runner
-        # (or inside an already-parallel cross-validation) spawning workers
-        # makes the fit fail outright rather than run slower, so the fold
-        # parallelism the package controls is the only one used.
-        n.cores = 1L,
-        verbose = FALSE
-      )
-      bt <- gbm::gbm.perf(m, method = "cv", plot.it = FALSE)
-      list(type = "traditional", model = m, name = "brt", best_trees = bt)
+      check_suggested("xgboost", "for BRT")
+      m <- .fit_xgboost(X, Y, nrounds = brt_n_trees,
+                        max_depth = brt_depth, eta = brt_shrinkage,
+                        weights = case_weights, num_threads = num_threads,
+                        seed = seed %||% 42L)
+      list(type = "traditional", model = m, name = "brt",
+           depth = brt_depth, shrinkage = brt_shrinkage)
     },
     "gam" = {
       check_suggested("mgcv", "for GAM")
@@ -407,6 +470,48 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       list(type = "traditional", model = m, name = "gam")
     }
   )
+}
+
+#' Fit a Boosted Regression Tree (xgboost)
+#'
+#' Single construction path shared by [cast_fit()] and the BRT grid search.
+#' Logloss on the binary response, prespecified round count, deterministic
+#' (no row/column subsampling) so a given seed reproduces the fit.
+#'
+#' @param X Predictor data.frame (imputed, raw units).
+#' @param Y Binary 0/1 response.
+#' @param nrounds Number of boosting rounds.
+#' @param max_depth Tree depth.
+#' @param eta Learning rate.
+#' @param weights Optional case weights.
+#' @param num_threads Threads for xgboost.
+#' @param seed Seed for tree construction.
+#' @keywords internal
+#' @noRd
+.fit_xgboost <- function(X, Y, nrounds, max_depth, eta, weights = NULL,
+                         num_threads = 1L, seed = 42L) {
+  check_suggested("xgboost", "for BRT")
+  d <- xgboost::xgb.DMatrix(as.matrix(X), label = as.numeric(Y),
+                            weight = weights)
+  params <- list(
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = as.integer(max_depth),
+    eta = as.numeric(eta),
+    nthread = as.integer(num_threads),
+    seed = as.integer(seed)
+  )
+  xgboost::xgb.train(params = params, data = d,
+                     nrounds = as.integer(nrounds), verbose = 0)
+}
+
+#' Predict with a Boosted Regression Tree (xgboost)
+#'
+#' @keywords internal
+#' @noRd
+.predict_xgboost <- function(model, X) {
+  d <- xgboost::xgb.DMatrix(as.matrix(X))
+  as.numeric(stats::predict(model, newdata = d))
 }
 
 #' Fit a MaxEnt (maxnet) Model
@@ -465,7 +570,8 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 #'
 #' Grids (biomod2/flexsdm-informed, trimmed for cost):
 #' - rf: `mtry` around `sqrt(p)`, scored by out-of-bag TSS.
-#' - brt: `interaction.depth` x `shrinkage`, scored by internal-CV TSS.
+#' - brt: `max_depth` x `eta` at the configured round count, scored by TSS
+#'   on stratified inner folds (no internal random-fold CV inside the fit).
 #' - maxent: feature classes x regularisation multiplier (each dimension held
 #'   fixed when supplied via `fixed`), scored by stratified random-fold TSS.
 #'
@@ -500,7 +606,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                     num_threads = num_threads, case_weights = case_weights),
     brt  = .tune_brt(X, Y, grid, brt_n_trees = brt_n_trees,
                      tune_folds = tune_folds, seed = seed,
-                     case_weights = case_weights),
+                     case_weights = case_weights, num_threads = num_threads),
     maxent = .tune_maxent(X, Y, grid, tune_folds = tune_folds, seed = seed)
   )
   names(scores) <- apply(grid, 1L, function(r) paste(names(r), r, sep = "=",
@@ -536,11 +642,11 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   check_suggested("ranger", "for Random Forest tuning")
   vapply(seq_len(nrow(grid)), function(i) {
     tryCatch({
-      if (!is.null(seed)) set.seed(seed + grid$mtry[i])
       m <- ranger::ranger(
         presence ~ ., data = cbind(presence = as.factor(Y), X),
         num.trees = rf_ntree, probability = TRUE, mtry = grid$mtry[i],
-        seed = seed %||% 42L, num.threads = as.integer(num_threads),
+        seed = (seed %||% 42L) + grid$mtry[i],
+        num.threads = as.integer(num_threads),
         case.weights = case_weights,  # NULL -> unweighted
         verbose = FALSE
       )
@@ -549,44 +655,77 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   }, numeric(1))
 }
 
-#' Grid-score BRT by internal-CV TSS (each combination is fit once with
-#' `cv.folds`; `gbm.perf()` keeps the tree count adaptive). Fitting honours
-#' `case_weights`; the CV TSS itself stays unweighted.
+#' Stratified Inner Folds for the Grid Search
+#'
+#' Presence and background rows are split into `tune_folds` separately, so
+#' every fold sees both classes. Shared by the BRT and MaxEnt grid scores.
+#' @keywords internal
+#' @noRd
+.cast_tune_folds <- function(Y, tune_folds, seed) {
+  .cast_with_seed(seed, {
+    idx1 <- which(Y == 1L)
+    idx0 <- which(Y == 0L)
+    fold <- integer(length(Y))
+    fold[idx1] <- sample(rep(seq_len(tune_folds), length.out = length(idx1)))
+    fold[idx0] <- sample(rep(seq_len(tune_folds), length.out = length(idx0)))
+    fold
+  })
+}
+
+
+#' Grid-score BRT by stratified inner-fold TSS
+#'
+#' Each combination is fit once per inner fold at the configured round
+#' count; the threshold is selected on the fold's training part and applied
+#' to the held-out part. No internal cross-validation folds are drawn
+#' inside the fitted model.
 #' @keywords internal
 #' @noRd
 .tune_brt <- function(X, Y, grid, brt_n_trees, tune_folds, seed,
-                      case_weights = NULL) {
-  check_suggested("gbm", "for BRT tuning")
+                      case_weights = NULL, num_threads = 1L) {
+  check_suggested("xgboost", "for BRT tuning")
+  fold <- .cast_tune_folds(Y, tune_folds, seed)
   vapply(seq_len(nrow(grid)), function(i) {
-    tryCatch({
-      if (!is.null(seed)) set.seed(seed + i)
-      m <- gbm::gbm(
-        presence ~ ., data = cbind(presence = Y, X),
-        distribution = "bernoulli", n.trees = brt_n_trees,
-        interaction.depth = grid$depth[i], shrinkage = grid$shrinkage[i],
-        weights = case_weights,  # NULL -> unweighted
-        cv.folds = tune_folds, n.cores = 1L, verbose = FALSE
+    fold_scores <- vapply(seq_len(tune_folds), function(f) {
+      tr <- which(fold != f)
+      te <- which(fold == f)
+      if (!length(tr) || !length(te) ||
+          length(unique(Y[tr])) < 2L || length(unique(Y[te])) < 2L) {
+        return(NA_real_)
+      }
+      m <- tryCatch(
+        .fit_xgboost(X[tr, , drop = FALSE], Y[tr],
+                     nrounds = brt_n_trees, max_depth = grid$depth[i],
+                     eta = grid$shrinkage[i],
+                     weights = if (is.null(case_weights)) NULL else case_weights[tr],
+                     num_threads = num_threads, seed = seed %||% 42L),
+        error = function(e) NULL
       )
-      if (is.null(m$cv.fitted)) return(NA_real_)
-      # gbmCrossValPredictions() returns Bernoulli predictions on the link scale.
-      .tss_score(stats::plogis(as.numeric(m$cv.fitted)), Y)
-    }, error = function(e) NA_real_)
+      if (is.null(m)) return(NA_real_)
+      p_tr <- tryCatch(.predict_xgboost(m, X[tr, , drop = FALSE]),
+                       error = function(e) rep(NA_real_, length(tr)))
+      p_te <- tryCatch(.predict_xgboost(m, X[te, , drop = FALSE]),
+                       error = function(e) rep(NA_real_, length(te)))
+      thr <- tryCatch(cast_threshold(p_tr, Y[tr], method = "max_tss"),
+                      error = function(e) NA_real_)
+      .cast_tss(p_te, Y[te], thr)
+    }, numeric(1))
+    if (any(is.finite(fold_scores))) {
+      mean(fold_scores[is.finite(fold_scores)])
+    } else {
+      NA_real_
+    }
   }, numeric(1))
 }
 
 #' Grid-score MaxEnt by stratified random-fold TSS
 #'
-#' Presence and background rows are split into `tune_folds` separately, so
-#' every fold sees both classes. The threshold is selected on the training
-#' part of each fold and applied to the held-out part.
+#' The threshold is selected on the training part of each fold and applied
+#' to the held-out part.
 #' @keywords internal
 #' @noRd
 .tune_maxent <- function(X, Y, grid, tune_folds, seed) {
-  if (!is.null(seed)) set.seed(seed)
-  idx1 <- which(Y == 1L); idx0 <- which(Y == 0L)
-  fold <- integer(length(Y))
-  fold[idx1] <- sample(rep(seq_len(tune_folds), length.out = length(idx1)))
-  fold[idx0] <- sample(rep(seq_len(tune_folds), length.out = length(idx0)))
+  fold <- .cast_tune_folds(Y, tune_folds, seed)
 
   vapply(seq_len(nrow(grid)), function(i) {
     fold_scores <- vapply(seq_len(tune_folds), function(f) {

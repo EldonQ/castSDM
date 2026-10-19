@@ -1,7 +1,9 @@
 # P1 review round, W3: prevalence-correcting case weights. Weight = target/n
 # per class, so the weighted prevalence is exactly the target. Only the
 # fitting objective is re-prevalenced; evaluation metrics stay unweighted.
-# MaxEnt has no row-weight interface and is always fitted unweighted.
+# MaxEnt has no row-weight interface: its fit stays unweighted and the same
+# target is reached through a stored logit-scale calibration offset, so all
+# engines share one calibration scale.
 
 .w3_test_data <- function(seed = 41, n_pres = 20, n_bg = 300) {
   set.seed(seed)
@@ -49,24 +51,38 @@ test_that("prevalence_target shifts RF predictions toward the target prevalence"
   expect_gt(mean(p_w), mean(p_uw))
 })
 
-test_that("MaxEnt stays unweighted regardless of prevalence_target", {
+test_that("MaxEnt is calibrated to the prevalence target via a logit shift", {
   skip_if_not_installed("maxnet")
   dat <- .w3_test_data(42)
   fit_uw <- cast_fit(dat, models = "maxent", seed = 3, verbose = FALSE)
   fit_w <- cast_fit(dat, models = "maxent", prevalence_target = 0.5,
                     seed = 3, verbose = FALSE)
-  p_uw <- predict_single_model(fit_uw$models$maxent, dat[, c("x1", "x2", "x3")])
-  p_w <- predict_single_model(fit_w$models$maxent, dat[, c("x1", "x2", "x3")])
-  expect_identical(p_uw, p_w)
+  expect_null(fit_uw$calibration)
+  X <- dat[, c("x1", "x2", "x3")]
+  p_uw <- predict_single_model(fit_uw$models$maxent, X)
+  p_w <- predict_single_model(fit_w$models$maxent, X)
+  # The fitted (unweighted) maxnet model is unchanged; the predictions are
+  # shifted by the stored calibration offset.
+  expect_false(identical(p_uw, p_w))
+  expect_named(fit_w$calibration$offsets, "maxent")
+  expect_equal(fit_w$models$maxent$offset, fit_w$calibration$offsets[["maxent"]],
+               tolerance = 1e-12)
+  # Un-shifting restores the raw maxnet output exactly.
+  expect_equal(.cast_apply_offset(p_w, -fit_w$models$maxent$offset),
+               p_uw, tolerance = 1e-10)
+  # The weighted training mean hits the requested target.
+  w <- ifelse(dat$presence == 1L, 0.5 / sum(dat$presence == 1L),
+              0.5 / sum(dat$presence == 0L))
+  expect_equal(sum(w * p_w) / sum(w), 0.5, tolerance = 1e-3)
 })
 
 test_that("BRT and GAM accept the weights", {
-  skip_if_not_installed("gbm")
+  skip_if_not_installed("xgboost")
   skip_if_not_installed("mgcv")
   dat <- .w3_test_data(43)
   fit_brt <- cast_fit(dat, models = "brt", prevalence_target = 0.3,
-                      seed = 5, verbose = FALSE)
-  expect_s3_class(fit_brt$models$brt$model, "gbm")
+                      brt_n_trees = 50L, seed = 5, verbose = FALSE)
+  expect_s3_class(fit_brt$models$brt$model, "xgb.Booster")
   fit_gam <- cast_fit(dat, models = "gam", prevalence_target = 0.3,
                       seed = 5, verbose = FALSE)
   expect_s3_class(fit_gam$models$gam$model, "gam")

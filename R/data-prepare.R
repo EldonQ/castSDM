@@ -217,12 +217,12 @@ cast_vif <- function(data,
 #'   auto-detection picks up metadata columns (e.g., occurrence indicators).
 #' @param split Hold-out strategy: `"spatial"` (default), `"stratified"`, or
 #'   `"random"`. Degenerate spatial/stratified splits fall back automatically.
-#' @param block_method Spatial blocking for `split = "spatial"`: `"grid"`
-#'   (default; grid cells grouped into spatially contiguous blocks),
-#'   `"grid_random"` (legacy count-balanced packing, ignores cell position),
-#'   `"cluster"`, or `"env"` (k-means on the scaled predictor matrix, so
-#'   blocks are contiguous in environmental space; Roberts et al. 2017-style
-#'   environmental blocking).
+#' @param block_method Spatial blocking for `split = "spatial"`: `"blockcv"`
+#'   (default; \pkg{blockCV} square blocks with autocorrelation-range sizing),
+#'   `"grid"` (k-means on grid-cell centroids; dependency-free fallback), or
+#'   `"env"` (k-means on the scaled predictor matrix, so blocks are contiguous
+#'   in environmental space; Roberts et al. 2017-style environmental
+#'   blocking). See [cast_cv()].
 #' @param n_blocks Integer. Number of spatial blocks to form before assigning
 #'   whole blocks to the test set. Default `20`.
 #' @param verbose Logical. Print detected variables and excluded columns.
@@ -245,7 +245,7 @@ cast_vif <- function(data,
 cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          env_vars = NULL,
                          split = c("spatial", "stratified", "random"),
-                         block_method = c("grid", "grid_random", "cluster", "env"),
+                         block_method = c("blockcv", "grid", "env"),
                          n_blocks = 20L, verbose = TRUE) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
@@ -331,9 +331,9 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   }
 
   n <- nrow(data)
-  if (!is.null(seed)) set.seed(seed)
-  sp <- .cast_holdout_split(data, train_fraction, split, block_method,
-                            as.integer(n_blocks), "presence", verbose)
+  sp <- .cast_with_seed(seed,
+    .cast_holdout_split(data, train_fraction, split, block_method,
+                        as.integer(n_blocks), "presence", verbose))
   train_idx <- sp$train
   if (verbose) {
     cli::cli_inform(
@@ -427,7 +427,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   } else NULL
   blocks <- tryCatch(
     make_spatial_folds(data$lon, data$lat, k = n_blocks, method = block_method,
-                       env = env_block),
+                       env = env_block, y = y),
     error = function(e) NULL
   )
   if (is.null(blocks) || length(unique(blocks)) < 2L) {

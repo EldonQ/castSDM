@@ -2,22 +2,24 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_importance}
 \alias{cast_importance}
-\title{Forward-Selection Path from the Screen}
+\title{Selection Path from the Screen}
 \usage{
 cast_importance(object)
 }
 \arguments{
-\item{object}{A \code{cast_select} from \code{method = "two_stage"}, or a
+\item{object}{A \code{cast_select}, or a
 \code{cast_fit} / \code{cast_result} that carries such a screen.}
 }
 \value{
 A \code{cast_importance} object.
 }
 \description{
-Turns a two-stage screen into a tidy per-predictor table carrying the
-forward-selection path: each admitted predictor with its admission step
-and the inner cross-validated loss improvement at admission (\code{loss_gain}).
-Excluded survivors are listed with missing steps and gains.
+Turns a screen into a tidy per-predictor table carrying the admission
+path: each admitted predictor with its admission position (\code{step_added},
+the covsel aggregate rank; \code{0} for prespecified predictors) and, where
+the screen recorded one, the inner-CV loss improvement at admission
+(\code{loss_gain}, always \code{NA} for covsel screens).
+Excluded predictors are listed with missing steps and gains.
 }
 \section{Interpretation (read before citing)}{
 
@@ -27,8 +29,7 @@ requires a justified adjustment set, no uncontrolled confounding,
 consistency, joint support and adequate response and observation models.
 These assumptions are not verified by the ranking (Byrnes & Dee 2025).
 
-Gains carry no sign convention beyond "lower loss is better", so read the
-path together with \code{\link[=cast_effect_table]{cast_effect_table()}} for response direction.
+Read the path together with \code{\link[=cast_effect_table]{cast_effect_table()}} for response direction.
 }
 
 \references{

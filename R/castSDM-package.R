@@ -16,7 +16,8 @@
 #'
 #' @section Quick Start:
 #' ```
-#' result <- cast(species_data, env_data)
+#' protocol <- cast_protocol(models = c("rf", "brt"), cv_k = 5)
+#' result <- cast_run(species_data, env_data, protocol = protocol)
 #' summary(result)
 #' plot(result)
 #' ```

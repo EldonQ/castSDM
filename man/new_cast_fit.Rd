@@ -4,10 +4,19 @@
 \alias{new_cast_fit}
 \title{Create a cast_fit Object}
 \usage{
-new_cast_fit(models, cast_vars, env_vars, scaling, screen = NULL)
+new_cast_fit(
+  models,
+  cast_vars,
+  env_vars,
+  scaling,
+  screen = NULL,
+  calibration = NULL
+)
 }
 \arguments{
-\item{models}{Named list of fitted model objects.}
+\item{models}{Named list of fitted model objects. Each engine entry may
+carry a \code{offset} (logit-scale prevalence calibration shift added at
+prediction time).}
 
 \item{cast_vars}{Character vector of variables used for modeling.}
 
@@ -24,6 +33,12 @@ trained on the raw predictors; \code{means}/\code{sds} are not applied to fittin
 inputs.}
 
 \item{screen}{A \code{cast_select} object (or \code{NULL}).}
+
+\item{calibration}{Optional list recording the prevalence-target
+calibration applied at fit time (\code{method}, \code{prevalence_target},
+per-engine \code{offsets}), or \code{NULL} when no target was requested. When
+present, every prediction path applies the stored per-engine logit
+offset, so all engines share one calibration scale.}
 }
 \value{
 A \code{cast_fit} object.

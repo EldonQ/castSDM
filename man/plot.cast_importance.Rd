@@ -11,7 +11,7 @@
 
 \item{var_labels}{Optional named character vector for display labels.}
 
-\item{top}{Optional integer. Show only the \code{top} largest gains.}
+\item{top}{Optional integer. Show only the \code{top} strongest predictors.}
 
 \item{...}{Ignored.}
 }
@@ -19,7 +19,7 @@
 A \code{ggplot} object.
 }
 \description{
-Lollipop plot of the forward-selection path: each admitted predictor with
-the inner-CV loss improvement at admission. Excluded survivors are listed
-with missing steps and gains, not plotted.
+Lollipop plot of the selection path: each admitted predictor with its
+admission rank (the covsel aggregate rank, 1 = strongest). Excluded
+predictors carry a missing rank and are not plotted.
 }

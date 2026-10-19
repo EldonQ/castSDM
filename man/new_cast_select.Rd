@@ -10,11 +10,12 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 \item{selected}{Character vector of selected variable names.}
 
 \item{scores}{A \code{data.frame} with per-variable scores. For
-\code{method = "two_stage"}: marginal \code{assoc}, the stage-1
-\code{collinear_thinned} flag, the forward-selection admission \code{step_added}
-(\code{0} for prespecified predictors, \code{NA} for never-admitted ones), the
-inner-CV \code{loss_gain} at admission, and the \code{selected} flag. For
-\code{method = "full"} the score columns are \code{NA}.}
+\code{method = "covsel"}: marginal \code{assoc}, the univariate \code{stage1_p}
+ranking signal, the \code{collinear_thinned} flag, the admission \code{step_added}
+(\code{0} for prespecified predictors, \code{NA} for never-admitted ones; the
+covsel aggregate rank when embedded), the \code{loss_gain} (\code{NA} for
+covsel), and the \code{selected} flag. For \code{method = "full"} the score
+columns are \code{NA}.}
 
 \item{method}{Character screening-method identifier.}
 

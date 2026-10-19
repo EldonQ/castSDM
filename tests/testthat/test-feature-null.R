@@ -1,212 +1,156 @@
-# Stage 2 forward selection: admission by inner-CV loss improvement ----------
+# covsel screening: collinearity filter, embedded ranking, force, coverage ----
 
-test_that("forward search recovers true parents and drops a redundant proxy", {
-  skip_if_not_installed("ranger")
-  set.seed(21)
-  n <- 300
+skip_covsel_deps <- function() {
+  skip_if_not_installed("glmnet")
+  skip_if_not_installed("mgcv")
+  skip_if_not_installed("RRF")
+}
+
+feature_null_data <- function(n = 300, r = 0.98, seed = 21) {
+  set.seed(seed)
   x1 <- rnorm(n)
   x2 <- rnorm(n)
-  x3 <- 0.98 * x1 + sqrt(1 - 0.98^2) * rnorm(n)
-  dat <- data.frame(
+  x3 <- r * x1 + sqrt(1 - r^2) * rnorm(n)
+  data.frame(
     lon = runif(n, 70, 130), lat = runif(n, 20, 50),
     presence = rbinom(n, 1, plogis(1.5 * x1 - 1.2 * x2)),
-    x1 = x1, x2 = x2, x3 = x3, x4 = rnorm(n)
+    x1 = x1, x2 = x2, x3 = x3, x4 = rnorm(n), x5 = rnorm(n)
   )
-  s <- cast_select(dat, num_trees = 150, seed = 22, verbose = FALSE)
-  expect_s3_class(s, "cast_select")
-  expect_identical(s$diagnostics$status, "selected")
-  # The true driver is retained ...
-  expect_true("x2" %in% s$selected)
-  # ... exactly one of the near-duplicate pair survives (thinning or search) ...
-  expect_equal(sum(c("x1", "x3") %in% s$selected), 1L)
-  # ... and the pure noise predictor is not admitted.
-  expect_false("x4" %in% s$selected)
-  # Reasons use the forward vocabulary only.
-  expect_true(all(s$scores$selected_reason[s$scores$selected] %in%
-                    c("forward", "prespecified")))
-  expect_true(nrow(s$diagnostics$path) >= 1L)
+}
+
+test_that("covsel drops a near-duplicate and keeps the true drivers", {
+  skip_covsel_deps()
+  dat <- feature_null_data()
+  scr <- cast_select(dat, ncov = 2L, maxncov = 2L, seed = 22, verbose = FALSE)
+  expect_s3_class(scr, "cast_select")
+  expect_identical(scr$method, "covsel")
+  # Exactly one of the near-duplicate pair survives the collinearity filter.
+  expect_equal(sum(c("x1", "x3") %in% scr$selected), 1L)
+  expect_true("x2" %in% scr$selected)
+  expect_false(any(c("x4", "x5") %in% scr$selected))
+  expect_true(all(scr$selected %in% scr$diagnostics$filtered))
+  # Reasons use the covsel vocabulary only.
+  expect_true(all(scr$scores$selected_reason[scr$scores$selected] %in%
+                    c("embed", "prespecified", "ensured")))
 })
 
-test_that("a null signal returns an empty set, not a fallback set", {
-  skip_if_not_installed("ranger")
+test_that("covsel is deterministic under a seed", {
+  skip_covsel_deps()
+  dat <- feature_null_data(n = 200)
+  a <- cast_select(dat, seed = 99, verbose = FALSE)
+  b <- cast_select(dat, seed = 99, verbose = FALSE)
+  expect_identical(a$selected, b$selected)
+})
+
+test_that("var_id keeps one covariate per construct", {
+  skip_covsel_deps()
   set.seed(23)
+  n <- 300
+  base <- rnorm(n)
+  dat <- data.frame(
+    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
+    presence = rbinom(n, 1, plogis(1.3 * base)),
+    scale100 = base, scale500 = 0.9 * base + 0.1 * rnorm(n),
+    scale1000 = 0.85 * base + 0.2 * rnorm(n), noise = rnorm(n)
+  )
+  ids <- c(scale100 = "construct", scale500 = "construct",
+           scale1000 = "construct", noise = "noise")
+  scr <- cast_select(dat, var_id = ids, seed = 24, verbose = FALSE)
+  expect_equal(sum(c("scale100", "scale500", "scale1000") %in% scr$selected), 1L)
+})
+
+test_that("ncov truncates the embedded selection", {
+  skip_covsel_deps()
+  dat <- feature_null_data()
+  scr2 <- cast_select(dat, ncov = 2L, seed = 25, verbose = FALSE)
+  expect_identical(scr2$diagnostics$ncov, 2L)
+  expect_lte(length(scr2$selected), 2L)
+  # The default target follows the covsel rule ceiling(log2(n_presences)).
+  n_pres <- sum(dat$presence)
+  scr_default <- cast_select(dat, seed = 25, verbose = FALSE)
+  expect_identical(scr_default$diagnostics$ncov,
+                   as.integer(min(12L, ceiling(log2(n_pres)))))
+})
+
+test_that("keep forces prespecified predictors through filter and embedding", {
+  skip_covsel_deps()
+  dat <- feature_null_data(n = 200)
+  scr <- suppressWarnings(
+    cast_select(dat, keep = "x5", seed = 26, verbose = FALSE))
+  expect_true("x5" %in% scr$selected)
+  row <- scr$scores[scr$scores$variable == "x5", ]
+  expect_true(row$kept_by_design)
+  expect_identical(row$selected_reason, "prespecified")
+  reported <- cast_importance(scr)$effects
+  expect_true(all(reported$kept_by_design[reported$variable == "x5"]))
+})
+
+test_that("ensure tops up a declared coverage class", {
+  skip_covsel_deps()
+  dat <- feature_null_data()
+  flags <- c(x1 = FALSE, x2 = FALSE, x3 = FALSE, x4 = TRUE, x5 = FALSE)
+  scr <- cast_select(dat, ensure = list(climate = flags),
+                     ncov = 2L, maxncov = 2L, seed = 27, verbose = FALSE)
+  expect_true("x4" %in% scr$selected)
+  expect_identical(scr$scores$selected_reason[scr$scores$variable == "x4"],
+                   "ensured")
+  expect_true("x4" %in% scr$diagnostics$ensured)
+})
+
+test_that("scores and diagnostics carry the covsel schema", {
+  skip_covsel_deps()
+  dat <- feature_null_data(n = 250)
+  s <- cast_select(dat, keep = "x1", seed = 28, verbose = FALSE)
+  expect_true(all(c("step_added", "loss_gain", "selected_reason",
+                    "kept_by_design", "selected") %in% names(s$scores)))
+  d <- s$diagnostics
+  expect_true(all(c("keep", "corcut", "algorithms", "ncov", "maxncov",
+                    "ensured", "filtered", "final_ranks", "n_pres") %in%
+                    names(d)))
+  expect_identical(d$keep, "x1")
+  expect_true(length(d$filtered) >= 1L)
+  expect_true(all(s$selected %in% union(d$filtered, d$keep)))
+  expect_s3_class(cast_importance(s), "cast_importance")
+  expect_true(all(c("step_added", "loss_gain") %in%
+                    names(cast_importance(s)$effects)))
+})
+
+test_that("invalid selection arguments fail explicitly", {
+  skip_covsel_deps()
+  dat <- feature_null_data(n = 150)
+  expect_error(cast_select(dat, method = "typo", verbose = FALSE),
+               "covsel")
+  expect_error(cast_select(dat, algorithms = "nope", verbose = FALSE),
+               "algorithms")
+  expect_error(cast_select(dat, corcut = 2, verbose = FALSE), "corcut")
+  expect_error(cast_select(dat, ncov = 0, verbose = FALSE), "ncov")
+  expect_error(cast_select(dat, maxncov = 0, verbose = FALSE), "maxncov")
+  expect_error(cast_select(dat, seed = "x", verbose = FALSE), "seed")
+})
+
+test_that("covsel screens plot as a ggplot", {
+  skip_covsel_deps()
+  skip_if_not_installed("ggplot2")
+  dat <- feature_null_data(n = 250)
+  s <- cast_select(dat, keep = "x1", seed = 30, verbose = FALSE)
+  expect_s3_class(plot(cast_importance(s)), "ggplot")
+  expect_s3_class(plot(s), "ggplot")
+})
+
+test_that("a null signal still returns a valid, documented screen", {
+  skip_covsel_deps()
+  set.seed(31)
   n <- 300
   dat <- data.frame(
     lon = runif(n, 70, 130), lat = runif(n, 20, 50),
     presence = rbinom(n, 1, 0.3),
     x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
   )
-  expect_warning(
-    s <- cast_select(dat, num_trees = 60, seed = 24, verbose = FALSE),
-    "empty set"
-  )
-  expect_length(s$selected, 0L)
-  expect_identical(s$diagnostics$status, "empty_selection")
-  expect_true(all(s$scores$selected_reason == "excluded"))
+  s <- suppressWarnings(cast_select(dat, seed = 32, verbose = FALSE))
+  expect_s3_class(s, "cast_select")
+  expect_true(all(s$selected %in% s$diagnostics$filtered))
+  expect_true(all(s$scores$selected_reason %in%
+                    c("embed", "prespecified", "ensured", "excluded")))
   expect_false(any(c("fallback", "p_value", "null_threshold",
                      "interventional_effect") %in% names(s$scores)))
-})
-
-test_that("keep forces prespecified predictors at step 0", {
-  skip_if_not_installed("ranger")
-  set.seed(25)
-  n <- 200
-  dat <- data.frame(
-    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
-    presence = rbinom(n, 1, plogis(1.2 * rnorm(n))),
-    x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n), x5 = rnorm(n)
-  )
-  s <- suppressWarnings(cast_select(dat, keep = "x5", num_trees = 40,
-                                    seed = 26, verbose = FALSE))
-  expect_true("x5" %in% s$selected)
-  row <- s$scores[s$scores$variable == "x5", ]
-  expect_identical(row$step_added, 0L)
-  expect_identical(row$selected_reason, "prespecified")
-  expect_true(row$kept_by_design)
-  reported <- cast_importance(s)$effects
-  expect_true(all(reported$kept_by_design[reported$variable == "x5"]))
-})
-
-test_that("scores and diagnostics carry the forward path schema", {
-  skip_if_not_installed("ranger")
-  set.seed(27)
-  n <- 250
-  x1 <- rnorm(n)
-  dat <- data.frame(
-    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
-    presence = rbinom(n, 1, plogis(1.4 * x1)),
-    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
-  )
-  # keep forces a non-empty path so the schema is exercised deterministically.
-  s <- cast_select(dat, keep = "x1", num_trees = 60, seed = 28,
-                   verbose = FALSE)
-  expect_true(all(c("step_added", "loss_gain", "selected_reason",
-                    "kept_by_design", "selected") %in% names(s$scores)))
-  d <- s$diagnostics
-  expect_true(all(c("path", "metric", "inner_method", "tolerance",
-                    "n_folds", "null_loss", "final_loss", "n_fits",
-                    "status") %in% names(d)))
-  expect_true(d$n_fits >= 1L)
-  expect_true(d$status %in% c("selected", "empty_selection"))
-  expect_s3_class(cast_importance(s), "cast_importance")
-  expect_true(all(c("step_added", "loss_gain") %in%
-                    names(cast_importance(s)$effects)))
-})
-
-test_that("metric = 'auc' runs the same forward search on rank loss", {
-  skip_if_not_installed("ranger")
-  set.seed(29)
-  n <- 250
-  x1 <- rnorm(n)
-  dat <- data.frame(
-    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
-    presence = rbinom(n, 1, plogis(1.4 * x1)),
-    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
-  )
-  s <- cast_select(dat, metric = "auc", num_trees = 60, seed = 30,
-                   verbose = FALSE)
-  expect_identical(s$diagnostics$metric, "auc")
-  expect_true("x1" %in% s$selected)
-})
-
-test_that("invalid stage-2 arguments fail explicitly", {
-  set.seed(31)
-  dat <- data.frame(presence = rep(0:1, 60),
-                    x1 = rnorm(120), x2 = rnorm(120), x3 = rnorm(120))
-  expect_error(cast_select(dat, tolerance = -1, verbose = FALSE), "tolerance")
-  expect_error(cast_select(dat, n_folds = 1L, verbose = FALSE), "n_folds")
-  expect_error(cast_select(dat, metric = "typo", verbose = FALSE), "metric")
-  expect_error(cast_select(dat, num_trees = 0L, verbose = FALSE), "num_trees")
-})
-
-test_that("a huge tolerance stops the search with an empty set", {
-  skip_if_not_installed("ranger")
-  set.seed(32)
-  n <- 250
-  x1 <- rnorm(n)
-  dat <- data.frame(
-    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
-    presence = rbinom(n, 1, plogis(1.4 * x1)),
-    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
-  )
-  # No count cap exists: stopping is driven by the tolerance alone.
-  expect_warning(
-    s <- cast_select(dat, tolerance = 10, num_trees = 60, seed = 33,
-                     verbose = FALSE),
-    "empty set"
-  )
-  expect_length(s$selected, 0L)
-})
-
-test_that("forward path plots as a ggplot", {
-  skip_if_not_installed("ranger")
-  skip_if_not_installed("ggplot2")
-  set.seed(34)
-  n <- 250
-  x1 <- rnorm(n)
-  dat <- data.frame(
-    lon = runif(n, 70, 130), lat = runif(n, 20, 50),
-    presence = rbinom(n, 1, plogis(1.4 * x1)),
-    x1 = x1, x2 = rnorm(n), x3 = rnorm(n)
-  )
-  s <- cast_select(dat, num_trees = 60, seed = 35, verbose = FALSE)
-  expect_s3_class(plot(cast_importance(s)), "ggplot")
-  expect_s3_class(plot(s), "ggplot")
-})
-
-test_that("paired admission requires at least two finite common folds", {
-  for (metric in c("auc", "brier")) {
-    ref <- c(a = 0.5, b = 0.5, c = NA_real_)
-    candidate <- if (metric == "auc") c(a = 0.6, b = 0.6, c = 0.6) else
-      c(a = 0.4, b = 0.4, c = 0.4)
-    expect_true(.cast_admits(ref, candidate, 0, metric)$admit)
-    expect_false(.cast_admits(ref, candidate, 0.2, metric)$admit)
-    expect_false(.cast_admits(ref, candidate, 0.1, metric)$admit)
-    expect_false(.cast_admits(ref, candidate[c("a", "c")], 0, metric)$admit)
-    expect_false(.cast_admits(ref, candidate["c"], 0, metric)$admit)
-    expect_false(.cast_admits(ref, c(d = 0.6), 0, metric)$admit)
-    expect_equal(.cast_admits(ref, candidate["a"], 0, metric)$gain, 0.1)
-    expect_true(is.na(.cast_admits(ref, candidate["c"], 0, metric)$gain))
-    expect_true(.cast_admits(ref, candidate[c("c", "b", "a")], 0, metric)$admit)
-  }
-})
-
-test_that("forward search chooses the best admissible pair or addition", {
-  skip_if_not_installed("ranger")
-  local_mocked_bindings(
-    .cast_inner_folds = function(data, n_folds) {
-      list(folds = rep(1:3, each = 2), method = "random")
-    },
-    .cast_null_loss = function(y_num, folds, metric) {
-      list(loss = 0.5, folds = c(a = 0.5, b = 0.5, c = 0.5))
-    },
-    .cast_inner_loss = function(X, y_num, folds, vars, metric, num_trees,
-                                seed_base, counter) {
-      scores <- if (setequal(vars, c("x1", "x2"))) c(0.9, 0.6, 0.4) else
-        if (all(c("x1", "x3") %in% vars)) c(0.59, 0.60, 0.61) else
-          rep(0.5, 3)
-      if (metric == "brier") scores <- 1 - scores
-      list(loss = mean(scores), folds = setNames(scores, c("a", "b", "c")),
-           fits = 3L)
-    }
-  )
-  dat <- data.frame(presence = rep(0:1, 3), x1 = 1:6, x2 = 6:1,
-                    x3 = c(2, 4, 6, 1, 3, 5))
-  for (metric in c("auc", "brier")) {
-    for (keep in list(character(0), "x1")) {
-      result <- .cast_forward_search(dat, "presence", c("x1", "x2", "x3"),
-                                     keep, 1L, 2000L, metric, 0, 3L, 42L, FALSE)
-      expect_identical(result$selected, c("x1", "x3"))
-      expect_equal(unname(result$loss_gain["x3"]), 0.1)
-      expect_identical(result$diagnostics$status, "selected")
-      expect_false("x2" %in% result$selected)
-    }
-    expect_warning(
-      result <- .cast_forward_search(dat, "presence", c("x1", "x2", "x3"),
-                                     character(0), 1L, 2000L, metric, 0.2, 3L,
-                                     42L, FALSE),
-      "empty set"
-    )
-    expect_length(result$selected, 0L)
-  }
 })

@@ -161,7 +161,7 @@ cast_predict_tiled <- function(fit, raster,
     matrix(vals, nr, nc, byrow = TRUE)
   }
 
-  # Tiles are processed sequentially: ranger/gbm predictions dominate the
+  # Tiles are processed sequentially: ranger/xgboost predictions dominate the
   # cost and a serial sweep bounds peak memory to one tile at a time.
   #
   # The model loop is INSIDE the tile loop on purpose. The previous order

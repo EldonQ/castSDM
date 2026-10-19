@@ -1,3 +1,49 @@
+# castSDM 0.20.0
+
+Breaking release: one production pipeline with an explicit evaluation protocol.
+
+- New `cast_protocol()` and `cast_run()` replace `cast()`. The protocol is the
+  single declaration point for engines, selection, CV design, thresholds,
+  prevalence calibration, ensemble policy and extrapolation handling.
+  `cast_run()` echoes the effective values, and with `output_dir` writes
+  per-stage artifacts with content-digest receipts into `manifest.rds`
+  (stages/, tables/, odmap_report.md).
+- Evaluation protocol: selection, thresholds and ensemble weights are
+  estimated on the training split; the hold-out split is evaluated exactly
+  once with pooled out-of-fold thresholds (`cast_evaluate(thresholds = )`);
+  published predictions use the full-data refit; the ensemble threshold is
+  optimised on the out-of-fold ensemble surface that is actually thresholded.
+  Per-fold TSS/SEDI/kappa now use the pooled out-of-fold threshold instead of
+  each fold's in-sample training cut, which had collapsed the held-out TSS of
+  flexible learners (RF).
+- AOA threshold follows Meyer & Pebesma (2021): 75th percentile + 1.5 x IQR of
+  the pooled training-side nearest-neighbour DI; held-out DI and its share
+  above the threshold are validation evidence (`share_outside_oof`).
+- Prevalence calibration: with `prevalence_target`, every engine -- including
+  MaxEnt, whose fit accepts no row weights -- is calibrated to the same
+  training-sample prevalence through a stored logit-scale offset, so ensemble
+  members share one scale. `cast_protocol()` defaults to 0.5.
+- BRT engine switched from gbm to xgboost: prespecified round count; tuning
+  searches depth x eta on stratified inner folds; no random-fold internal CV
+  inside the fit. gbm dependency removed.
+- Spatial blocking: `block_method = "blockcv"` (default) builds square blocks
+  with blockCV, sized from the spatial-autocorrelation range
+  (`block_size` overrides); dependency-free `"grid"` fallback retained,
+  `"env"` kept. `grid_random` and `cluster` removed.
+- Variable selection: the vendored reference implementation of the covsel
+  package (Adde et al. 2023; MIT license, see inst/COPYRIGHTS) replaces the
+  self-implemented copy, with native weights/force support, the `ensure`
+  coverage rule and the token-space wrapper for non-syntactic predictor
+  names. The upstream elastic-net label truncation (missing final character
+  of every covariate name) is fixed, so cross-algorithm label matching is
+  exact. Default method "covsel"; `ncov` default
+  `ceiling(log2(n_presences))`. The legacy `two_stage` selector is removed.
+- RNG hygiene: every stage seeds locally (`withr`) and restores the caller's
+  RNG state; global `set.seed()` side effects removed; `ranger` prediction no
+  longer advances the global RNG.
+- Removed dead code: `cast()`, `cast_load_future_envs()`,
+  `cast_save_future_projection()`, `grid_random`, `cluster` blocking.
+
 # castSDM 0.19.0
 
 - Accept external fitted models through `cast_as_fit()` with explicit prediction

@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Drivers and Spatial Attribution of Habitat Change
-Version: 0.19.0
+Version: 0.20.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -30,12 +30,12 @@ Depends:
 Imports:
     cli (>= 3.6.0)
 Suggests:
+    blockCV,
     car,
     digest,
     FNN,
     future,
     future.apply,
-    gbm,
     ggplot2 (>= 3.4.0),
     glmnet,
     knitr,
@@ -53,6 +53,7 @@ Suggests:
     terra (>= 1.7.0),
     testthat (>= 3.0.0),
     viridisLite,
-    withr
+    withr,
+    xgboost
 Config/testthat/edition: 3
 VignetteBuilder: knitr

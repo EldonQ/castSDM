@@ -1,8 +1,10 @@
 # Importance reporting ------------------------------------------------------
 #
-# cast_importance() tidies the screen's forward-selection path: each admitted
-# predictor with the inner-CV loss improvement at admission. It reuses the
-# screen so no new estimation engine or hand-tuned knob is introduced.
+# cast_importance() tidies the screen's admission path: each admitted
+# predictor with its admission position (the covsel aggregate rank) and, for
+# older screens that carry one, the inner-CV loss improvement at admission.
+# It reuses the screen so no new estimation engine or hand-tuned knob is
+# introduced.
 
 #' @keywords internal
 #' @noRd
@@ -24,12 +26,14 @@
   screen
 }
 
-#' Forward-Selection Path from the Screen
+#' Selection Path from the Screen
 #'
-#' Turns a two-stage screen into a tidy per-predictor table carrying the
-#' forward-selection path: each admitted predictor with its admission step
-#' and the inner cross-validated loss improvement at admission (`loss_gain`).
-#' Excluded survivors are listed with missing steps and gains.
+#' Turns a screen into a tidy per-predictor table carrying the admission
+#' path: each admitted predictor with its admission position (`step_added`,
+#' the covsel aggregate rank; `0` for prespecified predictors) and, where
+#' the screen recorded one, the inner-CV loss improvement at admission
+#' (`loss_gain`, always `NA` for covsel screens).
+#' Excluded predictors are listed with missing steps and gains.
 #'
 #' @section Interpretation (read before citing):
 #' The table describes the \emph{fitted screening procedure}. It is not a
@@ -38,10 +42,9 @@
 #' consistency, joint support and adequate response and observation models.
 #' These assumptions are not verified by the ranking (Byrnes & Dee 2025).
 #'
-#' Gains carry no sign convention beyond "lower loss is better", so read the
-#' path together with [cast_effect_table()] for response direction.
+#' Read the path together with [cast_effect_table()] for response direction.
 #'
-#' @param object A `cast_select` from `method = "two_stage"`, or a
+#' @param object A `cast_select`, or a
 #'   `cast_fit` / `cast_result` that carries such a screen.
 #'
 #' @return A `cast_importance` object.
@@ -73,13 +76,13 @@ cast_importance <- function(object) {
   rownames(effects) <- NULL
 
   diagnostics <- screen$diagnostics
-  diagnostics$measure <- "loss_gain"
-  # The covsel screen has no inner-CV loss path; its admission order is the
-  # Adde et al. (2023) aggregate rank, and loss_gain stays NA by design.
+  diagnostics$measure <- "admission_rank"
+  # The covsel screen's admission order is the Adde et al. (2023) aggregate
+  # rank; loss_gain stays NA by design.
   metric <- if (identical(screen$method, "covsel")) {
     "embedded-selection rank"
   } else {
-    screen$diagnostics$metric %||% "brier"
+    screen$diagnostics$metric %||% "aggregate rank"
   }
   new_cast_importance(
     effects = effects,

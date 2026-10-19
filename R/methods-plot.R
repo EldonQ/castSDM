@@ -18,16 +18,14 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  # The score to plot must be the ONE the method actually ranked by. A
-  # method-blind fallback chain (loss_gain -> freq -> assoc) silently plotted
-  # |marginal association| for covsel, whose filter ranks on the poly(x, 2)
-  # logistic term instead -- so the panel advertised a ranking the method
-  # never used. stage1_p is the covsel filter's ranking statistic; loss_gain
-  # is the two_stage forward-search's; freq is the CV-selection frequency.
+  # The score to plot must be the ONE the method actually ranked by. The
+  # covsel filter ranks on the poly(x, 2) logistic term (stage1_p); the
+  # consensus screen carries fold selection frequency; "full" screens have
+  # no ranking and fall back to the selection indicator.
   imp_candidates <- if (identical(x$method, "covsel")) {
     c("stage1_p", "assoc")
   } else {
-    c("loss_gain", "freq", "assoc")
+    c("freq", "assoc")
   }
   imp_col <- imp_candidates[imp_candidates %in% names(scr)]
   imp_col <- imp_col[vapply(imp_col, function(nm)
@@ -81,7 +79,6 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   )
 
   x_lab <- switch(imp_col,
-    loss_gain = "CV loss improvement",
     freq = "Fold selection frequency",
     filter_score = "Filter score  (-log10 p of the quadratic-logistic term)",
     assoc = "|marginal association|",
@@ -647,13 +644,13 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 
 #' Plot Predictor Importance
 #'
-#' Lollipop plot of the forward-selection path: each admitted predictor with
-#' the inner-CV loss improvement at admission. Excluded survivors are listed
-#' with missing steps and gains, not plotted.
+#' Lollipop plot of the selection path: each admitted predictor with its
+#' admission rank (the covsel aggregate rank, 1 = strongest). Excluded
+#' predictors carry a missing rank and are not plotted.
 #'
 #' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.
-#' @param top Optional integer. Show only the `top` largest gains.
+#' @param top Optional integer. Show only the `top` strongest predictors.
 #' @param ... Ignored.
 #'
 #' @return A `ggplot` object.
@@ -662,66 +659,41 @@ plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
   check_suggested("ggplot2", "for plotting")
   eff <- x$effects
   n_out <- sum(is.na(x$effects$step_added))
-  has_gain <- "loss_gain" %in% names(eff) && any(is.finite(eff$loss_gain))
-  if (has_gain) {
-    # two_stage screens: the inner-CV loss improvement at admission.
-    eff <- eff[!is.na(eff$step_added) & is.finite(eff$loss_gain), , drop = FALSE]
-    if (!is.null(top) && is.finite(top)) {
-      eff <- utils::head(eff[order(-eff$loss_gain), , drop = FALSE],
-                         as.integer(top))
-    }
-    eff <- eff[order(eff$loss_gain), ]
-    x_measure <- eff$loss_gain
-    x_label <- "Inner-CV loss improvement at admission"
-    plot_title <- "Forward-selection path"
-    plot_subtitle <- sprintf(
-      "Inner-CV %s improvement at admission | %d admitted, %d screened out",
-      x$metric %||% "loss", nrow(eff), n_out)
-  } else {
-    # covsel screens: no loss path exists; the admission order is the
-    # Adde et al. (2023) aggregate rank (1 = strongest).
-    eff <- eff[!is.na(eff$step_added), , drop = FALSE]
-    if (!is.null(top) && is.finite(top)) {
-      eff <- utils::head(eff[order(eff$step_added), , drop = FALSE],
-                         as.integer(top))
-    }
-    eff <- eff[order(eff$step_added), ]
-    x_measure <- eff$step_added
-    x_label <- "Embedded-selection rank (1 = strongest)"
-    plot_title <- "Embedded-selection path"
-    plot_subtitle <- sprintf(
-      "%s | %d admitted, %d screened out",
-      x$metric %||% "aggregate rank", nrow(eff), n_out)
+  eff <- eff[!is.na(eff$step_added), , drop = FALSE]
+  if (!is.null(top) && is.finite(top)) {
+    eff <- utils::head(eff[order(eff$step_added), , drop = FALSE],
+                       as.integer(top))
   }
+  eff <- eff[order(eff$step_added), , drop = FALSE]
+  x_measure <- eff$step_added
   if (!is.null(var_labels)) {
     eff$display <- ifelse(eff$variable %in% names(var_labels),
                           var_labels[eff$variable], eff$variable)
   } else {
     eff$display <- eff$variable
   }
-  eff <- eff[order(eff$loss_gain), ]
-  eff$display <- factor(make.unique(eff$display), levels = make.unique(eff$display))
+  eff$display <- factor(make.unique(as.character(eff$display)),
+                        levels = rev(make.unique(as.character(eff$display))))
 
   plot_subtitle <- sprintf(
-    "Inner-CV %s improvement at admission | %d admitted, %d screened out",
-    x$metric %||% "loss", nrow(eff), n_out
-  )
+    "%s | %d admitted, %d screened out",
+    x$metric %||% "aggregate rank", nrow(eff), n_out)
 
   ggplot2::ggplot(eff, ggplot2::aes(
     x = x_measure, y = .data$display
   )) +
-    ggplot2::geom_vline(xintercept = if (has_gain) 0 else 0.5, linetype = "solid",
+    ggplot2::geom_vline(xintercept = 0.5, linetype = "solid",
                         color = "grey50", linewidth = 0.4) +
     ggplot2::geom_segment(
-      ggplot2::aes(x = if (has_gain) 0 else 0.5, xend = x_measure,
+      ggplot2::aes(x = 0.5, xend = x_measure,
                    y = .data$display, yend = .data$display),
       linewidth = 0.6, color = "#B2182B"
     ) +
     ggplot2::geom_point(size = 2.6, color = "#B2182B") +
     ggplot2::labs(
-      title = plot_title,
+      title = "Selection path",
       subtitle = plot_subtitle,
-      x = x_label, y = ""
+      x = "Embedded-selection rank (1 = strongest)", y = ""
     ) +
     theme_cast(base_size = 11) +
     ggplot2::theme(

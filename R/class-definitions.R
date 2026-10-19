@@ -4,11 +4,12 @@
 #'
 #' @param selected Character vector of selected variable names.
 #' @param scores A `data.frame` with per-variable scores. For
-#'   `method = "two_stage"`: marginal `assoc`, the stage-1
-#'   `collinear_thinned` flag, the forward-selection admission `step_added`
-#'   (`0` for prespecified predictors, `NA` for never-admitted ones), the
-#'   inner-CV `loss_gain` at admission, and the `selected` flag. For
-#'   `method = "full"` the score columns are `NA`.
+#'   `method = "covsel"`: marginal `assoc`, the univariate `stage1_p`
+#'   ranking signal, the `collinear_thinned` flag, the admission `step_added`
+#'   (`0` for prespecified predictors, `NA` for never-admitted ones; the
+#'   covsel aggregate rank when embedded), the `loss_gain` (`NA` for
+#'   covsel), and the `selected` flag. For `method = "full"` the score
+#'   columns are `NA`.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
 #'
@@ -29,8 +30,10 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of the forward-selection path: per-predictor
-#'   admission `step_added` and inner-CV `loss_gain` at admission.
+#' @param effects A `data.frame` of the admission path: per-predictor
+#'   `step_added` (covsel aggregate rank; `0` for prespecified predictors)
+#'   and the admission `loss_gain` where a screen recorded one (`NA` for
+#'   covsel).
 #' @param metric Inner-CV loss minimised by the search (`"brier"` or `"auc"`).
 #' @param diagnostics Named list carried over from the screen.
 #'
@@ -51,7 +54,9 @@ new_cast_importance <- function(effects, metric = "brier",
 
 #' Create a cast_fit Object
 #'
-#' @param models Named list of fitted model objects.
+#' @param models Named list of fitted model objects. Each engine entry may
+#'   carry a `offset` (logit-scale prevalence calibration shift added at
+#'   prediction time).
 #' @param cast_vars Character vector of variables used for modeling.
 #' @param env_vars Character vector of all environmental variable names.
 #' @param scaling List of training-set predictor statistics reused across the
@@ -64,18 +69,25 @@ new_cast_importance <- function(effects, metric = "brier",
 #'   trained on the raw predictors; `means`/`sds` are not applied to fitting
 #'   inputs.
 #' @param screen A `cast_select` object (or `NULL`).
+#' @param calibration Optional list recording the prevalence-target
+#'   calibration applied at fit time (`method`, `prevalence_target`,
+#'   per-engine `offsets`), or `NULL` when no target was requested. When
+#'   present, every prediction path applies the stored per-engine logit
+#'   offset, so all engines share one calibration scale.
 #'
 #' @return A `cast_fit` object.
 #' @keywords internal
 #' @export
-new_cast_fit <- function(models, cast_vars, env_vars, scaling, screen = NULL) {
+new_cast_fit <- function(models, cast_vars, env_vars, scaling, screen = NULL,
+                         calibration = NULL) {
   structure(
     list(
       models = models,
       cast_vars = cast_vars,
       env_vars = env_vars,
       scaling = scaling,
-      screen = screen
+      screen = screen,
+      calibration = calibration
     ),
     class = "cast_fit"
   )
@@ -84,16 +96,22 @@ new_cast_fit <- function(models, cast_vars, env_vars, scaling, screen = NULL) {
 #' Create a cast_eval Object
 #'
 #' @param metrics A `data.frame` with per-model evaluation metrics.
-#'   Columns: `model`, `auc_mean`, `tss_mean`, `cbi_mean`.
+#'   Columns: `model`, `auc_mean`, `tss_mean`, `cbi_mean`, ...
 #' @param cv_source Logical. Whether metrics came from spatial CV.
 #'   Default `FALSE`.
+#' @param thresholds Named numeric vector of the thresholds actually applied.
+#' @param threshold_source Character. `"out_of_fold_cv"` when thresholds were
+#'   caller-supplied (e.g. `cv$thresholds`), `"in_sample_training"` when
+#'   selected on the fit's own training predictions, or `"mixed"`.
 #'
 #' @return A `cast_eval` object.
 #' @keywords internal
 #' @export
-new_cast_eval <- function(metrics, cv_source = FALSE) {
+new_cast_eval <- function(metrics, cv_source = FALSE,
+                          thresholds = NULL, threshold_source = NULL) {
   structure(
-    list(metrics = metrics, cv_source = cv_source),
+    list(metrics = metrics, cv_source = cv_source,
+         thresholds = thresholds, threshold_source = threshold_source),
     class = "cast_eval"
   )
 }
@@ -181,14 +199,19 @@ new_cast_predict <- function(predictions, models) {
 #' Container for the full pipeline output.
 #'
 #' @param screen A `cast_select` object.
-#' @param fit A `cast_fit` object.
-#' @param eval A `cast_eval` object (hold-out evaluation).
-#' @param cv A `cast_cv` object (spatial CV), or `NULL`.
+#' @param fit A `cast_fit` object (training split).
+#' @param eval A `cast_eval` object (one-shot hold-out evaluation).
+#' @param cv A `cast_cv` object (nested spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
 #' @param fit_full A `cast_fit` object refitted on the full data set for
 #'   final prediction maps (or `NULL`).
 #' @param call The original function call.
+#' @param protocol The effective [cast_protocol()] object (or `NULL`).
+#' @param projection A `cast_project`/raster projection summary list, or
+#'   `NULL`.
+#' @param output_dir The artifact directory used by [cast_run()], or `NULL`.
+#' @param receipts The per-stage receipt log from [cast_run()], or `NULL`.
 #'
 #' @return A `cast_result` object.
 #' @keywords internal
@@ -197,7 +220,11 @@ new_cast_result <- function(screen, fit, eval,
                             cv = NULL, predict = NULL,
                             ensemble = NULL,
                             fit_full = NULL,
-                            call = NULL) {
+                            call = NULL,
+                            protocol = NULL,
+                            projection = NULL,
+                            output_dir = NULL,
+                            receipts = NULL) {
   structure(
     list(
       screen = screen,
@@ -207,7 +234,11 @@ new_cast_result <- function(screen, fit, eval,
       predict = predict,
       ensemble = ensemble,
       fit_full = fit_full,
-      call = call
+      call = call,
+      protocol = protocol,
+      projection = projection,
+      output_dir = output_dir,
+      receipts = receipts
     ),
     class = "cast_result"
   )

@@ -33,7 +33,7 @@ list(
       tune_args = c(mtry = "rf_mtry")
     ),
     brt = list(
-      package = "gbm",
+      package = "xgboost",
       label   = "Boosted regression trees",
       color   = "#3C5488",
       tune_args = c(depth = "brt_depth", shrinkage = "brt_shrinkage")

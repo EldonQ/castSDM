@@ -7,12 +7,7 @@
 cast_select(
   data,
   response = "presence",
-  method = c("two_stage", "full", "covsel"),
-  num_trees = 300L,
-  max_rows = 2000L,
-  metric = c("brier", "auc"),
-  tolerance = 0,
-  n_folds = 3L,
+  method = c("covsel", "full"),
   seed = NULL,
   verbose = TRUE,
   keep = character(0),
@@ -29,136 +24,90 @@ cast_select(
 }
 \arguments{
 \item{data}{Data frame with response and predictors (coordinates allowed;
-they are never selected, but \code{lon}/\code{lat} define the inner spatial folds
-when both are present and finite).}
+they are never selected).}
 
 \item{response}{Binary response column. Default \code{"presence"}.}
 
-\item{method}{\code{"two_stage"} (default), \code{"full"} (keep every predictor) or
-\code{"covsel"} (the two-step embedded selection of Adde et al. 2023: a
-hierarchical collinearity filter followed by elastic-net / GAM / guided-RF
-embedding with a \code{ceiling(log2(n_presences)) - 1} count rule).}
-
-\item{num_trees}{Trees per forest in the stage-2 forward search.
-Default 300.}
-
-\item{max_rows}{Rows sampled (evenly, preserving order) before the
-stage-2 search. Bounds stage-2 cost on large data sets.
-Default 2000.}
-
-\item{metric}{Inner-CV loss minimised by the forward search: \code{"brier"}
-(default, mean squared error of the predicted probability, sensitive to
-calibration) or \code{"auc"} (rank discrimination, insensitive to calibration
-shifts).}
-
-\item{tolerance}{Non-negative number. A candidate is admitted only if its
-paired inner-CV loss improvement exceeds both this absolute floor and
-two standard errors of the fold differences, with at least two finite
-paired folds. This heuristic does not control a false-positive rate.
-Default \code{0}, i.e. the 2-SE guard alone stops the search; outer nested
-spatial CV in \code{\link[=cast_cv]{cast_cv()}} remains the honest performance estimate.}
-
-\item{n_folds}{Number of inner folds for the stage-2 search. Default \code{3}.}
+\item{method}{\code{"covsel"} (default) or \code{"full"} (keep every predictor).}
 
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
 
-\item{keep}{Character vector of predictors specified before screening, such
-as an exposure and a scientifically justified adjustment set. These bypass
-collinearity thinning and are always retained: expert knowledge outranks
-the data-driven search. Candidate covariates must still be scientifically
-admissible (not colliders or mediators of a total effect); retention does
-not verify a sufficient adjustment set.}
+\item{keep}{Character vector of predictors specified before screening,
+such as an exposure and a scientifically justified adjustment set.
+These are forced through the collinearity filter and the embedding
+(\code{force}): expert knowledge outranks the data-driven search. Candidate
+covariates must still be scientifically admissible (not colliders or
+mediators of a total effect); retention does not verify a sufficient
+adjustment set.}
 
-\item{corcut}{Correlation threshold for the \code{"covsel"} filter levels.
-Default \code{0.7} (the community standard; Dormann et al. 2013).}
+\item{corcut}{Absolute Pearson correlation threshold for the collinearity
+filter levels. Default \code{0.7} (Dormann et al. 2013).}
 
 \item{var_id}{Character vector aligned with the predictors giving the
-variable-level identity (e.g. all years and focal scales of one covariate
-share an id). At the variable level the filter keeps exactly one
-covariate per id. \code{NULL} skips that level.}
+variable-level identity (e.g. all years and focal scales of one
+covariate share an id). At the variable level the filter keeps exactly
+one covariate per id. \code{NULL} skips that level.}
 
 \item{category}{Character vector aligned with the predictors giving the
 category-level identity (e.g. "climate", "terrain"). \code{NULL} skips it.}
 
 \item{algorithms}{Embedding learners for \code{"covsel"}: any of \code{"glm"}
 (elastic net), \code{"gam"} (null-space penalisation), \code{"rf"} (guided
-regularised random forest). Default all three.}
+regularised random forest). Default all three. Requires \pkg{glmnet},
+\pkg{mgcv} and \pkg{RRF} respectively.}
 
 \item{ncov}{Target number of covariates for \code{"covsel"}. Default \code{NULL} =
-\code{ceiling(log2(n_presences)) - 1} (the Adde et al. rule), capped at
-\code{maxncov}.}
+\code{ceiling(log2(n_presences))} (the covsel default), capped at \code{maxncov}.}
 
 \item{maxncov}{Maximum number of covariates for \code{"covsel"}. Default \code{12}.}
 
-\item{weights}{Optional numeric row weights (e.g. prevalence targets) used
-by the \code{"covsel"} filter and embedding steps.}
+\item{weights}{Optional numeric row weights (e.g. prevalence targets)
+used by the \code{"covsel"} filter and embedding steps.}
 
-\item{ensure}{Optional named list of logical flag vectors aligned with the
-predictors, declaring coverage requirements the data-driven search cannot
-guarantee. For each flag (e.g. \code{list(climate = c(TRUE, FALSE, ...))}), if
-the final set contains no flagged covariate, the strongest Step-A-ranked
+\item{ensure}{Optional named list of logical flag vectors aligned with
+the predictors, declaring coverage requirements the data-driven search
+cannot guarantee. For each flag (e.g. \code{list(climate = c(TRUE, ...))}),
+if the final set contains no flagged covariate, the strongest-ranked
 flagged survivor is admitted (reason \code{"ensured"}). This is the generic
 mechanism behind "a scenario-projection model must contain at least one
-time-varying driver": the flag comes from covariate provenance (e.g. the
-pool manifest's climate declaration), never a hardcoded variable name, so
-the rule is identical for every species while the admitted covariate is
-whatever the data ranks strongest. Coverage is a purpose-adequacy
-requirement, not an ecological claim; importance reporting stays honest
-about how much the ensured covariate contributes.}
+time-varying driver": the flag comes from covariate provenance, never a
+hardcoded variable name.}
 
 \item{env_vars}{Optional explicit predictor set (a contract, as in
-\code{\link[=cast_prepare]{cast_prepare()}}). When supplied, selection runs on
-\code{env_vars} intersected with what the data actually supports (a layer can
-be constant inside a CV fold's training sample even when it varies in the
-full data); \code{var_id}, \code{category} and \code{keep} are re-indexed to that
-intersection by name. \code{NULL} keeps auto-detection.}
+\code{\link[=cast_prepare]{cast_prepare()}}). When supplied, selection runs on \code{env_vars}
+intersected with what the data actually supports; \code{var_id}, \code{category}
+and \code{keep} are re-indexed to that intersection by name. \code{NULL} keeps
+auto-detection.}
 }
 \value{
 A \code{cast_select} object with \code{selected} (kept predictors, in
 admission order), \code{scores} (per-predictor marginal \code{assoc}, the
-\code{stage1_p} ranking signal with its \code{stage1_rank}, the stage-1
-\code{collinear_thinned} flag, the admission \code{step_added} (\code{0} for
-prespecified predictors, \code{NA} for never-admitted ones), the
-\code{loss_gain} (inner-CV loss improvement at admission, \code{NA} otherwise),
-the \code{selected_reason} (\code{"prespecified"}, \code{"forward"}, \code{"full"} or
-\code{"excluded"}), the \code{kept_by_design} indicator for \code{keep}, and the
-\code{selected} flag). An empty \code{selected} set is a valid answer: no
-candidate passed admission, including when too few paired folds exist.
+univariate \code{stage1_p} ranking signal, the \code{collinear_thinned} flag, the
+admission \code{step_added} (\code{0} for prespecified predictors, \code{NA} for
+never-admitted ones; the covsel aggregate rank when embedded), the
+\code{loss_gain} (always \code{NA} for covsel: an aggregate ranking has no loss
+path), the \code{selected_reason} (\code{"prespecified"}, \code{"embed"}, \code{"filter"},
+\code{"ensured"} or \code{"excluded"}), the \code{kept_by_design} indicator for
+\code{keep}, and the \code{selected} flag), and \code{diagnostics} (filtered set,
+per-algorithm ranks, final aggregate ranking, coverage admissions and
+effective settings).
 }
 \description{
-Two-stage variable selection:
-\enumerate{
-\item \strong{Stage 1 — collinearity thinning}: rank predictors by a
-univariate quadratic-logistic signal (the smaller p-value of the two
-\code{poly(x, 2)} terms, which sees U-shaped responses a linear correlation
-misses), then greedily keep predictors whose pairwise correlation with
-all kept predictors is \eqn{\le 0.7} (Dormann et al. 2013). Predictors
-whose GLM fails to fit fall back to the marginal-correlation rank.
-\item \strong{Stage 2 — spatial forward selection}: starting from the
-prespecified predictors (if any), repeatedly add the stage-1 survivor
-that most improves the inner cross-validated loss of a probability
-random forest, and stop when nothing improves it further. Folds are
-spatial when coordinates are available, random otherwise. There is no
-predictor-count cap and no fallback set: if no candidate improves on
-the intercept-only model, the selection is empty. Stopping is driven
-by predictive performance (Meyer et al. 2018, 2019), not by an
-arbitrary count.
+Screen predictor variables before model fitting. \code{method = "covsel"}
+implements the two-step embedded covariate selection procedure of Adde
+et al. (2023) through the vendored reference implementation of the
+\pkg{covsel} package (Step A: hierarchical collinearity filtering; Step
+B: elastic-net GLM, null-space-penalized GAM and guided regularized
+random forest, aggregated into one ranking and truncated to \code{ncov}).
+\code{method = "full"} keeps every varying predictor and is the honest choice
+for a small prespecified set.
 }
+\details{
+Selection serves parsimony for interpretation and projection; it does not
+identify a causal adjustment set.
 }
-\section{Why forward selection on spatial-CV loss}{
-
-Importance scores rank predictors by how much the fitted model leans on
-them, which rewards collinear stand-ins for the correlation they borrow
-from the true drivers (Hooker, Mentch & Zhou 2021). A forward search asks
-the opposite question — does adding this predictor improve predictions on
-held-out spatial folds? — so a redundant proxy adds nothing once its
-parents are in the model, while a count cap is never needed: the search
-stops by itself. Selection serves parsimony for interpretation and
-projection; it does not identify a causal adjustment set.
-}
-
 \references{
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 with it in ecological studies. \emph{Ecography} 36: 27-46.
@@ -167,16 +116,6 @@ Adde, A. et al. (2023). Too many candidates: embedded covariate selection
 procedure for species distribution modelling with the covsel R package.
 \emph{Ecological Informatics} 75: 102080.
 \doi{10.1016/j.ecoinf.2023.102080}.
-
-Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
-learning models using forward feature selection and target-oriented
-validation. \emph{Environmental Modelling & Software} 101: 1-9.
-\doi{10.1016/j.envsoft.2017.12.001}.
-
-Meyer, H. et al. (2019). Importance of spatial predictor variable selection
-in machine learning applications — moving from data reproduction to spatial
-prediction. \emph{Ecological Modelling} 411: 108815.
-\doi{10.1016/j.ecolmodel.2019.108815}.
 }
 \seealso{
 \code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}

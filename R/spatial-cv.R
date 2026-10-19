@@ -10,19 +10,28 @@
 #'   selection into the CV metrics (a warning is issued); treat those metrics
 #'   as optimistic.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"two_stage"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"covsel"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #'   Cannot override `data`, `response`, or `method`.
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
-#' @param block_method `"grid"` (default; grid cells grouped into spatially
-#'   contiguous folds via k-means on cell centroids), `"grid_random"`
-#'   (legacy behaviour: count-balanced greedy packing that ignores cell
-#'   position and produces interleaved, non-contiguous folds), `"cluster"`
-#'   (k-means on point coordinates), or `"env"` (k-means on the scaled
-#'   predictor matrix, so every fold is contiguous in **environmental**
-#'   space rather than geographic space; Roberts et al. 2017-style
-#'   environmental blocking).
+#' @param block_method Spatial blocking strategy:
+#'   - `"blockcv"` (default): \pkg{blockCV} spatial blocks
+#'     ([blockCV::cv_spatial()]) with square blocks. The block size follows
+#'     the range of spatial autocorrelation estimated by
+#'     [blockCV::cv_spatial_autocor()] (Roberts et al. 2017), or the
+#'     user-supplied `block_size`. Falls back to `"grid"` with a warning when
+#'     \pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
+#'   - `"grid"`: grid cells grouped into spatially contiguous folds via
+#'     k-means on cell centroids (dependency-free fallback).
+#'   - `"env"`: k-means on the scaled predictor matrix, so every fold is
+#'     contiguous in **environmental** space rather than geographic space
+#'     (Roberts et al. 2017-style environmental blocking).
+#'   - `"external"`: set internally when `fold_ids` is supplied.
+#' @param block_size Optional numeric block edge length in **metres**, passed
+#'   to [blockCV::cv_spatial()] (it converts to degrees automatically for
+#'   geographic coordinates). `NULL` (default) estimates the size from the
+#'   range of spatial autocorrelation.
 #' @param buffer Non-negative number. When `> 0`, training rows closer than
 #'   `buffer` to any test row are dropped for that fold, thinning
 #'   spatial-autocorrelation leakage at the fold boundary. Units follow
@@ -55,18 +64,24 @@
 #'   **between-repeat** standard deviation; `fold_metrics` gains a `repeat`
 #'   column; `selection_freq` pools all repeats; `oof`, `thresholds` and
 #'   `folds` refer to the first repeat.
-#' @param threshold_method Rule for selecting the binary threshold inside each
-#'   outer training fold. That threshold is then applied to the held-out fold.
-#'   See [cast_threshold()]. Default `"max_tss"`.
+#' @param threshold_method Rule for selecting the binary threshold. Thresholds
+#'   are computed once per model from the pooled **out-of-fold** predictions
+#'   after all folds finish, then applied to every fold's held-out rows and to
+#'   downstream products. Selecting a threshold on a fold's own in-sample
+#'   training predictions inflates it for flexible learners and collapses the
+#'   held-out TSS; see [cast_threshold()]. Default `"max_tss"`.
 #' @param aoa Logical. Calibrate the area-of-applicability (AOA)
 #'   dissimilarity threshold (Meyer & Pebesma 2021). When `TRUE`, every fold
-#'   computes the DI of its held-out rows against the fold's
-#'   (buffer-thinned) training rows in the standardized predictor space, and
-#'   the stored threshold is the 95th percentile of the pooled held-out DI
-#'   values. The calibration is model-independent (uniform predictor
-#'   weights). The result is stored in the `aoa` component of the returned
-#'   object, together with the per-row held-out DI (`di_oof`), and is
-#'   consumed by [cast_predict()] (`aoa = TRUE`) and
+#'   computes, in the standardized (optionally weighted) predictor space:
+#'   the held-out DI of each test row to its nearest training neighbour, and
+#'   the training-side DI of each training row to its nearest *other*
+#'   training neighbour. The stored threshold is `Q3 + 1.5 * IQR` of the
+#'   pooled training-side DI values (the published rule); the held-out DI
+#'   (`di_oof`) and the share of held-out rows above the threshold
+#'   (`share_outside_oof`) are validation evidence. The calibration is
+#'   model-independent (uniform predictor weights). The result is stored in
+#'   the `aoa` component of the returned object and is consumed by
+#'   [cast_predict()] (`aoa = TRUE`) and
 #'   [cast_ensemble_raster()] (`aoa_cv = TRUE`). Requires \pkg{FNN}.
 #' @param parallel Run folds with `future.apply`; requires the user to set a
 #'   [future::plan()] first (a warning is issued when none is set).
@@ -82,7 +97,8 @@
 #'   is evaluable, the `cast_cv_no_evaluable_folds` error carries `screens` and
 #'   `fold_status` for inspection. With `aoa = TRUE` the `aoa` component
 #'   carries the calibrated `threshold` (NA when fewer than 10 finite
-#'   held-out DI values were collected).
+#'   training-side DI values were collected), `di_oof`, `di_train` and
+#'   `share_outside_oof`.
 #' @export
 #' @param fold_ids Optional integer fold assignments from an external design
 #'   such as `blockCV`, aligned with data rows. Values must cover `1:k`.
@@ -91,11 +107,12 @@
 #'   blocking; supplied assignments are returned unchanged.
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "two_stage",
+                    select_method = "covsel",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
-                    block_method = c("grid", "grid_random", "cluster", "env"),
+                    block_method = c("blockcv", "grid", "env"),
+                    block_size = NULL,
                     buffer = 0,
                     buffer_unit = c("deg", "km"),
                     response = "presence",
@@ -137,6 +154,11 @@ cast_cv <- function(data,
   # row, silently emptying the model side of each fold.
   if (!is.finite(buffer)) {
     cli::cli_abort("{.arg buffer} must be finite; {.val Inf} would exclude every training row.")
+  }
+  if (!is.null(block_size) &&
+      (!is.numeric(block_size) || length(block_size) != 1L ||
+       !is.finite(block_size) || block_size <= 0)) {
+    cli::cli_abort("{.arg block_size} must be NULL or a single positive number of metres.")
   }
   buffer_unit <- match.arg(buffer_unit)
   if (buffer_unit == "km" && buffer > 0) {
@@ -239,12 +261,15 @@ cast_cv <- function(data,
                   screen = fold_screen))
     }
 
-    # Held-out AOA calibration (model-independent): DI of every test row to
-    # its nearest training-row neighbour in the standardized fold space. The
-    # training side uses the same buffer-thinned rows the models saw.
+    # AOA (model-independent, standardized fold space). Two DI sets per fold:
+    #   held  -- every test row to its nearest training-row neighbour;
+    #   train -- every training row to its nearest OTHER training neighbour
+    #            (k = 2 skips the self-match), the distribution Meyer &
+    #            Pebesma (2021) threshold.
     di_fold <- NULL
+    di_fold_train <- NULL
     if (aoa) {
-      di_fold <- tryCatch({
+      aoa_di <- tryCatch({
         x_tr <- as.data.frame(train[, fit$env_vars, drop = FALSE],
                               check.names = FALSE)
         x_te <- as.data.frame(test[, fit$env_vars, drop = FALSE],
@@ -254,14 +279,26 @@ cast_cv <- function(data,
           x_te[[nm]] <- as.numeric(x_te[[nm]])
         }
         prep <- .cast_aoa_prep(x_tr, x_te)
-        .cast_aoa_di(prep$train, prep$new)
+        list(held = .cast_aoa_di(prep$train, prep$new),
+             train = .cast_aoa_di_train(prep$train))
       }, error = function(e) {
         warning(sprintf("AOA DI failed in fold %d: %s", fold_i, e$message))
-        rep(NA_real_, nrow(test))
+        NULL
       })
+      if (!is.null(aoa_di)) {
+        di_fold <- aoa_di$held
+        di_fold_train <- aoa_di$train
+      } else {
+        di_fold <- rep(NA_real_, nrow(test))
+        di_fold_train <- rep(NA_real_, nrow(train))
+      }
     }
 
-    rows <- list()
+    # Fold predictions only. The threshold-dependent metrics (TSS, SEDI,
+    # kappa) are computed in run_once() against the pooled out-of-fold
+    # threshold for each model -- the in-sample training-prediction
+    # threshold used previously is optimistically high for flexible
+    # learners (RF/BRT) and made the held-out TSS collapse.
     updates <- list()
     pred_ok <- list()
     for (mdl in models) {
@@ -285,62 +322,12 @@ cast_cv <- function(data,
         }
       )
       pred_ok[[mdl]] <- length(pred) == nrow(test) && any(is.finite(pred))
-      fold_threshold <- NULL
-      if (!is.null(fit$scaling$response) && !is.null(fit$scaling$reference)) {
-        train_pred <- tryCatch(
-          predict_single_model(info, fit$scaling$reference),
-          error = function(e) {
-            warning(sprintf(
-              "Training-set prediction failed in fold %d for %s: %s",
-              fold_i, mdl, conditionMessage(e)
-            ))
-            rep(NA_real_, nrow(train))
-          }
-        )
-        fold_threshold <- tryCatch(cast_threshold(
-          train_pred, fit$scaling$response, method = threshold_method),
-          error = function(e) {
-            warning(sprintf(
-              "Threshold calibration failed in fold %d for %s: %s",
-              fold_i, mdl, conditionMessage(e)
-            ))
-            NA_real_
-          })
-      }
-      met <- tryCatch(
-        if (is.null(fold_threshold)) {
-          evaluate_model_full(pred, test[[response]])
-        } else {
-          evaluate_model_full(pred, test[[response]], threshold = fold_threshold,
-                              threshold_method = threshold_method)
-        },
-        error = function(e) c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
-          sedi = NA_real_, brier = NA_real_, logloss = NA_real_, boyce = NA_real_,
-          cbi = NA_real_, kappa = NA_real_, omission_5 = NA_real_,
-          omission_10 = NA_real_, mpa = NA_real_, tss_threshold = NA_real_)
-      )
-      metric_value <- function(nm) {
-        if (nm %in% names(met)) unname(met[[nm]]) else NA_real_
-      }
-      rows[[mdl]] <- data.frame(
-        fold = fold_i, model = mdl, auc = metric_value("auc"),
-        pr_auc = metric_value("pr_auc"), tss = metric_value("tss"),
-        sedi = metric_value("sedi"), brier = metric_value("brier"),
-        logloss = metric_value("logloss"), boyce = metric_value("boyce"),
-        cbi = metric_value("cbi"), kappa = metric_value("kappa"),
-        omission_5 = metric_value("omission_5"),
-        omission_10 = metric_value("omission_10"),
-        mpa = metric_value("mpa"),
-        tss_threshold = metric_value("tss_threshold"),
-        n_selected = length(fold_screen$selected),
-        stringsAsFactors = FALSE
-      )
       updates[[mdl]] <- list(idx = test_idx, pred = pred)
     }
-    if (!any(unlist(pred_ok))) rows <- list()
-    list(rows = rows, updates = updates, selected = fold_screen$selected,
-         screen = fold_screen, di = di_fold, pred_ok = pred_ok,
-         status = if (length(rows)) "evaluated" else "no_predictions")
+    list(updates = updates, selected = fold_screen$selected,
+         screen = fold_screen, di = di_fold, di_train = di_fold_train,
+         pred_ok = pred_ok,
+         status = if (any(unlist(pred_ok))) "evaluated" else "no_predictions")
   }
 
   run_once <- function(rep_i) {
@@ -348,7 +335,9 @@ cast_cv <- function(data,
     # repeats draw unrelated blockings under the same user seed.
     rep_seed <- if (!is.null(seed)) seed + (rep_i - 1L) * 7919L else NULL
     folds <- if (is.null(fold_ids)) {
-      make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed, env = env_block)
+      make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed,
+                         env = env_block, y = data[[response]],
+                         block_size = block_size)
     } else fold_ids
     if (verbose && n_repeat > 1L) {
       cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
@@ -368,9 +357,9 @@ cast_cv <- function(data,
       results <- lapply(seq_len(k), function(i) cv_one(folds, i))
     }
 
-    row_list <- list()
     oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
     oof_di <- rep(NA_real_, nrow(data))
+    train_di <- numeric(0)
     selections <- vector("list", k)
     screens <- vector("list", k)
     fold_status <- rep("failed", k)
@@ -389,11 +378,11 @@ cast_cv <- function(data,
         fold_status[i] <- "single_class"
         next
       }
-      row_list <- c(row_list, res$rows)
       selections[i] <- list(res$selected)
       screens[i] <- list(res$screen)
       fold_status[i] <- res$status
       if (aoa && !is.null(res$di)) oof_di[which(folds == i)] <- res$di
+      if (aoa && !is.null(res$di_train)) train_di <- c(train_di, res$di_train)
       for (mdl in names(res$updates)) {
         upd <- res$updates[[mdl]]
         oof[[mdl]][upd$idx] <- upd$pred
@@ -403,7 +392,6 @@ cast_cv <- function(data,
       }
     }
 
-    fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
     # Keep the out-of-fold surface: it is the only labelled ensemble-scale
     # prediction available downstream, and cast_ensemble() needs it to
     # threshold the ensemble rather than averaging per-model thresholds.
@@ -439,11 +427,49 @@ cast_cv <- function(data,
       cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
     }, numeric(1))
 
+    # Fold metrics are assembled here, after the pooled out-of-fold
+    # thresholds exist: AUC/Brier/Boyce and the area metrics do not need a
+    # threshold, while TSS/SEDI/kappa are evaluated at the model's pooled
+    # out-of-fold operating point (never at an in-sample training cut). Each
+    # fold row records that one threshold, so `tss_threshold_mean` is the
+    # operating point actually used.
+    row_list <- list()
+    for (i in seq_along(results)) {
+      res <- results[[i]]
+      if (is.null(res) || isTRUE(res$skipped_single_class)) next
+      for (mdl in names(res$updates %||% list())) {
+        upd <- res$updates[[mdl]]
+        met <- tryCatch(
+          evaluate_model_full(upd$pred, data[[response]][upd$idx],
+                              threshold = thresholds[[mdl]],
+                              threshold_method = threshold_method),
+          error = function(e) .cast_na_full_metrics()
+        )
+        metric_value <- function(nm) {
+          if (nm %in% names(met)) unname(met[[nm]]) else NA_real_
+        }
+        row_list[[length(row_list) + 1L]] <- data.frame(
+          fold = i, model = mdl, auc = metric_value("auc"),
+          pr_auc = metric_value("pr_auc"), tss = metric_value("tss"),
+          sedi = metric_value("sedi"), brier = metric_value("brier"),
+          logloss = metric_value("logloss"), boyce = metric_value("boyce"),
+          cbi = metric_value("cbi"), kappa = metric_value("kappa"),
+          omission_5 = metric_value("omission_5"),
+          omission_10 = metric_value("omission_10"),
+          mpa = metric_value("mpa"),
+          tss_threshold = metric_value("tss_threshold"),
+          n_selected = length(res$selected %||% character(0)),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+    fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
+
     list(folds = folds, fold_df = fold_df, oof_df = oof_df,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
          skipped_single = skipped_single, di = oof_di,
-         pred_folds = pred_folds)
+         di_train = train_di, pred_folds = pred_folds)
   }
 
   if (verbose) {
@@ -519,27 +545,39 @@ cast_cv <- function(data,
   }
 
   # AOA calibration from the first repeat (same convention as the oof
-  # surface): the threshold is the 95th percentile of the pooled held-out
-  # fold DI values. Fewer than 10 finite values leaves the threshold NA -
-  # too sparse to be anything but noise.
+  # surface). Threshold rule follows Meyer & Pebesma (2021): the 75th
+  # percentile plus 1.5 x IQR of the pooled TRAINING-side nearest-other-
+  # neighbour DI values (the distribution the published method thresholds).
+  # The held-out DI is validation evidence, not the threshold source: its
+  # share above the threshold is reported alongside. Fewer than 10 finite
+  # training DI values leaves the threshold NA - too sparse to be anything
+  # but noise.
   aoa_info <- NULL
   if (aoa) {
     di <- reps[[1]]$di
-    vals <- di[is.finite(di)]
+    di_tr <- reps[[1]]$di_train
+    vals <- di_tr[is.finite(di_tr)]
     if (length(vals) < 10L) {
       cli::cli_warn(
-        "Only {length(vals)} finite held-out DI value{?s}; the AOA threshold is NA."
+        "Only {length(vals)} finite training-side DI value{?s}; the AOA threshold is NA."
       )
     }
+    thr <- if (length(vals) >= 10L) {
+      qs <- as.numeric(stats::quantile(vals, c(0.25, 0.75), names = FALSE))
+      qs[2] + 1.5 * (qs[2] - qs[1])
+    } else NA_real_
+    di_held <- di[is.finite(di)]
     aoa_info <- list(
       enabled = TRUE,
       weighted = FALSE,
-      threshold = if (length(vals) >= 10L) {
-        as.numeric(stats::quantile(vals, 0.95, names = FALSE))
-      } else NA_real_,
+      threshold = thr,
       di_oof = di,
+      di_train = di_tr,
       n_di = length(vals),
-      method = "cv_heldout_di_p95"
+      share_outside_oof = if (is.finite(thr) && length(di_held)) {
+        mean(di_held > thr)
+      } else NA_real_,
+      method = "train_di_q3_plus_1.5iqr"
     )
   }
 
@@ -626,32 +664,36 @@ cast_cv <- function(data,
 #'
 #' @param lon,lat Numeric coordinate vectors.
 #' @param k Number of folds.
-#' @param method `"grid"` (default): bin coordinates into grid cells and group
-#'   cells into `k` spatially contiguous folds via k-means on cell centroids,
-#'   so every fold is a connected region. `"grid_random"`: legacy behaviour
-#'   (greedy count-balanced packing that ignores cell position; kept for
-#'   backwards comparability). `"cluster"`: k-means on the (scaled) point
-#'   coordinates. `"env"`: k-means on the scaled predictor matrix (`env`),
-#'   so folds are contiguous in environmental space; gaps are imputed with
-#'   column medians and zero-variance columns dropped before scaling.
+#' @param method `"blockcv"` (default): [blockCV::cv_spatial()] square blocks
+#'   over an sf point layer, with class-balanced fold assignment when `y` is
+#'   supplied; block size from `block_size` or the autocorrelation range.
+#'   `"grid"`: grid cells grouped into `k` spatially contiguous folds via
+#'   k-means on cell centroids (dependency-free fallback). `"env"`: k-means
+#'   on the scaled predictor matrix (`env`); gaps imputed with column medians
+#'   and zero-variance columns dropped before scaling.
 #' @param seed Random seed.
-#' @param env Optional numeric matrix with one row per record, used only by
-#'   `method = "env"`.
+#' @param env Optional numeric matrix with one row per record (method "env").
+#' @param y Optional binary response vector; passed to blockCV for class-
+#'   balanced fold assignment.
+#' @param block_size Optional block edge length in metres (method "blockcv").
 #' @return Integer fold ids in `1:k` (degenerate inputs collapse to `1L`).
 #' @keywords internal
 #' @noRd
 make_spatial_folds <- function(lon, lat, k,
-                               method = c("grid", "grid_random", "cluster", "env"),
-                               seed = NULL, env = NULL) {
+                               method = c("blockcv", "grid", "env"),
+                               seed = NULL, env = NULL,
+                               y = NULL, block_size = NULL) {
   method <- match.arg(method)
-  if (!is.null(seed)) set.seed(seed)
   n <- length(lon)
   k_use <- min(k, n)
   if (k_use < 2L) return(rep(1L, n))
-  if (method == "cluster") {
-    return(as.integer(factor(stats::kmeans(
-      scale(cbind(lon, lat)), centers = k_use, nstart = 10L
-    )$cluster)))
+  if (method == "blockcv") {
+    folds <- .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size)
+    if (!is.null(folds)) return(folds)
+    cli::cli_warn(c(
+      "blockCV blocking is unavailable or could not be built for this data set;",
+      i = "falling back to grid blocking."
+    ))
   }
   if (method == "env") {
     if (is.null(env) || nrow(env) != n) {
@@ -669,41 +711,89 @@ make_spatial_folds <- function(lon, lat, k,
     if (sum(keep) < 2L) {
       cli::cli_abort("{.code block_method = \"env\"} needs at least two predictors with non-zero variance.")
     }
-    return(as.integer(factor(stats::kmeans(
+    return(as.integer(factor(.cast_with_seed(seed, stats::kmeans(
       scale(env[, keep, drop = FALSE]), centers = k_use, nstart = 10L
-    )$cluster)))
+    )$cluster))))
   }
-  # grid blocking; degenerate coordinates (few distinct values) collapse to
-  # a coarser grid rather than erroring
+  # "grid" (also the blockcv fallback): spatially contiguous folds. Cells are
+  # the atoms; their centroids are clustered into k spatial groups and each
+  # group becomes one fold. Degenerate coordinates (few distinct values)
+  # collapse to a coarser grid rather than erroring.
   side <- ceiling(sqrt(k * 2))
   xb <- .cast_bin(lon, side)
   yb <- .cast_bin(lat, side)
   cell <- interaction(xb, yb, drop = TRUE)
   counts <- table(cell)
-  if (method == "grid_random") {
-    # Legacy: greedy count-balanced packing, ignores cell position entirely.
-    counts <- sort(counts, decreasing = TRUE)
-    totals <- integer(k)
-    assignment <- integer(length(counts))
-    names(assignment) <- names(counts)
-    for (nm in names(counts)) {
-      f <- which.min(totals)
-      assignment[nm] <- f
-      totals[f] <- totals[f] + counts[nm]
-    }
-    return(as.integer(assignment[as.character(cell)]))
-  }
-  # "grid": spatially contiguous folds. Cells are the atoms; their centroids
-  # are clustered into k spatial groups and each group becomes one fold.
   cell_lon <- as.numeric(tapply(lon, cell, mean))
   cell_lat <- as.numeric(tapply(lat, cell, mean))
   n_cells <- length(cell_lon)
   if (n_cells <= k) {
     return(as.integer(factor(cell, levels = names(counts))))
   }
-  km <- stats::kmeans(cbind(cell_lon, cell_lat), centers = k, nstart = 10L)
+  km <- .cast_with_seed(seed,
+    stats::kmeans(cbind(cell_lon, cell_lat), centers = k, nstart = 10L))
   fold_of_cell <- stats::setNames(km$cluster, names(counts))
   as.integer(fold_of_cell[as.character(cell)])
+}
+
+#' blockCV-Backed Fold Assignment
+#'
+#' Builds square spatial blocks with [blockCV::cv_spatial()] over an sf point
+#' layer. Block size: `block_size` when supplied, else the range of spatial
+#' autocorrelation estimated by [blockCV::cv_spatial_autocor()] (Roberts et
+#' al. 2017); when the autocorrelation range is unavailable the blockCV
+#' default sizing is used. Geographic coordinates (lon/lat within their
+#' bounds) are tagged with CRS 4326 so blockCV converts metres to degrees;
+#' projected coordinates are passed through unchanged (metres assumed).
+#'
+#' @return Integer fold ids, or `NULL` when blockCV/sf are unavailable or the
+#'   design cannot be built (caller falls back to grid blocking).
+#' @keywords internal
+#' @noRd
+.cast_blockcv_folds <- function(lon, lat, k, seed, y, block_size) {
+  if (!requireNamespace("blockCV", quietly = TRUE) ||
+      !requireNamespace("sf", quietly = TRUE)) {
+    return(NULL)
+  }
+  ok <- is.finite(lon) & is.finite(lat)
+  if (sum(ok) < 2L * k) return(NULL)
+  geographic <- all(lon[ok] >= -180 & lon[ok] <= 180) &&
+    all(lat[ok] >= -90 & lat[ok] <= 90)
+  df <- data.frame(.lon = lon, .lat = lat)
+  if (!is.null(y)) df$.response <- as.integer(y)
+  pts <- tryCatch(
+    sf::st_as_sf(df, coords = c(".lon", ".lat"),
+                 crs = if (geographic) 4326L else NA),
+    error = function(e) NULL
+  )
+  if (is.null(pts) || any(sf::st_is_empty(pts))) return(NULL)
+  column <- if (!is.null(y)) ".response" else NULL
+  size <- block_size
+  if (is.null(size)) {
+    size <- tryCatch({
+      ac <- suppressWarnings(blockCV::cv_spatial_autocor(
+        x = pts, column = column,
+        num_sample = min(5000L, nrow(pts)),
+        plot = FALSE, progress = FALSE
+      ))
+      rng <- as.numeric(ac$range %||% NA_real_)
+      if (is.finite(rng) && rng > 0) rng else NULL
+    }, error = function(e) NULL)
+  }
+  blk <- tryCatch(
+    suppressWarnings(blockCV::cv_spatial(
+      x = pts, column = column, k = k, size = size,
+      hexagon = FALSE, selection = "random", iteration = 100L,
+      seed = seed, progress = FALSE, report = FALSE, plot = FALSE
+    )),
+    error = function(e) NULL
+  )
+  if (is.null(blk)) return(NULL)
+  ids <- as.integer(blk$folds_ids)
+  if (length(ids) != length(lon) || anyNA(ids)) return(NULL)
+  # blockCV may return fewer than k non-empty folds on degenerate extents.
+  if (!all(seq_len(k) %in% unique(ids))) return(NULL)
+  ids
 }
 
 
@@ -742,25 +832,21 @@ make_spatial_folds <- function(lon, lat, k,
   all_idx[!near & !(all_idx %in% test_idx)]
 }
 
-#' Bin a coordinate into `side` quantile bins (degenerate-safe)
+#' Bin a coordinate into `side` equal-width bins (degenerate-safe)
+#'
+#' Equal-WIDTH bins keep neighbouring cells neighbours on the raster, which
+#' the k-means step downstream needs to recover fold contiguity. Equal-count
+#' (quantile) bins were the legacy default but on a clustered distribution
+#' they turn into long thin cells that straddle the whole domain.
+#'
 #' @keywords internal
 #' @noRd
-.cast_bin <- function(x, side, method = c("quantile", "width")) {
-  # "quantile" gives equal-COUNT bins, which on a clustered distribution turns
-  # into long thin cells that can straddle the whole domain; the k-means step
-  # downstream then cannot recover contiguity. "width" gives equal-WIDTH bins on
-  # the value scale, so neighbouring cells stay neighbours in the raster.
-  method <- match.arg(method)
+.cast_bin <- function(x, side) {
   x <- as.numeric(x)
   u <- sort(unique(x[!is.na(x)]))
   if (length(u) < 2L) return(rep(1L, length(x)))
-  if (method == "width") {
-    breaks <- seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE),
-                  length.out = side + 1L)
-  } else {
-    breaks <- unique(stats::quantile(x, seq(0, 1, length.out = side + 1L),
-                                      na.rm = TRUE, names = FALSE))
-  }
+  breaks <- seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE),
+                length.out = side + 1L)
   if (length(breaks) < 2L) breaks <- c(u[1], u[length(u)])
   b <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
   b[is.na(b)] <- 1L

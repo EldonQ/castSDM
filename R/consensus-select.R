@@ -1,6 +1,6 @@
 # Consensus selection -------------------------------------------------------
 #
-# Nested cross-validation re-runs the two-stage screen inside every outer
+# Nested cross-validation re-runs the covsel screen inside every outer
 # spatial fold (cast_cv()). A predictor that is retained in most folds is
 # conditionally informative across regions -- the operational counterpart of
 # "transferable driver". cast_consensus() aggregates the fold selections
@@ -49,7 +49,7 @@ cast_consensus <- function(cv, threshold = 0.5) {
     if (!length(sets)) {
       cli::cli_abort(c(
         "The CV object holds no fold selections.",
-        i = "Run {.code cast_cv(..., select_method = \"two_stage\")} first."
+        i = "Run {.code cast_cv(..., select_method = \"covsel\")} first."
       ))
     }
     all_vars <- unique(unlist(sets))

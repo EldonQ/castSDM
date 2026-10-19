@@ -16,7 +16,7 @@
 #' purpose, data licence, expertise) are taken from `meta` or left as
 #' explicit `[report]` placeholders.
 #'
-#' @param object A `cast_result` object (from [cast()]).
+#' @param object A `cast_result` object (from [cast_run()]).
 #' @param path Output file path. Default `"odmap_report.md"`.
 #' @param meta Optional named list of report metadata. Recognised keys:
 #'   `taxon`, `authors`, `title`, `purpose`, `data_description`,
@@ -27,7 +27,7 @@
 #' @references
 #' Zurell, D. et al. (2020). A standard protocol for reporting species
 #' distribution models. *Ecography*, 43(9), 1261-1277.
-#' @seealso [cast()]
+#' @seealso [cast_run()]
 #' @export
 cast_report_odmap <- function(object, path = "odmap_report.md",
                               meta = list(), verbose = TRUE) {
@@ -48,13 +48,6 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
 
   diag <- scr$diagnostics %||% list()
   screen_method <- scr$method %||% "unknown"
-  fwd_steps <- if (!is.null(diag$path)) nrow(diag$path) else NA_integer_
-  fwd_loss <- if (!is.null(diag$final_loss) && is.finite(diag$final_loss)) {
-    signif(diag$final_loss, 4)
-  } else {
-    NA_real_
-  }
-  fwd_metric <- diag$metric %||% "not recorded"
   n_sel <- length(scr$selected %||% character(0))
   sel_vars <- scr$selected %||% character(0)
   models_used <- names(fit$models)
@@ -69,6 +62,24 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     sprintf("%d sites predicted", nrow(object$predict$predictions))
   } else {
     "[report] (no spatial prediction recorded in this object)"
+  }
+  selection_line <- if (identical(screen_method, "covsel")) {
+    sprintf(paste0("covsel embedded selection (Adde et al. 2023) via the ",
+                   "vendored reference implementation: %d candidate%s filtered, ",
+                   "top %s retained"),
+            length(diag$filtered %||% sel_vars),
+            if (length(diag$filtered %||% sel_vars) == 1L) "" else "s",
+            format(diag$ncov %||% length(sel_vars)))
+  } else if (identical(screen_method, "full")) {
+    "full (no data-driven screening; every varying predictor retained)"
+  } else {
+    as.character(screen_method)
+  }
+  ensured_line <- if (length(diag$ensured %||% character(0))) {
+    sprintf("- **Coverage requirement applied**: %s admitted to keep a declared covariate class in the set",
+            paste(diag$ensured, collapse = ", "))
+  } else {
+    NULL
   }
 
   lines <- c(
@@ -94,11 +105,8 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
     "",
     "## 3. Model",
     "",
-    sprintf("- **Variable selection**: %s", screen_method),
-    sprintf("- **Stage-2 forward search**: %s admission(s), inner-CV %s = %s",
-            if (is.na(fwd_steps)) "not recorded" else fwd_steps,
-            fwd_metric,
-            if (is.na(fwd_loss)) "not recorded" else fwd_loss),
+    sprintf("- **Variable selection**: %s", selection_line),
+    if (!is.null(ensured_line)) ensured_line,
     sprintf("- **Predictors retained**: %s (%d)",
             paste(sel_vars, collapse = ", "), n_sel),
     sprintf("- **Selection leakage control**: %s",

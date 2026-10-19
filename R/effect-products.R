@@ -102,7 +102,7 @@
 #' Quantile-box masking only diagnoses range extrapolation; it does not
 #' establish joint positivity or causal identification.
 #'
-#' @param fit A `cast_fit` object (from [cast_fit()] or [cast()]).
+#' @param fit A `cast_fit` object (from [cast_fit()] or [cast_run()]).
 #' @param newdata Data frame with the fitted predictors; rows with missing
 #'   predictors are dropped. Coordinates are not required.
 #' @param drivers Character vector of drivers to intervene on. Default:
@@ -337,9 +337,9 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
                        nrows = r1 - r0 + 1L)[, env_vars, drop = FALSE]
     ok <- rowSums(!is.finite(X)) == 0L
     if (!any(ok)) next
-    # predict.gbm() and mgcv's predict() reject a matrix, so hand every engine a
-    # data.frame. Shifting one column by name also avoids copying the whole
-    # block on each intervention step.
+    # Every engine prediction goes through the shared per-engine path
+    # (xgboost needs a DMatrix, GAM a data.frame). Shifting one column by
+    # name also avoids copying the whole block on each intervention step.
     Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
     n_complete <- n_complete + nrow(Xi)
     coverage <- lapply(drivers, function(v) {

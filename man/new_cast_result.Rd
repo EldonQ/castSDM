@@ -12,17 +12,21 @@ new_cast_result(
   predict = NULL,
   ensemble = NULL,
   fit_full = NULL,
-  call = NULL
+  call = NULL,
+  protocol = NULL,
+  projection = NULL,
+  output_dir = NULL,
+  receipts = NULL
 )
 }
 \arguments{
 \item{screen}{A \code{cast_select} object.}
 
-\item{fit}{A \code{cast_fit} object.}
+\item{fit}{A \code{cast_fit} object (training split).}
 
-\item{eval}{A \code{cast_eval} object (hold-out evaluation).}
+\item{eval}{A \code{cast_eval} object (one-shot hold-out evaluation).}
 
-\item{cv}{A \code{cast_cv} object (spatial CV), or \code{NULL}.}
+\item{cv}{A \code{cast_cv} object (nested spatial CV), or \code{NULL}.}
 
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 
@@ -32,6 +36,15 @@ new_cast_result(
 final prediction maps (or \code{NULL}).}
 
 \item{call}{The original function call.}
+
+\item{protocol}{The effective \code{\link[=cast_protocol]{cast_protocol()}} object (or \code{NULL}).}
+
+\item{projection}{A \code{cast_project}/raster projection summary list, or
+\code{NULL}.}
+
+\item{output_dir}{The artifact directory used by \code{\link[=cast_run]{cast_run()}}, or \code{NULL}.}
+
+\item{receipts}{The per-stage receipt log from \code{\link[=cast_run]{cast_run()}}, or \code{NULL}.}
 }
 \value{
 A \code{cast_result} object.

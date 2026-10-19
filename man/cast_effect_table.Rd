@@ -17,7 +17,7 @@ cast_effect_table(
 )
 }
 \arguments{
-\item{fit}{A \code{cast_fit} object (from \code{\link[=cast_fit]{cast_fit()}} or \code{\link[=cast]{cast()}}).}
+\item{fit}{A \code{cast_fit} object (from \code{\link[=cast_fit]{cast_fit()}} or \code{\link[=cast_run]{cast_run()}}).}
 
 \item{newdata}{Data frame with the fitted predictors; rows with missing
 predictors are dropped. Coordinates are not required.}

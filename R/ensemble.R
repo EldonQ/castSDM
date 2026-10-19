@@ -800,36 +800,38 @@ cast_ensemble_importance <- function(fit, cv, new_data,
     function(a, b) stats::cor(a, b, method = "spearman")
   }
 
-  if (!is.null(seed)) set.seed(seed)
-  imp <- matrix(NA_real_, nrow = length(env_vars), ncol = n_perm,
-                dimnames = list(env_vars, NULL))
-  if (verbose) {
-    cli::cli_inform(
-      "Ensemble permutation importance: {length(env_vars)} predictor{?s} x {n_perm} permutation{?s}."
-    )
-  }
-  for (vi in seq_along(env_vars)) {
-    v <- env_vars[vi]
-    vals <- X_base[[v]]
-    for (p in seq_len(n_perm)) {
-      X_p <- X_base
-      X_p[[v]] <- sample(vals, size = length(vals), replace = FALSE)
-      perm_mat <- pred_one(X_p)
-      # Keep the denominator honest: score each permutation against the SAME
-      # model set the baseline used, so a model that fails only under
-      # permutation cannot shrink the ensemble mid-comparison.
-      perm_keep <- base_ok & vapply(mdl_names, function(m) any(is.finite(perm_mat[, m])), logical(1))
-      if (!all(perm_keep)) {
-        perm_keep <- base_ok
-      }
-      ens_p <- .ensemble_rowmean(perm_mat[, perm_keep, drop = FALSE], w[perm_keep])
-      ok <- ok0 & is.finite(ens_p)
-      imp[vi, p] <- if (sum(ok) >= 3L) {
-        r <- suppressWarnings(corr_fun(ens0[ok], ens_p[ok]))
-        if (is.finite(r)) 1 - r else NA_real_
-      } else NA_real_
+  imp <- .cast_with_seed(seed, {
+    imp <- matrix(NA_real_, nrow = length(env_vars), ncol = n_perm,
+                  dimnames = list(env_vars, NULL))
+    if (verbose) {
+      cli::cli_inform(
+        "Ensemble permutation importance: {length(env_vars)} predictor{?s} x {n_perm} permutation{?s}."
+      )
     }
-  }
+    for (vi in seq_along(env_vars)) {
+      v <- env_vars[vi]
+      vals <- X_base[[v]]
+      for (p in seq_len(n_perm)) {
+        X_p <- X_base
+        X_p[[v]] <- sample(vals, size = length(vals), replace = FALSE)
+        perm_mat <- pred_one(X_p)
+        # Keep the denominator honest: score each permutation against the SAME
+        # model set the baseline used, so a model that fails only under
+        # permutation cannot shrink the ensemble mid-comparison.
+        perm_keep <- base_ok & vapply(mdl_names, function(m) any(is.finite(perm_mat[, m])), logical(1))
+        if (!all(perm_keep)) {
+          perm_keep <- base_ok
+        }
+        ens_p <- .ensemble_rowmean(perm_mat[, perm_keep, drop = FALSE], w[perm_keep])
+        ok <- ok0 & is.finite(ens_p)
+        imp[vi, p] <- if (sum(ok) >= 3L) {
+          r <- suppressWarnings(corr_fun(ens0[ok], ens_p[ok]))
+          if (is.finite(r)) 1 - r else NA_real_
+        } else NA_real_
+      }
+    }
+    imp
+  })
 
   importance <- data.frame(
     variable = env_vars,

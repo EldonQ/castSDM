@@ -9,12 +9,11 @@ print.cast_select <- function(x, ...) {
     "Selected variables: {n_selected}"
   ))
   d <- x$diagnostics
-  if (!is.null(d$engine)) {
+  if (identical(x$method, "covsel")) {
+    n_filt <- length(d$filtered %||% character(0))
+    cli::cli_text("covsel embedded selection: {n_filt} filtered covariate{?s}, target ncov = {d$ncov %||% NA}; aggregate rank drives admission.")
+  } else if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")
-  }
-  if (identical(x$method, "two_stage")) {
-    n_steps <- if (!is.null(d$path)) nrow(d$path) else NA_integer_
-    cli::cli_text("Forward search: {n_steps} admission{?s} on inner-CV {d$metric %||% 'loss'}; empty means nothing passed admission (too few paired folds also yields empty).")
   }
   cli::cli_text("Variables: {.val {x$selected}}")
   invisible(x)
@@ -24,21 +23,20 @@ print.cast_select <- function(x, ...) {
 print.cast_importance <- function(x, ...) {
   eff <- x$effects
   n_adm <- sum(!is.na(eff$step_added))
-  cli::cli_h1("castSDM Forward-Selection Path")
+  cli::cli_h1("castSDM Selection Path")
   cli::cli_ul(c(
-    "Inner-CV loss: {x$metric %||% 'unknown'} (lower is better)",
+    "Admission measure: {x$metric %||% 'aggregate rank'}",
     "Admitted: {n_adm} / {nrow(eff)}"
   ))
   show <- utils::head(eff[order(is.na(eff$step_added), eff$step_added), , drop = FALSE], 10L)
   disp <- data.frame(
     variable = show$variable,
-    step = show$step_added,
-    gain = signif(show$loss_gain, 4),
+    rank = show$step_added,
     sig = ifelse(show$selected, "*", ""),
     stringsAsFactors = FALSE
   )
   print(disp, row.names = FALSE)
-  cli::cli_text("Gain is the inner-CV loss improvement at admission; prespecified predictors enter at step 0.")
+  cli::cli_text("Rank is the covsel aggregate rank (1 = strongest); prespecified predictors are marked by design.")
   invisible(x)
 }
 

@@ -38,6 +38,14 @@ accepts spatial groups designed with tools such as blockCV. External fits need
 an explicit training reference and comparable suitability scales; they do not
 automatically inherit valid evaluation scores.
 
+The production pipeline is `cast_run()`, driven by one `cast_protocol()`:
+covsel variable selection (Adde et al. 2023 reference implementation),
+RF / xgboost-BRT / MaxEnt / GAM engines, nested spatial cross-validation on
+blockCV blocks, a one-shot hold-out evaluation at out-of-fold thresholds,
+full-data refit and ensemble. `cast_run(output_dir = ...)` writes every stage
+to disk with content-digest receipts in `manifest.rds`, together with an
+ODMAP-aligned report.
+
 The [research workflows](tools/workflows/README.md) include the complete
 Schizopygopsis case configuration, the independent method-validation protocol
 and R figure scripts. The [validation results](tools/workflows/core_method_validation/RESULTS_20261016.md)

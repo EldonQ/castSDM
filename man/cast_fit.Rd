@@ -39,7 +39,12 @@ cast_fit(
 \item{rf_mtry}{Integer. RF variables considered at each split. Default
 \code{NULL} (the ranger default, \code{floor(sqrt(p))}).}
 
-\item{brt_n_trees}{Integer. Number of BRT trees. Default \code{2000}.}
+\item{brt_n_trees}{Integer. Number of boosting rounds (trees) for the
+xgboost BRT. Default \code{2000} at the default \code{brt_shrinkage = 0.005};
+jointly assess rounds, learning rate and depth for the dataset rather
+than assuming a universal SDM recipe. The round count is a
+prespecified setting: it is never selected by an internal random-fold
+cross-validation inside the fit.}
 
 \item{brt_depth}{Integer. BRT tree depth. Default \code{5}. Ignored when
 \code{tune = TRUE} (the depth enters the search grid).}
@@ -59,14 +64,12 @@ held fixed while the regularisation multiplier is searched.}
 value is held fixed while the feature classes are searched.}
 
 \item{tune}{Logical. Run a small grid search per engine (RF \code{mtry}; BRT
-\code{interaction.depth} x \code{shrinkage}; MaxEnt feature classes x regularisation
+\code{max_depth} x \code{eta}; MaxEnt feature classes x regularisation
 multiplier) and fit with the best-scoring combination. Default \code{FALSE}.
 See Details.}
 
-\item{tune_folds}{Integer. Folds used by the inner grid-search scoring
-(BRT internal CV; MaxEnt stratified random folds). When tuning BRT,
-also controls final tree-count selection. Default \code{3}; untuned BRT
-keeps its existing 5-fold tree-count selection.}
+\item{tune_folds}{Integer. Stratified folds used by the inner grid-search
+scoring (BRT and MaxEnt; RF scores out-of-bag). Default \code{3}.}
 
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. When supplied,
 presence and background rows are weighted so that the \emph{weighted}
@@ -105,8 +108,9 @@ detected in \code{data} are used.
 clamps predictions internally; clamping to the training range is a
 package-level decision (see \code{\link[=cast_predict]{cast_predict()}} and
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}, argument \code{clamp}).
-\item \strong{BRT}: \code{\link[gbm:gbm]{gbm::gbm()}} with Bernoulli loss and 5-fold tree-count selection
-by default (\code{tune_folds} when \code{tune = TRUE}).
+\item \strong{BRT}: \code{\link[xgboost:xgb.train]{xgboost::xgb.train()}} with logloss (binary:logistic) and a
+prespecified round count (\code{brt_n_trees}). No internal
+cross-validation folds are drawn inside the fit.
 \item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
@@ -118,9 +122,9 @@ flexsdm) but trimmed for cost:
 \itemize{
 \item \strong{RF} searches \code{mtry} around \code{sqrt(p)} and is scored by out-of-bag TSS
 (no extra refits beyond the grid itself).
-\item \strong{BRT} searches \code{interaction.depth} x \code{shrinkage}; the tree count stays
-adaptive via \code{\link[gbm:gbm.perf]{gbm::gbm.perf()}}. Each combination is scored by the TSS of
-its internal cross-validated predictions.
+\item \strong{BRT} searches \code{max_depth} x \code{eta} at the configured round count,
+scored by TSS on stratified inner folds whose threshold is selected on
+the fold's training part.
 \item \strong{MaxEnt} searches feature classes x regularisation multiplier, scored
 by stratified random-fold TSS with the threshold selected on the
 training part of each fold.
