@@ -44,7 +44,12 @@ castsdm_species_configs <- function() {
     cv_threshold_method = "max_tss",
     cv_workers = 5L,
     train_fraction = 0.7,
-    cv_block_method = "grid",
+    # Spatial blocking follows castSDM 0.20.0: blockCV square blocks sized
+    # from the estimated range of spatial autocorrelation (cv_block_size
+    # overrides, in metres); falls back to the dependency-free grid blocking
+    # with a warning when the design cannot be built.
+    cv_block_method = "blockcv",
+    cv_block_size = NULL,
     cv_buffer = 0,
     cv_buffer_unit = "deg",
     cv_aoa = TRUE,
@@ -58,8 +63,15 @@ castsdm_species_configs <- function() {
     ensemble_permutation = FALSE,
     ensemble_perm_n = 25L,
     ensemble_perm_metric = "pearson",
-    min_cast_version = "0.19.0",
-    prevalence_target = NA,
+    min_cast_version = "0.20.0",
+    # 0.20.0 default: every engine (including MaxEnt, via a stored
+    # logit-scale offset) is calibrated so the weighted training prevalence
+    # equals this target; ensemble members then share one scale.
+    prevalence_target = 0.5,
+    # 0.20.0 default: predictors are clamped to the training range at
+    # prediction/projection time for every engine (MESS/AOA flags are still
+    # computed on the unclamped input).
+    clamp = TRUE,
     effect_support_probs = c(0.01, 0.99),
     effect_min_support = 0.5,
     attribution_block_size = 50000L,

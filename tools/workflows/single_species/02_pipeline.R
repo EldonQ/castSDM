@@ -1,8 +1,8 @@
 required_workflow_packages <- function() {
   packages <- c(
     "devtools", "pkgload", "parallelly", "data.table", "terra", "sf", "ranger",
-    "gbm", "maxnet", "mgcv", "ggplot2", "digest",
-    "future.apply", "patchwork", "svglite", "ragg",
+    "xgboost", "maxnet", "mgcv", "ggplot2", "digest",
+    "future.apply", "patchwork", "svglite", "ragg", "blockCV",
     "glmnet", "RRF"   # covsel Step B embedding (elastic net + guided RF)
   )
   missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
@@ -343,23 +343,26 @@ assert_cast_api <- function(cfg) {
   # passes by name. Add a row here when a call is added; the preflight then
   # protects it automatically.
   required <- list(
-    cast_prepare          = c("train_fraction", "seed", "env_vars", "verbose"),
+    cast_prepare          = c("train_fraction", "seed", "env_vars",
+                              "block_method", "verbose"),
     cast_select           = c("method", "corcut", "algorithms", "ncov",
                               "maxncov", "keep", "ensure", "env_vars",
                               "var_id", "category", "seed", "verbose"),
     cast_fit              = c("screen", "models", "seed", "verbose"),
     cast_cv               = c("select_method", "select_args", "k", "models",
-                              "block_method", "buffer", "buffer_unit", "n_repeat",
+                              "block_method", "block_size", "buffer",
+                              "buffer_unit", "n_repeat",
                               "tune", "prevalence_target", "threshold_method",
                               "aoa", "parallel", "seed", "verbose"),
-    cast_evaluate         = c("test_data", "threshold_method"),
-    cast_predict          = c("new_data", "models", "cv", "aoa"),
+    cast_evaluate         = c("test_data", "threshold_method", "thresholds"),
+    cast_predict          = c("new_data", "models", "cv", "aoa", "clamp"),
     cast_ensemble         = c("cv", "new_data", "method", "min_score", "decay",
                               "fallback", "min_metric_folds"),
     cast_ensemble_importance = c("cv", "new_data", "n_perm", "metric", "seed"),
     cast_project_raster   = c("cv", "current_raster", "future_rasters",
                               "output_dir", "mask", "method", "min_score",
-                              "fallback", "min_metric_folds", "overwrite"),
+                              "fallback", "min_metric_folds", "overwrite",
+                              "clamp"),
     cast_effect_table     = c("newdata", "drivers", "shift", "shift_type",
                               "support_probs", "min_support"),
     cast_effect_map       = c("current_stack", "drivers", "shift", "shift_type",
@@ -683,7 +686,9 @@ run_species <- function(cfg) {
 
   split <- cache_step(file.path(cache_dir, "prepare.rds"), fp,
                       cast_prepare(d, train_fraction = cfg$train_fraction,
-                                   seed = cfg$seed, env_vars = vars, verbose = FALSE))
+                                   seed = cfg$seed, env_vars = vars,
+                                   block_method = cfg$cv_block_method,
+                                   verbose = FALSE))
   # Align the selection metadata with what the training split ACTUALLY
   # supports. cast_prepare drops layers that are constant in the training
   # sample (e.g. land-cover patch statistics over a uniform plateau window):
@@ -702,11 +707,10 @@ run_species <- function(cfg) {
     is_climate_flag <- is_climate_flag[match(fit_vars, names(is_climate_flag))]
     climate_layers <- intersect(climate_layers, vars)
   }
-  # Selection arguments per method. "covsel" (main path since 2026-10-12):
-  # hierarchical collinearity filter + embedded regularised ranking with the
-  # ceiling(log2(n_presences)) - 1 count rule (Adde et al. 2023). "two_stage"
-  # (legacy spatial forward search) keeps the package defaults; its per-case
-  # metric switch is gone from the config on purpose.
+  # Selection arguments per method. "covsel" is the two-step embedded
+  # selection of Adde et al. (2023); the target count follows the package
+  # default ceiling(log2(n_presences)), capped by maxncov. "full" keeps every
+  # varying predictor (prespecified sets only).
   select_args <- switch(cfg$select_method,
     covsel = list(corcut = cfg$select_corcut,
                   algorithms = cfg$select_algorithms,
@@ -729,7 +733,6 @@ run_species <- function(cfg) {
                   # var_id/category vectors are re-indexed automatically.
                   env_vars = vars,
                   var_id = var_id, category = category),
-    two_stage = list(),
     full = list())
   screen <- cache_step(file.path(cache_dir, "screen.rds"), fp,
     do.call(cast_select, c(list(data = split$train, method = cfg$select_method,
@@ -790,7 +793,8 @@ run_species <- function(cfg) {
     cast_cv(split$train, select_method = cfg$select_method,
             select_args = select_args,
             k = cfg$cv_k, models = cfg$models,
-            block_method = cfg$cv_block_method, buffer = cfg$cv_buffer,
+            block_method = cfg$cv_block_method, block_size = cfg$cv_block_size,
+            buffer = cfg$cv_buffer,
             buffer_unit = cfg$cv_buffer_unit,
             n_repeat = cfg$cv_n_repeat, tune = cfg$cv_tune,
             threshold_method = cfg$cv_threshold_method,
@@ -806,9 +810,13 @@ run_species <- function(cfg) {
     future::plan(future::sequential)
     parallel::stopCluster(cl)
   }
+  # One-shot hold-out evaluation. Thresholds are the pooled out-of-fold
+  # operating points from cast_cv() -- selected without touching the hold-out
+  # rows -- and are applied unchanged here (protocol rule 2 in castSDM 0.20.0).
   evaluation <- cache_step(file.path(cache_dir, "evaluation.rds"), fp,
     cast_evaluate(fit, split$test,
-                  threshold_method = cfg$cv_threshold_method))
+                  threshold_method = cfg$cv_threshold_method,
+                  thresholds = cv$thresholds))
   table_dir <- file.path(out_dir, "tables")
   dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
   data.table::fwrite(screen$scores, file.path(table_dir, "selection_scores.csv"))
@@ -876,7 +884,8 @@ run_species <- function(cfg) {
   if (!all(engine_status$fitted)) {
     stop("Requested engines failed; inspect engine_status.csv before accepting a complete case.")
   }
-  holdout_prediction <- cast_predict(fit, split$test, cv = cv, aoa = cfg$cv_aoa)
+  holdout_prediction <- cast_predict(fit, split$test, cv = cv,
+                                     aoa = cfg$cv_aoa, clamp = cfg$clamp)
   data.table::fwrite(data.frame(presence = split$test$presence,
     holdout_prediction$predictions), file.path(table_dir, "holdout_predictions.csv"))
   # The configured method, not a literal: a hardcoded "weighted" here made
@@ -1015,6 +1024,7 @@ run_species <- function(cfg) {
     # projection-side knob; assert_cast_api guards the combination).
     fallback = cfg$ensemble_fallback,
     min_metric_folds = cfg$ensemble_min_metric_folds,
+    clamp = cfg$clamp,
     overwrite = projection_overwrite, verbose = TRUE,
     parallel = projection_workers > 1L, max_memory_mb = 25
   )
