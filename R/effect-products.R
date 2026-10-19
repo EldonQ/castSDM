@@ -252,6 +252,8 @@ print.cast_effect_table <- function(x, ...) {
 #' @param shift_type `"raw"` (default) or `"sd"`.
 #' @param block_rows Integer rows per processing block. Default 512.
 #' @param filename Optional GeoTIFF path for the effect and coverage stack (LZW).
+#'   If omitted, a temporary file backs the returned raster. Outputs stream in
+#'   row blocks; an existing filename requires `overwrite = TRUE`.
 #' @param weights Optional named model weights, as in [cast_effect_table()].
 #' @param overwrite Logical. Overwrite `filename`. Default `FALSE`.
 #' @param verbose Print block progress. Default `TRUE`.
@@ -318,25 +320,29 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   for (v in drivers) {
     if (!is.null(ref)) .cast_check_shift_reachable(ref, v, steps[[v]])
   }
-  n_cells <- terra::ncell(current_stack)
   nr <- terra::nrow(current_stack)
   ncl <- terra::ncol(current_stack)
-  blank <- stats::setNames(rep(list(rep(NA_real_, n_cells)), length(drivers)), drivers)
-  acc_signed <- blank
-  acc_abs <- blank
-  acc_support <- blank
+  layer_names <- c(sprintf("dHSS_%s", drivers), sprintf("absdHSS_%s", drivers),
+                   sprintf("support_%s", drivers))
+  if (is.null(filename)) filename <- tempfile("cast_effect_", fileext = ".tif")
+  if (!overwrite && file.exists(filename)) cli::cli_abort("Effect-map output already exists; choose a new filename or overwrite = TRUE.")
+  writer <- .cast_raster_writer(current_stack, filename, layer_names, datatype = "FLT8S", overwrite = overwrite)
+  on.exit(.cast_writer_abort(writer), add = TRUE)
+  sum_signed <- sum_abs <- stats::setNames(rep(0, length(drivers)), drivers)
   n_supported <- stats::setNames(rep(0, length(drivers)), drivers)
   n_complete <- 0
   starts <- seq(1L, nr, by = block_rows)
   for (b in seq_along(starts)) {
     r0 <- starts[b]; r1 <- min(nr, r0 + block_rows - 1L)
-    cells <- ((r0 - 1L) * ncl + 1L):(r1 * ncl)
+    block <- matrix(NA_real_, (r1 - r0 + 1L) * ncl, length(layer_names), dimnames = list(NULL, layer_names))
     # Read only this block: reading the whole stack per block turned an
     # O(n) pass into O(n * n_blocks) on national grids.
-    X <- terra::values(current_stack, mat = TRUE, row = r0,
-                       nrows = r1 - r0 + 1L)[, env_vars, drop = FALSE]
-    ok <- rowSums(!is.finite(X)) == 0L
-    if (!any(ok)) next
+    X <- .cast_raster_block(current_stack[[env_vars]], r0, r1 - r0 + 1L)
+    ok <- .cast_finite_rows(X)
+    if (!any(ok)) {
+      .cast_writer_block(writer, block, r0, r1 - r0 + 1L)
+      next
+    }
     # Every engine prediction goes through the shared per-engine path
     # (xgboost needs a DMatrix, GAM a data.frame). Shifting one column by
     # name also avoids copying the whole block on each intervention step.
@@ -363,33 +369,25 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
       if (any(k)) delta[k] <- .effect_predictions(fit, Xi[k, , drop = FALSE], v,
         steps[[v]], base[k, , drop = FALSE], weights)
       covered[!is.finite(delta) & !is.na(covered)] <- FALSE
-      s <- rep(NA_real_, length(cells))
-      a <- rep(NA_real_, length(cells))
-      cvg <- rep(NA_real_, length(cells))
+      s <- rep(NA_real_, nrow(block))
+      a <- rep(NA_real_, nrow(block))
+      cvg <- rep(NA_real_, nrow(block))
       s[ok] <- ifelse(covered, delta, NA_real_)
       a[ok] <- ifelse(covered, abs(delta), NA_real_)
       cvg[ok] <- as.numeric(covered)
-      acc_signed[[v]][cells] <- s
-      acc_abs[[v]][cells] <- a
-      acc_support[[v]][cells] <- cvg
+      block[, paste0("dHSS_", v)] <- s
+      block[, paste0("absdHSS_", v)] <- a
+      block[, paste0("support_", v)] <- cvg
+      sum_signed[[v]] <- sum_signed[[v]] + sum(s[is.finite(s)])
+      sum_abs[[v]] <- sum_abs[[v]] + sum(a[is.finite(a)])
       n_supported[[v]] <- n_supported[[v]] + sum(covered, na.rm = TRUE)
     }
+    .cast_writer_block(writer, block, r0, r1 - r0 + 1L)
     if (verbose) cli::cli_inform("block {b}/{length(starts)} done")
   }
-  to_rast <- function(d) {
-    r <- terra::rast(current_stack[[1]])
-    terra::values(r) <- d
-    r
-  }
-  out <- c(lapply(acc_signed, to_rast), lapply(acc_abs, to_rast),
-           lapply(acc_support, to_rast))
-  names(out) <- c(sprintf("dHSS_%s", drivers), sprintf("absdHSS_%s", drivers),
-                  sprintf("support_%s", drivers))
-  res <- terra::rast(out)
+  .cast_writer_finish(writer)
+  res <- terra::rast(filename)
   tab <- do.call(rbind, lapply(drivers, function(v) {
-    svec <- acc_signed[[v]]
-    avec <- acc_abs[[v]]
-    keep <- is.finite(svec)
     support <- if (!bounds_ok || n_complete <= 0) {
       NA_real_
     } else {
@@ -398,22 +396,13 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     masked <- is.na(support) || support < min_support
     data.frame(
       driver = v, shift_raw = steps[[v]],
-      mean_abs_dHSS = if (masked || !any(keep)) NA_real_ else mean(avec[keep], na.rm = TRUE),
-      mean_signed_dHSS = if (masked || !any(keep)) NA_real_ else mean(svec[keep], na.rm = TRUE),
+      mean_abs_dHSS = if (masked || n_supported[[v]] == 0) NA_real_ else sum_abs[[v]] / n_supported[[v]],
+      mean_signed_dHSS = if (masked || n_supported[[v]] == 0) NA_real_ else sum_signed[[v]] / n_supported[[v]],
       n = n_complete, n_supported = n_supported[[v]],
       support = support, masked = masked,
       stringsAsFactors = FALSE)
   }))
   rownames(tab) <- NULL
-  if (!is.null(filename)) {
-    # `overwrite = FALSE` used to be passed straight through; the atomic
-    # helper renames into place, so guard the skip here instead.
-    if (!overwrite && file.exists(filename)) {
-      cli::cli_inform("{.path {basename(filename)}} exists; skipping (overwrite = FALSE).")
-    } else {
-      .cast_write_raster_atomic(res, filename)
-    }
-  }
   attr(res, "effect_table") <- tab
   attr(res, "steps") <- steps
   attr(res, "support_probs") <- support_probs

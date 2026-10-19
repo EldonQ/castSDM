@@ -45,9 +45,9 @@
 #'   unclamped block input, so clamping never softens the flag. Requires the
 #'   \pkg{FNN} package.
 #' @param mask A `terra::SpatRaster` or `NULL`. If provided, prediction
-#'   is restricted to cells where mask is non-NA. Only the first layer is
-#'   used; a mask whose geometry cannot be matched to `raster_stack` is
-#'   ignored with a warning.
+#'   is restricted to finite non-zero cells. The mask must have one layer
+#'   and exactly match the prediction grid. Geometry or read failures abort;
+#'   align categorical masks explicitly with nearest-neighbour resampling.
 #' @param clamp Logical. Clamp predictors to the training range before
 #'   prediction. Default `FALSE`. The MESS layer (see `extrapolation`) is
 #'   always computed on the unclamped input, so clamping never hides
@@ -57,7 +57,8 @@
 #'   `TRUE` (skipped, with `mess_path = NULL`, if the fit lacks a stored
 #'   training reference).
 #' @param max_memory_mb Numeric. Approximate per-block memory budget in MB
-#'   used to size the row blocks. Default `200`.
+#'   used to size the row blocks. Default `200`. This is not a whole-process
+#'   limit: fitted models, prediction workspaces and GDAL add memory costs.
 #' @param prefix Character. Filename prefix. Default `""`.
 #' @param overwrite Logical. Overwrite existing output. Default `FALSE`.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
@@ -83,7 +84,7 @@
 #' weights are renormalised per cell over the models that produced a value
 #' there - the same convention as [cast_ensemble()]. The cross-model SD layer
 #' likewise uses only the cell-level contributors (`NA` where fewer than two
-#' models contribute). Cells with `NA` covariates (or masked out) stay `NA` in
+#' models contribute). Cells with non-finite covariates (or masked out) stay `NA` in
 #' every output layer. If no model produces a finite prediction for a block,
 #' those cells are `NA` and a warning is issued once. `n_valid_cells` counts
 #' the cells that received an ensemble value.
@@ -112,6 +113,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   method <- match.arg(method)
   fallback <- match.arg(fallback)
   decay <- .cast_check_decay(decay)
+  .cast_check_fit(fit)
+  max_memory_mb <- .cast_check_scalar(max_memory_mb, "max_memory_mb", lower = 0, min_inclusive = FALSE)
 
   if (!inherits(raster_stack, "SpatRaster")) {
     if (is.character(raster_stack)) {
@@ -127,6 +130,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   if (length(missing_layers) > 0) {
     cli::cli_abort("Raster missing required layer{?s}: {.val {missing_layers}}.")
   }
+
+  raster_stack <- raster_stack[[env_vars]]
+  mask <- .cast_raster_mask(mask, raster_stack)
 
   # ---- Output paths -----------------------------------------------------------
   # `prefix` reaches the filesystem through six paste0() calls below, so a
@@ -251,144 +257,58 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     ))
   }
 
-  # ---- Block-based raster prediction (memory-safe) ----------------------------
-  # Uses terra::crop() for block reading instead of readStart/readValues,
-  # which avoids both the full-grid segfault and the readStart NULL-pointer
-  # issue on some terra installations.
+  # Only block-sized output buffers are retained; each layer streams to disk.
   r <- raster_stack
-
-  nr    <- terra::nrow(r)
-  nc    <- terra::ncol(r)
-  nl    <- terra::nlyr(r)
-  res_y <- terra::yres(r)
-
-  bytes_per_row <- as.double(nc) * nl * 8 * 5
-  rows_per_block <- max(10L, as.integer(max_memory_mb * 1e6 / bytes_per_row))
-  rows_per_block <- min(rows_per_block, nr)
+  nr <- terra::nrow(r); nc <- terra::ncol(r); nl <- terra::nlyr(r)
+  bytes_per_row <- as.double(nc) * (nl + length(mdl_names) + 6L) * 8 * 5
+  rows_per_block <- max(1L, floor(min(nr, max_memory_mb * 1e6 / bytes_per_row)))
   n_blocks <- ceiling(nr / rows_per_block)
-
-  if (verbose) {
-    cli::cli_inform(c(
-      "Grid: {nr} x {nc}  |  {nl} vars  |  {n_blocks} block{?s} of ~{rows_per_block} rows"
-    ))
-  }
-
-  # Validate the mask geometry once; values are read per block below so a
-  # national-scale mask never has to be held in memory as a whole.
-  mask_ok <- FALSE
-  if (!is.null(mask)) {
-    geom_ok <- tryCatch(
-      terra::compareGeom(mask, r, ext = TRUE, rowcol = TRUE, res = TRUE,
-                         crs = TRUE, stopOnError = FALSE),
-      error = function(e) FALSE
-    )
-    if (!isTRUE(geom_ok)) {
-      # A mask in a different CRS (or grid) is reprojected onto the stack
-      # geometry before giving up and predicting the full extent.
-      mask_proj <- tryCatch(terra::project(mask, r), error = function(e) NULL)
-      if (!is.null(mask_proj)) {
-        geom_ok <- tryCatch(
-          terra::compareGeom(mask_proj, r, ext = TRUE, rowcol = TRUE,
-                             res = TRUE, crs = TRUE, stopOnError = FALSE),
-          error = function(e) FALSE
-        )
-        if (isTRUE(geom_ok)) mask <- mask_proj
-      }
-    }
-    if (!isTRUE(geom_ok)) {
-      cli::cli_warn(
-        "Mask geometry does not match the raster stack; predicting the full extent."
-      )
-    } else {
-      if (terra::nlyr(mask) > 1L) {
-        cli::cli_warn(
-          "{.arg mask} has {terra::nlyr(mask)} layers; using the first one."
-        )
-        mask <- mask[[1L]]
-      }
-      mask_ok <- TRUE
-    }
-  }
-
-  # Pre-allocate output vectors
-  n_cells_total <- as.double(nr) * as.double(nc)
-  hss_vec  <- rep(NA_real_,    n_cells_total)
-  hss_sd_vec <- rep(NA_real_,  n_cells_total)
-  bin_vec  <- rep(NA_integer_, n_cells_total)
-  mess_vec <- if (want_mess) rep(NA_real_, n_cells_total) else NULL
-  aoa_vec <- if (want_aoa) rep(NA_integer_, n_cells_total) else NULL
-  aoa_di_vec <- if (want_aoa) rep(NA_real_, n_cells_total) else NULL
+  if (verbose) cli::cli_inform("Grid: {nr} x {nc} | {n_blocks} blocks of ~{rows_per_block} rows")
+  paths <- c(hss_ensemble = hss_path, hss_sd = hss_sd_path, binary_ensemble = bin_path,
+    if (want_mess) c(mess = mess_path),
+    if (want_aoa) c(aoa = aoa_path, aoa_di = aoa_di_path))
+  writers <- list()
+  on.exit(for (writer in writers) .cast_writer_abort(writer), add = TRUE)
+  for (name in names(paths)) writers[[name]] <- .cast_raster_writer(r, paths[[name]], name,
+    datatype = if (name %in% c("binary_ensemble", "aoa")) "INT1U" else "FLT4S",
+    compression = compression, overwrite = TRUE)
 
   n_valid <- 0L
   warned <- stats::setNames(rep(FALSE, length(mdl_names)), mdl_names)
   warned_empty_block <- FALSE
-  warned_mask <- FALSE
 
   for (bi in seq_len(n_blocks)) {
     row_start <- (bi - 1L) * rows_per_block + 1L
     row_count <- min(rows_per_block, nr - row_start + 1L)
 
-    y_top <- terra::yFromRow(r, row_start) + res_y / 2
-    y_bot <- terra::yFromRow(r, row_start + row_count - 1L) - res_y / 2
-    block_ext <- terra::ext(terra::xmin(r), terra::xmax(r), y_bot, y_top)
-
-    block_r <- terra::crop(r, block_ext)
-    v <- terra::as.data.frame(block_r, na.rm = FALSE)
-    rm(block_r)
-
-    if (!all(env_vars %in% names(v))) {
-      cli::cli_abort(c(
-        "Block values lost expected layer name{?s}: {.val {setdiff(env_vars, names(v))}}.",
-        "i" = "Refusing to match predictors by position; check that raster layer names are stable."
-      ))
-    }
-    v <- v[, env_vars, drop = FALSE]
-
-    cell_start <- (row_start - 1L) * nc + 1L
-
-    if (mask_ok) {
-      m <- tryCatch(
-        terra::values(mask, mat = FALSE, row = row_start, nrows = row_count),
-        error = function(e) NULL
-      )
-      if (is.null(m) || length(m) != nrow(v)) {
-        if (!warned_mask) {
-          cli::cli_warn(
-            "Mask read failed for at least one block; those cells are predicted unmasked."
-          )
-          warned_mask <- TRUE
-        }
-      } else {
-        v[is.na(m), ] <- NA
-      }
-      rm(m)
-    }
-
-    ok <- stats::complete.cases(v)
+    v <- .cast_raster_block(r, row_start, row_count)
+    if (!identical(names(v), env_vars)) cli::cli_abort("Raster block lost fitted predictor names.")
+    ok <- .cast_finite_rows(v) & .cast_mask_rows(mask, row_start, row_count, nrow(v))
+    block <- matrix(NA_real_, nrow(v), length(writers), dimnames = list(NULL, names(writers)))
     n_ok <- sum(ok)
 
     if (n_ok > 0) {
       X_raw <- as.data.frame(v[ok, , drop = FALSE])
       for (col in names(X_raw)) X_raw[[col]] <- as.numeric(X_raw[[col]])
 
-      valid_idx <- cell_start - 1L + which(ok)
+      valid_idx <- which(ok)
 
       # MESS on the (unclamped) block input; clamping happens afterwards and
       # therefore never masks extrapolation.
       if (want_mess) {
-        mess_vec[valid_idx] <- tryCatch(
+        block[valid_idx, "mess"] <- tryCatch(
           .cast_mess(reference, X_raw),
           error = function(e) rep(NA_real_, n_ok)
         )
       }
       # AOA likewise on the unclamped input (same convention as MESS).
       if (want_aoa) {
-        aoa_di_vec[valid_idx] <- tryCatch({
+        block[valid_idx, "aoa_di"] <- tryCatch({
           new_s <- .cast_aoa_apply(aoa_params, X_raw[, env_vars, drop = FALSE])
           .cast_aoa_di(aoa_params$train, new_s)
         }, error = function(e) rep(NA_real_, n_ok))
-        di_blk <- aoa_di_vec[valid_idx]
-        aoa_vec[valid_idx] <- as.integer(!is.na(di_blk) & di_blk <= aoa_threshold)
+        di_blk <- block[valid_idx, "aoa_di"]
+        block[valid_idx, "aoa"] <- ifelse(is.finite(di_blk), as.integer(di_blk <= aoa_threshold), NA_integer_)
       }
       if (isTRUE(clamp) && !is.null(reference)) {
         X_raw <- .cast_clamp(X_raw, reference)
@@ -407,6 +327,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
             rep(NA_real_, n_ok)
           }
         )
+        if (!is.numeric(preds) || length(preds) != n_ok) {
+          cli::cli_abort("Model {.val {mdl_name}} returned an invalid prediction vector in block {bi}.")
+        }
         finite <- is.finite(preds)
         if (!any(finite)) {
           if (!warned[mdl_name]) {
@@ -449,9 +372,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
           ens_hss <- .ensemble_rowmean(sub, w_blk)
         }
         ens_sd <- .ensemble_rowsd(sub)
-        hss_vec[valid_idx] <- ens_hss
-        hss_sd_vec[valid_idx] <- ens_sd
-        bin_vec[valid_idx] <- as.integer(ens_hss >= threshold)
+        block[valid_idx, "hss_ensemble"] <- ens_hss
+        block[valid_idx, "hss_sd"] <- ens_sd
+        block[valid_idx, "binary_ensemble"] <- as.integer(ens_hss >= threshold)
         n_valid <- n_valid + sum(is.finite(ens_hss))
         rm(ens_hss, ens_sd, w_blk, sub)
       } else if (!warned_empty_block) {
@@ -463,7 +386,8 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       rm(X_raw, pred_mat, contrib, valid_idx)
     }
 
-    rm(v)
+    for (name in names(writers)) .cast_writer_block(writers[[name]], block[, name], row_start, row_count)
+    rm(v, block)
     if (bi %% 5 == 0) invisible(gc())
   }
 
@@ -471,53 +395,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
     cli::cli_abort("No valid (non-NA) cells found in raster stack.")
   }
 
-  # Write output rasters
-  template <- terra::rast(
-    nrows = nr, ncols = nc,
-    xmin = terra::xmin(r), xmax = terra::xmax(r),
-    ymin = terra::ymin(r), ymax = terra::ymax(r),
-    crs = terra::crs(r)
-  )
-
-  hss_out <- terra::setValues(template, hss_vec)
-  names(hss_out) <- "hss_ensemble"
-  .cast_write_raster_atomic(hss_out, hss_path, compression = compression)
-  rm(hss_out, hss_vec)
-  invisible(gc())
-
-  hss_sd_out <- terra::setValues(template, hss_sd_vec)
-  names(hss_sd_out) <- "hss_sd"
-  .cast_write_raster_atomic(hss_sd_out, hss_sd_path, compression = compression)
-  rm(hss_sd_out, hss_sd_vec)
-  invisible(gc())
-
-  if (want_mess) {
-    mess_out <- terra::setValues(terra::rast(template), mess_vec)
-    names(mess_out) <- "mess"
-    .cast_write_raster_atomic(mess_out, mess_path, compression = compression)
-    rm(mess_out)
-  }
-  rm(mess_vec)
-
-  if (want_aoa) {
-    aoa_di_out <- terra::setValues(terra::rast(template), aoa_di_vec)
-    names(aoa_di_out) <- "aoa_di"
-    .cast_write_raster_atomic(aoa_di_out, aoa_di_path, compression = compression)
-    rm(aoa_di_out)
-
-    aoa_out <- terra::setValues(terra::rast(template), aoa_vec)
-    names(aoa_out) <- "aoa"
-    .cast_write_raster_atomic(aoa_out, aoa_path, compression = compression,
-                              datatype = "INT1U")
-    rm(aoa_out)
-  }
-  rm(aoa_di_vec, aoa_vec)
-
-  bin_out <- terra::setValues(terra::rast(template), bin_vec)
-  names(bin_out) <- "binary_ensemble"
-  .cast_write_raster_atomic(bin_out, bin_path, compression = compression,
-                            datatype = "INT1U")
-  rm(bin_out, bin_vec)
+  for (writer in writers) .cast_writer_finish(writer)
 
   if (verbose) {
     msg <- c(

@@ -79,7 +79,8 @@ cast_thin <- function(occurrences,
     cli::cli_warn("{n_na} record{?s} with missing coordinates dropped before thinning.")
   }
 
-  ord <- .cast_with_seed(seed, sample(which(ok)))  # random visiting order
+  candidates <- which(ok)
+  ord <- .cast_with_seed(seed, candidates[sample.int(length(candidates))])
 
   # Haversine great-circle distance, vectorised over already-kept records.
   R <- 6371.0088  # IUGG mean Earth radius, km

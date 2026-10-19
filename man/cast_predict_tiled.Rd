@@ -32,7 +32,8 @@ checkpoints are written. Created if it does not exist.}
 all.}
 
 \item{overwrite}{Logical. Overwrite existing output rasters. Default
-\code{FALSE} - existing files trigger a \code{cli_inform()} and skip.}
+\code{FALSE} - existing files skip only when their receipt matches this fit,
+input content and output file. Stale or unverified outputs cause an error.}
 
 \item{compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
 
@@ -51,18 +52,20 @@ Memory-bounded variant of \code{\link[=cast_predict]{cast_predict()}} for predic
 full pixel count would otherwise exceed available RAM. Reads the
 covariate raster stack tile by tile, applies a fitted model, and writes
 the per-model habitat-suitability surface (HSS) to disk via
-\code{terra::writeRaster()}.
+streamed row-block writing. Output buffers are bounded by tile height
+times grid width, not total grid size. Model/GDAL memory is additional.
 }
 \details{
 Per-tile checkpoints are written eagerly under a per-fit directory
 (\verb{<output_dir>/.cast_tiles_<fingerprint>/}) so an interrupted run can be
 resumed without recomputing finished tiles, and a new fit can never
-replay tiles predicted by an older model. \code{overwrite = TRUE} bypasses
-and refreshes the checkpoints.
+replay tiles predicted by an older model. The input-content fingerprint
+requires one additional streaming read pass before prediction.
+\code{overwrite = TRUE} bypasses and refreshes the checkpoints.
 
-Cells with missing (\code{NA}) covariates stay \code{NA} in the output rasters -
-they are recorded before \code{\link[=cast_predict]{cast_predict()}} imputes them and written back
-as \code{NA} afterwards, matching the NA semantics of
+Cells with missing or non-finite covariates stay \code{NA} in the output rasters -
+only finite predictor rows are sent to the fitted engine, matching
+the missing-cell semantics of
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}. No suitability values are fabricated outside
 the data mask (e.g. ocean pixels).
 }

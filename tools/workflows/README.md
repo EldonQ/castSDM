@@ -1,6 +1,9 @@
 # Reproducible research workflows
 
-These scripts mirror the maintained workflows run for castSDM 0.19.0. They
+These scripts mirror the maintained workflows, adapted to castSDM 0.20.0. The
+completed case and core evidence were computed with their recorded 0.19.0 sources.
+The [2026-10-19 raster maintenance](RASTER_REFACTOR_20261019.md) has separate
+engineering evidence; it does not relabel historical experiments. The scripts
 remain outside the installed package: model fitting is delegated to the engine
 packages, and the package owns scenario comparisons and plotting.
 

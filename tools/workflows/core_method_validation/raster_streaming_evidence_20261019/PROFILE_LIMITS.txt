@@ -1,0 +1,6 @@
+Baseline is f5cbb7d (0.20.0) raster entry points, using identical current engine callbacks.
+600 x 400 equal-geometry grid, two external engines, finite inputs, same row/tile limits.
+Rprofmem measures R allocations only; largest single allocation is not process peak memory.
+GDAL/terra C++ allocations and resident fitted models are not captured; timings are one run, not a speed benchmark.
+Effect map uses FLT8S rather than FLT4S storage to preserve table/raster numerical agreement.
+No ecological, universal performance or new source-matched historical-case claim.

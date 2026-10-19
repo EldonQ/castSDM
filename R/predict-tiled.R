@@ -4,17 +4,19 @@
 #' full pixel count would otherwise exceed available RAM. Reads the
 #' covariate raster stack tile by tile, applies a fitted model, and writes
 #' the per-model habitat-suitability surface (HSS) to disk via
-#' `terra::writeRaster()`.
+#' streamed row-block writing. Output buffers are bounded by tile height
+#' times grid width, not total grid size. Model/GDAL memory is additional.
 #'
 #' Per-tile checkpoints are written eagerly under a per-fit directory
 #' (`<output_dir>/.cast_tiles_<fingerprint>/`) so an interrupted run can be
 #' resumed without recomputing finished tiles, and a new fit can never
-#' replay tiles predicted by an older model. `overwrite = TRUE` bypasses
-#' and refreshes the checkpoints.
+#' replay tiles predicted by an older model. The input-content fingerprint
+#' requires one additional streaming read pass before prediction.
+#' `overwrite = TRUE` bypasses and refreshes the checkpoints.
 #'
-#' Cells with missing (`NA`) covariates stay `NA` in the output rasters -
-#' they are recorded before [cast_predict()] imputes them and written back
-#' as `NA` afterwards, matching the NA semantics of
+#' Cells with missing or non-finite covariates stay `NA` in the output rasters -
+#' only finite predictor rows are sent to the fitted engine, matching
+#' the missing-cell semantics of
 #' [cast_ensemble_raster()]. No suitability values are fabricated outside
 #' the data mask (e.g. ocean pixels).
 #'
@@ -29,7 +31,8 @@
 #' @param models Character vector. Which fitted models to predict. Default
 #'   all.
 #' @param overwrite Logical. Overwrite existing output rasters. Default
-#'   `FALSE` - existing files trigger a `cli_inform()` and skip.
+#'   `FALSE` - existing files skip only when their receipt matches this fit,
+#'   input content and output file. Stale or unverified outputs cause an error.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
 #' @param verbose Logical. Default `TRUE`.
 #'
@@ -50,229 +53,97 @@ cast_predict_tiled <- function(fit, raster,
                                compression = "LZW",
                                verbose   = TRUE) {
   check_suggested("terra", "for tile-based raster prediction")
-  if (inherits(raster, "character")) raster <- terra::rast(raster)
-  if (!inherits(raster, "SpatRaster"))
-    cli::cli_abort("{.arg raster} must be a SpatRaster or readable path.")
-  dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
-
-  mdl_names <- if (is.null(models)) names(fit$models) else models
-  mdl_names <- intersect(mdl_names, names(fit$models))
-  if (length(mdl_names) == 0)
-    cli::cli_abort("No matching fitted models in fit.")
-
+  .cast_check_fit(fit)
+  if (is.character(raster)) raster <- terra::rast(raster)
+  if (!inherits(raster, "SpatRaster")) cli::cli_abort("{.arg raster} must be a SpatRaster or readable path.")
+  mdl_names <- models %||% names(fit$models)
+  if (!length(mdl_names) || anyNA(mdl_names) || anyDuplicated(mdl_names) ||
+      !all(mdl_names %in% names(fit$models))) cli::cli_abort("{.arg models} must name unique fitted models.")
   env_vars <- fit$env_vars
-  missing <- setdiff(env_vars, names(raster))
-  if (length(missing) > 0)
-    cli::cli_abort("Raster missing required layer{?s}: {.val {missing}}.")
-
-  ts <- if (length(tile_size) == 1L) c(tile_size, tile_size) else tile_size
-  # Unvalidated, `tile_size = 0` produced `seq(1, n, by = 0)` (an R-internal
-  # error) and a length-3 vector silently dropped its third element.
-  if (!is.numeric(ts) || !length(ts) %in% c(1L, 2L) ||
-      any(!is.finite(ts)) || any(ts < 1)) {
-    cli::cli_abort(
-      "{.arg tile_size} must be one or two positive whole numbers of pixels."
-    )
+  if (!all(env_vars %in% names(raster))) cli::cli_abort("Raster is missing fitted predictors.")
+  raster <- raster[[env_vars]]
+  if (!is.numeric(tile_size) || !length(tile_size) %in% c(1L, 2L) ||
+      any(!is.finite(tile_size)) || any(tile_size < 1) ||
+      any(tile_size != floor(tile_size)) || any(tile_size > .Machine$integer.max)) {
+    cli::cli_abort("{.arg tile_size} must be one or two positive whole numbers of pixels.")
   }
-  ts <- as.integer(ts)
-  nrow_r <- terra::nrow(raster); ncol_r <- terra::ncol(raster)
-  row_starts <- seq(1L, nrow_r, by = ts[1])
-  col_starts <- seq(1L, ncol_r, by = ts[2])
-  tile_ids <- expand.grid(r0 = row_starts, c0 = col_starts,
-                          KEEP.OUT.ATTRS = FALSE)
-  n_tiles <- nrow(tile_ids)
-  if (verbose) cli::cli_inform(
-    "cast_predict_tiled: {n_tiles} tiles ({ts[1]}x{ts[2]} px) for {length(mdl_names)} model(s)."
-  )
-
-  # Output rasters: one per model, written once at the end of the sweep.
-  # `pre_existing` records which outputs existed BEFORE this call. No NA
-  # prototype is written up front: an interrupted run used to leave a
-  # pure-NA TIFF that the next `overwrite = FALSE` run accepted as complete.
-  out_paths <- stats::setNames(
-    file.path(output_dir, paste0("HSS_", mdl_names, ".tif")),
-    mdl_names
-  )
-  pre_existing <- stats::setNames(file.exists(out_paths), mdl_names)
-  for (mdl in mdl_names) {
-    if (pre_existing[[mdl]] && !overwrite) {
-      cli::cli_inform("  {basename(out_paths[[mdl]])} exists; skipping (overwrite = FALSE).")
+  ts <- rep(as.integer(tile_size), length.out = 2L)
+  nr <- terra::nrow(raster); nc <- terra::ncol(raster)
+  starts <- seq.int(1L, nr, by = ts[1]); columns <- seq.int(1L, nc, by = ts[2])
+  n_tiles <- length(starts) * length(columns)
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  paths <- stats::setNames(file.path(output_dir, paste0("HSS_", mdl_names, ".tif")), mdl_names)
+  # Content hashes distinguish spatial permutations with the same summary stats.
+  input_hash <- vapply(starts, function(row) .cast_digest(.cast_raster_block(raster,
+    row, min(ts[1], nr - row + 1L))), character(1))
+  grid <- list(extent = as.vector(terra::ext(raster)), dimensions = dim(raster),
+    crs = terra::crs(raster), variables = env_vars, tile_size = ts, input = input_hash)
+  signatures <- stats::setNames(vapply(mdl_names, function(m) {
+    info <- fit$models[[m]]
+    if (is.function(info$predict_function)) info$predict_function <- .cast_callback_identity(info$predict_function)
+    .cast_digest(list(algorithm = "streamed_tiles_v1", grid = grid, model = info,
+      scaling = fit$scaling, predictor = body(predict_single_model)))
+  }, character(1)), mdl_names)
+  receipt_path <- function(m) paste0(paths[[m]], ".receipt.rds")
+  todo <- mdl_names
+  for (m in mdl_names[file.exists(paths) & !overwrite]) {
+    receipt <- tryCatch(readRDS(receipt_path(m)), error = function(e) NULL)
+    if (is.null(receipt) || !identical(receipt$signature, signatures[[m]]) ||
+        !identical(receipt$md5, unname(tools::md5sum(paths[[m]])))) {
+      cli::cli_abort("Existing raster does not match this fit/input: {.path {paths[[m]]}}. Use a new directory or overwrite = TRUE.")
     }
+    todo <- setdiff(todo, m)
   }
-
-  do_tile <- function(k, rast) {
-    r0 <- tile_ids$r0[k]; c0 <- tile_ids$c0[k]
-    nr <- min(ts[1], nrow_r - r0 + 1L)
-    nc <- min(ts[2], ncol_r - c0 + 1L)
-    ext_tile <- terra::ext(
-      terra::xFromCol(rast, c0) - terra::xres(rast) / 2,
-      terra::xFromCol(rast, c0 + nc - 1L) + terra::xres(rast) / 2,
-      terra::yFromRow(rast, r0 + nr - 1L) - terra::yres(rast) / 2,
-      terra::yFromRow(rast, r0) + terra::yres(rast) / 2
-    )
-    tile_r <- terra::crop(rast, ext_tile)
-    df <- terra::as.data.frame(tile_r, xy = TRUE, na.rm = FALSE)
-    if (!"x" %in% names(df)) names(df)[1:2] <- c("x", "y")
-    names(df)[names(df) == "x"] <- "lon"
-    names(df)[names(df) == "y"] <- "lat"
-    list(tile_id = k, r0 = r0, c0 = c0, nr = nr, nc = nc, df = df)
-  }
-
-  # Tile checkpoints live in a per-fit directory so a new fit can never
-  # replay predictions of an older model, and `overwrite = TRUE` bypasses
-  # (and refreshes) the checkpoints instead of silently reusing them.
-  predict_tile <- function(tile, mdl_name, chk_root) {
-    df <- tile$df
-    nr <- tile$nr; nc <- tile$nc
-    if (nrow(df) == 0L) return(matrix(NA_real_, nr, nc))
-    # `chk_root` is NA when fingerprinting failed: checkpoints are then
-    # disabled rather than shared, so no tile can cross models.
-    chk_path <- if (is.na(chk_root)) NULL else
-      file.path(chk_root, sprintf("%s_%05d.rds", mdl_name, tile$tile_id))
-    if (!is.null(chk_path) && !isTRUE(overwrite) && file.exists(chk_path)) {
-      vals <- tryCatch(readRDS(chk_path), error = function(e) NULL)
-      if (!is.null(vals) && length(vals) == nr * nc) {
-        return(matrix(vals, nr, nc, byrow = TRUE))
+  writers <- list()
+  on.exit(for (writer in writers) .cast_writer_abort(writer), add = TRUE)
+  for (m in todo) writers[[m]] <- .cast_raster_writer(raster, paths[[m]], paste0("HSS_", m),
+    compression = compression, overwrite = overwrite)
+  checkpoints <- stats::setNames(lapply(todo, function(m) {
+    path <- file.path(output_dir, paste0(".cast_tiles_", signatures[[m]]))
+    dir.create(path, showWarnings = FALSE)
+    path
+  }), todo)
+  if (length(todo)) for (row in starts) {
+    count <- min(ts[1], nr - row + 1L)
+    X <- .cast_raster_block(raster, row, count)
+    if (!identical(.cast_digest(X), input_hash[match(row, starts)])) {
+      cli::cli_abort("Raster input changed during prediction; no completed output is published.")
+    }
+    stripe <- matrix(NA_real_, nrow(X), length(todo), dimnames = list(NULL, todo))
+    for (col in columns) {
+      width <- min(ts[2], nc - col + 1L)
+      index <- as.vector(t(outer(seq_len(count) - 1L, seq.int(col, col + width - 1L),
+                                function(r, c) r * nc + c)))
+      tile <- X[index, , drop = FALSE]
+      ok <- .cast_finite_rows(tile)
+      for (m in todo) {
+        file <- file.path(checkpoints[[m]], sprintf("%d_%d.rds", row, col))
+        checkpoint <- if (!overwrite && file.exists(file)) tryCatch(readRDS(file), error = function(e) NULL) else NULL
+        vals <- if (is.list(checkpoint) &&
+          identical(checkpoint$digest, .cast_digest(checkpoint$values))) checkpoint$values else NULL
+        if (!is.numeric(vals) || length(vals) != nrow(tile) ||
+            any(is.infinite(vals)) || any(!is.na(vals[!ok]))) {
+          vals <- rep(NA_real_, nrow(tile))
+          if (any(ok)) {
+            pred <- tryCatch(predict_single_model(fit$models[[m]], tile[ok, , drop = FALSE]),
+              error = function(e) cli::cli_abort("Prediction failed for {.val {m}} in tile {row}/{col}: {conditionMessage(e)}"))
+            if (!is.numeric(pred) || length(pred) != sum(ok)) cli::cli_abort("Invalid prediction vector for {.val {m}}.")
+            pred[!is.finite(pred)] <- NA_real_
+            vals[ok] <- pred
+          }
+          saveRDS(list(values = vals, digest = .cast_digest(vals)), file)
+        }
+        stripe[index, m] <- vals
       }
     }
-    pred_obj <- tryCatch(
-      cast_predict(fit, df, models = mdl_name),
-      error = function(e) NULL
-    )
-    if (is.null(pred_obj)) {
-      vals <- rep(NA_real_, nr * nc)
-    } else {
-      vals <- pred_obj$predictions[[paste0("HSS_", mdl_name)]]
-      # Write NA back over cells with NA covariates: cast_predict() imputes
-      # them with training medians, but those pixels must stay NA instead
-      # of carrying fabricated suitabilities (cast_ensemble_raster NA
-      # semantics).
-      na_rows <- !stats::complete.cases(df[, env_vars, drop = FALSE])
-      if (length(vals) == length(na_rows)) vals[na_rows] <- NA_real_
-      if (length(vals) != nr * nc) {
-        # nrow(df) may differ if cropping clipped pixels; pad NAs.
-        v2 <- rep(NA_real_, nr * nc); v2[seq_along(vals)] <- vals
-        vals <- v2
-      }
-    }
-    if (!is.null(chk_path)) {
-      tryCatch(saveRDS(vals, chk_path), error = function(e) NULL)
-    }
-    matrix(vals, nr, nc, byrow = TRUE)
+    for (m in todo) .cast_writer_block(writers[[m]], stripe[, m], row, count)
+    if (verbose) cli::cli_inform("Prediction rows {row}-{row + count - 1L}/{nr}")
   }
-
-  # Tiles are processed sequentially: ranger/xgboost predictions dominate the
-  # cost and a serial sweep bounds peak memory to one tile at a time.
-  #
-  # The model loop is INSIDE the tile loop on purpose. The previous order
-  # (model outside, tile inside) re-read the whole predictor stack from disk
-  # once per model, because `do_tile()` crops `raster` on every call -- with
-  # four models that is four redundant passes over a multi-gigabyte stack.
-  # Reading each tile once and predicting every model from it cuts that I/O
-  # to a single pass. Peak memory still holds one tile at a time: each tile
-  # keeps one prediction vector per model, not one full raster.
-  todo <- mdl_names[!pre_existing | overwrite]
-  if (!length(todo)) {
-    cli::cli_inform("All output rasters exist; nothing to do (overwrite = FALSE).")
+  for (m in todo) {
+    .cast_writer_finish(writers[[m]])
+    saveRDS(list(signature = signatures[[m]], md5 = unname(tools::md5sum(paths[[m]]))), receipt_path(m))
   }
-
-  # Fit fingerprints (one per model) so a new fit can never replay tiles
-  # predicted by an older model.
-  mdl_sig <- stats::setNames(
-    vapply(mdl_names, function(m) {
-      tryCatch(.cast_digest(fit$models[[m]]$model, len = 10),
-               error = function(e) NA_character_)
-    }, character(1)),
-    mdl_names
-  )
-  if (anyNA(mdl_sig)) {
-    # A digest failure must not collapse distinct models onto one shared
-    # checkpoint root, which would let tiles cross models.
-    cli::cli_warn(c(
-      "Could not fingerprint {sum(is.na(mdl_sig))} fitted model{?s};",
-      i = "checkpoints are disabled for those models so no tile can be replayed across models."
-    ))
-  }
-
-  # Raster fingerprint: geometry + layer names + summary stats, so a different
-  # environmental stack can never silently replay old tiles. Computed ONCE
-  # (it does not depend on the model) instead of once per model.
-  rast_sig <- tryCatch(
-    .cast_digest(list(
-      as.vector(terra::ext(raster)), dim(raster), names(raster),
-      terra::global(raster, c("mean", "min", "max"), na.rm = TRUE)
-    ), len = 10),
-    error = function(e) NA_character_
-  )
-  if (is.na(rast_sig)) {
-    cli::cli_warn(
-      "Could not fingerprint the raster stack; checkpoints are disabled for this run."
-    )
-  }
-
-  chk_root_of <- function(m) {
-    if (is.na(mdl_sig[[m]]) || is.na(rast_sig)) return(NA_character_)
-    root <- file.path(output_dir, paste0(".cast_tiles_", mdl_sig[[m]], "_", rast_sig))
-    dir.create(root, showWarnings = FALSE, recursive = TRUE)
-    root
-  }
-
-  if (length(todo)) {
-    n_cells_out <- as.double(nrow_r) * as.double(ncol_r)
-    # One accumulator per model, filled cell by cell.
-    acc <- stats::setNames(
-      lapply(todo, function(m) rep(NA_real_, n_cells_out)),
-      todo
-    )
-    # Output templates share the INPUT stack geometry (never re-opening the
-    # output file, which would lock it on Windows). `setNames()` is required:
-    # `todo` is an unnamed character vector, so `lapply()` returns an UNNAMED
-    # list and `templates[[mdl]]` would be NULL.
-    templates <- stats::setNames(
-      lapply(todo, function(m) {
-        tpl <- terra::rast(raster, nlyrs = 1L)
-        names(tpl) <- paste0("HSS_", m)
-        tpl
-      }),
-      todo
-    )
-
-    for (k in seq_len(n_tiles)) {
-      # Read the tile ONCE and reuse it for every model.
-      tile <- do_tile(k, raster)
-      for (mdl in todo) {
-        vals <- as.numeric(t(predict_tile(tile, mdl, chk_root_of(mdl))))
-        cells <- terra::cellFromRowColCombine(
-          templates[[mdl]],
-          seq(tile$r0, tile$r0 + tile$nr - 1L),
-          seq(tile$c0, tile$c0 + tile$nc - 1L)
-        )
-        acc[[mdl]][cells] <- vals
-        rm(vals, cells)
-      }
-      rm(tile)
-      if (k %% 20 == 0) invisible(gc())
-    }
-
-    for (mdl in todo) {
-      if (verbose) cli::cli_inform("  writing tiles for {.val {mdl}}...")
-      # Atomic write: a truncated GeoTIFF left behind by an interrupted run
-      # used to be accepted by the next `overwrite = FALSE` run as complete.
-      .cast_write_raster_atomic(
-        terra::setValues(templates[[mdl]], acc[[mdl]]),
-        out_paths[[mdl]], compression = compression
-      )
-    }
-    rm(acc, templates)
-  }
-
-  out <- list(
-    rasters = out_paths,
-    n_tiles = n_tiles,
-    models  = mdl_names
-  )
-  class(out) <- "cast_predict_tiled"
-  out
+  structure(list(rasters = paths, n_tiles = n_tiles, models = mdl_names), class = "cast_predict_tiled")
 }
 
 #' @export

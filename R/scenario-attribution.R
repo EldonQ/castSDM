@@ -191,17 +191,12 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     }
     terra::compareGeom(current, future, lyrs = FALSE, stopOnError = TRUE)
     current <- current[[vars]]; future <- future[[vars]]
-    if (!is.null(mask)) terra::compareGeom(current, mask, lyrs = FALSE, stopOnError = TRUE)
+    mask <- .cast_raster_mask(mask, current)
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
     if (file.exists(filename) && !overwrite) cli::cli_abort("{.arg filename} already exists.")
-    dir.create(dirname(filename), recursive = TRUE, showWarnings = FALSE)
-    temp <- tempfile(".attribution_", tmpdir = dirname(filename), fileext = ".tif")
-    on.exit(unlink(temp), add = TRUE)
-    out <- terra::rast(current[[1]], nlyrs = length(layer_names))
-    names(out) <- layer_names
-    terra::writeStart(out, temp, overwrite = TRUE, wopt = list(gdal = "COMPRESS=LZW", datatype = "FLT8S"))
-    writing <- TRUE
-    on.exit(if (writing) try(terra::writeStop(out), silent = TRUE), add = TRUE)
+    writer <- .cast_raster_writer(current, filename, layer_names,
+      datatype = "FLT8S", overwrite = overwrite)
+    on.exit(.cast_writer_abort(writer), add = TRUE)
     n <- terra::ncell(current)
     rows <- max(1L, as.integer(block_size / terra::ncol(current)))
     starts <- seq.int(1L, terra::nrow(current), by = rows)
@@ -242,22 +237,19 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     first <- starts[i]
     if (raster) {
       count <- min(rows, terra::nrow(current) - first + 1L)
-      a <- as.data.frame(terra::values(current, row = first, nrows = count, mat = TRUE))
-      b <- as.data.frame(terra::values(future, row = first, nrows = count, mat = TRUE))
+      a <- .cast_raster_block(current, first, count)
+      b <- .cast_raster_block(future, first, count)
     } else {
       idx <- seq.int(first, min(n, first + block_size - 1L))
       a <- current[idx, vars, drop = FALSE]; b <- future[idx, vars, drop = FALSE]
     }
-    keep <- rowSums(!is.finite(as.matrix(a))) == 0 & rowSums(!is.finite(as.matrix(b))) == 0
-    if (raster && !is.null(mask)) {
-      m <- terra::values(mask[[1]], row = first, nrows = count, mat = FALSE)
-      keep <- keep & is.finite(m) & m != 0
-    }
+    keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
+    if (raster) keep <- keep & .cast_mask_rows(mask, first, count, nrow(a))
     z <- matrix(NA_real_, nrow(a), length(layer_names), dimnames = list(NULL, layer_names))
     if (any(keep)) z[keep, ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
       b[keep, , drop = FALSE], drivers, weights, bounds)
     accumulate(z)
-    if (raster) terra::writeValues(out, z, first, count) else out[idx, ] <- z
+    if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
     if (verbose) cli::cli_inform("Scenario attribution: block {i}/{length(starts)}")
   }
   divide <- function(x, n) ifelse(n > 0, x / n, NA_real_)
@@ -272,9 +264,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     mean_model_sd = divide(sums[, "sd"], sums[, "nsd"]), row.names = NULL)
   data <- NULL
   if (raster) {
-    out <- terra::writeStop(out); writing <- FALSE
-    # Rename the complete sibling file so interruption cannot publish a partial copy.
-    if (!file.rename(temp, filename)) cli::cli_abort("Cannot publish attribution raster.")
+    .cast_writer_finish(writer)
     filename <- normalizePath(filename, winslash = "/", mustWork = TRUE)
   } else {
     xy <- intersect(c("lon", "lat"), names(current))

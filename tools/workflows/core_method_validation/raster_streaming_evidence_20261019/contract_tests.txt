@@ -1,0 +1,78 @@
+
+== Testing test-raster-contracts.R =============================================
+
+[ FAIL 0 | WARN 0 | SKIP 0 | PASS 0 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 0 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 1 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 2 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 3 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 4 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 5 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 6 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 7 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 8 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 9 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 10 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 11 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 12 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 13 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 14 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 15 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 16 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 17 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 18 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 19 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 20 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 21 ]
+[ FAIL 0 | WARN 1 | SKIP 0 | PASS 22 ]
+[ FAIL 0 | WARN 2 | SKIP 0 | PASS 22 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 22 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 23 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 24 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 25 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 26 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 27 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 28 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 29 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 30 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 31 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 32 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 33 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 34 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 35 ]
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 36 ]
+
+-- Warning ('test-raster-contracts.R:19:3'): raster mask and finite-cell semantics agree with paired attribution --
+`cv` carries no usable out-of-fold predictions for these models.
+i Thresholding on the weighted mean of per-model thresholds, which only approximates the ensemble-surface optimum.
+Backtrace:
+    x
+ 1. \-castSDM::cast_ensemble_raster(...) at test-raster-contracts.R:19:3
+ 2.   \-castSDM:::.ensemble_threshold(cv, mdl_names, weights, method) at cast/R/ensemble-raster.R:230:3
+ 3.     \-cli::cli_warn(...) at cast/R/ensemble.R:540:3
+
+-- Warning ('test-raster-contracts.R:88:3'): mask read failure aborts before publication and preserves existing output --
+`cv` carries no usable out-of-fold predictions for these models.
+i Thresholding on the weighted mean of per-model thresholds, which only approximates the ensemble-surface optimum.
+Backtrace:
+    x
+ 1. \-castSDM::cast_ensemble_raster(...) at test-raster-contracts.R:88:3
+ 2.   \-castSDM:::.ensemble_threshold(cv, mdl_names, weights, method) at cast/R/ensemble-raster.R:230:3
+ 3.     \-cli::cli_warn(...) at cast/R/ensemble.R:540:3
+
+-- Warning ('test-raster-contracts.R:91:3'): mask read failure aborts before publication and preserves existing output --
+`cv` carries no usable out-of-fold predictions for these models.
+i Thresholding on the weighted mean of per-model thresholds, which only approximates the ensemble-surface optimum.
+Backtrace:
+    x
+ 1. +-testthat::expect_error(...) at test-raster-contracts.R:91:3
+ 2. | \-testthat:::expect_condition_matching_(...)
+ 3. |   \-testthat:::quasi_capture(...)
+ 4. |     +-testthat (local) .capture(...)
+ 5. |     | \-base::withCallingHandlers(...)
+ 6. |     \-rlang::eval_bare(quo_get_expr(.quo), quo_get_env(.quo))
+ 7. \-castSDM::cast_ensemble_raster(...)
+ 8.   \-castSDM:::.ensemble_threshold(cv, mdl_names, weights, method) at cast/R/ensemble-raster.R:230:3
+ 9.     \-cli::cli_warn(...) at cast/R/ensemble.R:540:3
+
+[ FAIL 0 | WARN 3 | SKIP 0 | PASS 36 ]

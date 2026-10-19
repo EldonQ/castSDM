@@ -581,8 +581,8 @@ n_folds <- cv$pred_folds
 #' interrupted run can never leave a truncated GeoTIFF at the final path.
 #' Resume logic elsewhere keys off `file.exists()`, which previously meant a
 #' half-written output was silently accepted as a complete one on the next
-#' run. `file.rename()` is atomic within a filesystem on both POSIX and
-#' Windows, and the temp file is removed on failure.
+#' run. Existing outputs are moved aside for recoverable replacement on
+#' Windows; a failed rename never falls back to copying into the final path.
 #'
 #' @param r A `terra::SpatRaster` to write.
 #' @param path Final output path.
@@ -607,14 +607,7 @@ n_folds <- cv$pred_folds
     gdal = c(paste0("COMPRESS=", compression), "TILED=YES"),
     wopt = list(datatype = datatype)
   )
-  if (!file.rename(tmp, path)) {
-    # Cross-device or locked destination: fall back to copy + remove so the
-    # result is still complete, just not atomic.
-    if (!file.copy(tmp, path, overwrite = TRUE)) {
-      cli::cli_abort("Could not write raster to {.path {path}}.")
-    }
-    unlink(tmp)
-  }
+  .cast_publish_raster(tmp, path, overwrite = TRUE)
   ok <- TRUE
   invisible(path)
 }
@@ -816,8 +809,8 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
 #'   projected CRS; degrees would need a different distance).
 #' @param min_dist_km Positive minimum separation in kilometres.
 #' @param order `"random"` (seeded; the spThin default) or `"year_desc"`
-#'   (newest records first, on the argument that recent records carry more
-#'   precise coordinates -- deterministic, no seed needed).
+#'   (known years newest first, unknown years last; recency does not certify
+#'   coordinate precision -- deterministic, no seed needed).
 #' @param year Optional numeric year vector, required for `"year_desc"`.
 #' @param seed Seed for the `"random"` order.
 #' @return A logical vector marking the kept points.
@@ -829,14 +822,14 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
   order <- match.arg(order)
   stopifnot(is.numeric(lon), is.numeric(lat), length(lon) == length(lat),
             is.numeric(min_dist_km), length(min_dist_km) == 1L,
-            min_dist_km > 0)
+            is.finite(min_dist_km), min_dist_km > 0)
   n <- length(lon)
   ok <- is.finite(lon) & is.finite(lat)
   if (order == "year_desc") {
-    if (is.null(year) || length(year) != n) {
+    if (!is.numeric(year) || length(year) != n) {
       stop("order = 'year_desc' requires a year vector of the same length.")
     }
-    ord <- order(ifelse(is.finite(year), -year, -Inf), method = "radix")
+    ord <- order(ifelse(is.finite(year), -year, Inf), method = "radix")
   } else {
     ord <- .cast_with_seed(seed, sample.int(n))
   }

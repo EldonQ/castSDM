@@ -55,9 +55,9 @@ Default \code{"best"}.}
 contribute to the composite score. Default \code{2}.}
 
 \item{mask}{A \code{terra::SpatRaster} or \code{NULL}. If provided, prediction
-is restricted to cells where mask is non-NA. Only the first layer is
-used; a mask whose geometry cannot be matched to \code{raster_stack} is
-ignored with a warning.}
+is restricted to finite non-zero cells. The mask must have one layer
+and exactly match the prediction grid. Geometry or read failures abort;
+align categorical masks explicitly with nearest-neighbour resampling.}
 
 \item{clamp}{Logical. Clamp predictors to the training range before
 prediction. Default \code{FALSE}. The MESS layer (see \code{extrapolation}) is
@@ -79,7 +79,8 @@ unclamped block input, so clamping never softens the flag. Requires the
 \pkg{FNN} package.}
 
 \item{max_memory_mb}{Numeric. Approximate per-block memory budget in MB
-used to size the row blocks. Default \code{200}.}
+used to size the row blocks. Default \code{200}. This is not a whole-process
+limit: fitted models, prediction workspaces and GDAL add memory costs.}
 
 \item{prefix}{Character. Filename prefix. Default \code{""}.}
 
@@ -119,7 +120,7 @@ of a block still contributes to the rest of that block, and the positive
 weights are renormalised per cell over the models that produced a value
 there - the same convention as \code{\link[=cast_ensemble]{cast_ensemble()}}. The cross-model SD layer
 likewise uses only the cell-level contributors (\code{NA} where fewer than two
-models contribute). Cells with \code{NA} covariates (or masked out) stay \code{NA} in
+models contribute). Cells with non-finite covariates (or masked out) stay \code{NA} in
 every output layer. If no model produces a finite prediction for a block,
 those cells are \code{NA} and a warning is issued once. \code{n_valid_cells} counts
 the cells that received an ensemble value.

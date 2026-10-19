@@ -2,6 +2,19 @@
 
 Breaking release: one production pipeline with an explicit evaluation protocol.
 
+- Raster maintenance (2026-10-19): ensemble, single-shift maps, tiled prediction
+  and paired attribution share row-block I/O and recoverable file publication.
+  Full-grid output accumulators are removed. Mask geometry/read failures abort;
+  masks now require one aligned layer and finite non-zero inclusion values.
+- Tiled checkpoints fingerprint input content and callback dependencies, verify
+  stored prediction digests and require matching completion receipts before
+  skipping outputs. Prediction errors stop without publishing partial rasters.
+  Predictor names `x`/`y` are preserved rather than mistaken for coordinates.
+- Thinning puts unknown years last; a sole valid geographic record is sampled
+  correctly. Recency alone is not evidence of coordinate precision.
+- Effect maps are backed by streamed double-precision GeoTIFFs, including when
+  no filename is supplied. Existing filenames require explicit overwrite.
+
 - New `cast_protocol()` and `cast_run()` replace `cast()`. The protocol is the
   single declaration point for engines, selection, CV design, thresholds,
   prevalence calibration, ensemble policy and extrapolation handling.

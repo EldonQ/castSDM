@@ -1,0 +1,7 @@
+"run","elapsed_seconds","largest_recorded_R_allocation_bytes","total_recorded_R_allocations_bytes"
+"old_ensemble",2.21,1920048,251650024
+"new_ensemble",3.89,76848,261331152
+"old_effect",0.77,1920048,451494440
+"new_effect",0.880000000000001,384048,450227264
+"old_tiled",3.23,1920048,337222576
+"new_tiled",1.03,128232,158582552

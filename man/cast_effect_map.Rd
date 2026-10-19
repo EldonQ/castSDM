@@ -35,7 +35,9 @@ with one value per driver. Default \code{1}.}
 
 \item{block_rows}{Integer rows per processing block. Default 512.}
 
-\item{filename}{Optional GeoTIFF path for the effect and coverage stack (LZW).}
+\item{filename}{Optional GeoTIFF path for the effect and coverage stack (LZW).
+If omitted, a temporary file backs the returned raster. Outputs stream in
+row blocks; an existing filename requires \code{overwrite = TRUE}.}
 
 \item{overwrite}{Logical. Overwrite \code{filename}. Default \code{FALSE}.}
 
