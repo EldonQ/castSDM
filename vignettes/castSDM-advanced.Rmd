@@ -70,7 +70,7 @@ handed in as degrees are refused (a 10^5-fold thinning error, not a warning).
 random draw:
 
 - `user_table` uses exactly the points you supply (Phillips et al. 2009
-  user-defined background) â€?for already-available species records used as
+  user-defined background) â€” for already-available species records used as
   background, or expert-chosen controls.
 - `bias_raster` draws cells with probability proportional to a raster of
   sampling effort (target-group background). Combine it only with
@@ -109,7 +109,7 @@ engine to the same target: RF, BRT and GAM receive case weights (weight =
 target/n per class), and MaxEnt -- which has no row-weight interface -- gets
 a stored logit-scale offset fitted so its weighted mean training prediction
 equals the target too. All engines therefore share one calibration scale
-before ensembling. Evaluation metrics remain unweighted â€?the target changes
+before ensembling. Evaluation metrics remain unweighted â€” the target changes
 what is fitted, not what is scored.
 
 ```{r prevalence, purl = FALSE}
@@ -128,7 +128,7 @@ and a grid that fails entirely keeps the fixed defaults with a warning. No
 engine draws its own internal random-fold cross-validation inside the fit.
 
 Inside `cast_cv(tune = TRUE)` the grid runs again in every outer training
-fold â€?nested, leak-free: the held-out folds never influence the chosen
+fold â€” nested, leak-free: the held-out folds never influence the chosen
 hyperparameters. That multiplies compute by the grid size per fold; budget
 accordingly.
 
@@ -136,7 +136,7 @@ accordingly.
 
 `cast_cv()` blocks by space, so its metrics mix two uncertainty sources:
 which rows landed in which fold, and where the block boundaries fell.
-`n_repeat` separates them â€?each repeat redraws the fold assignment under
+`n_repeat` separates them â€” each repeat redraws the fold assignment under
 its own seed, metrics are averaged within each repeat, and the reported
 standard deviation is the **between-repeat** spread (blocking randomness),
 not fold noise.
