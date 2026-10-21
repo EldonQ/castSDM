@@ -261,7 +261,7 @@ compute_kappa <- function(obs, pred, threshold) {
 #' Logit- and Probability-Scale Calibration Helpers
 #'
 #' Presence-background engines produce scores on different implicit scales
-#' (probability forest, Bernoulli GBM, maxnet logistic, binomial GAM). When a
+#' (probability forest, maxnet logistic, binomial GAM). When a
 #' prevalence target is requested, every engine is shifted on the logit scale
 #' by a single constant `b` chosen so that the weighted mean prediction on the
 #' training sample equals the target -- the same estimand for every engine,
