@@ -7,14 +7,13 @@
 cast_select(
   data,
   response = "presence",
-  method = c("covsel", "full"),
+  method = c("screen", "full"),
   seed = NULL,
   verbose = TRUE,
   keep = character(0),
   corcut = 0.7,
   var_id = NULL,
   category = NULL,
-  algorithms = c("glm", "gam", "rf"),
   ncov = NULL,
   maxncov = 12L,
   weights = NULL,
@@ -28,81 +27,48 @@ they are never selected).}
 
 \item{response}{Binary response column. Default \code{"presence"}.}
 
-\item{method}{\code{"covsel"} (default) or \code{"full"} (keep every predictor).}
+\item{method}{\code{"screen"} (default) or \code{"full"} (keep every predictor).}
 
 \item{seed}{Random seed.}
 
 \item{verbose}{Print progress.}
 
-\item{keep}{Character vector of predictors specified before screening,
-such as an exposure and a scientifically justified adjustment set.
-These are forced through the collinearity filter and the embedding
-(\code{force}): expert knowledge outranks the data-driven search. Candidate
-covariates must still be scientifically admissible (not colliders or
-mediators of a total effect); retention does not verify a sufficient
-adjustment set.}
+\item{keep}{Character vector forced through the screen (expert knowledge).}
 
-\item{corcut}{Absolute Pearson correlation threshold for the collinearity
-filter levels. Default \code{0.7} (Dormann et al. 2013).}
+\item{corcut}{Absolute Pearson correlation threshold for pruning. Default
+\code{0.7} (Dormann et al. 2013).}
 
-\item{var_id}{Character vector aligned with the predictors giving the
-variable-level identity (e.g. all years and focal scales of one
-covariate share an id). At the variable level the filter keeps exactly
-one covariate per id. \code{NULL} skips that level.}
+\item{var_id}{Optional character vector aligned with the predictors giving
+a construct identity (e.g. all years/focal scales of one covariate share
+an id). The strongest-ranked member of each construct is retained.}
 
-\item{category}{Character vector aligned with the predictors giving the
-category-level identity (e.g. "climate", "terrain"). \code{NULL} skips it.}
+\item{category}{Optional character vector aligned with predictors. Accepted
+for API compatibility; the screen does not use category quotas.}
 
-\item{algorithms}{Embedding learners for \code{"covsel"}: any of \code{"glm"}
-(elastic net), \code{"gam"} (null-space penalisation), \code{"rf"} (guided
-regularised random forest). Default all three. Requires \pkg{glmnet},
-\pkg{mgcv} and \pkg{RRF} respectively.}
+\item{ncov}{Target number of covariates. Default \code{NULL} =
+\code{ceiling(log2(n_presences))}, capped at \code{maxncov}.}
 
-\item{ncov}{Target number of covariates for \code{"covsel"}. Default \code{NULL} =
-\code{ceiling(log2(n_presences))} (the covsel default), capped at \code{maxncov}.}
+\item{maxncov}{Maximum number of covariates. Default \code{12}.}
 
-\item{maxncov}{Maximum number of covariates for \code{"covsel"}. Default \code{12}.}
+\item{weights}{Optional numeric row weights used by the screen.}
 
-\item{weights}{Optional numeric row weights (e.g. prevalence targets)
-used by the \code{"covsel"} filter and embedding steps.}
+\item{ensure}{Optional named list of logical flag vectors aligned with the
+predictors, declaring coverage requirements. If the final set contains no
+flagged covariate, the strongest-ranked flagged survivor is admitted.}
 
-\item{ensure}{Optional named list of logical flag vectors aligned with
-the predictors, declaring coverage requirements the data-driven search
-cannot guarantee. For each flag (e.g. \code{list(climate = c(TRUE, ...))}),
-if the final set contains no flagged covariate, the strongest-ranked
-flagged survivor is admitted (reason \code{"ensured"}). This is the generic
-mechanism behind "a scenario-projection model must contain at least one
-time-varying driver": the flag comes from covariate provenance, never a
-hardcoded variable name.}
-
-\item{env_vars}{Optional explicit predictor set (a contract, as in
-\code{\link[=cast_prepare]{cast_prepare()}}). When supplied, selection runs on \code{env_vars}
-intersected with what the data actually supports; \code{var_id}, \code{category}
-and \code{keep} are re-indexed to that intersection by name. \code{NULL} keeps
-auto-detection.}
+\item{env_vars}{Optional explicit predictor set. \code{NULL} keeps auto-detection.}
 }
 \value{
-A \code{cast_select} object with \code{selected} (kept predictors, in
-admission order), \code{scores} (per-predictor marginal \code{assoc}, the
-univariate \code{stage1_p} ranking signal, the \code{collinear_thinned} flag, the
-admission \code{step_added} (\code{0} for prespecified predictors, \code{NA} for
-never-admitted ones; the covsel aggregate rank when embedded), the
-\code{loss_gain} (always \code{NA} for covsel: an aggregate ranking has no loss
-path), the \code{selected_reason} (\code{"prespecified"}, \code{"embed"}, \code{"filter"},
-\code{"ensured"} or \code{"excluded"}), the \code{kept_by_design} indicator for
-\code{keep}, and the \code{selected} flag), and \code{diagnostics} (filtered set,
-per-algorithm ranks, final aggregate ranking, coverage admissions and
-effective settings).
+A \code{cast_select} object with \code{selected}, per-predictor \code{scores}, and
+diagnostics (filtered set, coefficients, lambda, coverage admissions).
 }
 \description{
-Screen predictor variables before model fitting. \code{method = "covsel"}
-implements the two-step embedded covariate selection procedure of Adde
-et al. (2023) through the vendored reference implementation of the
-\pkg{covsel} package (Step A: hierarchical collinearity filtering; Step
-B: elastic-net GLM, null-space-penalized GAM and guided regularized
-random forest, aggregated into one ranking and truncated to \code{ncov}).
-\code{method = "full"} keeps every varying predictor and is the honest choice
-for a small prespecified set.
+Screen predictors before model fitting. \code{method = "screen"} applies a
+transparent sequence: low-information predictors are dropped, repeated
+constructs can be de-duplicated with \code{var_id}, correlated survivors are
+pruned at \code{corcut}, and the remaining set is screened with an L2-penalised
+(elastic-net) logistic model. \code{method = "full"} keeps every varying
+predictor and is the honest choice for a small prespecified set.
 }
 \details{
 Selection serves parsimony for interpretation and projection; it does not
@@ -112,10 +78,13 @@ identify a causal adjustment set.
 Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
 with it in ecological studies. \emph{Ecography} 36: 27-46.
 
-Adde, A. et al. (2023). Too many candidates: embedded covariate selection
-procedure for species distribution modelling with the covsel R package.
-\emph{Ecological Informatics} 75: 102080.
-\doi{10.1016/j.ecoinf.2023.102080}.
+Zou, H. & Hastie, T. (2005). Regularization and variable selection via the
+elastic net. \emph{Journal of the Royal Statistical Society: Series B}
+67: 301-320.
+
+Friedman, J., Hastie, T. & Tibshirani, R. (2010). Regularization paths for
+generalized linear models via coordinate descent.
+\emph{Journal of Statistical Software} 33: 1-22.
 }
 \seealso{
 \code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}

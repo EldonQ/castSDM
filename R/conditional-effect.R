@@ -1,8 +1,8 @@
 # Importance reporting ------------------------------------------------------
 #
 # cast_importance() tidies the screen's admission path: each admitted
-# predictor with its admission position (the covsel aggregate rank) and, for
-# older screens that carry one, the inner-CV loss improvement at admission.
+# predictor with its elastic-net screen rank and, for older screens that
+# carry one, the inner-CV loss improvement at admission.
 # It reuses the screen so no new estimation engine or hand-tuned knob is
 # introduced.
 
@@ -30,9 +30,9 @@
 #'
 #' Turns a screen into a tidy per-predictor table carrying the admission
 #' path: each admitted predictor with its admission position (`step_added`,
-#' the covsel aggregate rank; `0` for prespecified predictors) and, where
+#' the elastic-net screen rank; `0` for prespecified predictors) and, where
 #' the screen recorded one, the inner-CV loss improvement at admission
-#' (`loss_gain`, always `NA` for covsel screens).
+#' (`loss_gain`, always `NA` for the screen).
 #' Excluded predictors are listed with missing steps and gains.
 #'
 #' @section Interpretation (read before citing):
@@ -77,10 +77,10 @@ cast_importance <- function(object) {
 
   diagnostics <- screen$diagnostics
   diagnostics$measure <- "admission_rank"
-  # The covsel screen's admission order is the Adde et al. (2023) aggregate
-  # rank; loss_gain stays NA by design.
-  metric <- if (identical(screen$method, "covsel")) {
-    "embedded-selection rank"
+  # The screen's admission order is the elastic-net rank; loss_gain stays NA
+  # by design.
+  metric <- if (identical(screen$method, "screen")) {
+    "elastic-net screen rank"
   } else {
     screen$diagnostics$metric %||% "aggregate rank"
   }

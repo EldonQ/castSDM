@@ -12,7 +12,7 @@
 #' its fit/predict functions.
 #'
 #' @format A named list; names are the internal engine keys (`"rf"`,
-#'   `"maxent"`, `"brt"`, `"gam"`). Each entry carries:
+#'   `"maxent"`, `"gam"`). Each entry carries:
 #'   \describe{
 #'     \item{package}{Backing \pkg{Suggests} package.}
 #'     \item{label}{Human-readable name for messages and figures.}
@@ -31,12 +31,6 @@ list(
       color   = "#4DBBD5",
       # names(tune$best) -> cast_fit() formal
       tune_args = c(mtry = "rf_mtry")
-    ),
-    brt = list(
-      package = "xgboost",
-      label   = "Boosted regression trees",
-      color   = "#3C5488",
-      tune_args = c(depth = "brt_depth", shrinkage = "brt_shrinkage")
     ),
     maxent = list(
       package = "maxnet",

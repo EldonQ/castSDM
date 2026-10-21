@@ -166,7 +166,7 @@ test_that("centroid_shift_km is in kilometres on a projected metre grid", {
   dat <- .make_grid()
   fc <- .make_fit_cv(dat)
 
-  # Albers metres, the N-SDM grid family: a haversine on these coordinates
+  # Albers metres, a common projected grid: a haversine on these coordinates
   # returns a shift far larger than the extent itself.
   mk_rast <- function(jitter = 0) {
     base <- terra::rast(nrows = 8, ncols = 8,

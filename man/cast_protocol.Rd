@@ -5,19 +5,15 @@
 \title{Build a castSDM Analysis Protocol}
 \usage{
 cast_protocol(
-  models = c("rf", "brt", "maxent", "gam"),
+  models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
-  select_method = c("covsel", "full"),
+  select_method = c("screen", "full"),
   select_keep = character(0),
   select_corcut = 0.7,
-  select_algorithms = c("glm", "gam", "rf"),
   select_ncov = NULL,
   select_maxncov = 12L,
   rf_ntree = 500L,
   rf_mtry = NULL,
-  brt_n_trees = 2000L,
-  brt_depth = 5L,
-  brt_shrinkage = 0.005,
   maxent_classes = NULL,
   maxent_regmult = NULL,
   threshold_method = "max_tss",
@@ -42,14 +38,14 @@ cast_protocol(
 )
 }
 \arguments{
-\item{models}{Engines to fit: any of \code{"rf"}, \code{"brt"}, \code{"maxent"},
-\code{"gam"}. Default all four.}
+\item{models}{Engines to fit: any of \code{"rf"}, \code{"maxent"}, \code{"gam"}.
+Default all three.}
 
 \item{train_fraction}{Hold-out fraction rule: fraction of rows assigned
 to the training split (spatial block split). Default \code{0.7}.}
 
-\item{select_method}{\code{"covsel"} (embedded selection, Adde et al. 2023) or
-\code{"full"} (keep every varying predictor). Default \code{"covsel"}.}
+\item{select_method}{\code{"screen"} (independent elastic-net screen) or
+\code{"full"} (keep every varying predictor). Default \code{"screen"}.}
 
 \item{select_keep}{Predictors forced through screening (see
 \code{\link[=cast_select]{cast_select()}}).}
@@ -57,21 +53,14 @@ to the training split (spatial block split). Default \code{0.7}.}
 \item{select_corcut}{Absolute Pearson correlation threshold for the
 collinearity filter. Default \code{0.7}.}
 
-\item{select_algorithms}{Embedding learners for \code{"covsel"}. Default all
-three (\code{"glm"}, \code{"gam"}, \code{"rf"}).}
-
-\item{select_ncov}{Target covariate count for \code{"covsel"} (\code{NULL} =
+\item{select_ncov}{Target covariate count for \code{"screen"} (\code{NULL} =
 \code{ceiling(log2(n_presences))}).}
 
-\item{select_maxncov}{Maximum covariate count for \code{"covsel"}. Default \code{12}.}
+\item{select_maxncov}{Maximum covariate count for \code{"screen"}. Default \code{12}.}
 
 \item{rf_ntree}{RF trees. Default \code{500}.}
 
 \item{rf_mtry}{RF \code{mtry} (\code{NULL} keeps the ranger default \code{sqrt(p)}).}
-
-\item{brt_n_trees, brt_depth, brt_shrinkage}{BRT rounds, depth and learning
-rate. Defaults \code{2000}, \code{5}, \code{0.005}; depth and rate are replaced by the
-tuning grid when \code{tune = TRUE}.}
 
 \item{maxent_classes, maxent_regmult}{MaxEnt feature classes and
 regularisation multiplier (\code{NULL} = maxnet defaults).}

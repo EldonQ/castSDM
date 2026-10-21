@@ -2,7 +2,6 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
   skip_if_not_installed("ranger")
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mgcv")
-  skip_if_not_installed("RRF")
   set.seed(80)
   n <- 300
   x1 <- rnorm(n)
@@ -12,7 +11,7 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
     x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
   cv <- cast_cv(
-    dat, select_method = "covsel",
+    dat, select_method = "screen",
     select_args = list(corcut = 0.7),
     k = 3, models = "rf", rf_ntree = 40, seed = 81, verbose = FALSE
   )

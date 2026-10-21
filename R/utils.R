@@ -796,14 +796,14 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
 }
 
 # ---- Spatial thinning of occurrence coordinates ---------------------------
-#' Greedy minimum-distance thinning (spThin / N-SDM disaggregate style)
+#' Greedy minimum-distance thinning (spThin style)
 #'
 #' Keeps a point only when it lies more than `min_dist_km` from every
 #' already-kept point, scanning in the requested order. Grid-cell
 #' deduplication (one record per covariate cell) is NOT distance thinning:
 #' two records in adjacent cells can still sit metres apart, so spatial
 #' autocorrelation survives the cell filter. This is the standard remedy
-#' (Aiello-Lammens et al. 2015; N-SDM's `nsdm.disaggregate`).
+#' (Aiello-Lammens et al. 2015).
 #'
 #' @param lon,lat Numeric coordinate vectors in METRES (Albers or any
 #'   projected CRS; degrees would need a different distance).

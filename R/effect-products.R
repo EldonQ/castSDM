@@ -344,7 +344,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
       next
     }
     # Every engine prediction goes through the shared per-engine path
-    # (xgboost needs a DMatrix, GAM a data.frame). Shifting one column by
+    # (engines take raw predictor frames). Shifting one column by
     # name also avoids copying the whole block on each intervention step.
     Xi <- as.data.frame(X[ok, , drop = FALSE], check.names = FALSE)
     n_complete <- n_complete + nrow(Xi)

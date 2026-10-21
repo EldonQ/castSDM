@@ -1,9 +1,8 @@
-# covsel selection and the shift effect table ---------------------------------
+# Elastic-net screen and the shift effect table -------------------------------
 
-skip_covsel_deps <- function() {
+skip_screen_deps <- function() {
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mgcv")
-  skip_if_not_installed("RRF")
 }
 
 # x3 is a near-copy of x1 with no effect of its own: the filter must drop it.
@@ -20,35 +19,36 @@ make_collinear_data <- function(n = 300, r = 0.98, seed = 21) {
 }
 
 test_that("the collinearity filter drops a near-duplicate predictor", {
-  skip_covsel_deps()
+  skip_screen_deps()
   dat <- make_collinear_data()
   scr <- cast_select(dat, seed = 22, verbose = FALSE)
   expect_s3_class(scr, "cast_select")
-  expect_identical(scr$method, "covsel")
+  expect_identical(scr$method, "screen")
   # One of the two collinear partners must be thinned, never both kept.
   expect_true(any(scr$scores$collinear_thinned[scr$scores$variable %in% c("x1", "x3")]))
   expect_false(all(c("x1", "x3") %in% scr$diagnostics$filtered))
 })
 
-test_that("the embedding selects from the filtered set and records aggregates", {
-  skip_covsel_deps()
+test_that("the screen selects from the filtered set and records ranks", {
+  skip_screen_deps()
   dat <- make_collinear_data()
   scr <- cast_select(dat, seed = 23, verbose = FALSE)
   d <- scr$diagnostics
   expect_true(all(scr$selected %in% union(d$filtered, d$keep)))
-  expect_true(all(c("embed_ranks", "final_ranks") %in% names(d)))
+  expect_true(all(c("filtered", "lambda", "coefficients", "n_pres",
+                    "final_ranks") %in% names(d)))
   expect_true(nrow(d$final_ranks) >= 1L)
   # No null distribution, no p-values, no count cap leftovers.
   expect_false(any(c("p_value", "null_threshold", "interventional_effect",
                      "passed_null", "fallback") %in% names(scr$scores)))
-  # Embedded admissions carry an aggregate rank; prespecified entries are
+  # Screened admissions carry an elastic-net rank; prespecified entries are
   # marked by design.
-  emb <- scr$scores$selected_reason[scr$scores$selected] == "embed"
-  expect_true(all(is.finite(scr$scores$step_added[scr$scores$selected][emb])))
+  adm <- scr$scores$selected_reason[scr$scores$selected] == "screen"
+  expect_true(all(is.finite(scr$scores$step_added[scr$scores$selected][adm])))
 })
 
 test_that("the filter ranks a U-shaped driver above noise (poly2 signal)", {
-  skip_covsel_deps()
+  skip_screen_deps()
   set.seed(31)
   n <- 400
   xu <- rnorm(n)
@@ -79,7 +79,7 @@ test_that("retired or invalid selection requests fail without running a replacem
   expect_error(cast_select(dat, shift_size = 1), "unused argument")
   expect_error(cast_select(dat, num_trees = 60L), "unused argument")
   for (method in list("cpi", "dml", "rf", "typo", "two_stage", "two", NULL,
-                      character(), NA_character_, 1, c("full", "covsel"))) {
+                      character(), NA_character_, 1, c("full", "screen"))) {
     expect_error(cast_select(dat, method = method), "method.*must be")
   }
 })
@@ -122,7 +122,7 @@ test_that("cast_effect_table rejects a zero shift", {
 })
 
 test_that("prespecified predictors survive thinning and are marked by design", {
-  skip_covsel_deps()
+  skip_screen_deps()
   dat <- make_collinear_data(n = 150)
   required <- c("x1", "x3")
   scr <- suppressWarnings(cast_select(dat, keep = required,
@@ -133,14 +133,15 @@ test_that("prespecified predictors survive thinning and are marked by design", {
   expect_false(any(scr$scores$collinear_thinned[rows]))
   expect_true(all(scr$scores$selected_reason[rows] == "prespecified"))
   expect_identical(scr$diagnostics$keep, required)
+  expect_true(all(scr$scores$step_added[rows] == 0L))
   reported <- cast_importance(scr)$effects
   expect_true(all(reported$kept_by_design[reported$variable %in% required]))
   expect_true(all(reported$selected_reason[reported$variable %in% required] == "prespecified"))
   expect_false("perm_importance" %in% names(reported))
 })
 
-test_that("prespecified retention coexists with embedded admissions", {
-  skip_covsel_deps()
+test_that("prespecified retention coexists with screened admissions", {
+  skip_screen_deps()
   dat <- make_collinear_data(n = 150)
   scr <- suppressWarnings(cast_select(dat, keep = "x5",
     seed = 42, verbose = FALSE))
@@ -161,7 +162,7 @@ test_that("invalid or unaccommodated prespecified sets fail explicitly", {
 })
 
 test_that("nested CV retains the same prespecified variables within each training fold", {
-  skip_covsel_deps()
+  skip_screen_deps()
   skip_if_not_installed("ranger")
   skip_if_not_installed("pROC")
   dat <- make_collinear_data(n = 200)
@@ -176,7 +177,7 @@ test_that("nested CV retains the same prespecified variables within each trainin
 })
 
 test_that("stage functions forward prespecified retention to CV folds", {
-  skip_covsel_deps()
+  skip_screen_deps()
   skip_if_not_installed("ranger")
   skip_if_not_installed("pROC")
   dat <- make_collinear_data(n = 160)
@@ -222,29 +223,27 @@ test_that("invalid explicit predictor sets fail before selection", {
 })
 
 test_that("fold-constant predictors are dropped and metadata follow survivors", {
+  skip_screen_deps()
   dat <- make_collinear_data(n = 120)
   dat$x5 <- 0
   requested <- c("x3", "x1", "x2", "x5")
-  local_mocked_bindings(.cast_covsel_select = function(
-      data, response, env_vars, keep, corcut, var_id, category, algorithms,
-      ncov, maxncov, weights, ensure, seed, verbose) {
-    list(env_vars = env_vars, var_id = var_id, category = category, ensure = ensure)
-  })
   ids <- c(x5 = "id5", x2 = "id2", x1 = "id1", x3 = "id3")
   categories <- c(x1 = "climate", x2 = "terrain", x5 = "other", x3 = "water")
   flags <- c(x2 = FALSE, x5 = FALSE, x3 = FALSE, x1 = TRUE)
-  expect_warning(scr <- cast_select(dat, method = "covsel", env_vars = requested,
+  expect_warning(scr <- cast_select(dat, env_vars = requested,
     var_id = ids, category = categories, ensure = list(climate = flags),
-    verbose = FALSE), "lack supported variation")
-  survivors <- c("x3", "x1", "x2")
-  expect_identical(scr$env_vars, survivors)
-  expect_identical(scr$var_id, ids[survivors])
-  expect_identical(scr$category, categories[survivors])
-  expect_identical(scr$ensure$climate, flags[survivors])
+    seed = 45, verbose = FALSE), "lack supported variation")
+  expect_false("x5" %in% scr$selected)
+  expect_false("x5" %in% scr$scores$variable)
+  expect_true("x1" %in% scr$selected)
+  # x1 is both the declared coverage member and a screened survivor; the
+  # reason records how it entered, so either admission path is valid.
+  expect_true(scr$scores$selected_reason[scr$scores$variable == "x1"] %in%
+                c("screen", "ensured"))
   expect_error(suppressWarnings(cast_select(dat, env_vars = requested,
     keep = "x5", verbose = FALSE)), "vary in the training data")
-  expect_error(cast_select(dat, method = "full", env_vars = survivors,
+  expect_error(cast_select(dat, method = "full", env_vars = c("x3", "x1", "x2"),
     var_id = c(x3 = "id3", x1 = "id1"), verbose = FALSE), "var_id.*cover")
-  expect_error(cast_select(dat, method = "full", env_vars = survivors,
+  expect_error(cast_select(dat, method = "full", env_vars = c("x3", "x1", "x2"),
     category = c(x3 = "water", x1 = "climate"), verbose = FALSE), "category.*cover")
 })

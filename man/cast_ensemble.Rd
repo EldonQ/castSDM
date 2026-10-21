@@ -87,11 +87,10 @@ components among \verb{2 x AUC - 1} (AUC skill), \code{maxTSS}, and Boyce/CBI:
 
 \deqn{Score = mean(2 \times AUC - 1, maxTSS, Boyce)}
 
-averaged over whichever components are finite, following the N-SDM
-nested-modelling framework (Adde et al. 2023), whose reference
-implementation takes the \code{na.omit} mean of the available components
-rather than a fixed divisor (the docstring formula \eqn{\frac{1}{3}}
-applies only when all three components are present). When the CV metrics
+averaged over whichever components are finite. The mean uses the
+available components rather than a fixed divisor (the docstring formula
+\eqn{\frac{1}{3}} applies only when all three components are present).
+When the CV metrics
 carry Boyce it substitutes CBI as the ordination-aware component. A
 model with fewer than two finite score components scores \code{NA} and is
 dropped with a warning, because averaging over
@@ -111,13 +110,6 @@ the out-of-fold predictions stored by \code{\link[=cast_cv]{cast_cv()}}, i.e. of
 is actually thresholded. When \code{cv} carries no out-of-fold predictions the
 function falls back to a weighted mean of the per-model thresholds and
 warns that this is only an approximation.
-}
-\references{
-Adde, A., Rey, P.-L., Brun, P., Külling, N., Fopp, F., Altermatt, F.,
-Broennimann, O., Lehmann, A., Petitpierre, B., Zimmermann, N. E.,
-Pellissier, L., Guisan, A. (2023). N-SDM: a high-performance computing
-pipeline for Nested Species Distribution Modelling.
-\emph{Ecography}, 2023(6), e06540. \doi{10.1111/ecog.06540}
 }
 \seealso{
 \code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_predict]{cast_predict()}}, \code{\link[=cast_project]{cast_project()}}

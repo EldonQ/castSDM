@@ -1,5 +1,0 @@
-Candidate audit completed; ecological validation has NOT been run.
-Provisional lead: Schizopygopsis pylzovi, based on species names and traceable references.
-Counts are records/cells, not independent sampling units.
-Publication/received dates cannot be treated as sampling years.
-Accessible aquatic domain, observation bias and independent evaluation remain to be defined.

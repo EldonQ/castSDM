@@ -42,9 +42,9 @@ belong to several groups, e.g. a family ensemble plus a full ensemble).
 # One ensemble per algorithm family plus a consensus view
 cast_ensemble_by(fit, cv, preds,
   groups = list(
-    trees   = c("rf", "brt"),
+    trees   = c("rf"),
     other   = c("maxent", "gam"),
-    full    = c("rf", "brt", "maxent", "gam")
+    full    = c("rf", "maxent", "gam")
   ))
 }
 

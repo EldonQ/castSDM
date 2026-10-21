@@ -7,7 +7,7 @@
 cast_cv(
   data,
   screen = NULL,
-  select_method = "covsel",
+  select_method = "screen",
   select_args = list(),
   k = 5L,
   models = c("rf"),
@@ -17,8 +17,6 @@ cast_cv(
   buffer_unit = c("deg", "km"),
   response = "presence",
   rf_ntree = 500L,
-  brt_n_trees = 2000L,
-  brt_shrinkage = 0.005,
   tune = FALSE,
   tune_folds = 3L,
   prevalence_target = NULL,
@@ -29,7 +27,6 @@ cast_cv(
   seed = NULL,
   verbose = TRUE,
   rf_mtry = NULL,
-  brt_depth = 5L,
   maxent_classes = NULL,
   maxent_regmult = NULL,
   num_threads = 1L,
@@ -46,7 +43,7 @@ selection into the CV metrics (a warning is issued); treat those metrics
 as optimistic.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
-\code{"covsel"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
+\code{"screen"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.
 Cannot override \code{data}, \code{response}, or \code{method}.}
@@ -89,10 +86,6 @@ projected inputs.}
 \item{response}{Binary response column.}
 
 \item{rf_ntree}{RF trees per fold. Default \code{500}.}
-
-\item{brt_n_trees}{BRT trees per fold. Default \code{2000}.}
-
-\item{brt_shrinkage}{BRT learning rate per fold. Default \code{0.005}.}
 
 \item{tune}{Logical. Run the per-engine hyperparameter grid search
 (\code{\link[=cast_fit]{cast_fit()}}, argument \code{tune}) inside every outer training fold, so the
@@ -146,7 +139,7 @@ the \code{aoa} component of the returned object and is consumed by
 
 \item{verbose}{Print progress.}
 
-\item{rf_mtry, brt_depth, maxent_classes, maxent_regmult, num_threads}{Engine
+\item{rf_mtry, maxent_classes, maxent_regmult, num_threads}{Engine
 settings as in \code{\link[=cast_fit]{cast_fit()}}, applied in every outer training fold.}
 
 \item{fold_ids}{Optional integer fold assignments from an external design

@@ -117,13 +117,13 @@ test_that("per-driver shifts keep their names through SD conversion", {
 test_that("real multiengine maps agree with tabular ensemble magnitudes", {
   skip_if_not_installed("terra")
   skip_if_not_installed("ranger")
-  skip_if_not_installed("xgboost")
+  skip_if_not_installed("mgcv")
   set.seed(91)
   x <- rnorm(220); z <- rnorm(220)
   d <- data.frame(lon = runif(220), lat = runif(220), x = x, z = z,
                   presence = rbinom(220, 1, plogis(x - z)))
-  fit <- cast_fit(d, models = c("rf", "brt"), rf_ntree = 40,
-                  brt_n_trees = 60, seed = 92, verbose = FALSE)
+  fit <- cast_fit(d, models = c("rf", "gam"), rf_ntree = 40,
+                  seed = 92, verbose = FALSE)
   r <- terra::rast(nrows = 4, ncols = 5, nlyrs = 2)
   names(r) <- c("x", "z")
   terra::values(r) <- as.matrix(d[1:20, c("x", "z")])

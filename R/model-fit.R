@@ -1,8 +1,7 @@
 #' Fit Species Distribution Models
 #'
 #' Trains one or more SDM algorithms on prepared data. Supported models:
-#' Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
-#' Generalised Additive Models (GAM).
+#' Random Forest (RF), MaxEnt, and Generalised Additive Models (GAM).
 #'
 #' Variable selection is driven by the `cast_select` object from
 #' [cast_select()]. If no screen is provided, all environmental variables
@@ -10,24 +9,12 @@
 #'
 #' @param data A `data.frame` with `presence` column and predictor variables.
 #' @param screen A `cast_select` object from [cast_select()], or `NULL`.
-#' @param models Character vector. Models to fit: `"rf"`, `"maxent"`, `"brt"`,
-#'   `"gam"`. Default `c("rf", "brt", "maxent", "gam")`.
+#' @param models Character vector. Models to fit: `"rf"`, `"maxent"`,
+#'   `"gam"`. Default all three.
 #' @param response Character. Response column name. Default `"presence"`.
 #' @param rf_ntree Integer. Number of RF trees. Default `500`.
 #' @param rf_mtry Integer. RF variables considered at each split. Default
 #'   `NULL` (the ranger default, `floor(sqrt(p))`).
-#' @param brt_n_trees Integer. Number of boosting rounds (trees) for the
-#'   xgboost BRT. Default `2000` at the default `brt_shrinkage = 0.005`;
-#'   jointly assess rounds, learning rate and depth for the dataset rather
-#'   than assuming a universal SDM recipe. The round count is a
-#'   prespecified setting: it is never selected by an internal random-fold
-#'   cross-validation inside the fit.
-#' @param brt_depth Integer. BRT tree depth. Default `5`. Ignored when
-#'   `tune = TRUE` (the depth enters the search grid).
-#' @param brt_shrinkage Numeric. BRT learning rate. Default `0.005`
-#'   as a starting value; jointly assess learning rate, tree count and depth
-#'   for the dataset rather than assuming a universal SDM recipe.
-#'   Ignored when `tune = TRUE` (the rate enters the search grid).
 #' @param maxent_classes Character. MaxEnt feature classes as a single string
 #'   of class letters, e.g. `"l"`, `"lq"`, `"lqh"`, `"lqhp"`. Default `NULL`
 #'   (the maxnet default feature set). When `tune = TRUE`, a supplied value is
@@ -35,18 +22,19 @@
 #' @param maxent_regmult Numeric. MaxEnt regularisation multiplier. Default
 #'   `NULL` (i.e. `1`, the maxnet default). When `tune = TRUE`, a supplied
 #'   value is held fixed while the feature classes are searched.
-#' @param tune Logical. Run a small grid search per engine (RF `mtry`; BRT
-#'   `max_depth` x `eta`; MaxEnt feature classes x regularisation
-#'   multiplier) and fit with the best-scoring combination. Default `FALSE`.
+#' @param tune Logical. Run a small grid search per engine (RF `mtry`;
+#'   MaxEnt feature classes x regularisation multiplier) and fit with the
+#'   best-scoring combination. Default `FALSE`.
 #'   See Details.
 #' @param tune_folds Integer. Stratified folds used by the inner grid-search
-#'   scoring (BRT and MaxEnt; RF scores out-of-bag). Default `3`.
+#'   scoring (MaxEnt; RF scores out-of-bag). Default `3`.
 #' @param prevalence_target Numeric in (0, 1), or `NULL`. When supplied,
 #'   presence and background rows are weighted so that the *weighted*
 #'   prevalence equals `prevalence_target` (weight = target/n per class),
-#'   following the standard presence-background correction (N-SDM uses the
-#'   equivalent `n_bg/n_pres` presence weight; biomod2 defaults to a 0.5
-#'   target). RF, BRT and GAM accept the weights; MaxEnt has no row-weight
+#'   following the standard presence-background correction (presence weight
+#'   `n_bg/n_pres` is an equivalent parameterisation; biomod2 defaults to a
+#'   0.5 target). RF accepts the weights; GAM is fitted unweighted and
+#'   calibrated with the shared logit offset; MaxEnt has no row-weight
 #'   interface and is always fitted unweighted. Default `NULL` (unweighted:
 #'   outputs stay relative suitabilities under the sampled prevalence).
 #' @param num_threads Integer. Threads for the Random Forest learner. Default
@@ -65,9 +53,6 @@
 #'   clamps predictions internally; clamping to the training range is a
 #'   package-level decision (see [cast_predict()] and
 #'   [cast_ensemble_raster()], argument `clamp`).
-#' - **BRT**: [xgboost::xgb.train()] with logloss (binary:logistic) and a
-#'   prespecified round count (`brt_n_trees`). No internal
-#'   cross-validation folds are drawn inside the fit.
 #' - **GAM**: [mgcv::gam()] with thin-plate splines.
 #'
 #' ## Hyperparameter grids (`tune = TRUE`)
@@ -75,9 +60,6 @@
 #' flexsdm) but trimmed for cost:
 #' - **RF** searches `mtry` around `sqrt(p)` and is scored by out-of-bag TSS
 #'   (no extra refits beyond the grid itself).
-#' - **BRT** searches `max_depth` x `eta` at the configured round count,
-#'   scored by TSS on stratified inner folds whose threshold is selected on
-#'   the fold's training part.
 #' - **MaxEnt** searches feature classes x regularisation multiplier, scored
 #'   by stratified random-fold TSS with the threshold selected on the
 #'   training part of each fold.
@@ -85,7 +67,6 @@
 #' Combinations that fail to fit (e.g. very small folds) score `NA`; if no
 #' combination scores, the fixed defaults are kept with a warning.
 #' Explicit RF `mtry` and MaxEnt feature/regularisation values are held fixed.
-#' BRT depth and shrinkage are replaced by the documented grid when tuning.
 #' Selecting hyperparameters on inner data and evaluating on outer folds is
 #' the nested-selection principle of Cawley & Talbot (2010): pass
 #' `tune = TRUE` to [cast_cv()] to run the grid inside every outer training
@@ -96,21 +77,15 @@
 #' and subsequent selection bias in performance evaluation. *Journal of
 #' Machine Learning Research*, 11, 2079-2107.
 #'
-#' Elith, J., Leathwick, J. R. & Hastie, T. (2008). A working guide to boosted
-#' regression trees. *Journal of Animal Ecology*, 77(4), 802-813.
-#'
 #' @seealso [cast_select()], [cast_evaluate()], [cast_predict()]
 #'
 #' @export
 cast_fit <- function(data,
                      screen       = NULL,
-                     models       = c("rf", "brt", "maxent", "gam"),
+                     models       = c("rf", "maxent", "gam"),
                      response     = "presence",
                      rf_ntree     = 500L,
                      rf_mtry      = NULL,
-                     brt_n_trees  = 2000L,
-                     brt_depth    = 5L,
-                     brt_shrinkage = 0.005,
                      maxent_classes = NULL,
                      maxent_regmult = NULL,
                      tune         = FALSE,
@@ -145,10 +120,6 @@ cast_fit <- function(data,
     num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
   }
   rf_ntree <- .cast_check_scalar(rf_ntree, "rf_ntree", lower = 1, integer = TRUE)
-  brt_n_trees <- .cast_check_scalar(brt_n_trees, "brt_n_trees", lower = 1, integer = TRUE)
-  brt_depth <- .cast_check_scalar(brt_depth, "brt_depth", lower = 1, integer = TRUE)
-  brt_shrinkage <- .cast_check_scalar(brt_shrinkage, "brt_shrinkage", lower = 0,
-                                    upper = 1, min_inclusive = FALSE)
   if (!is.null(rf_mtry)) {
     rf_mtry <- .cast_check_scalar(rf_mtry, "rf_mtry", lower = 1, integer = TRUE)
   }
@@ -236,16 +207,14 @@ cast_fit <- function(data,
     # Per-engine hyperparameters; explicit overrides win, tuning replaces
     # whichever dimensions were not pinned down.
     p_rf_mtry <- rf_mtry
-    p_brt_depth <- brt_depth
-    p_brt_shrinkage <- brt_shrinkage
     p_me_classes <- maxent_classes
     p_me_regmult <- maxent_regmult
-    if (isTRUE(tune) && mdl %in% c("rf", "brt", "maxent")) {
+    if (isTRUE(tune) && mdl %in% c("rf", "maxent")) {
       tune_info <- tryCatch(
         .cast_tune(
           mdl, X_raw, Y,
           tune_folds = tune_folds,
-          rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
+          rf_ntree = rf_ntree,
           case_weights = case_weights,
           fixed = list(rf_mtry = rf_mtry, maxent_classes = maxent_classes,
                        maxent_regmult = maxent_regmult),
@@ -260,16 +229,13 @@ cast_fit <- function(data,
       )
       if (!is.null(tune_info)) {
         p_rf_mtry <- tune_info$best$mtry
-        p_brt_depth <- tune_info$best$depth %||% p_brt_depth
-        p_brt_shrinkage <- tune_info$best$shrinkage %||% p_brt_shrinkage
         p_me_classes <- tune_info$best$classes %||% p_me_classes
         p_me_regmult <- tune_info$best$regmult %||% p_me_regmult
       }
     }
 
     fitted_models[[mdl]] <- tryCatch(
-      fit_traditional(mdl, X_raw, Y, rf_ntree, brt_n_trees,
-                      p_brt_depth, p_brt_shrinkage, seed, num_threads,
+      fit_traditional(mdl, X_raw, Y, rf_ntree, seed, num_threads,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
                       rf_mtry = p_rf_mtry,
@@ -282,7 +248,7 @@ cast_fit <- function(data,
         ))
       }
     )
-    if (isTRUE(tune) && mdl %in% c("rf", "brt", "maxent") &&
+    if (isTRUE(tune) && mdl %in% c("rf", "maxent") &&
         !is.null(tune_info)) {
       fitted_models[[mdl]]$tune <- tune_info
     }
@@ -357,10 +323,6 @@ cast_fit <- function(data,
   for (mdl in names(fit$models %||% list())) {
     info <- fit$models[[mdl]]
     if (mdl == "rf" && !is.null(info$model$mtry)) out$rf_mtry <- info$model$mtry
-    if (mdl == "brt" && !is.null(info$depth)) {
-      out$brt_depth <- info$depth
-      out$brt_shrinkage <- info$shrinkage
-    }
     t <- fit$models[[mdl]]$tune
     spec <- eng[[mdl]]$tune_args
     if (is.null(t) || is.null(t$best) || is.null(spec)) next
@@ -403,8 +365,7 @@ cast_fit <- function(data,
 
 #' @keywords internal
 #' @noRd
-fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
-                             brt_depth, brt_shrinkage, seed,
+fit_traditional <- function(name, X, Y, rf_ntree, seed,
                              num_threads = 1L,
                              maxent_classes = NULL,
                              maxent_regmult = NULL,
@@ -428,15 +389,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       m <- .fit_maxent(X, Y, classes = maxent_classes, regmult = maxent_regmult)
       list(type = "traditional", model = m, name = "maxent")
     },
-    "brt" = {
-      check_suggested("xgboost", "for BRT")
-      m <- .fit_xgboost(X, Y, nrounds = brt_n_trees,
-                        max_depth = brt_depth, eta = brt_shrinkage,
-                        weights = case_weights, num_threads = num_threads,
-                        seed = seed %||% 42L)
-      list(type = "traditional", model = m, name = "brt",
-           depth = brt_depth, shrinkage = brt_shrinkage)
-    },
     "gam" = {
       check_suggested("mgcv", "for GAM")
       df <- cbind(presence = Y, X)
@@ -453,9 +405,15 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       f <- stats::as.formula(
         paste("presence ~", paste(pred_terms, collapse = " + "))
       )
+      # Fit unweighted and let the shared post-fit logit offset calibrate
+      # prevalence. Passing fractional case weights to a binomial GAM triggers
+      # R's "non-integer #successes" warning and can destabilise the outer
+      # gam.fit3 iterations; the offset gives the same ensemble scale without
+      # changing the likelihood.
       m <- tryCatch(
         mgcv::gam(f, data = df, family = stats::binomial(),
-                  weights = case_weights, method = "REML"),
+                  method = "REML", select = TRUE,
+                  control = mgcv::gam.control(maxit = 100L)),
         error = function(e) {
           cli::cli_warn("GAM smooth fit failed ({e$message}); fitting a linear-only fallback. Inspect the fitted formula before interpreting responses.")
           flin <- stats::as.formula(
@@ -464,54 +422,13 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
                         collapse = " + "))
           )
           mgcv::gam(flin, data = df, family = stats::binomial(),
-                    weights = case_weights)
+                    method = "REML", select = TRUE,
+                    control = mgcv::gam.control(maxit = 100L))
         }
       )
       list(type = "traditional", model = m, name = "gam")
     }
   )
-}
-
-#' Fit a Boosted Regression Tree (xgboost)
-#'
-#' Single construction path shared by [cast_fit()] and the BRT grid search.
-#' Logloss on the binary response, prespecified round count, deterministic
-#' (no row/column subsampling) so a given seed reproduces the fit.
-#'
-#' @param X Predictor data.frame (imputed, raw units).
-#' @param Y Binary 0/1 response.
-#' @param nrounds Number of boosting rounds.
-#' @param max_depth Tree depth.
-#' @param eta Learning rate.
-#' @param weights Optional case weights.
-#' @param num_threads Threads for xgboost.
-#' @param seed Seed for tree construction.
-#' @keywords internal
-#' @noRd
-.fit_xgboost <- function(X, Y, nrounds, max_depth, eta, weights = NULL,
-                         num_threads = 1L, seed = 42L) {
-  check_suggested("xgboost", "for BRT")
-  d <- xgboost::xgb.DMatrix(as.matrix(X), label = as.numeric(Y),
-                            weight = weights)
-  params <- list(
-    objective = "binary:logistic",
-    eval_metric = "logloss",
-    max_depth = as.integer(max_depth),
-    eta = as.numeric(eta),
-    nthread = as.integer(num_threads),
-    seed = as.integer(seed)
-  )
-  xgboost::xgb.train(params = params, data = d,
-                     nrounds = as.integer(nrounds), verbose = 0)
-}
-
-#' Predict with a Boosted Regression Tree (xgboost)
-#'
-#' @keywords internal
-#' @noRd
-.predict_xgboost <- function(model, X) {
-  d <- xgboost::xgb.DMatrix(as.matrix(X))
-  as.numeric(stats::predict(model, newdata = d))
 }
 
 #' Fit a MaxEnt (maxnet) Model
@@ -570,8 +487,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 #'
 #' Grids (biomod2/flexsdm-informed, trimmed for cost):
 #' - rf: `mtry` around `sqrt(p)`, scored by out-of-bag TSS.
-#' - brt: `max_depth` x `eta` at the configured round count, scored by TSS
-#'   on stratified inner folds (no internal random-fold CV inside the fit).
 #' - maxent: feature classes x regularisation multiplier (each dimension held
 #'   fixed when supplied via `fixed`), scored by stratified random-fold TSS.
 #'
@@ -580,7 +495,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 #' @keywords internal
 #' @noRd
 .cast_tune <- function(name, X, Y, tune_folds = 3L,
-                       rf_ntree = 500L, brt_n_trees = 2000L,
+                       rf_ntree = 500L,
                        case_weights = NULL,
                        fixed = list(), seed = NULL,
                        num_threads = 1L, verbose = TRUE) {
@@ -591,7 +506,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
         as.integer(round(sqrt(p) * c(0.5, 1, 2)))))),
       stringsAsFactors = FALSE
     ),
-    brt = expand.grid(depth = c(2, 5), shrinkage = c(0.005, 0.01)),
     maxent = {
       cls <- fixed$maxent_classes %||% c("l", "lq", "lqh", "lqhp")
       rms <- fixed$maxent_regmult %||% c(0.5, 1, 2)
@@ -604,9 +518,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   scores <- switch(name,
     rf   = .tune_rf(X, Y, grid, rf_ntree = rf_ntree, seed = seed,
                     num_threads = num_threads, case_weights = case_weights),
-    brt  = .tune_brt(X, Y, grid, brt_n_trees = brt_n_trees,
-                     tune_folds = tune_folds, seed = seed,
-                     case_weights = case_weights, num_threads = num_threads),
     maxent = .tune_maxent(X, Y, grid, tune_folds = tune_folds, seed = seed)
   )
   names(scores) <- apply(grid, 1L, function(r) paste(names(r), r, sep = "=",
@@ -625,7 +536,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
       "Tuned {.val {name}}: {.val {names(scores)[best_i]}} (TSS = {round(scores[best_i], 3)})."
     )
   }
-  metric <- switch(name, rf = "tss_oob", brt = "tss_cv", maxent = "tss_cv")
+  metric <- switch(name, rf = "tss_oob", maxent = "tss_cv")
   list(
     engine = name, metric = metric, grid = grid, scores = scores,
     best = best, best_score = unname(scores[best_i])
@@ -658,7 +569,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
 #' Stratified Inner Folds for the Grid Search
 #'
 #' Presence and background rows are split into `tune_folds` separately, so
-#' every fold sees both classes. Shared by the BRT and MaxEnt grid scores.
+#' every fold sees both classes. Used by the MaxEnt grid score.
 #' @keywords internal
 #' @noRd
 .cast_tune_folds <- function(Y, tune_folds, seed) {
@@ -672,51 +583,6 @@ fit_traditional <- function(name, X, Y, rf_ntree, brt_n_trees,
   })
 }
 
-
-#' Grid-score BRT by stratified inner-fold TSS
-#'
-#' Each combination is fit once per inner fold at the configured round
-#' count; the threshold is selected on the fold's training part and applied
-#' to the held-out part. No internal cross-validation folds are drawn
-#' inside the fitted model.
-#' @keywords internal
-#' @noRd
-.tune_brt <- function(X, Y, grid, brt_n_trees, tune_folds, seed,
-                      case_weights = NULL, num_threads = 1L) {
-  check_suggested("xgboost", "for BRT tuning")
-  fold <- .cast_tune_folds(Y, tune_folds, seed)
-  vapply(seq_len(nrow(grid)), function(i) {
-    fold_scores <- vapply(seq_len(tune_folds), function(f) {
-      tr <- which(fold != f)
-      te <- which(fold == f)
-      if (!length(tr) || !length(te) ||
-          length(unique(Y[tr])) < 2L || length(unique(Y[te])) < 2L) {
-        return(NA_real_)
-      }
-      m <- tryCatch(
-        .fit_xgboost(X[tr, , drop = FALSE], Y[tr],
-                     nrounds = brt_n_trees, max_depth = grid$depth[i],
-                     eta = grid$shrinkage[i],
-                     weights = if (is.null(case_weights)) NULL else case_weights[tr],
-                     num_threads = num_threads, seed = seed %||% 42L),
-        error = function(e) NULL
-      )
-      if (is.null(m)) return(NA_real_)
-      p_tr <- tryCatch(.predict_xgboost(m, X[tr, , drop = FALSE]),
-                       error = function(e) rep(NA_real_, length(tr)))
-      p_te <- tryCatch(.predict_xgboost(m, X[te, , drop = FALSE]),
-                       error = function(e) rep(NA_real_, length(te)))
-      thr <- tryCatch(cast_threshold(p_tr, Y[tr], method = "max_tss"),
-                      error = function(e) NA_real_)
-      .cast_tss(p_te, Y[te], thr)
-    }, numeric(1))
-    if (any(is.finite(fold_scores))) {
-      mean(fold_scores[is.finite(fold_scores)])
-    } else {
-      NA_real_
-    }
-  }, numeric(1))
-}
 
 #' Grid-score MaxEnt by stratified random-fold TSS
 #'

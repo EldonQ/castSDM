@@ -168,7 +168,7 @@ compute_boyce <- function(pred, obs, window_fraction = 0.1, n_windows = 100L) {
     # low-suitability evidence; dropping those windows - as in
     # `pe > 0` filters - biases Spearman's rho optimistically upwards.
     # Aligned with ecospat.boyce (Hirzel et al. 2006), which keeps ratio-0
-    # windows; biomod2 and N-SDM inherit that reference behaviour.
+    # windows; biomod2 inherits that reference behaviour.
     if (fb <= 0) NA_real_ else fp / fb
   }, numeric(1))
   centers <- starts + width / 2

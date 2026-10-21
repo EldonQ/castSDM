@@ -1,4 +1,0 @@
-8 numerical comparisons pass with max absolute difference 0 on a 240,000-cell grid.
-R allocation and actual R process working-set sampling recorded separately; both have stated limitations.
-Engineering regression only. Historical core/case receipts are unchanged.
-Latest short R check: 0 errors, 0 warnings, 0 notes; manual/vignettes excluded.

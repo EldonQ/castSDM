@@ -1,5 +1,0 @@
-model,folds_with_predictions,folds_total,coverage,meets_floor
-rf,4,5,0.8,TRUE
-brt,4,5,0.8,TRUE
-maxent,4,5,0.8,TRUE
-gam,4,5,0.8,TRUE

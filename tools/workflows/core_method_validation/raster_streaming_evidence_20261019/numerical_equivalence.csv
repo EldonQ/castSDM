@@ -1,9 +1,0 @@
-"comparison","cells","layers","max_abs_difference","tolerance"
-"hss_path",240000,1,0,1e-07
-"hss_sd_path",240000,1,0,1e-07
-"binary_path",240000,1,0,1e-07
-"mess_path",240000,1,0,1e-07
-"single_shift",240000,6,0,1e-07
-"tiled_a",240000,1,0,1e-07
-"tiled_b",240000,1,0,1e-07
-"paired_attribution",240000,18,0,1e-12

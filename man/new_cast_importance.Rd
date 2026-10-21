@@ -8,9 +8,9 @@ new_cast_importance(effects, metric = "brier", diagnostics = list())
 }
 \arguments{
 \item{effects}{A \code{data.frame} of the admission path: per-predictor
-\code{step_added} (covsel aggregate rank; \code{0} for prespecified predictors)
+\code{step_added} (elastic-net screen rank; \code{0} for prespecified predictors)
 and the admission \code{loss_gain} where a screen recorded one (\code{NA} for
-covsel).}
+the screen).}
 
 \item{metric}{Inner-CV loss minimised by the search (\code{"brier"} or \code{"auc"}).}
 

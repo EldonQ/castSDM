@@ -1,3 +1,0 @@
-Static direct-call inventory; reflective get(), dispatch and serialized callbacks are not resolved.
-Zero static callers does not prove unused code. Exported functions and S3 methods remain public contracts.
-Inspect tests, examples and downstream workflows before removing any candidate.

@@ -4,12 +4,12 @@
 #'
 #' @param selected Character vector of selected variable names.
 #' @param scores A `data.frame` with per-variable scores. For
-#'   `method = "covsel"`: marginal `assoc`, the univariate `stage1_p`
+#'   `method = "screen"`: marginal `assoc`, the univariate `stage1_p`
 #'   ranking signal, the `collinear_thinned` flag, the admission `step_added`
 #'   (`0` for prespecified predictors, `NA` for never-admitted ones; the
-#'   covsel aggregate rank when embedded), the `loss_gain` (`NA` for
-#'   covsel), and the `selected` flag. For `method = "full"` the score
-#'   columns are `NA`.
+#'   elastic-net rank when screened), the `loss_gain` (`NA` for the screen),
+#'   and the `selected` flag. For `method = "full"` the score columns are
+#'   `NA`.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
 #'
@@ -31,9 +31,9 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 #' Create a cast_importance Object
 #'
 #' @param effects A `data.frame` of the admission path: per-predictor
-#'   `step_added` (covsel aggregate rank; `0` for prespecified predictors)
+#'   `step_added` (elastic-net screen rank; `0` for prespecified predictors)
 #'   and the admission `loss_gain` where a screen recorded one (`NA` for
-#'   covsel).
+#'   the screen).
 #' @param metric Inner-CV loss minimised by the search (`"brier"` or `"auc"`).
 #' @param diagnostics Named list carried over from the screen.
 #'

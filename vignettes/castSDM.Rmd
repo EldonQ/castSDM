@@ -46,7 +46,7 @@ models with an existing spatial design, supply its integer assignments through
 `cast_cv(fold_ids = ..., k = ..., n_repeat = 1)`.
 
 The existing fitting, selection and spatial-validation APIs remain available.
-RF / BRT / MaxEnt / GAM engine packages perform fitting. This walkthrough uses
+RF / MaxEnt / GAM engine packages perform fitting. This walkthrough uses
 the standard pipeline to obtain a fitted model, then explains environmental
 scenarios. When variable selection is used, re-run it inside validation folds.
 
@@ -127,7 +127,7 @@ the marginal training ranges, with supported summaries reported separately.
 ## What each stage measured
 
 `cast_importance()` shows the selection path from the screen: each admitted
-predictor with its admission rank from the covsel embedding (1 =
+predictor with its admission rank from the elastic-net screen (1 =
 strongest). There are no p-values and no count cap to read around.
 
 ```{r importance, purl = FALSE}

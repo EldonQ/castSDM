@@ -16,9 +16,9 @@ A \code{cast_importance} object.
 \description{
 Turns a screen into a tidy per-predictor table carrying the admission
 path: each admitted predictor with its admission position (\code{step_added},
-the covsel aggregate rank; \code{0} for prespecified predictors) and, where
+the elastic-net screen rank; \code{0} for prespecified predictors) and, where
 the screen recorded one, the inner-CV loss improvement at admission
-(\code{loss_gain}, always \code{NA} for covsel screens).
+(\code{loss_gain}, always \code{NA} for the screen).
 Excluded predictors are listed with missing steps and gains.
 }
 \section{Interpretation (read before citing)}{

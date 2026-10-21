@@ -105,24 +105,23 @@ the plain data.frame.
 
 Presence-background fits describe a ratio you did not choose. When a target
 prevalence matters for the application, `prevalence_target` calibrates every
-engine to the same target: RF, BRT and GAM receive case weights (weight =
-target/n per class), and MaxEnt -- which has no row-weight interface -- gets
-a stored logit-scale offset fitted so its weighted mean training prediction
-equals the target too. All engines therefore share one calibration scale
+engine to the same target: RF receives case weights (weight = target/n per
+class), while GAM and MaxEnt are fitted unweighted and get a stored
+logit-scale offset fitted so their weighted mean training prediction equals
+the target too. All engines therefore share one calibration scale
 before ensembling. Evaluation metrics remain unweighted — the target changes
 what is fitted, not what is scored.
 
 ```{r prevalence, purl = FALSE}
-fit <- cast_fit(bg, models = c("rf", "brt", "gam", "maxent"),
+fit <- cast_fit(bg, models = c("rf", "gam", "maxent"),
                 prevalence_target = 0.3, tune = TRUE, seed = 42)
 ```
 
 ## Hyperparameter tuning
 
 `tune = TRUE` runs a small per-engine grid search: RF `mtry` scored by
-out-of-bag TSS, BRT `max_depth` x `eta` at the configured round count scored
-by TSS on stratified inner folds, MaxEnt feature classes x regularisation
-multiplier by stratified random-fold TSS. The grids are informed by biomod2
+out-of-bag TSS, and MaxEnt feature classes x regularisation multiplier by
+stratified random-fold TSS. The grids are informed by biomod2
 and flexsdm and trimmed for cost; combinations that fail to fit score `NA`,
 and a grid that fails entirely keeps the fixed defaults with a warning. No
 engine draws its own internal random-fold cross-validation inside the fit.
@@ -143,7 +142,7 @@ not fold noise.
 
 ```{r cv, purl = FALSE}
 cv <- cast_cv(dat,
-              models = c("rf", "brt"),
+              models = c("rf", "gam"),
               select_method = "full",
               k = 4,
               n_repeat = 5,

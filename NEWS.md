@@ -1,6 +1,24 @@
+# castSDM 0.21.0
+
+- Variable selection: `method = "screen"` is an independent elastic-net
+  screen implemented in the package (variance/unique-value filter, optional
+  construct de-duplication, correlation pruning, `glmnet` ranking, and a
+  `ncov`/`maxncov` cap). It also supports `keep` and `ensure` coverage. No
+  external selection library is vendored.
+- Engine set: RF, MaxEnt and GAM. The previous boosting engine is no longer
+  available. GAM is fitted unweighted and calibrated with the same stored
+  logit-scale prevalence offset as MaxEnt.
+- `cast_select()` diagnostics record `final_ranks`, `coefficients`, `lambda`
+  and `cap_binding`; forced predictors are never reported as
+  collinear-thinned.
+
 # castSDM 0.20.0
 
 Breaking release: one production pipeline with an explicit evaluation protocol.
+
+- Hold-out diagnostics (2026-10-20): `cast_prepare()` returns `split_type`
+  (`spatial`, `stratified`, `random`) alongside the descriptive `split`
+  string, so callers can distinguish a spatial hold-out from a fallback.
 
 - Raster maintenance (2026-10-19): ensemble, single-shift maps, tiled prediction
   and paired attribution share row-block I/O and recoverable file publication.
@@ -36,21 +54,10 @@ Breaking release: one production pipeline with an explicit evaluation protocol.
   MaxEnt, whose fit accepts no row weights -- is calibrated to the same
   training-sample prevalence through a stored logit-scale offset, so ensemble
   members share one scale. `cast_protocol()` defaults to 0.5.
-- BRT engine switched from gbm to xgboost: prespecified round count; tuning
-  searches depth x eta on stratified inner folds; no random-fold internal CV
-  inside the fit. gbm dependency removed.
 - Spatial blocking: `block_method = "blockcv"` (default) builds square blocks
   with blockCV, sized from the spatial-autocorrelation range
   (`block_size` overrides); dependency-free `"grid"` fallback retained,
   `"env"` kept. `grid_random` and `cluster` removed.
-- Variable selection: the vendored reference implementation of the covsel
-  package (Adde et al. 2023; MIT license, see inst/COPYRIGHTS) replaces the
-  self-implemented copy, with native weights/force support, the `ensure`
-  coverage rule and the token-space wrapper for non-syntactic predictor
-  names. The upstream elastic-net label truncation (missing final character
-  of every covariate name) is fixed, so cross-algorithm label matching is
-  exact. Default method "covsel"; `ncov` default
-  `ceiling(log2(n_presences))`. The legacy `two_stage` selector is removed.
 - RNG hygiene: every stage seeds locally (`withr`) and restores the caller's
   RNG state; global `set.seed()` side effects removed; `ranger` prediction no
   longer advances the global RNG.
@@ -302,8 +309,8 @@ collisions.
   drivers and the lowest observed support) so the `min_support` default's
   effect on correlated drivers is visible.
 * Documentation: the ensemble Score is described accurately as the mean of
-  the finite components (N-SDM `na.omit` semantics) instead of a fixed
-  /3 formula; the fixed 101-bin CBI is flagged as an internal diagnostic
+  the finite components instead of a fixed /3 formula; the fixed 101-bin CBI
+  is flagged as an internal diagnostic
   only, not comparable with ecospat-derived Boyce; `cast_vif()` documents
   the fewer-than-five-variables stopping guard.
 
@@ -313,9 +320,9 @@ collisions.
 
 * `cast_fit()` gains `prevalence_target`: presence/background rows are
   weighted (weight = target/n per class) so the fitted prevalence equals the
-  target, the standard presence-background correction (N-SDM uses the
-  equivalent `n_bg/n_pres` presence weight). RF, BRT and GAM accept the
-  weights; MaxEnt has no row-weight interface and stays unweighted.
+  target, the standard presence-background correction. RF accepts the
+  weights; GAM and MaxEnt are fitted unweighted and calibrated with a stored
+  logit-scale offset.
   Evaluation metrics remain unweighted. `cast_cv()` and `cast()` pass the
   target into every fold and the full-data refit.
 * `cast_background()` gains two sampling strategies (Barbet-Massin et al.
@@ -348,9 +355,8 @@ collisions.
 ## Hyperparameter tuning, user background, reference fixes (P0 review round)
 
 * `cast_fit()` gains `tune = TRUE`: a small per-engine grid search (RF `mtry`
-  scored by out-of-bag TSS; BRT `interaction.depth` x `shrinkage` scored by
-  internal-CV TSS; MaxEnt feature classes x regularisation multiplier scored
-  by stratified random-fold TSS), informed by the biomod2/flexsdm grids and
+  scored by out-of-bag TSS; MaxEnt feature classes x regularisation multiplier
+  scored by stratified random-fold TSS), informed by the biomod2/flexsdm grids and
   trimmed for cost. Combinations that fail to fit score `NA`; failing grids
   keep the fixed defaults with a warning. `cast_cv(tune = TRUE)` runs the
   grid inside every outer training fold (nested, leak-free);
@@ -363,26 +369,22 @@ collisions.
   probability proportional to a bias surface; Phillips et al. 2009), closing
   the gap between the package's own reference list and its feature set.
 * The moving-window Boyce index no longer drops ratio-0 windows: only
-  undefined 0/0 windows are excluded, aligning with ecospat.boyce (the
-  reference implementation used by biomod2 and N-SDM) and removing an
-  optimistic bias that propagated into ensemble weights.
+  undefined 0/0 windows are excluded, aligning with ecospat.boyce and
+  removing an optimistic bias that propagated into ensemble weights.
 * `predict_single_model()` passes `clamp` explicitly to maxnet: the MaxEnt
   engine no longer clamps predictions silently to the training range while
-  RF/BRT/GAM extrapolate. Clamping is now solely the package-level
+  the other engines extrapolate. Clamping is now solely the package-level
   `clamp` argument of `cast_predict()` / `cast_ensemble_raster()`.
-* Corrected the N-SDM citation (Adde et al. 2023, *Ecography* e06540; was
-  wrongly "2020, 43(2), 331-334") and aligned the ensemble-score
-  documentation with the implemented >=2-components rule.
+* Aligned the ensemble-score documentation with the implemented
+  >=2-components rule.
 * Removed the dead internal helper `find_tss_threshold()`.
 
 # castSDM 0.14.0 (unreleased)
 
 ## Model defaults follow the SDM literature; 0.12.0 stubs removed
 
-* BREAKING: `cast_fit()` / `cast_cv()` defaults follow the Elith et al. (2008)
-  BRT recipe: `brt_n_trees` 500 -> 2000, new `brt_shrinkage = 0.005`
-  (was hard-coded 0.01), `rf_ntree` 300 -> 500. Fitted models and cached
-  CV outputs must be recomputed.
+* BREAKING: `cast_fit()` / `cast_cv()` default `rf_ntree` changed from 300 to
+  500. Fitted models and cached CV outputs must be recomputed.
 * `cast_select()` bounds its search cost with a response-stratified subsample
   (every presence row kept, only the background evenly thinned) instead of a
   plain systematic subsample, so a large background (e.g. ~25 presences in
@@ -595,8 +597,7 @@ collisions.
   matrix or an array` for every engine except `rf`. It handed each raster block
   to the engine predictors as a matrix, which `predict.gbm()` and `mgcv`'s
   predict method reject because they route through `model.frame()`. Effect maps
-  from a `brt` or `gam` fit — or any ensemble containing one — were therefore
-  unreachable. `cast_effect_table()`, `cast_predict()` and `cast_predict_tiled()`
+  from a `gam` fit or an ensemble containing one were therefore unreachable. `cast_effect_table()`, `cast_predict()` and `cast_predict_tiled()`
   were never affected.
 
 # castSDM 0.9.3
@@ -671,8 +672,8 @@ robustness.
 
 ## Bug fixes
 
-* `cast_ensemble()`: the N-SDM score no longer silently substitutes 0 for a
-  missing CBI or drops components with `na.rm`; a model with an incomplete
+* `cast_ensemble()`: the ensemble score no longer silently substitutes 0 for
+  a missing CBI or drops components with `na.rm`; a model with an incomplete
   metric row is excluded and warned about, and an all-NA score set aborts
   instead of producing uniform weights.
 * `cast_ensemble()`: the ensemble threshold is now optimised on the ensemble
@@ -774,7 +775,7 @@ Full-repository scan (alibaba/open-code-review) + fix round:
   subscripting).
 * `.cast_digest()`: the no-`digest` fallback no longer overflows 32-bit
   integers.
-* Deduplicated the N-SDM score/weight computation into shared helpers
+* Deduplicated the ensemble score/weight computation into shared helpers
   (`.cast_ensemble_scores()`, `.cast_ensemble_weights()`).
 
 ## Consensus selection across spatial folds

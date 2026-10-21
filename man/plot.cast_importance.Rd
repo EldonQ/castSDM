@@ -20,6 +20,6 @@ A \code{ggplot} object.
 }
 \description{
 Lollipop plot of the selection path: each admitted predictor with its
-admission rank (the covsel aggregate rank, 1 = strongest). Excluded
+admission rank (the elastic-net screen rank, 1 = strongest). Excluded
 predictors carry a missing rank and are not plotted.
 }

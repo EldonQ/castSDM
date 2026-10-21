@@ -7,13 +7,10 @@
 cast_fit(
   data,
   screen = NULL,
-  models = c("rf", "brt", "maxent", "gam"),
+  models = c("rf", "maxent", "gam"),
   response = "presence",
   rf_ntree = 500L,
   rf_mtry = NULL,
-  brt_n_trees = 2000L,
-  brt_depth = 5L,
-  brt_shrinkage = 0.005,
   maxent_classes = NULL,
   maxent_regmult = NULL,
   tune = FALSE,
@@ -29,8 +26,8 @@ cast_fit(
 
 \item{screen}{A \code{cast_select} object from \code{\link[=cast_select]{cast_select()}}, or \code{NULL}.}
 
-\item{models}{Character vector. Models to fit: \code{"rf"}, \code{"maxent"}, \code{"brt"},
-\code{"gam"}. Default \code{c("rf", "brt", "maxent", "gam")}.}
+\item{models}{Character vector. Models to fit: \code{"rf"}, \code{"maxent"},
+\code{"gam"}. Default all three.}
 
 \item{response}{Character. Response column name. Default \code{"presence"}.}
 
@@ -38,21 +35,6 @@ cast_fit(
 
 \item{rf_mtry}{Integer. RF variables considered at each split. Default
 \code{NULL} (the ranger default, \code{floor(sqrt(p))}).}
-
-\item{brt_n_trees}{Integer. Number of boosting rounds (trees) for the
-xgboost BRT. Default \code{2000} at the default \code{brt_shrinkage = 0.005};
-jointly assess rounds, learning rate and depth for the dataset rather
-than assuming a universal SDM recipe. The round count is a
-prespecified setting: it is never selected by an internal random-fold
-cross-validation inside the fit.}
-
-\item{brt_depth}{Integer. BRT tree depth. Default \code{5}. Ignored when
-\code{tune = TRUE} (the depth enters the search grid).}
-
-\item{brt_shrinkage}{Numeric. BRT learning rate. Default \code{0.005}
-as a starting value; jointly assess learning rate, tree count and depth
-for the dataset rather than assuming a universal SDM recipe.
-Ignored when \code{tune = TRUE} (the rate enters the search grid).}
 
 \item{maxent_classes}{Character. MaxEnt feature classes as a single string
 of class letters, e.g. \code{"l"}, \code{"lq"}, \code{"lqh"}, \code{"lqhp"}. Default \code{NULL}
@@ -63,20 +45,21 @@ held fixed while the regularisation multiplier is searched.}
 \code{NULL} (i.e. \code{1}, the maxnet default). When \code{tune = TRUE}, a supplied
 value is held fixed while the feature classes are searched.}
 
-\item{tune}{Logical. Run a small grid search per engine (RF \code{mtry}; BRT
-\code{max_depth} x \code{eta}; MaxEnt feature classes x regularisation
-multiplier) and fit with the best-scoring combination. Default \code{FALSE}.
+\item{tune}{Logical. Run a small grid search per engine (RF \code{mtry};
+MaxEnt feature classes x regularisation multiplier) and fit with the
+best-scoring combination. Default \code{FALSE}.
 See Details.}
 
 \item{tune_folds}{Integer. Stratified folds used by the inner grid-search
-scoring (BRT and MaxEnt; RF scores out-of-bag). Default \code{3}.}
+scoring (MaxEnt; RF scores out-of-bag). Default \code{3}.}
 
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. When supplied,
 presence and background rows are weighted so that the \emph{weighted}
 prevalence equals \code{prevalence_target} (weight = target/n per class),
-following the standard presence-background correction (N-SDM uses the
-equivalent \code{n_bg/n_pres} presence weight; biomod2 defaults to a 0.5
-target). RF, BRT and GAM accept the weights; MaxEnt has no row-weight
+following the standard presence-background correction (presence weight
+\code{n_bg/n_pres} is an equivalent parameterisation; biomod2 defaults to a
+0.5 target). RF accepts the weights; GAM is fitted unweighted and
+calibrated with the shared logit offset; MaxEnt has no row-weight
 interface and is always fitted unweighted. Default \code{NULL} (unweighted:
 outputs stay relative suitabilities under the sampled prevalence).}
 
@@ -94,8 +77,7 @@ entry of the \code{models} list additionally carries a \code{tune} component
 }
 \description{
 Trains one or more SDM algorithms on prepared data. Supported models:
-Random Forest (RF), Boosted Regression Trees (BRT), MaxEnt, and
-Generalised Additive Models (GAM).
+Random Forest (RF), MaxEnt, and Generalised Additive Models (GAM).
 }
 \details{
 Variable selection is driven by the \code{cast_select} object from
@@ -108,9 +90,6 @@ detected in \code{data} are used.
 clamps predictions internally; clamping to the training range is a
 package-level decision (see \code{\link[=cast_predict]{cast_predict()}} and
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}, argument \code{clamp}).
-\item \strong{BRT}: \code{\link[xgboost:xgb.train]{xgboost::xgb.train()}} with logloss (binary:logistic) and a
-prespecified round count (\code{brt_n_trees}). No internal
-cross-validation folds are drawn inside the fit.
 \item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
@@ -122,9 +101,6 @@ flexsdm) but trimmed for cost:
 \itemize{
 \item \strong{RF} searches \code{mtry} around \code{sqrt(p)} and is scored by out-of-bag TSS
 (no extra refits beyond the grid itself).
-\item \strong{BRT} searches \code{max_depth} x \code{eta} at the configured round count,
-scored by TSS on stratified inner folds whose threshold is selected on
-the fold's training part.
 \item \strong{MaxEnt} searches feature classes x regularisation multiplier, scored
 by stratified random-fold TSS with the threshold selected on the
 training part of each fold.
@@ -133,7 +109,6 @@ training part of each fold.
 Combinations that fail to fit (e.g. very small folds) score \code{NA}; if no
 combination scores, the fixed defaults are kept with a warning.
 Explicit RF \code{mtry} and MaxEnt feature/regularisation values are held fixed.
-BRT depth and shrinkage are replaced by the documented grid when tuning.
 Selecting hyperparameters on inner data and evaluating on outer folds is
 the nested-selection principle of Cawley & Talbot (2010): pass
 \code{tune = TRUE} to \code{\link[=cast_cv]{cast_cv()}} to run the grid inside every outer training
@@ -144,9 +119,6 @@ fold, so the held-out folds never influence the chosen hyperparameters.
 Cawley, G. C. & Talbot, N. L. C. (2010). On over-fitting in model selection
 and subsequent selection bias in performance evaluation. \emph{Journal of
 Machine Learning Research}, 11, 2079-2107.
-
-Elith, J., Leathwick, J. R. & Hastie, T. (2008). A working guide to boosted
-regression trees. \emph{Journal of Animal Ecology}, 77(4), 802-813.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_evaluate]{cast_evaluate()}}, \code{\link[=cast_predict]{cast_predict()}}

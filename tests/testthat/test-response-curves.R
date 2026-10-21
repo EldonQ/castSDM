@@ -52,7 +52,7 @@ test_that("argument validation aborts informatively", {
               "two distinct predictors")
   expect_error(cast_response_curves(fit, pair = c("x1", "nope")),
               "two distinct predictors")
-  expect_error(cast_response_curves(fit, models = "brt"), "subset")
+  expect_error(cast_response_curves(fit, models = "nope"), "subset")
   expect_error(cast_response_curves(fit, grid_size = 1), "integer >= 2")
   expect_error(cast_response_curves(list()), "cast_fit")
 })

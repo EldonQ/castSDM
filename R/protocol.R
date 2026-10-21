@@ -22,26 +22,21 @@
 #' time, so all engines extrapolate under the same rule. MESS and AOA
 #' diagnostics are reported alongside either way.
 #'
-#' @param models Engines to fit: any of `"rf"`, `"brt"`, `"maxent"`,
-#'   `"gam"`. Default all four.
+#' @param models Engines to fit: any of `"rf"`, `"maxent"`, `"gam"`.
+#'   Default all three.
 #' @param train_fraction Hold-out fraction rule: fraction of rows assigned
 #'   to the training split (spatial block split). Default `0.7`.
-#' @param select_method `"covsel"` (embedded selection, Adde et al. 2023) or
-#'   `"full"` (keep every varying predictor). Default `"covsel"`.
+#' @param select_method `"screen"` (independent elastic-net screen) or
+#'   `"full"` (keep every varying predictor). Default `"screen"`.
 #' @param select_keep Predictors forced through screening (see
 #'   [cast_select()]).
 #' @param select_corcut Absolute Pearson correlation threshold for the
 #'   collinearity filter. Default `0.7`.
-#' @param select_algorithms Embedding learners for `"covsel"`. Default all
-#'   three (`"glm"`, `"gam"`, `"rf"`).
-#' @param select_ncov Target covariate count for `"covsel"` (`NULL` =
+#' @param select_ncov Target covariate count for `"screen"` (`NULL` =
 #'   `ceiling(log2(n_presences))`).
-#' @param select_maxncov Maximum covariate count for `"covsel"`. Default `12`.
+#' @param select_maxncov Maximum covariate count for `"screen"`. Default `12`.
 #' @param rf_ntree RF trees. Default `500`.
 #' @param rf_mtry RF `mtry` (`NULL` keeps the ranger default `sqrt(p)`).
-#' @param brt_n_trees,brt_depth,brt_shrinkage BRT rounds, depth and learning
-#'   rate. Defaults `2000`, `5`, `0.005`; depth and rate are replaced by the
-#'   tuning grid when `tune = TRUE`.
 #' @param maxent_classes,maxent_regmult MaxEnt feature classes and
 #'   regularisation multiplier (`NULL` = maxnet defaults).
 #' @param threshold_method Binary threshold rule (see [cast_threshold()]).
@@ -74,19 +69,15 @@
 #' @seealso [cast_run()]
 #' @export
 cast_protocol <- function(
-  models = c("rf", "brt", "maxent", "gam"),
+  models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
-  select_method = c("covsel", "full"),
+  select_method = c("screen", "full"),
   select_keep = character(0),
   select_corcut = 0.7,
-  select_algorithms = c("glm", "gam", "rf"),
   select_ncov = NULL,
   select_maxncov = 12L,
   rf_ntree = 500L,
   rf_mtry = NULL,
-  brt_n_trees = 2000L,
-  brt_depth = 5L,
-  brt_shrinkage = 0.005,
   maxent_classes = NULL,
   maxent_regmult = NULL,
   threshold_method = "max_tss",
@@ -118,14 +109,10 @@ cast_protocol <- function(
     select_method = first(select_method),
     select_keep = select_keep,
     select_corcut = select_corcut,
-    select_algorithms = select_algorithms,
     select_ncov = select_ncov,
     select_maxncov = select_maxncov,
     rf_ntree = rf_ntree,
     rf_mtry = rf_mtry,
-    brt_n_trees = brt_n_trees,
-    brt_depth = brt_depth,
-    brt_shrinkage = brt_shrinkage,
     maxent_classes = maxent_classes,
     maxent_regmult = maxent_regmult,
     threshold_method = threshold_method,
@@ -168,8 +155,8 @@ cast_protocol <- function(
   }
   required <- c(
     "models", "train_fraction", "select_method", "select_keep",
-    "select_corcut", "select_algorithms", "select_ncov", "select_maxncov",
-    "rf_ntree", "rf_mtry", "brt_n_trees", "brt_depth", "brt_shrinkage",
+    "select_corcut", "select_ncov", "select_maxncov",
+    "rf_ntree", "rf_mtry",
     "maxent_classes", "maxent_regmult", "threshold_method", "tune",
     "tune_folds", "prevalence_target", "cv_k", "n_repeat", "block_method",
     "block_size", "buffer", "buffer_unit", "aoa", "ensemble_method",
@@ -200,18 +187,13 @@ cast_protocol <- function(
     value
   }
   p$select_method <- enum_value(p$select_method, "select_method",
-                                c("covsel", "full"))
+                                c("screen", "full"))
   if (!is.character(p$select_keep) || anyNA(p$select_keep) ||
       anyDuplicated(p$select_keep)) {
     cli::cli_abort("{.arg protocol$select_keep} must be unique predictor names.")
   }
   p$select_corcut <- .cast_check_scalar(p$select_corcut,
     "protocol$select_corcut", lower = 0, upper = 1)
-  p$select_algorithms <- tolower(as.character(p$select_algorithms))
-  bad_alg <- setdiff(p$select_algorithms, c("glm", "gam", "rf"))
-  if (length(bad_alg) || !length(p$select_algorithms)) {
-    cli::cli_abort("{.arg protocol$select_algorithms} must contain one or more of 'glm', 'gam', 'rf'.")
-  }
   if (!is.null(p$select_ncov)) {
     p$select_ncov <- .cast_check_scalar(p$select_ncov,
       "protocol$select_ncov", lower = 1, integer = TRUE)
@@ -224,12 +206,6 @@ cast_protocol <- function(
     p$rf_mtry <- .cast_check_scalar(p$rf_mtry, "protocol$rf_mtry",
       lower = 1, integer = TRUE)
   }
-  p$brt_n_trees <- .cast_check_scalar(p$brt_n_trees, "protocol$brt_n_trees",
-    lower = 1, integer = TRUE)
-  p$brt_depth <- .cast_check_scalar(p$brt_depth, "protocol$brt_depth",
-    lower = 1, integer = TRUE)
-  p$brt_shrinkage <- .cast_check_scalar(p$brt_shrinkage,
-    "protocol$brt_shrinkage", lower = 0, upper = 1, min_inclusive = FALSE)
   if (!is.null(p$maxent_classes) &&
       (!is.character(p$maxent_classes) || length(p$maxent_classes) != 1L ||
        !grepl("^[lqpht]+$", p$maxent_classes))) {
@@ -298,8 +274,8 @@ print.cast_protocol <- function(x, ...) {
   cli::cli_ul(c(
     "Engines: {fmt(x$models)}",
     "Split: train_fraction = {x$train_fraction}",
-    "Selection: {x$select_method} (corcut = {x$select_corcut}; algorithms = {fmt(x$select_algorithms)}; ncov = {fmt(x$select_ncov)}; maxncov = {x$select_maxncov})",
-    "Engine settings: rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; brt_n_trees = {x$brt_n_trees}; brt_depth = {x$brt_depth}; brt_shrinkage = {x$brt_shrinkage}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
+    "Selection: {x$select_method} (corcut = {x$select_corcut}; ncov = {fmt(x$select_ncov)}; maxncov = {x$select_maxncov})",
+    "Engine settings: rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
     "Tuning: tune = {x$tune} (tune_folds = {x$tune_folds})",
     "Threshold: {x$threshold_method}; prevalence_target = {fmt(x$prevalence_target)}",
     "Spatial CV: k = {x$cv_k}; repeats = {x$n_repeat}; blocks = {x$block_method}; block_size = {fmt(x$block_size)}; buffer = {x$buffer} {x$buffer_unit}; aoa = {x$aoa}",

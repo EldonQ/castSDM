@@ -381,7 +381,8 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     train    = data[train_idx, keep_cols, drop = FALSE],
     test     = data[-train_idx, keep_cols, drop = FALSE],
     env_vars = final_vars,
-    split    = sp$method
+    split    = sp$method,
+    split_type = sp$type
   )
 }
 
@@ -409,16 +410,16 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   }
 
   if (identical(split, "random")) {
-    return(list(train = make_random(), method = "random"))
+    return(list(train = make_random(), method = "random", type = "random"))
   }
   if (identical(split, "stratified")) {
-    return(list(train = make_stratified(), method = "stratified"))
+    return(list(train = make_stratified(), method = "stratified", type = "stratified"))
   }
 
   # split == "spatial" (block_method "env" partitions in environmental space)
   if (!has_coords) {
     if (verbose) cli::cli_warn("No {.val lon}/{.val lat}; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (no coords)"))
+    return(list(train = make_stratified(), method = "stratified (no coords)", type = "stratified"))
   }
   env_block <- if (identical(block_method, "env")) {
     cand <- setdiff(names(data), c("lon", "lat", response))
@@ -432,7 +433,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   )
   if (is.null(blocks) || length(unique(blocks)) < 2L) {
     if (verbose) cli::cli_warn("Blocking failed; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (block failed)"))
+    return(list(train = make_stratified(), method = "stratified (block failed)", type = "stratified"))
   }
   ub <- sample(unique(blocks))
   target_test <- round((1 - train_fraction) * n)
@@ -455,10 +456,11 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   } else TRUE
   if (!length(train_idx) || !length(test_idx) || !ok_classes) {
     if (verbose) cli::cli_warn("Spatial split degenerate; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (spatial degenerate)"))
+    return(list(train = make_stratified(), method = "stratified (spatial degenerate)", type = "stratified"))
   }
   list(train = sort(train_idx),
        method = sprintf("%s block (%s)",
                         if (identical(block_method, "env")) "environmental" else "spatial",
-                        block_method))
+                        block_method),
+       type = "spatial")
 }

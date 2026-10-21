@@ -10,7 +10,7 @@
 #'   selection into the CV metrics (a warning is issued); treat those metrics
 #'   as optimistic.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"covsel"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"screen"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #'   Cannot override `data`, `response`, or `method`.
 #' @param k Number of outer spatial folds.
@@ -42,8 +42,6 @@
 #'   projected inputs.
 #' @param response Binary response column.
 #' @param rf_ntree RF trees per fold. Default `500`.
-#' @param brt_n_trees BRT trees per fold. Default `2000`.
-#' @param brt_shrinkage BRT learning rate per fold. Default `0.005`.
 #' @param tune Logical. Run the per-engine hyperparameter grid search
 #'   ([cast_fit()], argument `tune`) inside every outer training fold, so the
 #'   held-out folds never influence the chosen hyperparameters. Default
@@ -87,7 +85,7 @@
 #'   [future::plan()] first (a warning is issued when none is set).
 #' @param seed Random seed.
 #' @param verbose Print progress.
-#' @param rf_mtry,brt_depth,maxent_classes,maxent_regmult,num_threads Engine
+#' @param rf_mtry,maxent_classes,maxent_regmult,num_threads Engine
 #'   settings as in [cast_fit()], applied in every outer training fold.
 #'
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
@@ -107,7 +105,7 @@
 #'   blocking; supplied assignments are returned unchanged.
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "covsel",
+                    select_method = "screen",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
@@ -117,8 +115,6 @@ cast_cv <- function(data,
                     buffer_unit = c("deg", "km"),
                     response = "presence",
                     rf_ntree = 500L,
-                    brt_n_trees = 2000L,
-                    brt_shrinkage = 0.005,
                     tune = FALSE,
                     tune_folds = 3L,
                     prevalence_target = NULL,
@@ -128,7 +124,7 @@ cast_cv <- function(data,
                     parallel = FALSE,
                     seed = NULL,
                     verbose = TRUE,
-                    rf_mtry = NULL, brt_depth = 5L,
+                    rf_mtry = NULL,
                     maxent_classes = NULL, maxent_regmult = NULL,
                     num_threads = 1L, fold_ids = NULL) {
   block_method <- match.arg(block_method)
@@ -242,8 +238,7 @@ cast_cv <- function(data,
     fit <- tryCatch(
       cast_fit(
         train, screen = fold_screen, models = models, response = response,
-        rf_ntree = rf_ntree, brt_n_trees = brt_n_trees,
-        rf_mtry = rf_mtry, brt_depth = brt_depth, brt_shrinkage = brt_shrinkage,
+        rf_ntree = rf_ntree, rf_mtry = rf_mtry,
         maxent_classes = maxent_classes, maxent_regmult = maxent_regmult,
         num_threads = num_threads,
         tune = tune, tune_folds = tune_folds,
@@ -298,7 +293,7 @@ cast_cv <- function(data,
     # kappa) are computed in run_once() against the pooled out-of-fold
     # threshold for each model -- the in-sample training-prediction
     # threshold used previously is optimistically high for flexible
-    # learners (RF/BRT) and made the held-out TSS collapse.
+    # learners (RF) and made the held-out TSS collapse.
     updates <- list()
     pred_ok <- list()
     for (mdl in models) {

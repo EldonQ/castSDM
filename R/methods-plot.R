@@ -19,10 +19,10 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr$is_selected <- scr$variable %in% x$selected
 
   # The score to plot must be the ONE the method actually ranked by. The
-  # covsel filter ranks on the poly(x, 2) logistic term (stage1_p); the
+  # elastic-net screen carries the univariate stage1_p ordering; the
   # consensus screen carries fold selection frequency; "full" screens have
   # no ranking and fall back to the selection indicator.
-  imp_candidates <- if (identical(x$method, "covsel")) {
+  imp_candidates <- if (identical(x$method, "screen")) {
     c("stage1_p", "assoc")
   } else {
     c("freq", "assoc")
@@ -314,7 +314,7 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
   check_suggested("ggplot2", "for plotting")
 
   model_colors <- .cast_engine_colors(
-    c("rf", "brt", "maxent", "gam")
+    c("rf", "maxent", "gam")
   )
   fold_colors <- c(
     "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
@@ -645,7 +645,7 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 #' Plot Predictor Importance
 #'
 #' Lollipop plot of the selection path: each admitted predictor with its
-#' admission rank (the covsel aggregate rank, 1 = strongest). Excluded
+#' admission rank (the elastic-net screen rank, 1 = strongest). Excluded
 #' predictors carry a missing rank and are not plotted.
 #'
 #' @param x A `cast_importance` object (from [cast_importance()]).

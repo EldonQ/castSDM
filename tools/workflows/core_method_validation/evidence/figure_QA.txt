@@ -1,5 +1,0 @@
-R-only scientific exports. Four PDF page renders visually inspected at 183 mm width.
-All labels and legends readable; negative results, null and joint response cases retained.
-Independent datasets are experimental units. Means shown without confidence intervals.
-Editable SVG text checked; 600 dpi PNG/TIFF exports; source CSVs accompany every figure.
-Shared signed map scale; no post-export manipulation. PDF tile seams are rendering artefacts, absent in PNG.

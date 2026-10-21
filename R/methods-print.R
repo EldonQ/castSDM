@@ -9,9 +9,9 @@ print.cast_select <- function(x, ...) {
     "Selected variables: {n_selected}"
   ))
   d <- x$diagnostics
-  if (identical(x$method, "covsel")) {
+  if (identical(x$method, "screen")) {
     n_filt <- length(d$filtered %||% character(0))
-    cli::cli_text("covsel embedded selection: {n_filt} filtered covariate{?s}, target ncov = {d$ncov %||% NA}; aggregate rank drives admission.")
+    cli::cli_text("Elastic-net screen: {n_filt} filtered covariate{?s}, target ncov = {d$ncov %||% NA}.")
   } else if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")
   }
@@ -36,7 +36,7 @@ print.cast_importance <- function(x, ...) {
     stringsAsFactors = FALSE
   )
   print(disp, row.names = FALSE)
-  cli::cli_text("Rank is the covsel aggregate rank (1 = strongest); prespecified predictors are marked by design.")
+  cli::cli_text("Rank is the screen admission rank (1 = strongest); prespecified predictors are marked by design.")
   invisible(x)
 }
 

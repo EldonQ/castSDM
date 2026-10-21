@@ -130,7 +130,7 @@ test_that("ensemble excludes models with non-finite predictions and warns", {
 
 test_that("cast_effect_map drives every engine, not only the matrix-tolerant one", {
   skip_if_not_installed("ranger")
-  skip_if_not_installed("xgboost")
+  skip_if_not_installed("mgcv")
   skip_if_not_installed("terra")
   set.seed(5)
   n <- 240
@@ -142,9 +142,9 @@ test_that("cast_effect_map drives every engine, not only the matrix-tolerant one
   screen <- new_cast_select(c("x1", "x2"),
                             data.frame(variable = c("x1", "x2")),
                             method = "manual")
-  # brt (DMatrix) and gam (model.frame) reject a plain matrix; rf does not.
-  fit <- cast_fit(dat, screen = screen, models = c("rf", "brt"),
-                  rf_ntree = 40, brt_n_trees = 80L, seed = 6, verbose = FALSE)
+  # gam (model.frame) rejects a plain matrix; rf does not.
+  fit <- cast_fit(dat, screen = screen, models = c("rf", "gam"),
+                  rf_ntree = 40, seed = 6, verbose = FALSE)
 
   stack <- terra::rast(nrows = 12, ncols = 12, nlyrs = 2,
                        xmin = 70, xmax = 130, ymin = 20, ymax = 50)
@@ -183,7 +183,7 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     cast_select = function(data, response, method, ...) {
       i <- length(seen) + 1L
       seen[[i]] <<- data
-      expect_identical(method, "covsel")
+      expect_identical(method, "screen")
       if (i == 2L) stop("test backend failure")
       selected <- if (i == 1L) character(0) else "x"
       new_cast_select(selected, data.frame(variable = "x"), method = method,
@@ -195,7 +195,7 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     evaluate_model_full = function(...) c(auc = .7, tss = .4, cbi = .3)
   )
   expect_warning(cv <- cast_cv(dat, k = 3, models = "gam", buffer = 1.5,
-    select_method = "covsel", verbose = FALSE), "test backend failure")
+    select_method = "screen", verbose = FALSE), "test backend failure")
   for (i in 1:3) {
     idx <- .cast_buffer_train_idx(dat$lon, dat$lat, which(folds == i), 1.5)
     expect_identical(seen[[i]], dat[idx, , drop = FALSE])
@@ -218,7 +218,7 @@ test_that("CV all-empty errors retain the selection diagnostics", {
   testthat::local_mocked_bindings(
     make_spatial_folds = function(...) rep(1:2, each = 20),
     cast_select = function(...) new_cast_select(character(0), data.frame(variable = "x"),
-      method = "covsel", diagnostics = list(status = "empty_selection"))
+      method = "screen", diagnostics = list(status = "empty_selection"))
   )
   err <- tryCatch(cast_cv(dat, k = 2L, verbose = FALSE), error = identity)
   expect_s3_class(err, "cast_cv_no_evaluable_folds")

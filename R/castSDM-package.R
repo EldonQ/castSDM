@@ -8,7 +8,7 @@
 #' of overall change, driver-only effects and retained-driver comparisons.
 #' Range coverage and model disagreement accompany the results.
 #'
-#' The package also provides data preparation, variable selection, RF/BRT/
+#' The package also provides data preparation, variable selection, RF/
 #' MaxEnt/GAM fitting, nested spatial validation and raster projection. These
 #' support the central environmental-attribution workflow; selection and
 #' scenario comparisons are predictive diagnostics, not causal discovery.
@@ -16,7 +16,7 @@
 #'
 #' @section Quick Start:
 #' ```
-#' protocol <- cast_protocol(models = c("rf", "brt"), cv_k = 5)
+#' protocol <- cast_protocol(models = c("rf", "gam"), cv_k = 5)
 #' result <- cast_run(species_data, env_data, protocol = protocol)
 #' summary(result)
 #' plot(result)

@@ -63,9 +63,8 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
   } else {
     "[report] (no spatial prediction recorded in this object)"
   }
-  selection_line <- if (identical(screen_method, "covsel")) {
-    sprintf(paste0("covsel embedded selection (Adde et al. 2023) via the ",
-                   "vendored reference implementation: %d candidate%s filtered, ",
+  selection_line <- if (identical(screen_method, "screen")) {
+    sprintf(paste0("independent elastic-net screen: %d candidate%s filtered, ",
                    "top %s retained"),
             length(diag$filtered %||% sel_vars),
             if (length(diag$filtered %||% sel_vars) == 1L) "" else "s",

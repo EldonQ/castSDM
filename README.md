@@ -2,8 +2,6 @@
 
 **Environmental drivers and spatial attribution of habitat change.**
 
-中文入口：[castSDM回答什么、四张结果图怎么读](tools/workflows/START_HERE_ZH.md)。
-
 castSDM asks where an environmental change improves or reduces predicted
 habitat suitability, and how individual drivers contribute to future habitat
 change. Use one fitted SDM, paired current/future environments and frozen model
@@ -39,25 +37,15 @@ an explicit training reference and comparable suitability scales; they do not
 automatically inherit valid evaluation scores.
 
 The production pipeline is `cast_run()`, driven by one `cast_protocol()`:
-covsel variable selection (Adde et al. 2023 reference implementation),
-RF / xgboost-BRT / MaxEnt / GAM engines, nested spatial cross-validation on
-blockCV blocks, a one-shot hold-out evaluation at out-of-fold thresholds,
-full-data refit and ensemble. `cast_run(output_dir = ...)` writes every stage
-to disk with content-digest receipts in `manifest.rds`, together with an
-ODMAP-aligned report.
+the independent elastic-net variable screen, RF / MaxEnt / GAM engines,
+nested spatial cross-validation on blockCV blocks, a one-shot hold-out
+evaluation at out-of-fold thresholds, full-data refit and ensemble.
+`cast_run(output_dir = ...)` writes every stage to disk with content-digest
+receipts in `manifest.rds`, together with an ODMAP-aligned report.
 
-The [research workflows](tools/workflows/README.md) include the complete
-Schizopygopsis case configuration, the independent method-validation protocol
-and R figure scripts. The [validation results](tools/workflows/core_method_validation/RESULTS_20261016.md)
-retain negative cases and model-dependent limitations.
-The [development review](tools/workflows/POSITIONING_AND_CODE_AUDIT_20261016.md) records
-the repaired code paths, remaining scientific limits and retained assets.
-The maintained case report has four main figures: model evaluation, habitat
-change, environmental driver comparisons, and range/model disagreement.
-Detailed optional diagnostics remain available without filling the default report.
-Schizopygopsis is a genus-level workflow demonstration. The separate
-[species validation plan](tools/workflows/core_method_validation/ECOLOGICAL_VALIDATION_PLAN_20261016.md)
-records candidate data quality and the independent ecological evidence still needed.
+Typical case reports use four main figures: model evaluation, habitat change,
+environmental driver comparisons, and range/model disagreement. Detailed
+optional diagnostics remain available without filling the default report.
 
 ## Installation
 
@@ -65,11 +53,11 @@ records candidate data quality and the independent ecological evidence still nee
 pak::pak("EldonQ/castSDM")
 ```
 
-For the full workflow:
+For the full feature set:
 
 ```r
 install.packages(c(
-  "ranger", "gbm", "maxnet", "mgcv",
+  "ranger", "maxnet", "mgcv", "glmnet",
   "pROC", "ggplot2", "sf", "terra", "future", "future.apply"
 ))
 ```

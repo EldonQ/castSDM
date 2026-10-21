@@ -76,16 +76,17 @@ test_that("MaxEnt is calibrated to the prevalence target via a logit shift", {
   expect_equal(sum(w * p_w) / sum(w), 0.5, tolerance = 1e-3)
 })
 
-test_that("BRT and GAM accept the weights", {
-  skip_if_not_installed("xgboost")
+test_that("GAM is fitted unweighted and calibrated by the shared offset", {
   skip_if_not_installed("mgcv")
   dat <- .w3_test_data(43)
-  fit_brt <- cast_fit(dat, models = "brt", prevalence_target = 0.3,
-                      brt_n_trees = 50L, seed = 5, verbose = FALSE)
-  expect_s3_class(fit_brt$models$brt$model, "xgb.Booster")
-  fit_gam <- cast_fit(dat, models = "gam", prevalence_target = 0.3,
-                      seed = 5, verbose = FALSE)
+  w <- character()
+  fit_gam <- withCallingHandlers(
+    cast_fit(dat, models = "gam", prevalence_target = 0.3,
+             seed = 5, verbose = FALSE),
+    warning = function(x) { w <<- c(w, conditionMessage(x)); invokeRestart("muffleWarning") })
   expect_s3_class(fit_gam$models$gam$model, "gam")
+  expect_true(is.finite(fit_gam$models$gam$offset))
+  expect_false(any(grepl("non-integer", w)))
 })
 
 test_that("tuned RF with prevalence_target runs the grid (weight-aware scoring)", {

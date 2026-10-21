@@ -1,9 +1,7 @@
-# covsel screening: collinearity filter, embedded ranking, force, coverage ----
+# Elastic-net screen: collinearity filter, ranking, force, coverage ----------
 
-skip_covsel_deps <- function() {
+skip_screen_deps <- function() {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mgcv")
-  skip_if_not_installed("RRF")
 }
 
 feature_null_data <- function(n = 300, r = 0.98, seed = 21) {
@@ -18,24 +16,22 @@ feature_null_data <- function(n = 300, r = 0.98, seed = 21) {
   )
 }
 
-test_that("covsel drops a near-duplicate and keeps the true drivers", {
-  skip_covsel_deps()
+test_that("screen drops a near-duplicate and keeps the true drivers", {
+  skip_screen_deps()
   dat <- feature_null_data()
   scr <- cast_select(dat, ncov = 2L, maxncov = 2L, seed = 22, verbose = FALSE)
   expect_s3_class(scr, "cast_select")
-  expect_identical(scr$method, "covsel")
-  # Exactly one of the near-duplicate pair survives the collinearity filter.
+  expect_identical(scr$method, "screen")
   expect_equal(sum(c("x1", "x3") %in% scr$selected), 1L)
   expect_true("x2" %in% scr$selected)
   expect_false(any(c("x4", "x5") %in% scr$selected))
   expect_true(all(scr$selected %in% scr$diagnostics$filtered))
-  # Reasons use the covsel vocabulary only.
   expect_true(all(scr$scores$selected_reason[scr$scores$selected] %in%
-                    c("embed", "prespecified", "ensured")))
+                    c("screen", "prespecified", "ensured")))
 })
 
-test_that("covsel is deterministic under a seed", {
-  skip_covsel_deps()
+test_that("screen is deterministic under a seed", {
+  skip_screen_deps()
   dat <- feature_null_data(n = 200)
   a <- cast_select(dat, seed = 99, verbose = FALSE)
   b <- cast_select(dat, seed = 99, verbose = FALSE)
@@ -43,7 +39,7 @@ test_that("covsel is deterministic under a seed", {
 })
 
 test_that("var_id keeps one covariate per construct", {
-  skip_covsel_deps()
+  skip_screen_deps()
   set.seed(23)
   n <- 300
   base <- rnorm(n)
@@ -59,24 +55,22 @@ test_that("var_id keeps one covariate per construct", {
   expect_equal(sum(c("scale100", "scale500", "scale1000") %in% scr$selected), 1L)
 })
 
-test_that("ncov truncates the embedded selection", {
-  skip_covsel_deps()
+test_that("ncov truncates the elastic-net screen", {
+  skip_screen_deps()
   dat <- feature_null_data()
   scr2 <- cast_select(dat, ncov = 2L, seed = 25, verbose = FALSE)
   expect_identical(scr2$diagnostics$ncov, 2L)
   expect_lte(length(scr2$selected), 2L)
-  # The default target follows the covsel rule ceiling(log2(n_presences)).
   n_pres <- sum(dat$presence)
   scr_default <- cast_select(dat, seed = 25, verbose = FALSE)
   expect_identical(scr_default$diagnostics$ncov,
                    as.integer(min(12L, ceiling(log2(n_pres)))))
 })
 
-test_that("keep forces prespecified predictors through filter and embedding", {
-  skip_covsel_deps()
+test_that("keep forces prespecified predictors through the screen", {
+  skip_screen_deps()
   dat <- feature_null_data(n = 200)
-  scr <- suppressWarnings(
-    cast_select(dat, keep = "x5", seed = 26, verbose = FALSE))
+  scr <- suppressWarnings(cast_select(dat, keep = "x5", seed = 26, verbose = FALSE))
   expect_true("x5" %in% scr$selected)
   row <- scr$scores[scr$scores$variable == "x5", ]
   expect_true(row$kept_by_design)
@@ -86,7 +80,7 @@ test_that("keep forces prespecified predictors through filter and embedding", {
 })
 
 test_that("ensure tops up a declared coverage class", {
-  skip_covsel_deps()
+  skip_screen_deps()
   dat <- feature_null_data()
   flags <- c(x1 = FALSE, x2 = FALSE, x3 = FALSE, x4 = TRUE, x5 = FALSE)
   scr <- cast_select(dat, ensure = list(climate = flags),
@@ -97,15 +91,15 @@ test_that("ensure tops up a declared coverage class", {
   expect_true("x4" %in% scr$diagnostics$ensured)
 })
 
-test_that("scores and diagnostics carry the covsel schema", {
-  skip_covsel_deps()
+test_that("scores and diagnostics carry the screen schema", {
+  skip_screen_deps()
   dat <- feature_null_data(n = 250)
   s <- cast_select(dat, keep = "x1", seed = 28, verbose = FALSE)
   expect_true(all(c("step_added", "loss_gain", "selected_reason",
                     "kept_by_design", "selected") %in% names(s$scores)))
   d <- s$diagnostics
-  expect_true(all(c("keep", "corcut", "algorithms", "ncov", "maxncov",
-                    "ensured", "filtered", "final_ranks", "n_pres") %in%
+  expect_true(all(c("keep", "corcut", "ncov", "maxncov", "ensured",
+                    "filtered", "lambda", "coefficients", "n_pres") %in%
                     names(d)))
   expect_identical(d$keep, "x1")
   expect_true(length(d$filtered) >= 1L)
@@ -116,20 +110,17 @@ test_that("scores and diagnostics carry the covsel schema", {
 })
 
 test_that("invalid selection arguments fail explicitly", {
-  skip_covsel_deps()
+  skip_screen_deps()
   dat <- feature_null_data(n = 150)
-  expect_error(cast_select(dat, method = "typo", verbose = FALSE),
-               "covsel")
-  expect_error(cast_select(dat, algorithms = "nope", verbose = FALSE),
-               "algorithms")
+  expect_error(cast_select(dat, method = "typo", verbose = FALSE), "screen")
   expect_error(cast_select(dat, corcut = 2, verbose = FALSE), "corcut")
   expect_error(cast_select(dat, ncov = 0, verbose = FALSE), "ncov")
   expect_error(cast_select(dat, maxncov = 0, verbose = FALSE), "maxncov")
   expect_error(cast_select(dat, seed = "x", verbose = FALSE), "seed")
 })
 
-test_that("covsel screens plot as a ggplot", {
-  skip_covsel_deps()
+test_that("screen plots as a ggplot", {
+  skip_screen_deps()
   skip_if_not_installed("ggplot2")
   dat <- feature_null_data(n = 250)
   s <- cast_select(dat, keep = "x1", seed = 30, verbose = FALSE)
@@ -138,7 +129,7 @@ test_that("covsel screens plot as a ggplot", {
 })
 
 test_that("a null signal still returns a valid, documented screen", {
-  skip_covsel_deps()
+  skip_screen_deps()
   set.seed(31)
   n <- 300
   dat <- data.frame(
@@ -150,7 +141,7 @@ test_that("a null signal still returns a valid, documented screen", {
   expect_s3_class(s, "cast_select")
   expect_true(all(s$selected %in% s$diagnostics$filtered))
   expect_true(all(s$scores$selected_reason %in%
-                    c("embed", "prespecified", "ensured", "excluded")))
+                    c("screen", "prespecified", "ensured", "excluded")))
   expect_false(any(c("fallback", "p_value", "null_threshold",
                      "interventional_effect") %in% names(s$scores)))
 })

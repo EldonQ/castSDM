@@ -155,7 +155,7 @@ cast_evaluate <- function(fit, test_data, response = "presence",
 #' @param X_raw Raw (unscaled) test data.
 #' @param clamp Logical. Explicitly controls the MaxEnt engine's internal
 #'   clamping of predictors to the training range. Default `FALSE`: engine
-#'   clamping is off so that every engine (RF, BRT, GAM, MaxEnt) extrapolates
+#'   clamping is off so that every engine (RF, GAM, MaxEnt) extrapolates
 #'   identically outside the training envelope, and clamping is decided once,
 #'   at the package level (`.cast_clamp()` on the inputs), never silently
 #'   inside one engine. Default `FALSE` keeps predictions comparable across
@@ -194,12 +194,10 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
   } else if (nm == "maxent") {
     # clamp is passed explicitly: maxnet::predict.maxnet defaults to
     # clamp = TRUE, which would silently freeze MaxEnt to the training
-    # range while RF/BRT/GAM extrapolate - an engine inconsistency the
+    # range while RF/GAM extrapolate - an engine inconsistency the
     # package never asked for.
     as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic",
                               clamp = isTRUE(clamp)))
-  } else if (nm == "brt") {
-    .predict_xgboost(mdl_info$model, X_raw)
   } else if (nm == "gam") {
     as.numeric(stats::predict(mdl_info$model, newdata = X_raw,
                               type = "response"))

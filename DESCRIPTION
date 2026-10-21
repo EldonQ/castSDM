@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Drivers and Spatial Attribution of Habitat Change
-Version: 0.20.0
+Version: 0.21.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -14,9 +14,9 @@ Description: Explains where environmental changes improve or reduce fitted
     habitat suitability. Paired current and future scenarios produce spatial
     driver-only effects, retained-driver comparisons and overall habitat
     change using frozen model weights. Range diagnostics and model disagreement
-    accompany the comparisons. Existing random forest, boosted regression
-    tree, MaxEnt and generalized additive model engines support variable
-    selection, spatial cross-validation, ensemble prediction and projection.
+    accompany the comparisons. Random forest, MaxEnt and generalized additive
+    model engines support variable selection, spatial cross-validation,
+    ensemble prediction and projection.
     Scenario attribution is a predictive explanation; presence-background
     suitability is not an occurrence probability or an identified causal effect.
 License: GPL (>= 3)
@@ -49,12 +49,10 @@ Suggests:
     ranger,
     scales,
     rmarkdown,
-    RRF,
     sf (>= 1.0.0),
     terra (>= 1.7.0),
     testthat (>= 3.0.0),
     viridisLite,
-    withr,
-    xgboost
+    withr
 Config/testthat/edition: 3
 VignetteBuilder: knitr

@@ -108,10 +108,9 @@ test_that("cast_run forwards selection metadata into the nested CV folds", {
   skip_if_not_installed("pROC")
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mgcv")
-  skip_if_not_installed("RRF")
   dat <- run_smoke_data(n = 180, seed = 44)
   protocol <- cast_protocol(
-    models = "rf", select_method = "covsel", select_keep = "x2",
+    models = "rf", select_method = "screen", select_keep = "x2",
     cv_k = 2L, block_method = "grid", aoa = FALSE, rf_ntree = 30L,
     prevalence_target = NULL, seed = 5L
   )

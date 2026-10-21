@@ -104,24 +104,6 @@ test_that("cast_fit(tune = TRUE) tunes RF and MaxEnt and records the grid", {
   expect_true(all(is.finite(ev$metrics$auc_mean)))
 })
 
-test_that("cast_fit(tune = TRUE) tunes BRT over depth x eta at the configured rounds", {
-  skip_if_not_installed("xgboost")
-  dat <- .tune_test_data(32)
-  fit <- suppressWarnings(cast_fit(
-    dat, models = "brt", brt_n_trees = 200L,
-    tune = TRUE, tune_folds = 2L, seed = 6, verbose = FALSE
-  ))
-  t <- fit$models$brt$tune
-  expect_equal(t$engine, "brt")
-  expect_equal(nrow(t$grid), 4L)
-  expect_true(t$best$depth %in% c(2, 5))
-  expect_true(t$best$shrinkage %in% c(0.005, 0.01))
-  # The fitted model carries the tuned configuration for refit reuse.
-  expect_equal(fit$models$brt$depth, t$best$depth)
-  expect_equal(fit$models$brt$shrinkage, t$best$shrinkage)
-  expect_equal(.cast_tuned_args(fit)$brt_depth, t$best$depth)
-})
-
 test_that("explicit MaxEnt classes are held fixed while regmult is searched", {
   skip_if_not_installed("ranger")
   skip_if_not_installed("maxnet")

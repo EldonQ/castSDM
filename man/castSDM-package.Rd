@@ -8,7 +8,7 @@
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Explains where environmental changes improve or reduce fitted habitat suitability. Paired current and future scenarios produce spatial driver-only effects, retained-driver comparisons and overall habitat change using frozen model weights. Range diagnostics and model disagreement accompany the comparisons. Existing random forest, boosted regression tree, MaxEnt and generalized additive model engines support variable selection, spatial cross-validation, ensemble prediction and projection. Scenario attribution is a predictive explanation; presence-background suitability is not an occurrence probability or an identified causal effect.
+Explains where environmental changes improve or reduce fitted habitat suitability. Paired current and future scenarios produce spatial driver-only effects, retained-driver comparisons and overall habitat change using frozen model weights. Range diagnostics and model disagreement accompany the comparisons. Random forest, MaxEnt and generalized additive model engines support variable selection, spatial cross-validation, ensemble prediction and projection. Scenario attribution is a predictive explanation; presence-background suitability is not an occurrence probability or an identified causal effect.
 }
 \seealso{
 Useful links:
