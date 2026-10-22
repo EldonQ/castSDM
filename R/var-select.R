@@ -266,10 +266,6 @@ cast_select <- function(data, response = "presence",
   if (!length(kept)) {
     cli::cli_abort("No predictor survived the variance/correlation screen.")
   }
-  if (verbose) {
-    cli::cli_inform("Screen: {length(env_vars)} -> {length(kept)} predictors after variance/collinearity filtering.")
-  }
-
   n_pres <- sum(y == 1L)
   target0 <- if (is.null(ncov)) max(1L, ceiling(log2(n_pres))) else as.integer(ncov)
   target <- as.integer(min(target0, maxncov))
@@ -341,6 +337,11 @@ cast_select <- function(data, response = "presence",
   selected <- union(keep, selected)
   kept <- union(kept, ensured)
   thinned[ensured] <- FALSE
+  if (verbose) {
+    cli::cli_inform(
+      "Screen: {length(env_vars)} -> {length(kept)} candidates after variance/collinearity; {length(selected)} selected (target {target}, maxncov {maxncov})."
+    )
+  }
 
   step_rank <- stats::setNames(rep(NA_integer_, length(env_vars)), env_vars)
   if (any(is.finite(coefs))) {

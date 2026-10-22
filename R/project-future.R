@@ -43,8 +43,11 @@
 #'     `change` columns.}
 #'   \item{stats}{A `data.frame` with columns `scenario`, `n_gain`,
 #'     `n_loss`, `n_stable_present`, `n_stable_absent`, `n_current_range`,
-#'     `n_future_range`, `pct_loss`, `pct_gain`, `pct_change`,
-#'     `centroid_shift_km`.}
+#'     `n_future_range`, `n_current_present_total`, `n_unpaired_current`,
+#'     `pct_loss`, `pct_gain`, `pct_change`, `pct_turnover`,
+#'     `centroid_shift_km`; percentages use the paired current range, and
+#'     `n_unpaired_current` records current presences missing a future
+#'     prediction.}
 #' }
 #'
 #' @details
@@ -175,11 +178,17 @@ cast_project <- function(fit, cv, current_env, future_envs,
       # loss relative to the current range, gain relative to the future range.
       n_current_range <- n_loss + n_stable
       n_future_range  <- n_gain + n_stable
+      n_current_present_total <- sum(cur_bin == 1, na.rm = TRUE)
+      n_unpaired_current <- max(0L, n_current_present_total - n_current_range)
       pct_loss <- if (n_current_range > 0) 100 * n_loss / n_current_range else NA_real_
       pct_gain <- if (n_future_range > 0) 100 * n_gain / n_future_range else NA_real_
-      total_present_now <- sum(cur_bin == 1, na.rm = TRUE)
-      pct_change <- if (total_present_now > 0) {
-        100 * (n_gain - n_loss) / total_present_now
+      pct_change <- if (n_current_range > 0) {
+        100 * (n_gain - n_loss) / n_current_range
+      } else {
+        NA_real_
+      }
+      pct_turnover <- if (n_current_range > 0) {
+        100 * (n_gain + n_loss) / n_current_range
       } else {
         NA_real_
       }
@@ -218,9 +227,12 @@ cast_project <- function(fit, cv, current_env, future_envs,
           n_stable_absent  = n_absent,
           n_current_range  = n_current_range,
           n_future_range   = n_future_range,
+          n_current_present_total = n_current_present_total,
+          n_unpaired_current = n_unpaired_current,
           pct_loss        = round(pct_loss, 2),
           pct_gain        = round(pct_gain, 2),
           pct_change      = round(pct_change, 2),
+          pct_turnover    = round(pct_turnover, 2),
           centroid_shift_km = round(centroid_km, 1),
           stringsAsFactors = FALSE
         )
@@ -235,8 +247,10 @@ cast_project <- function(fit, cv, current_env, future_envs,
         scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
         n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
         n_current_range = NA_integer_, n_future_range = NA_integer_,
+        n_current_present_total = NA_integer_, n_unpaired_current = NA_integer_,
         pct_loss = NA_real_, pct_gain = NA_real_,
-        pct_change = NA_real_, centroid_shift_km = NA_real_,
+        pct_change = NA_real_, pct_turnover = NA_real_,
+        centroid_shift_km = NA_real_,
         stringsAsFactors = FALSE
       )
     } else {
@@ -519,8 +533,9 @@ cast_project <- function(fit, cv, current_env, future_envs,
 #'   \item{current}{List with `hss_path`, `binary_path`, etc.}
 #'   \item{future}{Named list of per-scenario results.}
 #'   \item{stats}{A `data.frame` with per-scenario statistics, including
-#'     `n_current_range`/`n_future_range` pixel counts and biomod2-convention
-#'     `pct_loss` (loss over the current range) and `pct_gain` (gain over the
+#'     `n_current_range`/`n_future_range` pixel counts, `n_unpaired_current`,
+#'     and biomod2-convention `pct_loss` (loss over the current range),
+#'     `pct_turnover` (gain+loss over current range), and `pct_gain` (gain over the
 #'     future range).}
 #'   \item{output_dir}{The output directory path.}
 #' }
@@ -700,12 +715,19 @@ cast_project_raster <- function(fit, cv,
       # Range sizes (pixel counts) and biomod2-convention percentages.
       n_current_range <- n_loss + n_stable
       n_future_range  <- n_gain + n_stable
+      cur_freq <- terra::freq(cur_bin)
+      n_current_present_total <- sum(
+        cur_freq$count[cur_freq$value == 1], na.rm = TRUE)
+      n_unpaired_current <- max(0L, n_current_present_total - n_current_range)
       pct_loss <- if (n_current_range > 0) 100 * n_loss / n_current_range else NA_real_
       pct_gain <- if (n_future_range > 0) 100 * n_gain / n_future_range else NA_real_
-      total_present_now <- n_current_range
-
-      pct_change <- if (total_present_now > 0) {
-        100 * (n_gain - n_loss) / total_present_now
+      pct_change <- if (n_current_range > 0) {
+        100 * (n_gain - n_loss) / n_current_range
+      } else {
+        NA_real_
+      }
+      pct_turnover <- if (n_current_range > 0) {
+        100 * (n_gain + n_loss) / n_current_range
       } else {
         NA_real_
       }
@@ -735,7 +757,7 @@ cast_project_raster <- function(fit, cv,
       if (verbose) {
         cli::cli_inform(c(
           " " = "Gain: {n_gain} | Loss: {n_loss} | Stable: {n_stable}",
-          " " = "Change: {round(pct_change, 1)}% | Shift: {round(shift_km, 1)} km"
+          " " = "Change: {round(pct_change, 1)}% | Turnover: {round(pct_turnover, 1)}% | Shift: {round(shift_km, 1)} km"
         ))
       }
 
@@ -749,9 +771,12 @@ cast_project_raster <- function(fit, cv,
           n_stable_absent   = n_absent,
           n_current_range   = n_current_range,
           n_future_range    = n_future_range,
+          n_current_present_total = n_current_present_total,
+          n_unpaired_current = n_unpaired_current,
           pct_loss          = round(pct_loss, 2),
           pct_gain          = round(pct_gain, 2),
           pct_change        = round(pct_change, 2),
+          pct_turnover      = round(pct_turnover, 2),
           current_centroid_lon = round(cur_centroid$lon, 4),
           current_centroid_lat = round(cur_centroid$lat, 4),
           future_centroid_lon  = round(fut_centroid$lon, 4),
@@ -770,8 +795,10 @@ cast_project_raster <- function(fit, cv,
         scenario = scen, n_gain = NA_integer_, n_loss = NA_integer_,
         n_stable_present = NA_integer_, n_stable_absent = NA_integer_,
         n_current_range = NA_integer_, n_future_range = NA_integer_,
+        n_current_present_total = NA_integer_, n_unpaired_current = NA_integer_,
         pct_loss = NA_real_, pct_gain = NA_real_,
-        pct_change = NA_real_, current_centroid_lon = NA_real_,
+        pct_change = NA_real_, pct_turnover = NA_real_,
+        current_centroid_lon = NA_real_,
         current_centroid_lat = NA_real_, future_centroid_lon = NA_real_,
         future_centroid_lat = NA_real_, centroid_shift_km = NA_real_,
         stringsAsFactors = FALSE

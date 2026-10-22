@@ -73,8 +73,11 @@ A \code{cast_project} object with components:
 \code{change} columns.}
 \item{stats}{A \code{data.frame} with columns \code{scenario}, \code{n_gain},
 \code{n_loss}, \code{n_stable_present}, \code{n_stable_absent}, \code{n_current_range},
-\code{n_future_range}, \code{pct_loss}, \code{pct_gain}, \code{pct_change},
-\code{centroid_shift_km}.}
+\code{n_future_range}, \code{n_current_present_total}, \code{n_unpaired_current},
+\code{pct_loss}, \code{pct_gain}, \code{pct_change}, \code{pct_turnover},
+\code{centroid_shift_km}; percentages use the paired current range, and
+\code{n_unpaired_current} records current presences missing a future
+prediction.}
 }
 }
 \description{

@@ -42,7 +42,12 @@
   inside
 }
 
-.cast_attribution_block <- function(fit, current, future, drivers, weights, bounds) {
+.cast_attribution_block <- function(fit, current, future, drivers, weights,
+                                    bounds, reference = NULL, clamp = FALSE) {
+  if (isTRUE(clamp) && !is.null(reference)) {
+    current <- .cast_clamp(current, reference)
+    future <- .cast_clamp(future, reference)
+  }
   predict <- function(X) {
     p <- vapply(names(weights), function(m) {
       z <- tryCatch(predict_single_model(fit$models[[m]], X), error = function(e) {
@@ -126,6 +131,10 @@
 #' @param support_probs Training quantiles used for range flags. Default
 #'   `c(0.01, 0.99)`. Raw contrasts are retained and supported summaries are
 #'   reported separately; range flags do not establish ecological causality.
+#' @param clamp Logical. Clamp current and future predictors to the training
+#'   range before prediction, matching [cast_project_raster()]. Default
+#'   `FALSE` (raw scenario values). Use `TRUE` when attribution maps must share
+#'   the same extrapolation rule as projected HSS maps.
 #' @param block_size Maximum prediction rows per block. Default `50000`.
 #' @param filename GeoTIFF output path for raster inputs. When omitted a
 #'   temporary file is used. Ignored for tables.
@@ -157,7 +166,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              method = c("equal", "weighted", "best"),
                              min_score = 0.5, decay = 1, fallback = "best",
                              min_metric_folds = 2L,
-                             support_probs = c(0.01, 0.99), block_size = 50000L,
+                             support_probs = c(0.01, 0.99), clamp = FALSE,
+                             block_size = 50000L,
                              filename = NULL, mask = NULL, overwrite = FALSE,
                              verbose = TRUE) {
   .cast_check_fit(fit)
@@ -172,7 +182,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   }
   weights <- .cast_attribution_weights(fit, cv, models, weights, method,
     min_score, decay, fallback, min_metric_folds)
-  bounds <- .cast_support_bounds(.cast_reference(fit, vars), support_probs)
+  reference <- .cast_reference(fit, vars)
+  bounds <- .cast_support_bounds(reference, support_probs)
   if (any(!vapply(bounds, function(b) all(is.finite(b)), logical(1)))) {
     cli::cli_abort("Training reference contains no finite values for a predictor.")
   }
@@ -247,7 +258,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (raster) keep <- keep & .cast_mask_rows(mask, first, count, nrow(a))
     z <- matrix(NA_real_, nrow(a), length(layer_names), dimnames = list(NULL, layer_names))
     if (any(keep)) z[keep, ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
-      b[keep, , drop = FALSE], drivers, weights, bounds)
+      b[keep, , drop = FALSE], drivers, weights, bounds,
+      reference = reference, clamp = clamp)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
     if (verbose) cli::cli_inform("Scenario attribution: block {i}/{length(starts)}")

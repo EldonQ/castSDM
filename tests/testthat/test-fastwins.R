@@ -67,7 +67,8 @@ test_that("cast_project stats gain range columns and biomod2 percentages", {
   fut$x1 <- fut$x1 + 1
 
   p <- cast_project(fc$fit, fc$cv, cur, list(s1 = fut))
-  expect_true(all(c("n_current_range", "n_future_range", "pct_loss", "pct_gain")
+  expect_true(all(c("n_current_range", "n_future_range", "pct_loss", "pct_gain",
+                    "pct_turnover", "n_unpaired_current")
                   %in% names(p$stats)))
   st <- p$stats[p$stats$scenario == "s1", ]
   expect_identical(st$n_current_range, st$n_loss + st$n_stable_present)
@@ -80,6 +81,11 @@ test_that("cast_project stats gain range columns and biomod2 percentages", {
     expect_equal(st$pct_gain,
                  round(100 * st$n_gain / st$n_future_range, 2))
   }
+  if (st$n_current_range > 0) {
+    expect_equal(st$pct_turnover,
+                 round(100 * (st$n_gain + st$n_loss) / st$n_current_range, 2))
+  }
+  expect_identical(st$n_unpaired_current, 0L)
 })
 
 test_that("failed scenarios carry NA in the new stats columns (S2)", {

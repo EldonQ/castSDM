@@ -19,6 +19,7 @@ cast_attribution(
   fallback = "best",
   min_metric_folds = 2L,
   support_probs = c(0.01, 0.99),
+  clamp = FALSE,
   block_size = 50000L,
   filename = NULL,
   mask = NULL,
@@ -52,6 +53,11 @@ must already be paired. Rasters must have identical geometry and CRS.}
 \item{support_probs}{Training quantiles used for range flags. Default
 \code{c(0.01, 0.99)}. Raw contrasts are retained and supported summaries are
 reported separately; range flags do not establish ecological causality.}
+
+\item{clamp}{Logical. Clamp current and future predictors to the training
+range before prediction, matching \code{\link[=cast_project_raster]{cast_project_raster()}}. Default
+\code{FALSE} (raw scenario values). Use \code{TRUE} when attribution maps must share
+the same extrapolation rule as projected HSS maps.}
 
 \item{block_size}{Maximum prediction rows per block. Default \code{50000}.}
 

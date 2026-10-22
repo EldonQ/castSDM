@@ -87,8 +87,9 @@ A list with components:
 \item{current}{List with \code{hss_path}, \code{binary_path}, etc.}
 \item{future}{Named list of per-scenario results.}
 \item{stats}{A \code{data.frame} with per-scenario statistics, including
-\code{n_current_range}/\code{n_future_range} pixel counts and biomod2-convention
-\code{pct_loss} (loss over the current range) and \code{pct_gain} (gain over the
+\code{n_current_range}/\code{n_future_range} pixel counts, \code{n_unpaired_current},
+and biomod2-convention \code{pct_loss} (loss over the current range),
+\code{pct_turnover} (gain+loss over current range), and \code{pct_gain} (gain over the
 future range).}
 \item{output_dir}{The output directory path.}
 }

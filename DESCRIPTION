@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Drivers and Spatial Attribution of Habitat Change
-Version: 0.21.0
+Version: 0.22.0
 Authors@R: c(
     person(
             "Liqiang", "Q",

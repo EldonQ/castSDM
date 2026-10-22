@@ -30,6 +30,8 @@ test_that("raster and table attribution agree across block sizes and missing cel
   b <- a; b$x <- b$x + .3
   terra::values(r) <- as.matrix(a); s <- r; terra::values(s) <- as.matrix(b)
   table <- cast_attribution(f, a, b, verbose = FALSE)
+  table_clamped <- cast_attribution(f, a, b, clamp = TRUE, verbose = FALSE)
+  expect_equal(table_clamped$summary, table$summary, tolerance = 1e-12)
   m1 <- cast_attribution(f, r, s, block_size = 2, verbose = FALSE)
   m2 <- cast_attribution(f, r, s, block_size = 20, verbose = FALSE)
   expect_equal(terra::values(terra::rast(m1$raster_file)), as.matrix(table$data), tolerance = 1e-12)

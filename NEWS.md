@@ -1,3 +1,13 @@
+# castSDM 0.22.0
+
+- `cast_attribution()` gains `clamp`; set it to `TRUE` to apply the same
+  training-range clamp as `cast_project_raster()`.
+- Projection statistics gain `n_current_present_total`, `n_unpaired_current`
+  and `pct_turnover`; `pct_change` now uses the paired current range, matching
+  the raster implementation.
+- The screen message reports both the post-filter candidate count and the
+  final elastic-net/ensure selection count.
+
 # castSDM 0.21.0
 
 - Variable selection: `method = "screen"` is an independent elastic-net
