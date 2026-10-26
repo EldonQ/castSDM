@@ -1,3 +1,12 @@
+# castSDM 0.22.1
+
+- `cast_attribution()` now reports a `remainder` row in `summary` (total change
+  minus the sum of driver-only effects), matching the existing `remainder`
+  raster layer and documenting non-additivity explicitly.
+- Attribution progress remains available through `verbose`; long-running
+  callers should checkpoint driver subsets rather than relying on a single
+  monolithic surface.
+
 # castSDM 0.22.0
 
 - `cast_attribution()` gains `clamp`; set it to `TRUE` to apply the same

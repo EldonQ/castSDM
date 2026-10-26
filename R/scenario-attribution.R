@@ -230,14 +230,17 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     out <- matrix(NA_real_, n, length(layer_names), dimnames = list(NULL, layer_names))
   }
   # Online moments avoid retaining national effect surfaces in RAM.
-  sums <- matrix(0, 1 + 2 * length(drivers), 8,
+  sums <- matrix(0, 2 + 2 * length(drivers), 8,
     dimnames = list(NULL, c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd")))
   accumulate <- function(z) {
-    cols <- c("total_change", paste0("effect_", drivers), paste0("retained_", drivers))
+    cols <- c("total_change", paste0("effect_", drivers),
+      paste0("retained_", drivers), "remainder")
     for (j in seq_along(cols)) {
       col <- cols[j]; d <- z[, col]
-      sc <- if (j == 1) "support_total" else paste0("support_", col)
-      dc <- if (j == 1) "total_sd" else sub("^(effect|retained)_", "\\1_sd_", col)
+      sc <- if (col %in% c("total_change", "remainder")) "support_total" else
+        paste0("support_", col)
+      dc <- if (col %in% c("total_change", "remainder")) "total_sd" else
+        sub("^(effect|retained)_", "\\1_sd_", col)
       k <- is.finite(d); s <- k & !is.na(z[, sc]) & z[, sc] == 1
       ds <- z[, dc]; ks <- k & is.finite(ds)
       sums[j, ] <<- sums[j, ] + c(sum(k), sum(s), sum(d[k]), sum(abs(d[k])),
@@ -265,15 +268,20 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (verbose) cli::cli_inform("Scenario attribution: block {i}/{length(starts)}")
   }
   divide <- function(x, n) ifelse(n > 0, x / n, NA_real_)
-  summary <- data.frame(driver = c(NA_character_, drivers, drivers),
-    contrast = c("total", rep("only", length(drivers)), rep("retained", length(drivers))),
+  n_driver_rows <- 1L + 2L * length(drivers)
+  summary <- data.frame(
+    driver = c(NA_character_, drivers, drivers, NA_character_),
+    contrast = c("total", rep("only", length(drivers)),
+      rep("retained", length(drivers)), "remainder"),
     n = sums[, "n"], n_supported = sums[, "ns"],
     support = divide(sums[, "ns"], sums[, "n"]),
     mean_signed = divide(sums[, "sum"], sums[, "n"]),
     mean_abs = divide(sums[, "abs"], sums[, "n"]),
     mean_signed_supported = divide(sums[, "sums"], sums[, "ns"]),
     mean_abs_supported = divide(sums[, "abss"], sums[, "ns"]),
-    mean_model_sd = divide(sums[, "sd"], sums[, "nsd"]), row.names = NULL)
+    mean_model_sd = c(divide(sums[seq_len(n_driver_rows), "sd"],
+      sums[seq_len(n_driver_rows), "nsd"]), NA_real_),
+    row.names = NULL)
   data <- NULL
   if (raster) {
     .cast_writer_finish(writer)
