@@ -1,3 +1,9 @@
+# castSDM 0.22.2
+
+- `cast_project_raster()` projection statistics now name centroid coordinates
+  `*_centroid_x` / `*_centroid_y`, matching their projected CRS units instead
+  of the misleading `lon` / `lat` labels.
+
 # castSDM 0.22.1
 
 - `cast_attribution()` now reports a `remainder` row in `summary` (total change

@@ -777,10 +777,10 @@ cast_project_raster <- function(fit, cv,
           pct_gain          = round(pct_gain, 2),
           pct_change        = round(pct_change, 2),
           pct_turnover      = round(pct_turnover, 2),
-          current_centroid_lon = round(cur_centroid$lon, 4),
-          current_centroid_lat = round(cur_centroid$lat, 4),
-          future_centroid_lon  = round(fut_centroid$lon, 4),
-          future_centroid_lat  = round(fut_centroid$lat, 4),
+          current_centroid_x = round(cur_centroid$lon, 4),
+          current_centroid_y = round(cur_centroid$lat, 4),
+          future_centroid_x  = round(fut_centroid$lon, 4),
+          future_centroid_y  = round(fut_centroid$lat, 4),
           centroid_shift_km = round(shift_km, 1),
           stringsAsFactors  = FALSE
         )
@@ -798,9 +798,9 @@ cast_project_raster <- function(fit, cv,
         n_current_present_total = NA_integer_, n_unpaired_current = NA_integer_,
         pct_loss = NA_real_, pct_gain = NA_real_,
         pct_change = NA_real_, pct_turnover = NA_real_,
-        current_centroid_lon = NA_real_,
-        current_centroid_lat = NA_real_, future_centroid_lon = NA_real_,
-        future_centroid_lat = NA_real_, centroid_shift_km = NA_real_,
+        current_centroid_x = NA_real_,
+        current_centroid_y = NA_real_, future_centroid_x = NA_real_,
+        future_centroid_y = NA_real_, centroid_shift_km = NA_real_,
         stringsAsFactors = FALSE
       )
     } else {

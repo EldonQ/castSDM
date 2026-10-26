@@ -184,8 +184,8 @@ test_that("centroid_shift_km is in kilometres on a projected metre grid", {
   st <- out$stats[out$stats$scenario == "ok", ]
   skip_if(is.na(st$centroid_shift_km))
 
-  planar_km <- sqrt((st$future_centroid_lon - st$current_centroid_lon)^2 +
-                      (st$future_centroid_lat - st$current_centroid_lat)^2) / 1000
+  planar_km <- sqrt((st$future_centroid_x - st$current_centroid_x)^2 +
+                      (st$future_centroid_y - st$current_centroid_y)^2) / 1000
   expect_equal(st$centroid_shift_km, round(planar_km, 1), tolerance = 1e-6)
   # The extent is 400 km wide, so any shift must stay well inside it.
   expect_lt(st$centroid_shift_km, 600)
