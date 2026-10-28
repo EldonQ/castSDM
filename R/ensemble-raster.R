@@ -280,6 +280,9 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
   for (bi in seq_len(n_blocks)) {
     row_start <- (bi - 1L) * rows_per_block + 1L
     row_count <- min(rows_per_block, nr - row_start + 1L)
+    if (verbose && (bi == n_blocks || bi %% max(1L, ceiling(n_blocks / 4)) == 0L)) {
+      cli::cli_inform("Block {bi}/{n_blocks}")
+    }
 
     v <- .cast_raster_block(r, row_start, row_count)
     if (!identical(names(v), env_vars)) cli::cli_abort("Raster block lost fitted predictor names.")

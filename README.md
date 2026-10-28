@@ -1,19 +1,51 @@
 # castSDM
 
-**Environmental drivers and spatial attribution of habitat change.**
+**Factorial causal scenario attribution for species distribution models.**
 
-castSDM asks where an environmental change improves or reduces predicted
-habitat suitability, and how individual drivers contribute to future habitat
-change. Use one fitted SDM, paired current/future environments and frozen model
-weights throughout each comparison.
+castSDM separates two questions that are often conflated: how much do climate
+and land use each contribute to a projected change, and how do individual
+drivers explain the joint future? The first is answered by a 2 x 2 factorial
+design; the second by the within-scenario driver-only/retained decomposition.
 
 ```r
-# Models can be fitted in another tool; supply its prediction method.
+# Four aligned suitability surfaces from one fitted SDM and frozen weights.
+fa <- cast_factorial_attribution(
+  current = current_hss,
+  joint   = joint_hss,
+  climate = climate_only_hss,
+  lulc    = lulc_only_hss,
+  threshold = 0.43
+)
+fa$summary          # climate main, land-use main, joint, interaction
+fa$binary           # thresholded range counts and percentage changes
+fa$contract         # claim level and explicit assumptions
+plot(fa)            # contrast layers
+```
+
+The factorial contrasts are:
+
+- `climate_main = climate - current`;
+- `lulc_main = lulc - current`;
+- `joint_change = joint - current`;
+- `interaction = joint - climate - lulc + current`;
+- `climate_conditional = joint - lulc` and
+  `lulc_conditional = joint - climate`.
+
+The other scenario component is fixed by the design, so the factorial layer
+does **not** require a DAG or a user-supplied adjustment set. It is a
+model-based causal scenario attribution under explicit assumptions: the
+scenario components are well-defined manipulations, the fitted response is
+valid for those scenarios, no omitted component changes the contrast, and the
+counterfactual values are supported. It is not an identified real-world causal
+effect from observational data. Continuous and binary summaries, support,
+optional model-SD layers and a claim contract are returned together.
+
+```r
+# Optional within-scenario explanation, using one fitted model.
 fit <- cast_as_fit(list(gam = fitted_gam), training_predictors,
   function(model, newdata) predict(model, newdata, type = "response"))
 attribution <- cast_attribution(fit, current, future)
 plot(attribution, contrast = "retained")
-plot(attribution, type = "map", driver = "temperature")
 ```
 
 `effect_<driver>` changes only that predictor to its actual future values.
@@ -26,8 +58,9 @@ Tables and aligned rasters use the same numerical implementation. Raster outputs
 are written in bounded blocks; plots use the package's existing cartographic
 assets. Raw comparisons and within-range summaries are reported separately.
 Cross-model standard deviations describe model disagreement, not confidence
-intervals. Presence/background predictions are relative suitability; these
-comparisons do not identify ecological causal effects or realized colonisation.
+intervals. Presence/background predictions are relative suitability; the
+factorial contrasts are causal scenario attributions under assumptions, not
+identified ecological causal effects or realised colonisation.
 
 Existing fitting, spatial validation, projection and single-shift effect APIs
 remain available. Mature engine packages perform model fitting.
@@ -44,8 +77,9 @@ evaluation at out-of-fold thresholds, full-data refit and ensemble.
 receipts in `manifest.rds`, together with an ODMAP-aligned report.
 
 Typical case reports use four main figures: model evaluation, habitat change,
-environmental driver comparisons, and range/model disagreement. Detailed
-optional diagnostics remain available without filling the default report.
+factorial causal attribution (climate main, land-use main, interaction), and
+support/model disagreement. Within-scenario driver comparisons and detailed
+diagnostics remain available without filling the default report.
 
 ## Installation
 
@@ -73,9 +107,15 @@ change coding.
 - Driver-only maps answer: how would suitability change if this predictor took
   its future values while the others stayed current? Retained-driver maps ask
   how much the complete future differs when that predictor stays current.
-- These are comparisons of a fitted response. Correlated predictors, missing
-  ecological processes and observation bias can change their meaning; the
-  software does not establish which environmental factor caused observed habitat change.
+- The factorial contrasts are model-based causal scenario attributions under
+  the assumptions recorded in `fa$contract`: well-defined scenario components,
+  a valid fitted response for those scenarios, no omitted component, supported
+  counterfactuals and no interference. They are not identified real-world causal
+  effects from observational data.
+- Driver-only and retained-driver comparisons are within-scenario explanations
+  of a fitted response. Correlated predictors, missing ecological processes and
+  observation bias can change their meaning; they do not establish which
+  environmental factor caused observed habitat change.
 - Training-range flags show whether the compared environments fall within each
   predictor's training quantiles. They cannot detect every unsupported joint
   combination. Raw scenario contrasts and supported summaries are separate.

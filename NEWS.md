@@ -1,3 +1,24 @@
+# castSDM 0.23.0
+
+- New `cast_factorial_attribution()`: a 2 x 2 factorial causal scenario
+  attribution for climate and land use. It computes climate and land-use main
+  effects, the joint change, the interaction and the two conditional effects
+  from four aligned current/climate-only/LULC-only/joint suitability surfaces.
+  Continuous and binary range summaries, optional support and cross-model SD
+  layers, a contrast GeoTIFF and an explicit claim contract are returned in a
+  `cast_factorial` object.
+- The factorial design fixes the other scenario component, so no DAG or
+  adjustment set is required. The contrasts are model-based causal scenario
+  attributions under stated assumptions, not identified real-world causal
+  effects.
+- `cast_attribution()` remains the within-scenario driver-only/retained
+  decomposition; the two APIs answer different questions.
+- Package title and description now foreground factorial causal scenario
+  attribution while retaining the predictive engine and attribution contracts.
+- `cast_ensemble_raster()` reports block progress at quartiles when
+  `verbose = TRUE`, so long national projections are no longer silent between
+  the grid message and the final raster.
+
 # castSDM 0.22.2
 
 - `cast_project_raster()` projection statistics now name centroid coordinates

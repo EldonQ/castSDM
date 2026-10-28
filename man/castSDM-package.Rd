@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Environmental Drivers and Spatial Attribution of Habitat Change}
+\title{castSDM: Factorial Causal Scenario Attribution for Species Distribution Models}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Explains where environmental changes improve or reduce fitted habitat suitability. Paired current and future scenarios produce spatial driver-only effects, retained-driver comparisons and overall habitat change using frozen model weights. Range diagnostics and model disagreement accompany the comparisons. Random forest, MaxEnt and generalized additive model engines support variable selection, spatial cross-validation, ensemble prediction and projection. Scenario attribution is a predictive explanation; presence-background suitability is not an occurrence probability or an identified causal effect.
+Factorial causal scenario attribution for species distribution models. A 2 x 2 design (current, climate-only, land-use-only, joint) estimates climate main effects, land-use main effects, the joint change and their interaction on a fitted suitability surface, with continuous and binary range summaries, support diagnostics and model disagreement. Paired driver-only and retained-driver comparisons remain available for within-scenario explanation. Random forest, MaxEnt and generalized additive model engines support a data-driven elastic-net screen, spatial cross-validation, ensemble prediction and projection. The factorial contrasts are model-based causal scenario attributions under explicit assumptions; they are not identified real-world causal effects, occurrence probabilities or realised distributions.
 }
 \seealso{
 Useful links:

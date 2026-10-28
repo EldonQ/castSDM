@@ -203,6 +203,35 @@ proj <- cast_project(fit, cv, current_env, future_envs,
 proj$stats
 ```
 
+## Factorial causal scenario attribution
+
+The factorial layer answers a different question from the driver-only and
+retained-driver comparisons. With four aligned suitability surfaces from a
+2 x 2 design, it estimates the climate main effect, the land-use main effect,
+the joint change and their interaction. The other component is fixed by the
+design, so no DAG or adjustment-set object is required. The contrasts are
+model-based causal scenario attributions under the assumptions recorded in
+`fa$contract`; they are not identified real-world causal effects.
+
+```{r factorial, eval=FALSE}
+fa <- cast_factorial_attribution(
+  current = current_hss,
+  joint   = joint_hss,
+  climate = climate_only_hss,
+  lulc    = lulc_only_hss,
+  threshold = 0.43
+)
+fa$summary
+fa$binary
+fa$contract
+plot(fa, layers = c("climate_main", "lulc_main", "interaction"))
+```
+
+The continuous summaries use the fitted suitability scale. The binary
+summaries use the thresholded range. `support` and optional cross-model SD
+rasters are reported separately; surface-level SD is not the SD of the
+contrast and is not a confidence interval.
+
 ## What the extra options do not buy
 
 Tuning, weighting, replication and buffers sharpen the model and its

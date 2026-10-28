@@ -922,6 +922,61 @@ load_basemap <- function(type = "world") {
 .cast_var_label <- function(vars) {
   lab <- vars
   lab <- gsub("_r[0-9]+cell$", "", lab)
+
+  bio <- c(
+    bio01 = "annual mean temperature",
+    bio02 = "mean diurnal range",
+    bio03 = "isothermality",
+    bio04 = "temperature seasonality",
+    bio05 = "max temperature of warmest month",
+    bio06 = "min temperature of coldest month",
+    bio07 = "temperature annual range",
+    bio08 = "mean temperature of wettest quarter",
+    bio09 = "mean temperature of driest quarter",
+    bio10 = "mean temperature of warmest quarter",
+    bio11 = "mean temperature of coldest quarter",
+    bio12 = "annual precipitation",
+    bio13 = "precipitation of wettest month",
+    bio14 = "precipitation of driest month",
+    bio15 = "precipitation seasonality",
+    bio16 = "precipitation of wettest quarter",
+    bio17 = "precipitation of driest quarter",
+    bio18 = "precipitation of warmest quarter",
+    bio19 = "precipitation of coldest quarter")
+  bio_hit <- match(lab, names(bio))
+  is_bio <- !is.na(bio_hit)
+  lab[is_bio] <- paste0(bio[bio_hit[is_bio]], " (", lab[is_bio], ")")
+
+  prop <- regexec(
+    "^lulc_(?:glu1km|hlu1km|clcd)_[0-9]{4}_(.+?)_prop(?:_f([0-9]+))?$",
+    lab, perl = TRUE)
+  prop <- regmatches(lab, prop)
+  for (i in which(lengths(prop) > 0L)) {
+    cls <- gsub("_", " ", prop[[i]][2])
+    cls <- sub("^mngforest$", "managed forest", cls)
+    cls <- sub("^grassshrub$", "grass/shrub", cls)
+    scale <- prop[[i]][3]
+    lab[i] <- paste0("LULC ", cls, " proportion",
+      if (nzchar(scale)) paste0(" (", as.integer(scale) / 1000, " km window)") else "")
+  }
+  metric <- regexec(
+    "^lulc_(?:glu1km|hlu1km|clcd)_[0-9]{4}_(.+?)(?:_f([0-9]+))?$",
+    lab, perl = TRUE)
+  metric <- regmatches(lab, metric)
+  for (i in which(lengths(metric) > 0L)) {
+    if (grepl("_prop$", metric[[i]][2])) next
+    met <- gsub("_", " ", metric[[i]][2])
+    scale <- metric[[i]][3]
+    lab[i] <- paste0("LULC ", met,
+      if (nzchar(scale)) paste0(" (", as.integer(scale) / 1000, " km window)") else "")
+  }
+  soil <- regexec("^soil_csdlv2_(.+)_([0-9]+)$", lab, perl = TRUE)
+  soil <- regmatches(lab, soil)
+  for (i in which(lengths(soil) > 0L)) {
+    lab[i] <- paste0("Soil ", gsub("_", " ", soil[[i]][2]),
+                     " (", soil[[i]][3], " cm)")
+  }
+
   repl <- c(
     "aridityindexthornthwaite" = "aridity index",
     "maxtempcoldest" = "max temp coldest month",
@@ -931,8 +986,7 @@ load_basemap <- function(type = "world") {
     "landcover_igbp" = "land cover (IGBP)",
     "lu_water_prop" = "surface water proportion",
     "lu_urban" = "urban proportion",
-    "lu_cropland" = "cropland proportion"
-  )
+    "lu_cropland" = "cropland proportion")
   for (nm in names(repl)) lab <- gsub(nm, repl[[nm]], lab, fixed = TRUE)
   lab <- gsub("^lu_", "", lab)
   lab <- gsub("^anthro_", "human ", lab)
