@@ -1,3 +1,10 @@
+# castSDM 0.23.1
+
+- Map rendering now clips the basemap to the same analysis-domain polygon as
+  the rasters, draws the domain as a dashed outline, and uses a 0.02 degree
+  display grid. This removes the sharp raster/basemap edge without
+  extrapolating predictions outside the analysis domain.
+
 # castSDM 0.23.0
 
 - New `cast_factorial_attribution()`: a 2 x 2 factorial causal scenario

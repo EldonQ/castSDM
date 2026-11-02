@@ -3,13 +3,17 @@
                              legend_name = NULL,
                              bg = .cast_map_bg(), boundary = NULL,
                              bounds = NULL, context = 0, feather = 0,
-                             alpha_col = NULL, cell_size = 0.05) {
+                             alpha_col = NULL, cell_size = 0.02) {
   outside <- NULL
   if (".inside" %in% names(df)) {
     outside <- df[!df$.inside, , drop = FALSE]
     df <- df[df$.inside, , drop = FALSE]
   }
   bm <- load_basemap("china")
+  if (!is.null(bm) && !is.null(boundary)) {
+    boundary <- sf::st_transform(boundary, 4326)
+    bm <- suppressWarnings(sf::st_intersection(bm, boundary))
+  }
   p <- ggplot2::ggplot()
   if (!is.null(bm)) {
     p <- p + ggplot2::geom_sf(data = bm, fill = bg, color = "#bdc3c7", linewidth = 0.2)
@@ -35,6 +39,10 @@
     ggplot2::geom_tile(data = df, mapping = map_aes,
                        width = cell_size[1], height = utils::tail(cell_size, 1)) +
     scale_fn("main")
+  if (!is.null(boundary)) {
+    p <- p + ggplot2::geom_sf(data = boundary, fill = NA,
+      color = "#4D4D4D", linewidth = 0.3, linetype = "dashed")
+  }
   if ((is.null(alpha_col) || !alpha_col %in% names(df)) &&
       !is.null(feather) && feather > 0 && ".dist_deg" %in% names(df)) {
     p <- p + ggplot2::scale_alpha(range = c(0, 1), limits = c(0, feather),

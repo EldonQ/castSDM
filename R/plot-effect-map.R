@@ -1,4 +1,4 @@
-.cast_display_raster <- function(path, layer = 1L, res_deg = 0.05,
+.cast_display_raster <- function(path, layer = 1L, res_deg = 0.02,
                           method = "bilinear", mask = NULL,
                           keep_outside = FALSE, feather_deg = 0) {
   rd <- terra::project(terra::rast(path)[[layer]], "EPSG:4326",
