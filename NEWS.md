@@ -1,3 +1,16 @@
+# castSDM 0.24.0
+
+- `cast_select(method = "screen")` diagnostics now record the elastic-net
+  non-zero count, whether the `ncov` target cap was applied, how many variables
+  the target cap removed, and the removed variable names. Those variables carry
+  `selected_reason = "target_cap"` in `scores`, so the final variable count is
+  auditable instead of being hidden behind the `maxncov` guardrail.
+- The package retains the same fitting, projection and factorial APIs. The
+  application workflow now uses one analysis domain for background sampling,
+  projection and maps, and allows static predictors into the model while
+  holding them fixed across scenarios; those are workflow contracts, not new
+  package entry points.
+
 # castSDM 0.23.1
 
 - Map rendering now clips the basemap to the same analysis-domain polygon as

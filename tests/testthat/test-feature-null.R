@@ -67,6 +67,26 @@ test_that("ncov truncates the elastic-net screen", {
                    as.integer(min(12L, ceiling(log2(n_pres)))))
 })
 
+test_that("target cap removal is recorded in diagnostics and scores", {
+  skip_screen_deps()
+  set.seed(1)
+  n <- 500
+  X <- matrix(rnorm(n * 6), n, 6)
+  colnames(X) <- paste0("x", seq_len(6))
+  p <- plogis(1.2 * X[, 1] + 1.1 * X[, 2] + 1.0 * X[, 3] + 0.9 * X[, 4])
+  dat <- as.data.frame(X)
+  dat$lon <- runif(n, 70, 130)
+  dat$lat <- runif(n, 20, 50)
+  dat$presence <- rbinom(n, 1, p)
+  scr <- cast_select(dat, ncov = 2L, maxncov = 12L, seed = 25, verbose = FALSE)
+  d <- scr$diagnostics
+  expect_true(d$target_cap_applied)
+  expect_gt(d$n_screened_nonzero, length(scr$selected))
+  expect_gt(d$n_dropped_by_target, 0L)
+  expect_setequal(d$target_cap_dropped,
+                  scr$scores$variable[scr$scores$selected_reason == "target_cap"])
+})
+
 test_that("keep forces prespecified predictors through the screen", {
   skip_screen_deps()
   dat <- feature_null_data(n = 200)

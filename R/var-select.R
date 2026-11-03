@@ -280,6 +280,9 @@ cast_select <- function(data, response = "presence",
   selected <- kept
   coefs <- stats::setNames(rep(NA_real_, length(kept)), kept)
   lambda <- NA_real_
+  target_cap_applied <- FALSE
+  target_cap_dropped <- character(0)
+  n_screened_nonzero <- length(selected)
   if (length(kept) > 1L) {
     x <- as.matrix(X[, kept, drop = FALSE])
     storage.mode(x) <- "double"
@@ -309,34 +312,55 @@ cast_select <- function(data, response = "presence",
                          -assoc[kept])][1]
       selected <- union(keep, best)
     }
-    if (length(selected) > target) {
-      rank <- abs(coefs[selected])
-      rank[is.na(rank)] <- -Inf
-      selected <- union(keep, selected[order(-rank)][seq_len(max(0L, target - length(keep)))])
-    }
+    n_screened_nonzero <- length(selected)
   }
 
-  # Coverage requirements. Only survivors of the variance/collinearity filter
-  # can satisfy a declared class; resurrecting a thinned layer would contradict
-  # the filter that is reported alongside the selection.
+  # Coverage requirements are applied before the target cap and are protected
+  # from it. Otherwise a pool with many static layers can fill every slot and
+  # push the required climate/LULC driver outside the target as an extra
+  # covariate.
   ensured <- character(0)
   if (!is.null(ensure)) {
+    coef_rank <- function(v) {
+      z <- abs(coefs[v])
+      z[is.na(z)] <- -Inf
+      z
+    }
     for (nm in names(ensure)) {
       flag <- stats::setNames(ensure[[nm]], env_vars)
-      if (any(flag[selected])) next
-      cand <- intersect(kept, env_vars[flag])
-      if (!length(cand)) {
-        cli::cli_warn("ensure[[{.val {nm}}]] has no survivor after filtering; coverage cannot be satisfied.")
-        next
+      cand <- intersect(selected, env_vars[flag])
+      if (length(cand)) {
+        pick <- cand[order(-coef_rank(cand), is.na(stage1_p[cand]),
+                          stage1_p[cand], cand)][1]
+      } else {
+        cand <- intersect(kept, env_vars[flag])
+        if (!length(cand)) {
+          cli::cli_warn("ensure[[{.val {nm}}]] has no survivor after filtering; coverage cannot be satisfied.")
+          next
+        }
+        pick <- cand[order(is.na(stage1_p[cand]), stage1_p[cand], cand)][1]
+        selected <- union(selected, pick)
       }
-      pick <- cand[order(is.na(stage1_p[cand]), stage1_p[cand], cand)][1]
-      selected <- union(selected, pick)
       ensured <- c(ensured, pick)
     }
   }
-  selected <- union(keep, selected)
+  ensured <- unique(ensured)
+  selected <- union(keep, union(selected, ensured))
   kept <- union(kept, ensured)
   thinned[ensured] <- FALSE
+
+  if (length(selected) > target) {
+    selected_pre_cap <- selected
+    protected <- union(keep, ensured)
+    rank <- abs(coefs[selected])
+    rank[is.na(rank)] <- -Inf
+    extra <- setdiff(selected, protected)
+    n_extra <- max(0L, target - length(protected))
+    selected <- union(protected,
+                      extra[order(-rank[extra])][seq_len(min(length(extra), n_extra))])
+    target_cap_applied <- TRUE
+    target_cap_dropped <- setdiff(selected_pre_cap, selected)
+  }
   if (verbose) {
     cli::cli_inform(
       "Screen: {length(env_vars)} -> {length(kept)} candidates after variance/collinearity; {length(selected)} selected (target {target}, maxncov {maxncov})."
@@ -358,8 +382,9 @@ cast_select <- function(data, response = "presence",
   )
   reason <- stats::setNames(rep("excluded", length(env_vars)), env_vars)
   reason[selected] <- "screen"
-  reason[keep] <- "prespecified"
+  reason[target_cap_dropped] <- "target_cap"
   reason[ensured] <- "ensured"
+  reason[keep] <- "prespecified"
   scores <- data.frame(
     variable = env_vars,
     assoc = unname(assoc[env_vars]),
@@ -379,7 +404,11 @@ cast_select <- function(data, response = "presence",
     diagnostics = list(
       keep = keep, corcut = corcut, ncov_target = target0, ncov = target,
       ncov_use = length(selected), maxncov = maxncov,
-      cap_binding = cap_binding, ensured = ensured, filtered = kept,
+      cap_binding = cap_binding, target_cap_applied = target_cap_applied,
+      n_screened_nonzero = n_screened_nonzero,
+      n_dropped_by_target = length(target_cap_dropped),
+      target_cap_dropped = target_cap_dropped,
+      ensured = ensured, filtered = kept,
       lambda = lambda, coefficients = coefs, n_pres = n_pres,
       algorithms = "elastic_net", final_ranks = final_ranks))
 }
