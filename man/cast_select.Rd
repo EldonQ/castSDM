@@ -18,6 +18,7 @@ cast_select(
   maxncov = 12L,
   weights = NULL,
   ensure = NULL,
+  ensure_n = NULL,
   env_vars = NULL
 )
 }
@@ -53,8 +54,12 @@ for API compatibility; the screen does not use category quotas.}
 \item{weights}{Optional numeric row weights used by the screen.}
 
 \item{ensure}{Optional named list of logical flag vectors aligned with the
-predictors, declaring coverage requirements. If the final set contains no
-flagged covariate, the strongest-ranked flagged survivor is admitted.}
+predictors, declaring coverage requirements. Each group is represented by
+at least one survivor; the representative is protected from the target cap.}
+
+\item{ensure_n}{Optional named integer vector aligned with \code{ensure}, giving
+the minimum number of survivors to retain from each coverage group. A
+value of \code{2} for \code{climate} reserves two climate slots inside the target.}
 
 \item{env_vars}{Optional explicit predictor set. \code{NULL} keeps auto-detection.}
 }

@@ -36,8 +36,11 @@
 #' @param maxncov Maximum number of covariates. Default `12`.
 #' @param weights Optional numeric row weights used by the screen.
 #' @param ensure Optional named list of logical flag vectors aligned with the
-#'   predictors, declaring coverage requirements. If the final set contains no
-#'   flagged covariate, the strongest-ranked flagged survivor is admitted.
+#'   predictors, declaring coverage requirements. Each group is represented by
+#'   at least one survivor; the representative is protected from the target cap.
+#' @param ensure_n Optional named integer vector aligned with `ensure`, giving
+#'   the minimum number of survivors to retain from each coverage group. A
+#'   value of `2` for `climate` reserves two climate slots inside the target.
 #' @param env_vars Optional explicit predictor set. `NULL` keeps auto-detection.
 #' @param keep Character vector forced through the screen (expert knowledge).
 #' @param seed Random seed.
@@ -65,7 +68,7 @@ cast_select <- function(data, response = "presence",
                         seed = NULL, verbose = TRUE, keep = character(0),
                         corcut = 0.7, var_id = NULL, category = NULL,
                         ncov = NULL, maxncov = 12L, weights = NULL,
-                        ensure = NULL, env_vars = NULL) {
+                        ensure = NULL, ensure_n = NULL, env_vars = NULL) {
   if (!missing(method) && (!is.character(method) || length(method) != 1L ||
                           is.na(method) ||
                           !method %in% c("screen", "full"))) {
@@ -156,6 +159,17 @@ cast_select <- function(data, response = "presence",
       ensure[[nm]] <- f
     }
   }
+  if (!is.null(ensure_n)) {
+    if (is.null(ensure) || !is.numeric(ensure_n) || is.null(names(ensure_n)) ||
+        anyNA(ensure_n) || anyDuplicated(names(ensure_n)) ||
+        any(!nzchar(names(ensure_n))) || any(ensure_n < 1) ||
+        any(!names(ensure_n) %in% names(ensure))) {
+      cli::cli_abort("{.arg ensure_n} must be a named positive-integer vector whose names are present in {.arg ensure}.")
+    }
+    ensure_names <- names(ensure_n)
+    ensure_n <- as.integer(ensure_n)
+    names(ensure_n) <- ensure_names
+  }
   if (!is.null(seed)) seed <- .cast_check_scalar(seed, "seed", integer = TRUE)
 
   if (identical(method, "full")) {
@@ -172,7 +186,8 @@ cast_select <- function(data, response = "presence",
   }
 
   .cast_screen_select(data, response, env_vars, keep, corcut,
-                      var_id, ncov, maxncov, weights, ensure, seed, verbose)
+                      var_id, ncov, maxncov, weights, ensure, ensure_n,
+                      seed, verbose)
 }
 
 # ---- independent screen ----------------------------------------------------
@@ -210,7 +225,7 @@ cast_select <- function(data, response = "presence",
 #' @noRd
 .cast_screen_select <- function(data, response, env_vars, keep, corcut,
                                 var_id, ncov, maxncov, weights, ensure,
-                                seed, verbose) {
+                                ensure_n, seed, verbose) {
   check_suggested("glmnet", "for the elastic-net screen")
   y <- as.integer(data[[response]])
   if (!all(y %in% c(0L, 1L))) cli::cli_abort("The screen response must be binary 0/1.")
@@ -328,20 +343,27 @@ cast_select <- function(data, response = "presence",
     }
     for (nm in names(ensure)) {
       flag <- stats::setNames(ensure[[nm]], env_vars)
+      need <- if (is.null(ensure_n) || is.na(ensure_n[nm])) 1L else
+        as.integer(ensure_n[[nm]])
       cand <- intersect(selected, env_vars[flag])
-      if (length(cand)) {
-        pick <- cand[order(-coef_rank(cand), is.na(stage1_p[cand]),
-                          stage1_p[cand], cand)][1]
-      } else {
-        cand <- intersect(kept, env_vars[flag])
-        if (!length(cand)) {
-          cli::cli_warn("ensure[[{.val {nm}}]] has no survivor after filtering; coverage cannot be satisfied.")
-          next
-        }
-        pick <- cand[order(is.na(stage1_p[cand]), stage1_p[cand], cand)][1]
-        selected <- union(selected, pick)
+      cand <- cand[order(-coef_rank(cand), is.na(stage1_p[cand]),
+                        stage1_p[cand], cand)]
+      picks <- utils::head(cand, need)
+      if (length(picks) < need) {
+        pool <- setdiff(intersect(kept, env_vars[flag]), picks)
+        pool <- pool[order(is.na(stage1_p[pool]), stage1_p[pool], pool)]
+        add <- utils::head(pool, need - length(picks))
+        picks <- c(picks, add)
+        selected <- union(selected, add)
       }
-      ensured <- c(ensured, pick)
+      if (!length(picks)) {
+        cli::cli_warn("ensure[[{.val {nm}}]] has no survivor after filtering; coverage cannot be satisfied.")
+        next
+      }
+      if (length(picks) < need) {
+        cli::cli_warn("ensure[[{.val {nm}}]] requested {need} variable{?s} but only {length(picks)} survived filtering.")
+      }
+      ensured <- c(ensured, picks)
     }
   }
   ensured <- unique(ensured)
@@ -408,7 +430,7 @@ cast_select <- function(data, response = "presence",
       n_screened_nonzero = n_screened_nonzero,
       n_dropped_by_target = length(target_cap_dropped),
       target_cap_dropped = target_cap_dropped,
-      ensured = ensured, filtered = kept,
+      ensure_n = ensure_n, ensured = ensured, filtered = kept,
       lambda = lambda, coefficients = coefs, n_pres = n_pres,
       algorithms = "elastic_net", final_ranks = final_ranks))
 }

@@ -1,3 +1,13 @@
+# castSDM 0.25.0
+
+- `cast_select()` gains `ensure_n`, a named integer vector giving the minimum
+  number of survivors retained from each `ensure` coverage group. The
+  representatives are selected before the target cap and protected from it,
+  so a static-rich pool cannot crowd the required climate/LULC drivers out of
+  the model. `climate = 2L` reserves two climate slots for a factorial model.
+- `ensure` now protects an already-selected group representative from the
+  target cap as well as topping up a missing group.
+
 # castSDM 0.24.0
 
 - `cast_select(method = "screen")` diagnostics now record the elastic-net

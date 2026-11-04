@@ -111,6 +111,23 @@ test_that("ensure tops up a declared coverage class", {
   expect_true("x4" %in% scr$diagnostics$ensured)
 })
 
+test_that("ensure_n reserves multiple members of a coverage group", {
+  skip_screen_deps()
+  dat <- feature_null_data(n = 400)
+  flags <- c(x1 = TRUE, x2 = TRUE, x3 = FALSE, x4 = TRUE, x5 = FALSE)
+  scr <- cast_select(dat, ensure = list(climate = flags),
+                     ensure_n = c(climate = 2L),
+                     ncov = 3L, maxncov = 3L, seed = 31, verbose = FALSE)
+  expect_gte(sum(scr$selected %in% c("x1", "x2", "x4")), 2L)
+  expect_gte(length(scr$diagnostics$ensured), 2L)
+  expect_lte(length(scr$selected), 3L)
+  expect_error(
+    cast_select(dat, ensure = list(climate = flags),
+                ensure_n = c(climate = 2L, noise = 1L),
+                seed = 31, verbose = FALSE),
+    "ensure_n")
+})
+
 test_that("scores and diagnostics carry the screen schema", {
   skip_screen_deps()
   dat <- feature_null_data(n = 250)

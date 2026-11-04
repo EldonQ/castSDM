@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Factorial Causal Scenario Attribution for Species Distribution Models
-Version: 0.24.0
+Version: 0.25.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
