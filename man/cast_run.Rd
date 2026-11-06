@@ -15,7 +15,10 @@ cast_run(
   select_ensure = NULL,
   output_dir = NULL,
   report_meta = list(),
-  verbose = TRUE
+  verbose = TRUE,
+  prepared = NULL,
+  cache_dir = NULL,
+  resume = TRUE
 )
 }
 \arguments{
@@ -48,6 +51,16 @@ ODMAP report and the run manifest. Created (recursively) when missing.}
 \code{\link[=cast_report_odmap]{cast_report_odmap()}} (\code{taxon}, \code{authors}, \code{title}, \code{purpose}, ...).}
 
 \item{verbose}{Print progress. Default \code{TRUE}.}
+
+\item{prepared}{Optional split from \code{\link[=cast_prepare]{cast_prepare()}} applied to exactly
+\code{species_data}. Its row indices and values are verified before use.}
+
+\item{cache_dir}{Optional shared training-stage cache. With an output
+directory, the default is \code{.cast-cache} in its parent directory, so a new
+output location does not invalidate fitted models. No future data or
+plotting settings enter a training-stage key.}
+
+\item{resume}{Reuse verified matching training-stage cache entries.}
 }
 \value{
 A \code{cast_result} object carrying \code{screen}, \code{fit} (training split),

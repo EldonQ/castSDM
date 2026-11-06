@@ -82,7 +82,7 @@ cast_predict_tiled <- function(fit, raster,
     info <- fit$models[[m]]
     if (is.function(info$predict_function)) info$predict_function <- .cast_callback_identity(info$predict_function)
     .cast_digest(list(algorithm = "streamed_tiles_v1", grid = grid, model = info,
-      scaling = fit$scaling, predictor = body(predict_single_model)))
+      scaling = fit$scaling, predictor = .cast_code_identity(predict_single_model)))
   }, character(1)), mdl_names)
   receipt_path <- function(m) paste0(paths[[m]], ".receipt.rds")
   todo <- mdl_names

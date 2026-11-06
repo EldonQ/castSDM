@@ -59,6 +59,13 @@
 #' @param report_meta Optional named list of report metadata passed to
 #'   [cast_report_odmap()] (`taxon`, `authors`, `title`, `purpose`, ...).
 #' @param verbose Print progress. Default `TRUE`.
+#' @param prepared Optional split from [cast_prepare()] applied to exactly
+#'   `species_data`. Its row indices and values are verified before use.
+#' @param cache_dir Optional shared training-stage cache. With an output
+#'   directory, the default is `.cast-cache` in its parent directory, so a new
+#'   output location does not invalidate fitted models. No future data or
+#'   plotting settings enter a training-stage key.
+#' @param resume Reuse verified matching training-stage cache entries.
 #'
 #' @return A `cast_result` object carrying `screen`, `fit` (training split),
 #'   `cv`, `eval` (one-shot hold-out), `fit_full` (full-data refit),
@@ -78,7 +85,8 @@ cast_run <- function(species_data,
                      select_ensure = NULL,
                      output_dir = NULL,
                      report_meta = list(),
-                     verbose = TRUE) {
+                     verbose = TRUE, prepared = NULL, cache_dir = NULL,
+                     resume = TRUE) {
   protocol <- .cast_validate_protocol(protocol)
   cl <- match.call()
   if (!is.data.frame(species_data)) {
@@ -96,7 +104,33 @@ cast_run <- function(species_data,
     cli::cli_abort("{.arg env_raster} projection writes GeoTIFFs; supply {.arg output_dir}.")
   }
   out <- .cast_run_dirs(output_dir)
+  if (!is.null(output_dir)) {
+    run_lock <- .cast_lock(file.path(output_dir, ".training.lock"))
+    on.exit(filelock::unlock(run_lock), add = TRUE)
+  }
   receipts <- list()
+  if (is.null(cache_dir) && !is.null(output_dir)) cache_dir <- file.path(dirname(output_dir), ".cast-cache")
+  if (!is.null(cache_dir)) dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  cache_hits <- list()
+  stage <- function(name, inputs, expr) {
+    code <- .cast_run_stage_identity(name, protocol$models)
+    key <- .cast_digest(list(schema = "cast_run/2", inputs = inputs, code = code))
+    path <- if (!is.null(cache_dir)) file.path(cache_dir, paste0(name, "-", key, ".rds"))
+    value <- if (resume) .cast_cache_read(path, key) else NULL
+    cache_hits[[name]] <<- !is.null(value)
+    if (is.null(value)) {
+      lock <- if (!is.null(path)) .cast_lock(paste0(path, ".lock"), timeout = Inf)
+      on.exit(if (!is.null(lock)) filelock::unlock(lock), add = TRUE)
+      # A concurrent run may have completed this stage while we waited.
+      value <- if (resume) .cast_cache_read(path, key) else NULL
+      cache_hits[[name]] <<- !is.null(value)
+      if (is.null(value)) {
+        value <- force(expr)
+        .cast_cache_write(value, path, key)
+      }
+    } else if (verbose) cli::cli_inform("{name}: verified training cache")
+    value
+  }
 
   add_receipt <- function(stage, inputs, value, tables = list(),
                           extra_files = character(0)) {
@@ -121,6 +155,7 @@ cast_run <- function(species_data,
     }
     receipts[[length(receipts) + 1L]] <<- list(
       stage = stage,
+      cache_hit = isTRUE(cache_hits[[stage]]),
       inputs = inputs,
       outputs = outputs,
       elapsed_secs = round(as.numeric(elapsed, units = "secs"), 2),
@@ -135,11 +170,12 @@ cast_run <- function(species_data,
   # ---- 1. Prepare: spatial hold-out split --------------------------------
   if (verbose) cli::cli_h2("Prep: spatial hold-out split")
   stage_started <- Sys.time()
-  split <- cast_prepare(
+  split <- stage("01_prepare", list(species_data, protocol$train_fraction,
+    protocol$block_method, protocol$holdout_blocks, protocol$seed, prepared), if (is.null(prepared)) cast_prepare(
     species_data, train_fraction = protocol$train_fraction,
     seed = protocol$seed, split = "spatial",
-    block_method = protocol$block_method, verbose = verbose
-  )
+    block_method = protocol$block_method, n_blocks = protocol$holdout_blocks, verbose = verbose
+  ) else .cast_verify_prepared(species_data, prepared))
   if (verbose) {
     cli::cli_inform("Train: {nrow(split$train)} | Hold-out: {nrow(split$test)} | Predictors: {length(split$env_vars)}")
   }
@@ -151,7 +187,10 @@ cast_run <- function(species_data,
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
   stage_started <- Sys.time()
-  screen <- cast_select(
+  selection_inputs <- list(split$train, protocol$select_method, protocol$select_keep,
+    protocol$select_corcut, protocol$select_ncov, protocol$select_maxncov,
+    select_var_id, select_category, select_ensure, protocol$select_ensure_n, protocol$seed)
+  screen <- stage("02_select", selection_inputs, cast_select(
     split$train,
     method = protocol$select_method,
     keep = protocol$select_keep,
@@ -161,8 +200,9 @@ cast_run <- function(species_data,
     ncov = protocol$select_ncov,
     maxncov = protocol$select_maxncov,
     ensure = select_ensure,
+    ensure_n = protocol$select_ensure_n,
     seed = protocol$seed, verbose = verbose
-  )
+  ))
   add_receipt("02_select",
     .cast_digest(list(split$train, protocol$select_method,
                       protocol$select_keep, protocol$select_corcut,
@@ -173,7 +213,10 @@ cast_run <- function(species_data,
   # ---- 3. Fit on the training split ---------------------------------------
   if (verbose) cli::cli_h2("Fit: engines on the training split")
   stage_started <- Sys.time()
-  fit <- cast_fit(
+  fit_inputs <- list(split$train, screen$selected, protocol$models,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed)
+  fit <- stage("03_fit", fit_inputs, cast_fit(
     split$train, screen = screen, models = protocol$models,
     rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry,
     maxent_classes = protocol$maxent_classes,
@@ -181,7 +224,7 @@ cast_run <- function(species_data,
     tune = protocol$tune, tune_folds = protocol$tune_folds,
     prevalence_target = protocol$prevalence_target,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
-  )
+  ))
   add_receipt("03_fit",
     .cast_digest(list(split$train, screen$selected, protocol$models,
                       protocol$rf_ntree, protocol$rf_mtry,
@@ -201,12 +244,18 @@ cast_run <- function(species_data,
       maxncov = protocol$select_maxncov,
       keep = protocol$select_keep,
       ensure = select_ensure,
+      ensure_n = protocol$select_ensure_n,
       var_id = select_var_id,
       category = select_category
     ),
     full = list(keep = protocol$select_keep)
   )
-  cv <- cast_cv(
+  cv_inputs <- list(split$train, select_args, protocol$models, protocol$cv_k,
+    protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
+    protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed)
+  cv <- stage("04_cv", cv_inputs, cast_cv(
     split$train, screen = screen,
     select_method = protocol$select_method, select_args = select_args,
     k = protocol$cv_k, models = protocol$models,
@@ -220,7 +269,7 @@ cast_run <- function(species_data,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
-  )
+  ))
   cv_tables <- list(
     cv_metrics = cv$metrics,
     cv_fold_metrics = cv$fold_metrics,
@@ -244,11 +293,12 @@ cast_run <- function(species_data,
   # ---- 5. One-shot hold-out evaluation (out-of-fold thresholds) -----------
   if (verbose) cli::cli_h2("Evaluate: hold-out split, out-of-fold thresholds")
   stage_started <- Sys.time()
-  eval_result <- cast_evaluate(
+  eval_result <- stage("05_evaluate", list(.cast_fit_identity(fit), split$test,
+    cv$thresholds, protocol$threshold_method), cast_evaluate(
     fit, split$test,
     threshold_method = protocol$threshold_method,
     thresholds = cv$thresholds
-  )
+  ))
   if (verbose) print(eval_result)
   add_receipt("05_evaluate",
     .cast_digest(list(fit, split$test, cv$thresholds,
@@ -259,7 +309,9 @@ cast_run <- function(species_data,
   if (verbose) cli::cli_h2("Refit: full-data models for publication")
   stage_started <- Sys.time()
   tuned <- .cast_tuned_args(fit)
-  fit_full <- cast_fit(
+  fit_full <- stage("06_refit", list(species_data, screen$selected, tuned, protocol$models,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$prevalence_target, protocol$seed), cast_fit(
     species_data, screen = screen, models = protocol$models,
     rf_ntree = protocol$rf_ntree,
     rf_mtry = tuned$rf_mtry %||% protocol$rf_mtry,
@@ -267,7 +319,7 @@ cast_run <- function(species_data,
     maxent_regmult = tuned$maxent_regmult %||% protocol$maxent_regmult,
     prevalence_target = protocol$prevalence_target,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
-  )
+  ))
   add_receipt("06_refit",
     .cast_digest(list(species_data, screen$selected, tuned, protocol$models,
                       protocol$prevalence_target, protocol$seed)),
@@ -389,11 +441,13 @@ cast_run <- function(species_data,
     saveRDS(manifest, file.path(output_dir, "manifest.rds"))
     receipt_rows <- do.call(rbind, lapply(receipts, function(r) {
       data.frame(stage = r$stage, inputs = r$inputs,
+                 cache_hit = r$cache_hit,
                  outputs = nrow(r$outputs), elapsed_secs = r$elapsed_secs,
                  finished = r$finished, stringsAsFactors = FALSE)
     }))
     receipt_rows <- rbind(receipt_rows, data.frame(
       stage = "09_report", inputs = .cast_digest(report_meta), outputs = 1L,
+      cache_hit = FALSE,
       elapsed_secs = round(as.numeric(Sys.time() - stage_started,
                                       units = "secs"), 2),
       finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
@@ -404,6 +458,7 @@ cast_run <- function(species_data,
     if (verbose) cli::cli_inform("Artifacts and manifest under {.path {output_dir}}.")
   }
   if (verbose) cli::cli_h1("castSDM run complete")
+  if (!is.null(output_dir)) .cast_atomic_rds(result, file.path(output_dir, "result.rds"))
   result
 }
 

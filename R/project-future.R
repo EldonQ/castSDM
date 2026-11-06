@@ -838,25 +838,22 @@ cast_project_raster <- function(fit, cv,
 #' @keywords internal
 #' @noRd
 .weighted_centroid_raster <- function(hss_raster, binary_raster) {
-  # Extract values
-  hss_vals <- terra::values(hss_raster, mat = FALSE)
-  bin_vals <- terra::values(binary_raster, mat = FALSE)
-
-  # Cells where species is present
-  present <- which(!is.na(bin_vals) & bin_vals == 1)
-
-  if (length(present) == 0) {
-    return(list(lon = NA_real_, lat = NA_real_))
+  sums <- numeric(6L)
+  rows <- max(1L, as.integer(100000L / terra::ncol(hss_raster)))
+  for (row in seq.int(1L, terra::nrow(hss_raster), by = rows)) {
+    count <- min(rows, terra::nrow(hss_raster) - row + 1L)
+    h <- terra::values(hss_raster, row = row, nrows = count, mat = FALSE)
+    b <- terra::values(binary_raster, row = row, nrows = count, mat = FALSE)
+    present <- which(!is.na(b) & b == 1)
+    if (!length(present)) next
+    cells <- (row - 1L) * terra::ncol(hss_raster) + present
+    xy <- terra::xyFromCell(hss_raster, cells)
+    w <- h[present]
+    w[!is.finite(w)] <- 0
+    sums <- sums + c(sum(w), sum(xy[, 1] * w), sum(xy[, 2] * w),
+                     length(present), sum(xy[, 1]), sum(xy[, 2]))
   }
-
-  xy <- terra::xyFromCell(hss_raster, present)
-  w <- hss_vals[present]
-  w[is.na(w)] <- 0
-
-  if (sum(w) == 0) w <- rep(1, length(w))
-
-  list(
-    lon = stats::weighted.mean(xy[, 1], w),
-    lat = stats::weighted.mean(xy[, 2], w)
-  )
+  if (!sums[4]) return(list(lon = NA_real_, lat = NA_real_))
+  if (sums[1] == 0) return(list(lon = sums[5] / sums[4], lat = sums[6] / sums[4]))
+  list(lon = sums[2] / sums[1], lat = sums[3] / sums[1])
 }

@@ -1,185 +1,92 @@
 ---
 title: "Getting started with castSDM"
-author: "castSDM authors"
 output: rmarkdown::html_vignette
-knitr:
-  opts_chunk:
-    purl: false
 vignette: >
   %\VignetteIndexEntry{Getting started with castSDM}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r setup, include = FALSE, purl = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE,
-                      purl = FALSE)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(castSDM)
 ```
 
-## Overview
+## Fit a small response
 
-`castSDM` explains environmental drivers and the spatial pattern of predicted
-habitat change. Its central question is: where would suitability improve or
-decline under an environmental change, and how does each driver contribute?
+The central workflow compares two predictor groups under one fitted response.
+This complete example supplies a GLM through the external-model adapter.
+The random data illustrate the interface and carry no ecological evidence.
 
-`cast_attribution()` compares paired current and future environments with one
-fitted SDM and fixed ensemble weights. It returns overall change, driver-only
-effects, retained-driver contrasts, training-range flags and model disagreement.
-The same numerical implementation serves tables and aligned rasters.
-
-When models are already fitted with a mature tool, use its prediction method
-directly instead of repeating fitting in castSDM:
-
-```{r external-model, purl = FALSE}
-fit <- cast_as_fit(list(gam = fitted_gam), training_predictors,
+```{r model}
+set.seed(42)
+current <- data.frame(temperature = rnorm(120), land = runif(120))
+data <- transform(current, presence = rbinom(120, 1, plogis(temperature-land)))
+model <- glm(presence ~ temperature + land, data, family = binomial())
+fit <- cast_as_fit(list(glm = model), current,
   function(model, newdata) predict(model, newdata, type = "response"))
-attribution <- cast_attribution(fit, current_predictors, future_predictors)
-plot(attribution, contrast = "retained")
+future <- transform(current, temperature = temperature + .5, land = land + .1)
 ```
 
-The training reference contains predictors in the original modelling units.
-The callback owns preprocessing and returns one comparable suitability per row.
-Use explicit externally validated weights for multiple models when needed;
-the adapter does not create evaluation evidence. To evaluate internally fitted
-models with an existing spatial design, supply its integer assignments through
-`cast_cv(fold_ids = ..., k = ..., n_repeat = 1)`.
+## Compare grouped scenarios
 
-The existing fitting, selection and spatial-validation APIs remain available.
-RF / MaxEnt / GAM engine packages perform fitting. This walkthrough uses
-the standard pipeline to obtain a fitted model, then explains environmental
-scenarios. When variable selection is used, re-run it inside validation folds.
+`cast_compare()` creates both partial scenarios without requiring separate
+copies of environmental stacks. It freezes weights and records predictors
+outside the groups as static.
 
-## Data
-
-Species data are presence/background tables with `lon`, `lat`, `presence`
-(0/1) and environmental predictors. The following synthetic table demonstrates the API:
-
-```{r data, purl = FALSE}
-library(castSDM)
-
-# Synthetic demonstration data; not an empirical case or validation result.
-set.seed(1)
-n <- 400L
-dat <- data.frame(lon = runif(n, 90, 100), lat = runif(n, 25, 35),
-  bio01 = rnorm(n, 12, 3), bio12 = runif(n, 300, 1200), elevation = runif(n, 500, 4000))
-dat$presence <- rbinom(n, 1, plogis((dat$bio01 - 12) / 3 + (dat$bio12 - 700) / 400))
-
+```{r comparison}
+comparison <- cast_compare(fit, current, future,
+  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
+summary(comparison)[, c("component", "mean", "mean_supported", "n_valid")]
 ```
 
-## One-step pipeline
+`climate_main` and `lulc_main` retain historical names for the first and second
+groups. They are baseline simple effects. `climate_average` and `lulc_average`
+average the effect over both levels of the other group. Interaction is joint
+minus the two partial predictions plus current.
 
-`cast_run()` is the single production pipeline. It is driven by a
-`cast_protocol()` -- the one place where every scientific setting is
-declared -- and follows the four evaluation rules: selection, thresholds and
-ensemble weights are estimated on the training split; the hold-out split is
-evaluated exactly once with the out-of-fold thresholds; the published
-predictions use the full-data refit; and the ensemble threshold comes from
-the out-of-fold ensemble surface it is applied to.
-
-```{r pipeline, purl = FALSE}
-protocol <- cast_protocol(
-  models = c("rf", "gam"),
-  cv_k = 3,
-  tune = FALSE,
-  seed = 42
-)
-result <- cast_run(dat, env_data = dat, protocol = protocol, verbose = FALSE)
-
-summary(result)
-plot(result$screen)
-print(result$protocol)
+```{r plot, fig.width=7, fig.height=4}
+plot(comparison, las = 2)
 ```
 
-```{r eval, purl = FALSE}
-result$eval$metrics       # one-shot hold-out evaluation (out-of-fold thresholds)
-result$cv$thresholds      # per-engine thresholds pooled from out-of-fold predictions
+These model-conditional contrasts do not identify real-world causal effects.
+Presence/background predictions remain relative suitability unless an
+appropriate calibration is established.
+
+## Threshold sensitivity without new predictions
+
+An external fit has no automatic evaluation score or threshold. For declared
+threshold sensitivity, reuse the saved four-corner predictions:
+
+```{r thresholds}
+sensitivity <- summary(comparison, thresholds = c(.3, .5, .7))
+sensitivity[sensitivity$component == "joint_change" & sensitivity$domain == "full", ]
 ```
 
-## Environmental scenarios
+The rule is `suitability >= threshold`. These summaries count rows or cells;
+they are not area-weighted estimates. Supported counts use training marginal
+quantiles, which cannot detect all novel environmental combinations.
 
-Supply future values for every fitted predictor. Unchanged predictors stay at
-their current values; do not manufacture future values for static layers.
-This synthetic example changes one fitted predictor by one fifth of its SD.
+## Built-in training workflow
 
-```{r paired-scenarios, purl = FALSE}
-future <- dat
-driver <- result$fit$env_vars[1]
-future[[driver]] <- dat[[driver]] + 0.2 * sd(dat[[driver]])
-attribution <- cast_attribution(result$fit, dat, future,
-                               cv = result$cv, method = "weighted",
-                               verbose = FALSE)
-attribution$summary
-plot(attribution, contrast = "retained")
-plot(attribution, type = "map", driver = driver)
+For data with `lon`, `lat`, `presence` and numeric predictors, `cast_run()` uses
+one protocol for screening, nested spatial CV, hold-out evaluation and refitting.
+This small run uses grid blocks; design spatial validation for the actual study.
+
+```{r training, eval=requireNamespace("ranger", quietly=TRUE) && requireNamespace("pROC", quietly=TRUE)}
+species_data <- transform(data, lon = runif(120, 70, 130), lat = runif(120, 20, 50))
+protocol <- cast_protocol(models = "rf", select_method = "full", rf_ntree = 30,
+  cv_k = 2, block_method = "grid", aoa = FALSE, seed = 42)
+run <- cast_run(species_data, protocol = protocol, verbose = FALSE)
+summary(run)
+comparison_run <- cast_compare(run, current, future,
+  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
+comparison_run$threshold_source
 ```
 
-The driver-only contrast changes that predictor while keeping all others
-current. The retained-driver contrast compares the full future with a future
-where that predictor stays current. They can differ when the response depends
-on the other predictors. Individual effects need not add to overall change;
-the remainder includes joint responses and changes in omitted drivers.
+Selection and tuning repeat inside CV folds. Independent hold-out data do not
+choose weights. A usable pooled out-of-fold surface supplies the comparison
+threshold; otherwise comparison returns continuous results only.
 
-For rasters, supply stacks with identical grid geometry and CRS; `filename`
-sets the output GeoTIFF. Raw scenario comparisons remain available outside
-the marginal training ranges, with supported summaries reported separately.
-
-## What each stage measured
-
-`cast_importance()` shows the selection path from the screen: each admitted
-predictor with its admission rank from the elastic-net screen (1 =
-strongest). There are no p-values and no count cap to read around.
-
-```{r importance, purl = FALSE}
-imp <- cast_importance(result$screen)
-imp
-plot(imp)
-```
-
-## Shift effect and masking
-
-```{r attribution, purl = FALSE}
-eff <- cast_effect_table(result$fit, newdata = dat, shift = 1,
-                         verbose = FALSE)
-eff        # rank supported drivers by mean_abs_dHSS; masked drivers read NA
-plot(eff)  # cross = masked: the shift is not answerable inside the box
-
-# The first-admitted driver is guaranteed to be fitted.
-v1 <- result$screen$selected[1]
-```
-
-Give the shift in raw units whenever it has ecological meaning, for example
-`shift = list(bio01 = 2)` for +2 degrees. A shift that leaves the training
-range everywhere is refused rather than answered.
-
-## Spatial prediction on a grid
-
-```{r predict, purl = FALSE}
-# Build a small prediction grid from the data range.
-grid <- expand.grid(
-  lon = seq(min(dat$lon), max(dat$lon), length.out = 20),
-  lat = seq(min(dat$lat), max(dat$lat), length.out = 20)
-)
-env_vars <- result$fit$env_vars
-for (v in env_vars) {
-  grid[[v]] <- median(dat[[v]], na.rm = TRUE)
-}
-
-pred <- cast_predict(result$fit, grid)
-plot(pred, basemap = "none")
-```
-
-## Interpretation
-
-These maps explain the fitted model under stated environmental scenarios.
-They do not establish which factor caused an observed distribution change.
-Observation bias, correlated predictors and missing ecological processes can
-affect the explanation. Future projection assumes the fitted response remains
-applicable and does not model dispersal or colonisation.
-
-On presence/background data the scale is relative suitability, not occurrence
-probability. Training-range flags check each predictor separately; they do not
-detect every unsupported joint combination. Cross-model SD reports disagreement,
-not sampling uncertainty or a confidence interval. Single-shift products use
-hard masking, whereas paired attribution retains raw contrasts and separately
-reports their range coverage.
+For aligned rasters, use the same call with `SpatRaster` objects, a mask and
+`output_dir`. The advanced vignette demonstrates a small raster comparison.

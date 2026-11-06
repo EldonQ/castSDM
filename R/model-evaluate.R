@@ -190,7 +190,8 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
     # supplied, which would advance the caller's .Random.seed on every
     # prediction call. Pin it: predictions stay deterministic and the
     # caller's RNG state untouched.
-    stats::predict(mdl_info$model, data = X_raw, seed = 42L)$predictions[, "1"]
+    stats::predict(mdl_info$model, data = X_raw, seed = 42L,
+      num.threads = getOption("castSDM.predict_threads"))$predictions[, "1"]
   } else if (nm == "maxent") {
     # clamp is passed explicitly: maxnet::predict.maxnet defaults to
     # clamp = TRUE, which would silently freeze MaxEnt to the training

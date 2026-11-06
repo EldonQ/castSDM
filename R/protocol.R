@@ -35,6 +35,9 @@
 #' @param select_ncov Target covariate count for `"screen"` (`NULL` =
 #'   `ceiling(log2(n_presences))`).
 #' @param select_maxncov Maximum covariate count for `"screen"`. Default `12`.
+#' @param select_ensure_n Named minimum counts for the coverage groups passed
+#'   to [cast_run()] as `select_ensure`; see [cast_select()].
+#' @param holdout_blocks Number of blocks in the independent spatial hold-out.
 #' @param rf_ntree RF trees. Default `500`.
 #' @param rf_mtry RF `mtry` (`NULL` keeps the ranger default `sqrt(p)`).
 #' @param maxent_classes,maxent_regmult MaxEnt feature classes and
@@ -98,7 +101,9 @@ cast_protocol <- function(
   ensemble_min_metric_folds = 2L,
   clamp = TRUE,
   num_threads = 1L,
-  seed = NULL
+  seed = NULL,
+  select_ensure_n = NULL,
+  holdout_blocks = 20L
 ) {
   # Multi-value defaults document the allowed choices; the first element is
   # the effective default (match.arg semantics).
@@ -111,6 +116,8 @@ cast_protocol <- function(
     select_corcut = select_corcut,
     select_ncov = select_ncov,
     select_maxncov = select_maxncov,
+    select_ensure_n = select_ensure_n,
+    holdout_blocks = holdout_blocks,
     rf_ntree = rf_ntree,
     rf_mtry = rf_mtry,
     maxent_classes = maxent_classes,
@@ -153,6 +160,9 @@ cast_protocol <- function(
   if (!is.list(p)) {
     cli::cli_abort("{.arg protocol} must be a {.cls cast_protocol} object from {.fun cast_protocol}.")
   }
+  # Older serialized protocols inherit the previous hold-out default.
+  p$holdout_blocks <- p$holdout_blocks %||% 20L
+  p$select_ensure_n <- p$select_ensure_n %||% NULL
   required <- c(
     "models", "train_fraction", "select_method", "select_keep",
     "select_corcut", "select_ncov", "select_maxncov",
@@ -200,6 +210,13 @@ cast_protocol <- function(
   }
   p$select_maxncov <- .cast_check_scalar(p$select_maxncov,
     "protocol$select_maxncov", lower = 1, integer = TRUE)
+  p$holdout_blocks <- .cast_check_scalar(p$holdout_blocks,
+    "protocol$holdout_blocks", lower = 2, integer = TRUE)
+  if (!is.null(p$select_ensure_n) && (!is.numeric(p$select_ensure_n) ||
+      is.null(names(p$select_ensure_n)) || anyDuplicated(names(p$select_ensure_n)) ||
+      anyNA(p$select_ensure_n) || any(!is.finite(p$select_ensure_n)) ||
+      any(p$select_ensure_n < 1 | p$select_ensure_n != floor(p$select_ensure_n))))
+    cli::cli_abort("protocol$select_ensure_n must be named positive integer group counts.")
   p$rf_ntree <- .cast_check_scalar(p$rf_ntree, "protocol$rf_ntree",
     lower = 1, integer = TRUE)
   if (!is.null(p$rf_mtry)) {

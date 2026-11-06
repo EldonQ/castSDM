@@ -3,10 +3,10 @@
 
 #' @section Overview:
 #' \pkg{castSDM} explains how environmental changes alter predicted habitat
-#' suitability and where those changes occur. [cast_attribution()] compares
-#' current and future predictor values using frozen model weights, with maps
-#' of overall change, driver-only effects and retained-driver comparisons.
-#' Range coverage and model disagreement accompany the results.
+#' suitability and where those changes occur. [cast_compare()] constructs
+#' paired grouped scenarios using frozen model weights and an explicit domain.
+#' Supported summaries and paired model disagreement accompany the results.
+#' [cast_attribution()] provides optional individual-driver diagnostics.
 #'
 #' The package also provides data preparation, variable selection, RF/
 #' MaxEnt/GAM fitting, nested spatial validation and raster projection. These

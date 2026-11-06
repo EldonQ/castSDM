@@ -8,7 +8,7 @@
   if (is.primitive(fun)) return(fun)
   env <- environment(fun)
   if (isNamespace(env) || identical(env, baseenv())) {
-    return(list(body = body(fun), formals = formals(fun), environment = environmentName(env)))
+    return(list(code = .cast_code_identity(fun), environment = environmentName(env)))
   }
   globals <- codetools::findGlobals(fun, merge = TRUE)
   values <- lapply(globals, function(name) {
@@ -16,7 +16,7 @@
     value <- get(name, envir = env, inherits = TRUE)
     if (is.function(value)) .cast_callback_identity(value, depth + 1L) else value
   })
-  list(body = body(fun), formals = formals(fun), dependencies = stats::setNames(values, globals))
+  list(code = .cast_code_identity(fun), dependencies = stats::setNames(values, globals))
 }
 
 .cast_raster_mask <- function(mask, template) {

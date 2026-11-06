@@ -1,150 +1,131 @@
 # castSDM
 
-**Factorial causal scenario attribution for species distribution models.**
+**Auditable scenario comparisons for species distribution models.**
 
-castSDM separates two questions that are often conflated: how much do climate
-and land use each contribute to a projected change, and how do individual
-drivers explain the joint future? The first is answered by a 2 x 2 factorial
-design; the second by the within-scenario driver-only/retained decomposition.
-
-```r
-# Four aligned suitability surfaces from one fitted SDM and frozen weights.
-fa <- cast_factorial_attribution(
-  current = current_hss,
-  joint   = joint_hss,
-  climate = climate_only_hss,
-  lulc    = lulc_only_hss,
-  threshold = 0.43
-)
-fa$summary          # climate main, land-use main, joint, interaction
-fa$binary           # thresholded range counts and percentage changes
-fa$contract         # claim level and explicit assumptions
-plot(fa)            # contrast layers
-```
-
-The factorial contrasts are:
-
-- `climate_main = climate - current`;
-- `lulc_main = lulc - current`;
-- `joint_change = joint - current`;
-- `interaction = joint - climate - lulc + current`;
-- `climate_conditional = joint - lulc` and
-  `lulc_conditional = joint - climate`.
-
-The other scenario component is fixed by the design, so the factorial layer
-does **not** require a DAG or a user-supplied adjustment set. It is a
-model-based causal scenario attribution under explicit assumptions: the
-scenario components are well-defined manipulations, the fitted response is
-valid for those scenarios, no omitted component changes the contrast, and the
-counterfactual values are supported. It is not an identified real-world causal
-effect from observational data. Continuous and binary summaries, support,
-optional model-SD layers and a claim contract are returned together.
-
-```r
-# Optional within-scenario explanation, using one fitted model.
-fit <- cast_as_fit(list(gam = fitted_gam), training_predictors,
-  function(model, newdata) predict(model, newdata, type = "response"))
-attribution <- cast_attribution(fit, current, future)
-plot(attribution, contrast = "retained")
-```
-
-`effect_<driver>` changes only that predictor to its actual future values.
-`retained_<driver>` compares the full future with a future where that predictor
-stays current. Their difference exposes context-dependent responses; individual
-effects are not additive. `total_change` is the complete future/current contrast.
-The remainder also includes changes in any drivers omitted from the comparison.
-
-Tables and aligned rasters use the same numerical implementation. Raster outputs
-are written in bounded blocks; plots use the package's existing cartographic
-assets. Raw comparisons and within-range summaries are reported separately.
-Cross-model standard deviations describe model disagreement, not confidence
-intervals. Presence/background predictions are relative suitability; the
-factorial contrasts are causal scenario attributions under assumptions, not
-identified ecological causal effects or realised colonisation.
-
-Existing fitting, spatial validation, projection and single-shift effect APIs
-remain available. Mature engine packages perform model fitting.
-`cast_as_fit()` accepts an explicit prediction callback; `cast_cv(fold_ids = ...)`
-accepts spatial groups designed with tools such as blockCV. External fits need
-an explicit training reference and comparable suitability scales; they do not
-automatically inherit valid evaluation scores.
-
-The production pipeline is `cast_run()`, driven by one `cast_protocol()`:
-the independent elastic-net variable screen, RF / MaxEnt / GAM engines,
-nested spatial cross-validation on blockCV blocks, a one-shot hold-out
-evaluation at out-of-fold thresholds, full-data refit and ensemble.
-`cast_run(output_dir = ...)` writes every stage to disk with content-digest
-receipts in `manifest.rds`, together with an ODMAP-aligned report.
-
-Typical case reports use four main figures: model evaluation, habitat change,
-factorial causal attribution (climate main, land-use main, interaction), and
-support/model disagreement. Within-scenario driver comparisons and detailed
-diagnostics remain available without filling the default report.
+`cast_compare()` constructs current, first-group-only, second-group-only and
+joint predictions from a frozen fit. Fixed positive model weights and an
+explicit finite domain make the comparisons auditable. Results contain
+continuous contrasts, optional thresholded range counts, training-support
+diagnostics and paired model SD.
 
 ## Installation
 
 ```r
-pak::pak("EldonQ/castSDM")
+install.packages("remotes")
+remotes::install_github("EldonQ/castSDM")
+install.packages(c("ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN", "sf", "terra"))
 ```
 
-For the full feature set:
+## A complete small comparison
+
+This example supplies a fitted GLM through the public external-model adapter.
+External models supply their callback and training reference; evaluation
+scores are never invented for them.
 
 ```r
-install.packages(c(
-  "ranger", "maxnet", "mgcv", "glmnet",
-  "pROC", "ggplot2", "sf", "terra", "future", "future.apply"
-))
+library(castSDM)
+set.seed(42)
+current <- data.frame(temperature = rnorm(120), land = runif(120))
+observations <- transform(current,
+  presence = rbinom(120, 1, plogis(temperature - land)))
+model <- glm(presence ~ temperature + land, observations, family = binomial())
+fit <- cast_as_fit(list(glm = model), current,
+  function(model, newdata) predict(model, newdata, type = "response"))
+future <- transform(current, temperature = temperature + .5, land = land + .1)
+comparison <- cast_compare(fit, current, future,
+  groups = list(climate = "temperature", land_use = "land"))
+summary(comparison)
+plot(comparison)
 ```
 
-Two vignettes ship with the package: the getting-started walkthrough of the
-default pipeline, and *Beyond the defaults* (`vignette("castSDM-advanced")`)
-covering hyperparameter tuning, prevalence weighting, background designs and
-replicate sets, replicated spatial CV, response curves, and biomod2-compatible
-change coding.
+Without usable cross-validation or a supplied threshold there is no binary
+range estimate. `summary(comparison, thresholds = c(.3, .5, .7))` calculates
+sensitivity from saved predictions without fitting or predicting again.
+
+## Fit, validate, compare
+
+`cast_run()` handles screening, spatial validation, independent hold-out
+evaluation and full-data refitting. Scientific settings live in one
+`cast_protocol()`. Screening and tuning repeat inside outer CV folds; hold-out
+data do not determine ensemble weights or thresholds.
+
+```r
+# species_data: lon, lat, presence (0/1), and numeric predictors.
+protocol <- cast_protocol(models = c("rf", "maxent", "gam"), seed = 42)
+run <- cast_run(species_data, protocol = protocol,
+  output_dir = "results/training", cache_dir = "cache/training")
+comparison <- cast_compare(run, current_raster, future_rasters,
+  groups = list(climate = climate_variables, land_use = land_use_variables),
+  mask = analysis_mask, output_dir = "results/comparison",
+  resources = list(cores = 8, workers = 2, memory_mb = 4096))
+```
+
+Tables and aligned `terra::SpatRaster` inputs share a numerical kernel.
+Unlisted fitted predictors are recorded as static. Their future layers may be
+omitted; supplied static values must equal current values. Inputs must already
+share grid, extent and CRS. No automatic resampling occurs.
+
+The [single-species example](examples/single_species/README.md) supplies
+occurrence QC, domain masks, exact future-file mapping and saved-output plots.
+Training and comparison use public package functions.
 
 ## Interpretation
 
-- Driver-only maps answer: how would suitability change if this predictor took
-  its future values while the others stayed current? Retained-driver maps ask
-  how much the complete future differs when that predictor stays current.
-- The factorial contrasts are model-based causal scenario attributions under
-  the assumptions recorded in `fa$contract`: well-defined scenario components,
-  a valid fitted response for those scenarios, no omitted component, supported
-  counterfactuals and no interference. They are not identified real-world causal
-  effects from observational data.
-- Driver-only and retained-driver comparisons are within-scenario explanations
-  of a fitted response. Correlated predictors, missing ecological processes and
-  observation bias can change their meaning; they do not establish which
-  environmental factor caused observed habitat change.
-- Training-range flags show whether the compared environments fall within each
-  predictor's training quantiles. They cannot detect every unsupported joint
-  combination. Raw scenario contrasts and supported summaries are separate.
-- Single-shift effect products use one declared raw-unit or training-SD shift.
-  Their hard masking can produce `NA`; this records insufficient coverage.
-- `cast_select(keep = ...)` preserves scientifically chosen predictors.
-  Variable selection and embedded ranks describe a predictive screen, not evidence
-  that an environmental variable causes the distribution.
-- Future projections assume the learned response remains applicable. Static
-  layers stay static unless supplied with future values. Thresholded habitat
-  area additionally depends on the chosen operating threshold and spatial mask.
-- `cast_report_odmap()` records the analysis settings in an ODMAP-aligned report
-  (Zurell et al. 2020).
+Let `C` be current, `A` first-group-only, `B` second-group-only and `J` joint.
+Legacy `climate` and `lulc` prefixes denote the first and second groups even
+when those groups have different names.
 
-## References
+| Field | Definition |
+|---|---|
+| `climate_main` | `A - C`, baseline simple effect |
+| `lulc_main` | `B - C`, baseline simple effect |
+| `joint_change` | `J - C` |
+| `interaction` | `J - A - B + C` |
+| `climate_conditional` | `J - B` |
+| `lulc_conditional` | `J - A` |
+| `climate_average` | `((A - C) + (J - B))/2` |
+| `lulc_average` | `((B - C) + (J - A))/2` |
 
-Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal with
-it in ecological studies. *Ecography* 36: 27-46.
+These are **model-conditional scenario contrasts** on a fitted suitability
+surface. They do not establish ecological causation, occurrence probabilities
+or realised distributions. Historical `*_main` fields mean baseline simple
+effects; the averaged factorial effects have explicit `*_average` fields.
 
-Meyer, H. et al. (2018). Improving performance of spatio-temporal machine
-learning models using forward feature selection and target-oriented
-validation. *Environmental Modelling & Software* 101: 1-9.
-DOI: 10.1016/j.envsoft.2017.12.001.
+Each cell uses all positive-weight models in every corner. Model SD is the
+unweighted sample SD of within-model contrasts among active models; it is
+`NA` with one model and is not a confidence interval. Training support uses
+marginal quantiles on unclamped inputs and cannot establish joint support.
+Full-domain and supported summaries remain separate. Requested clamping
+applies uniformly to all engines.
 
-Meyer, H. et al. (2019). Importance of spatial predictor variable selection
-in machine learning applications — moving from data reproduction to spatial
-prediction. *Ecological Modelling* 411: 108815.
-DOI: 10.1016/j.ecolmodel.2019.108815.
+Binary predictions use `suitability >= threshold`. Binary summaries count
+valid grid cells or table rows, not square kilometres. Area interpretation
+requires an appropriate equal-area grid or a separate area-weighted analysis.
+
+`cast_factorial_attribution()` accepts four already-created single-layer
+surfaces or equal-length numeric vectors. Ensemble surfaces cannot recover
+paired model disagreement; optional surface-SD propagation is labelled as a
+separate diagnostic. `cast_attribution()` provides optional driver-only and
+retained-driver comparisons. Individual effects need not add to total change.
+
+## Execution and reproducibility
+
+Raster processing skips empty masked blocks and publishes artifacts atomically.
+Current predictions are shared across futures. Additive univariate logit GAMs
+reuse exact terms for partial scenarios; other structures use ordinary
+prediction. A total core and memory budget bounds scenario workers and RF
+threads. Workers require an installed matching package.
+
+Training-stage cache keys depend on data, scientific settings and relevant
+code, independently of output paths and future scenarios. Comparison receipts
+also verify model/input content and output hashes before reuse. OS file locks
+prevent simultaneous writes. Resume in the same directory; choose a new
+comparison directory or `overwrite = TRUE` after changing scientific inputs.
+Caching avoids repeated work and does not replace scientific validation.
+
+See `vignette("castSDM")` and `vignette("castSDM-advanced")` for executable
+examples and the detailed contracts.
 
 ## License
 
-GPL (>= 3)
+GPL (>= 3).

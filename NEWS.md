@@ -1,3 +1,27 @@
+# castSDM 0.26.0
+
+- New `cast_compare()` constructs paired grouped scenarios with frozen model
+  weights, common finite inputs, static-layer checks, support summaries and
+  paired model SD. Tables and rasters share one contrast kernel.
+- Interpretation is explicitly model-conditional. Legacy `*_main` fields are
+  baseline simple effects; new `*_average` fields are averaged effects.
+  Surface-SD diagnostics are labelled separately from paired model SD.
+- Fix finite-domain and mask handling for continuous/binary factorial results,
+  validate binary 0/1 inputs and consistently use `>=` thresholds. Sensitivity
+  analysis reads saved predictions without refitting or new prediction.
+- Fix AOA training dissimilarity to use the nearest other row: FNN already
+  excludes self. AOA results from earlier versions must be recalculated.
+- Add content-verified training-stage caches independent of output paths and
+  futures, validated prepared splits, OS locks and atomic publication.
+  Comparison and attribution receipts also verify output hashes.
+- Share current predictions across futures, reuse exact additive GAM terms,
+  skip empty masked blocks, stream raster centroids and bound RF threads under
+  a total resource budget. No production runtime claim is made.
+- Expose projected-metre thinning, protocol group coverage counts and hold-out
+  block counts. The versioned single-species example now uses public package
+  calls; driver attribution is optional and disabled by default.
+- Replace placeholder vignettes with small executable workflows.
+
 # castSDM 0.25.0
 
 - `cast_select()` gains `ensure_n`, a named integer vector giving the minimum

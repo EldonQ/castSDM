@@ -10,7 +10,10 @@ cast_thin(
   lon_col = "lon",
   lat_col = "lat",
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  projected = FALSE,
+  order = c("random", "year_desc"),
+  year_col = NULL
 )
 }
 \arguments{
@@ -27,6 +30,14 @@ retained records, in kilometres. Default \code{1}.}
 order (reproducibility of which records are kept).}
 
 \item{verbose}{Logical. Report the kept/removed counts. Default \code{TRUE}.}
+
+\item{projected}{Logical. Coordinates are projected metres rather than
+longitude/latitude. Default \code{FALSE}; no CRS or unit guessing is performed.}
+
+\item{order}{Visiting order: \code{"random"} or \code{"year_desc"}. Year ordering is
+supported for projected coordinates and requires \code{year_col}.}
+
+\item{year_col}{Optional year column for projected \code{order = "year_desc"}.}
 }
 \value{
 The thinned \code{data.frame} with rows of \code{occurrences} (original

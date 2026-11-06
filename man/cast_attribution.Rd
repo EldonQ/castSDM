@@ -24,7 +24,9 @@ cast_attribution(
   filename = NULL,
   mask = NULL,
   overwrite = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  resources = list(),
+  resume = TRUE
 )
 
 \method{print}{cast_attribution}(x, ...)
@@ -69,6 +71,11 @@ temporary file is used. Ignored for tables.}
 \item{overwrite}{Whether to replace an existing raster output.}
 
 \item{verbose}{Whether to report progress.}
+
+\item{resources}{Optional global resource budget; \code{cores} controls RF
+prediction threads in this single-process operation. See \code{\link[=cast_compare]{cast_compare()}}.}
+
+\item{resume}{Reuse a verified result receipt for an existing filename.}
 
 \item{x}{A \code{cast_attribution} result for printing.}
 

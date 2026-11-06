@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Factorial Causal Scenario Attribution for Species Distribution Models}
+\title{castSDM: Auditable Scenario Comparisons for Species Distribution Models}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Factorial causal scenario attribution for species distribution models. A 2 x 2 design (current, climate-only, land-use-only, joint) estimates climate main effects, land-use main effects, the joint change and their interaction on a fitted suitability surface, with continuous and binary range summaries, support diagnostics and model disagreement. Paired driver-only and retained-driver comparisons remain available for within-scenario explanation. Random forest, MaxEnt and generalized additive model engines support a data-driven elastic-net screen, spatial cross-validation, ensemble prediction and projection. The factorial contrasts are model-based causal scenario attributions under explicit assumptions; they are not identified real-world causal effects, occurrence probabilities or realised distributions.
+Auditable model-conditional comparisons of environmental scenarios using species distribution models. A paired 2 x 2 design separates two predictor groups, their joint change and interaction with fixed model weights, finite-domain checks, training-support diagnostics and paired model disagreement. Tables and bounded-memory raster processing share one contrast kernel. Random forest, MaxEnt and generalized additive model engines support variable screening, spatial cross-validation and full-data refitting. Content-verified stage caches and execution receipts support reproducible workflows. Contrasts describe fitted suitability responses; they do not establish real-world causal effects or occurrence probabilities.
 }
 \seealso{
 Useful links:

@@ -16,6 +16,11 @@
 #' @param seed Integer or `NULL`. Random seed controlling the visiting
 #'   order (reproducibility of which records are kept).
 #' @param verbose Logical. Report the kept/removed counts. Default `TRUE`.
+#' @param projected Logical. Coordinates are projected metres rather than
+#'   longitude/latitude. Default `FALSE`; no CRS or unit guessing is performed.
+#' @param order Visiting order: `"random"` or `"year_desc"`. Year ordering is
+#'   supported for projected coordinates and requires `year_col`.
+#' @param year_col Optional year column for projected `order = "year_desc"`.
 #'
 #' @return The thinned `data.frame` with rows of `occurrences` (original
 #'   column values, original row order among kept rows).
@@ -44,7 +49,9 @@ cast_thin <- function(occurrences,
                       lon_col = "lon",
                       lat_col = "lat",
                       seed = NULL,
-                      verbose = TRUE) {
+                      verbose = TRUE, projected = FALSE,
+                      order = c("random", "year_desc"), year_col = NULL) {
+  order <- match.arg(order)
   if (!is.data.frame(occurrences)) {
     cli::cli_abort("{.arg occurrences} must be a data.frame.")
   }
@@ -60,13 +67,26 @@ cast_thin <- function(occurrences,
   }
   lon <- as.numeric(occurrences[[lon_col]])
   lat <- as.numeric(occurrences[[lat_col]])
+  if (!is.logical(projected) || length(projected) != 1L || is.na(projected))
+    cli::cli_abort("projected must be TRUE or FALSE.")
+  if (projected) {
+    if (order == "year_desc" && (is.null(year_col) || !year_col %in% names(occurrences)))
+      cli::cli_abort("year_col must name a year column for year_desc thinning.")
+    kept <- .cast_thin_points(lon, lat, min_dist_km, order,
+      if (!is.null(year_col)) as.numeric(occurrences[[year_col]]), seed)
+    out <- occurrences[kept, , drop = FALSE]
+    rownames(out) <- NULL
+    if (verbose) cli::cli_inform("Projected thinning: {nrow(out)}/{nrow(occurrences)} records retained.")
+    return(out)
+  }
+  if (order != "random") cli::cli_abort("year_desc currently requires projected = TRUE.")
   # Haversine is defined on decimal degrees; silently treating projected
   # metres as degrees would thin by a factor of ~10^5.
   if (any(lon < -180 | lon > 180, na.rm = TRUE) ||
       any(lat < -90 | lat > 90, na.rm = TRUE)) {
     cli::cli_abort(c(
       "Coordinates must be decimal degrees (lon in [-180, 180], lat in [-90, 90]).",
-      i = "Projected coordinates are not supported; reproject to lon/lat first."
+      i = "For projected metres, explicitly set projected = TRUE."
     ))
   }
 

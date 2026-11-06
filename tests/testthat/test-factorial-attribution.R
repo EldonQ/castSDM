@@ -23,7 +23,7 @@ test_that("factorial attribution returns the 2x2 contrasts", {
   expect_true(all(is.finite(fa$summary$mean_surface_sd)))
   expect_equal(fa$binary$estimate[fa$binary$component == "joint_change"], 16)
   expect_equal(fa$binary$estimate[fa$binary$component == "interaction"], -16)
-  expect_true(any(grepl("model_based_causal_scenario_attribution",
+  expect_true(any(grepl("model_conditional_scenario_contrasts",
                         fa$contract$value)))
 })
 

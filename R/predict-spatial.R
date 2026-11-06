@@ -367,15 +367,13 @@ cast_predict <- function(fit, new_data, models = NULL,
 #' Within-Training Nearest-Other-Neighbour Distances
 #'
 #' For every training row, the distance to its nearest *other* training row
-#' (k = 2 skips the self-match at distance 0). The pooled upper quantile of
-#' these distances is the AOA threshold in Meyer & Pebesma (2021); castSDM
-#' calibrates it from held-out CV folds instead (see [cast_cv()] with `aoa = TRUE`),
-#' so this helper is exported for diagnostics only.
+#' (`FNN::get.knn()` already excludes the query row). These training-fold
+#' distances calibrate the threshold used to assess held-out CV rows.
 #'
 #' @keywords internal
 #' @noRd
 .cast_aoa_di_train <- function(train_s) {
   if (nrow(train_s) < 2L) return(rep(NA_real_, nrow(train_s)))
   check_suggested("FNN", "for the area of applicability (aoa = TRUE)")
-  FNN::get.knn(train_s, k = 2L)$nn.dist[, 2L]
+  FNN::get.knn(train_s, k = 1L)$nn.dist[, 1L]
 }

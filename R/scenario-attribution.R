@@ -44,22 +44,8 @@
 
 .cast_attribution_block <- function(fit, current, future, drivers, weights,
                                     bounds, reference = NULL, clamp = FALSE) {
-  if (isTRUE(clamp) && !is.null(reference)) {
-    current <- .cast_clamp(current, reference)
-    future <- .cast_clamp(future, reference)
-  }
-  predict <- function(X) {
-    p <- vapply(names(weights), function(m) {
-      z <- tryCatch(predict_single_model(fit$models[[m]], X), error = function(e) {
-        cli::cli_abort("Attribution prediction failed for {.val {m}}: {conditionMessage(e)}")
-      })
-      if (!is.numeric(z) || length(z) != nrow(X)) {
-        cli::cli_abort("Model {.val {m}} returned an invalid prediction vector.")
-      }
-      as.numeric(z)
-    }, numeric(nrow(X)))
-    matrix(p, nrow(X), length(weights), dimnames = list(NULL, names(weights)))
-  }
+  context <- .cast_prediction_context(fit, weights, current, future, clamp)
+  predict <- context$predict
   # Requiring the same finite active models preserves a paired comparison.
   average <- function(p) {
     z <- as.numeric(p %*% weights)
@@ -71,8 +57,8 @@
     z[rowSums(!is.finite(p)) > 0] <- NA_real_
     z
   }
-  base <- predict(current)
-  fut <- predict(future)
+  base <- predict()
+  fut <- predict(names(future))
   total <- fut - base
   bc <- .cast_attribution_inside(current, bounds)
   fc <- .cast_attribution_inside(future, bounds)
@@ -93,7 +79,9 @@
     } else if (identical(changed, v)) {
       po <- fut; ph <- base
     } else {
-      po <- predict(only); ph <- predict(held)
+      changed_rows <- current[[v]] != future[[v]]
+      po <- predict(v, base = base, changed_rows = changed_rows)
+      ph <- predict(setdiff(names(future), v), base = fut, changed_rows = changed_rows)
     }
     effect <- po - base
     retained <- fut - ph
@@ -141,6 +129,9 @@
 #' @param mask Optional raster mask; non-finite or zero mask cells are excluded.
 #' @param overwrite Whether to replace an existing raster output.
 #' @param verbose Whether to report progress.
+#' @param resources Optional global resource budget; `cores` controls RF
+#'   prediction threads in this single-process operation. See [cast_compare()].
+#' @param resume Reuse a verified result receipt for an existing filename.
 #'
 #' @return A `cast_attribution` list with `summary`, frozen `weights`,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
@@ -169,8 +160,11 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              support_probs = c(0.01, 0.99), clamp = FALSE,
                              block_size = 50000L,
                              filename = NULL, mask = NULL, overwrite = FALSE,
-                             verbose = TRUE) {
+                             verbose = TRUE, resources = list(), resume = TRUE) {
   .cast_check_fit(fit)
+  budget <- .cast_resources(resources)
+  old_options <- options(castSDM.predict_threads = budget$cores)
+  on.exit(options(old_options), add = TRUE)
   method <- match.arg(method)
   decay <- .cast_check_decay(decay)
   .cast_check_scalar(block_size, "block_size", lower = 1, integer = TRUE)
@@ -191,12 +185,19 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     unlist(lapply(drivers, function(v) paste0(c("effect_", "retained_",
       "support_effect_", "support_retained_", "effect_sd_", "retained_sd_"), v))),
     "remainder")
+  # The memory budget bounds block buffers; fitted learner objects are resident.
+  cells_budget <- max(1, floor(budget$memory_mb * 1e6 /
+    (8 * (3 * length(vars) + 2 * length(weights) * (length(drivers) + 1) + length(layer_names)) * 4)))
+  block_size <- min(block_size, cells_budget)
   raster <- inherits(current, "SpatRaster")
   if (raster != inherits(future, "SpatRaster")) {
     cli::cli_abort("{.arg current} and {.arg future} must have the same input type.")
   }
   if (raster) {
     check_suggested("terra", "for raster attribution")
+    old_temp <- terra::terraOptions(print = FALSE)$tempdir
+    terra::terraOptions(tempdir = budget$scratch_dir)
+    on.exit(terra::terraOptions(tempdir = old_temp), add = TRUE)
     if (!all(vars %in% names(current)) || !all(vars %in% names(future))) {
       cli::cli_abort("Both scenario rasters must contain every fitted predictor.")
     }
@@ -204,6 +205,18 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     current <- current[[vars]]; future <- future[[vars]]
     mask <- .cast_raster_mask(mask, current)
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
+    lock <- .cast_lock(paste0(filename, ".lock"))
+    on.exit(filelock::unlock(lock), add = TRUE)
+    key <- .cast_digest(list(fit = .cast_fit_identity(fit), weights = weights,
+      current = .cast_data_identity(current), future = .cast_data_identity(future),
+      mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
+      support_probs = support_probs, clamp = clamp, core = .cast_code_identity(.cast_attribution_block)))
+    receipt <- paste0(filename, ".receipt.rds")
+    cached <- if (resume && !overwrite) .cast_cache_read(receipt, key) else NULL
+    if (!is.null(cached)) {
+      cached$raster_file <- normalizePath(filename, winslash = "/")
+      return(cached)
+    }
     if (file.exists(filename) && !overwrite) cli::cli_abort("{.arg filename} already exists.")
     writer <- .cast_raster_writer(current, filename, layer_names,
       datatype = "FLT8S", overwrite = overwrite)
@@ -251,6 +264,11 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     first <- starts[i]
     if (raster) {
       count <- min(rows, terra::nrow(current) - first + 1L)
+      active <- .cast_mask_rows(mask, first, count, count * terra::ncol(current))
+      if (!any(active)) {
+        .cast_writer_block(writer, matrix(NA_real_, length(active), length(layer_names)), first, count)
+        next
+      }
       a <- .cast_raster_block(current, first, count)
       b <- .cast_raster_block(future, first, count)
     } else {
@@ -290,11 +308,13 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     xy <- intersect(c("lon", "lat"), names(current))
     data <- cbind(current[, xy, drop = FALSE], as.data.frame(out))
   }
-  structure(list(summary = summary, data = data,
+  result <- structure(list(summary = summary, data = data,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
     interpretation = "Fitted-model environmental scenario comparisons on the suitability scale"),
     class = c("cast_attribution", "list"))
+  if (raster) .cast_cache_write(result, receipt, key, filename)
+  result
 }
 
 #' @rdname cast_attribution

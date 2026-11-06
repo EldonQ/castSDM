@@ -1,0 +1,100 @@
+# One package pipeline, followed by one paired scenario comparison.
+case_training_year <- function(preparation, split) {
+  qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
+  if (!all(c("x_albers", "y_albers", "year", "used_in_model") %in% names(qc))) return(NULL)
+  qc <- qc[qc$used_in_model %in% TRUE, , drop = FALSE]
+  key <- function(x, y) paste(round(x, 3), round(y, 3), sep = "|")
+  pres <- split$train[split$train$presence == 1L, ]
+  idx <- match(key(pres$lon, pres$lat), key(qc$x_albers, qc$y_albers))
+  year <- suppressWarnings(as.numeric(qc$year[idx]))
+  year <- year[is.finite(year) & year > 1500 & year < 2100]
+  if (length(year)) stats::median(year) else NULL
+}
+
+case_match_training_layers <- function(data, split, meta, reference_year, mode) {
+  keep <- rep(TRUE, nrow(meta))
+  if (!is.null(reference_year) && mode %in% c("npts", "nts")) {
+    for (id in unique(meta$construct_id)) {
+      ix <- which(meta$construct_id == id & is.finite(meta$year))
+      if (!length(ix)) next
+      years <- meta$year[ix]
+      chosen <- if (mode == "npts") {
+        if (any(years <= reference_year)) max(years[years <= reference_year]) else min(years)
+      } else years[which.min(abs(years-reference_year))]
+      keep[ix[years != chosen]] <- FALSE
+    }
+  }
+  meta <- meta[keep, , drop = FALSE]
+  vars <- meta$layer
+  cols <- c("lon", "lat", "presence", vars)
+  split$train <- split$train[, cols, drop = FALSE]
+  split$test <- split$test[, cols, drop = FALSE]
+  split$env_vars <- vars
+  list(data = data[, cols, drop = FALSE], split = split, meta = meta)
+}
+
+run_species <- function(cfg) {
+  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast026_", cfg$scenario_lulc_product))
+  if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
+  out <- file.path(cfg$output_root, run_id, cfg$species_name)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  lock <- filelock::lock(file.path(out, ".case.lock"), timeout = 0)
+  if (is.null(lock)) stop("Another process is writing this case: ", out)
+  on.exit(filelock::unlock(lock), add = TRUE)
+  # A failed rerun must never leave a previous completion marker.
+  completion <- file.path(out, "completion.rds")
+  if (file.exists(completion)) unlink(completion)
+  preparation <- prepare_species(cfg)
+  data <- data.table::fread(file.path(preparation,
+    paste0(cfg$species_name, "_model_data.csv")), data.table = FALSE)
+  p <- cfg$protocol
+  split <- castSDM::cast_prepare(data, train_fraction = p$train_fraction,
+    n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed)
+  meta <- case_pool_metadata(cfg, split$env_vars)
+  year <- case_training_year(preparation, split)
+  if (is.null(year)) message("Training occurrence years unavailable: temporal matching skipped.")
+  matched <- case_match_training_layers(data, split, meta, year, cfg$select_temporal_match)
+  meta <- matched$meta
+  utils::write.csv(data.frame(reference_year = year %||% NA_real_,
+    source = if (is.null(year)) "unavailable" else "training_presences_only",
+    method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
+  utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
+  ensure <- list(climate = stats::setNames(meta$future_policy == "climate", meta$layer),
+                 lulc = stats::setNames(meta$future_policy == "lulc", meta$layer))
+  result <- castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
+    select_var_id = stats::setNames(meta$construct_id, meta$layer),
+    select_category = stats::setNames(meta$group, meta$layer), select_ensure = ensure,
+    cache_dir = cfg$cache_root, output_dir = file.path(out, "training"),
+    report_meta = list(taxon = cfg$species_name,
+      purpose = "Model-conditional climate and land-use scenario comparison"))
+  selected <- result$screen$selected
+  current <- wf_load_current_stack(cfg, varnames = selected)
+  scenarios <- case_scenarios(cfg, selected, current, out)
+  mask <- terra::rast(file.path(preparation, "analysis_domain_mask.tif"))
+  comparison <- castSDM::cast_compare(result, current, scenarios$future,
+    groups = scenarios$groups, mask = mask, support_probs = cfg$support_probs,
+    domain = "common", resources = cfg$resources,
+    output_dir = file.path(out, "comparison"))
+  if (isTRUE(cfg$driver_attribution)) {
+    # Explicitly optional: only the chosen report scenario, on the same domain.
+    common <- terra::rast(file.path(out, "comparison", ".cache", "common_domain.tif"))
+    castSDM::cast_attribution(result$fit_full, current,
+      scenarios$future[[scenarios$report]], drivers = unlist(scenarios$groups, use.names = FALSE),
+      weights = comparison$weights, mask = common, clamp = p$clamp,
+      support_probs = cfg$support_probs, resources = cfg$resources,
+      filename = file.path(out, "driver_attribution.tif"))
+  }
+  case <- list(schema = "cast_single_species/1", species = cfg$species_name,
+    cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
+    training = "training/result.rds", comparison = "comparison/comparison.rds",
+    script_hashes = tools::md5sum(list.files(cfg$example_root, pattern = "\\.R$", full.names = TRUE)),
+    session = utils::capture.output(utils::sessionInfo()))
+  saveRDS(case, file.path(out, "case.rds"))
+  case_figures(comparison, out, scenarios$report)
+  sensitivity <- summary(comparison, thresholds = c(.3, .5, .7))
+  utils::write.csv(sensitivity, file.path(out, "threshold_sensitivity.csv"), row.names = FALSE)
+  saveRDS(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    package_version = as.character(utils::packageVersion("castSDM")), case = "case.rds"), completion)
+  message("Outputs: ", out)
+  invisible(out)
+}

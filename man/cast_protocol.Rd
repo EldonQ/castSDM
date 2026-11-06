@@ -34,7 +34,9 @@ cast_protocol(
   ensemble_min_metric_folds = 2L,
   clamp = TRUE,
   num_threads = 1L,
-  seed = NULL
+  seed = NULL,
+  select_ensure_n = NULL,
+  holdout_blocks = 20L
 )
 }
 \arguments{
@@ -101,6 +103,11 @@ computed on the unclamped input).}
 
 \item{seed}{Base seed; every stage applies it locally without touching
 the caller's RNG state.}
+
+\item{select_ensure_n}{Named minimum counts for the coverage groups passed
+to \code{\link[=cast_run]{cast_run()}} as \code{select_ensure}; see \code{\link[=cast_select]{cast_select()}}.}
+
+\item{holdout_blocks}{Number of blocks in the independent spatial hold-out.}
 }
 \value{
 A \code{cast_protocol} object (a validated list). Use \code{print()} to see

@@ -1,0 +1,5 @@
+/config/
+/output/
+*.log
+*.lock
+Rplots.pdf

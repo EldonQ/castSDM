@@ -2,7 +2,7 @@
 % Please edit documentation in R/factorial-attribution.R
 \name{cast_factorial_attribution}
 \alias{cast_factorial_attribution}
-\title{Factorial causal attribution of climate and land-use scenario effects}
+\title{Compare Four Aligned Factorial Suitability Surfaces}
 \usage{
 cast_factorial_attribution(
   current,
@@ -26,94 +26,55 @@ cast_factorial_attribution(
   filename = NULL,
   overwrite = FALSE,
   compression = "LZW",
-  verbose = TRUE
+  verbose = TRUE,
+  block_size = 100000L
 )
 }
 \arguments{
-\item{current, joint, climate, lulc}{A single-layer \code{terra::SpatRaster} or a
-path to one. These are the four suitability surfaces of the factorial
-design. The layers must share the same geometry.}
+\item{current, joint, climate, lulc}{Equally sized numeric vectors or one-column
+frames, or four aligned single-layer \code{terra::SpatRaster}s/paths.}
 
-\item{current_binary, joint_binary, climate_binary, lulc_binary}{Optional
-binary range rasters (0/1) for the same four scenarios. Supply all four or
-none. If none are supplied and \code{threshold} is given, binary rasters are
-derived from the continuous surfaces.}
+\item{current_binary, joint_binary, climate_binary, lulc_binary}{Optional 0/1/NA
+inputs of matching size/geometry. Supply all four or none.}
 
-\item{threshold}{Optional numeric threshold in the continuous suitability
-scale, used only when binary rasters are not supplied.}
+\item{threshold}{Optional finite threshold. Binary values use \code{>=}.}
 
-\item{mask}{Optional single-layer mask. Cells that are \code{NA} or \code{0} are
-excluded from all contrasts and summaries.}
+\item{mask}{Matching input; only finite nonzero values participate. All
+contrasts and counts share the four-surface finite domain.}
 
-\item{support}{Optional single-layer support raster (1 = supported). When
-supplied, summaries report the supported subset separately. The support
-raster is not used to delete the raw contrasts.}
+\item{support}{Matching input; finite nonzero values mark training support.
+Unsupported values remain in raw contrasts and are reported separately.}
 
-\item{current_sd, joint_sd, climate_sd, lulc_sd}{Optional cross-model standard
-deviation rasters for the four scenarios. When all four are supplied,
-an approximate sqrt-sum surface-SD propagation is computed under an independence assumption
-and reported. It describes surface-level model disagreement, not the SD of the contrast, and is not a confidence interval.}
+\item{current_sd, joint_sd, climate_sd, lulc_sd}{Optional non-negative surface
+SDs, all four or none. The independent-surface approximation is named
+\verb{surface_sd_*}; it is not paired contrast SD.}
 
-\item{scenario, ssp, period}{Optional scenario metadata stored on the result.}
+\item{scenario, ssp, period}{Optional metadata.}
 
-\item{filename}{Optional GeoTIFF path for the contrast stack. The stack
-contains the four input surfaces, the six contrasts and any SD layers.}
+\item{filename}{Optional GeoTIFF path. Raster results otherwise use a
+temporary file to keep computation bounded in memory.}
 
-\item{overwrite, compression}{Passed to \code{\link[terra:writeRaster]{terra::writeRaster()}}.}
+\item{overwrite, compression}{Raster publication options.}
 
-\item{verbose}{Print a short progress message.}
+\item{verbose}{Print progress.}
+
+\item{block_size}{Maximum cells per processing block (approximately, by row).}
 }
 \value{
-A \code{cast_factorial} object with components:
-\describe{
-\item{summary}{Continuous contrast summaries.}
-\item{binary}{Binary range counts and percentage changes, or \code{NULL}.}
-\item{raster}{The contrast \code{SpatRaster}.}
-\item{raster_file}{The written file, or \code{NA}.}
-\item{contract}{The claim level, contrast definitions and assumptions.}
-\item{scenario,ssp,period}{Scenario metadata.}
-}
+A \code{cast_factorial} object with \code{summary}, optional \code{binary} and
+\code{binary_supported}, contrast \code{raster} or table \code{data}, and \code{contract}.
+\code{mean_surface_sd} is unpaired; \code{mean_model_sd} needs model-level inputs.
+Range sizes are cell counts, never automatically square kilometres.
 }
 \description{
-Given four aligned suitability surfaces from a 2 x 2 factorial scenario
-design, compute the climate main effect, the land-use main effect, the joint
-change, the interaction, and the two conditional effects at the joint
-scenario. The design is:
-}
-\details{
-\itemize{
-\item \code{current}: current climate and current land use;
-\item \code{climate}: future climate and current land use;
-\item \code{lulc}: current climate and future land use;
-\item \code{joint}: future climate and future land use.
-}
-
-The contrasts are defined on the supplied suitability scale:
-
-\deqn{climate main = climate - current}
-\deqn{land-use main = lulc - current}
-\deqn{joint change = joint - current}
-\deqn{interaction = joint - climate - lulc + current}
-\deqn{climate at joint = joint - lulc}
-\deqn{land-use at joint = joint - climate}
-
-These are model-based causal scenario contrasts, not identified ecological
-causal effects. The function records the assumptions in \code{contract}; it does
-not test them. The factorial design itself fixes the other component, so no
-user-supplied adjustment set is required.
+Computes baseline simple effects, conditional and average marginal effects,
+and non-additivity on the declared suitability scale. Legacy \code{climate_main}
+and \code{lulc_main} columns are baseline simple effects, not averaged effects.
+These are fitted-model scenario contrasts, not identified causal effects.
+Use \code{\link[=cast_compare]{cast_compare()}} to construct all four corners from an existing model.
 }
 \examples{
-\dontrun{
-cur <- terra::rast(matrix(0.2, 4, 4))
-clim <- terra::rast(matrix(0.3, 4, 4))
-lulc <- terra::rast(matrix(0.4, 4, 4))
-joint <- terra::rast(matrix(0.5, 4, 4))
-fa <- cast_factorial_attribution(cur, joint, clim, lulc, threshold = 0.5)
+fa <- cast_factorial_attribution(c(.2, .3), c(.8, .7),
+  c(.4, .5), c(.5, .4), threshold = .5, verbose = FALSE)
 fa$summary
-}
-}
-\references{
-The factorial contrast is a model-based counterfactual comparison. It does
-not identify a causal effect without assumptions about the fitted model and
-the scenario manipulations.
 }

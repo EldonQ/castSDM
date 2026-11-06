@@ -687,21 +687,7 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
 #' @keywords internal
 #' @noRd
 .cast_digest <- function(x, len = NULL) {
-  if (requireNamespace("digest", quietly = TRUE)) {
-    out <- digest::digest(x)
-  } else {
-    # Polynomial rolling hash on the serialised bytes; double arithmetic
-    # avoids the 32-bit overflow that breaks a bitwXor-based FNV-1a in R.
-    raw <- serialize(x, NULL, version = 3)
-    h <- 0
-    for (b in as.integer(raw)) {
-      # h * 1000003 leaves the double mantissa (2^53) for h beyond ~2^36, so
-  # distinct inputs collided. Two accumulators with different multipliers
-  # keep the product exact to 2^53.
-  h <- (h * 65599 + (b + 2^31)) %% 4503599627370496
-    }
-    out <- sprintf("%013.0f", h)
-  }
+  out <- digest::digest(x, algo = "sha256", serializeVersion = 3L)
   if (!is.null(len)) out <- substr(out, 1L, len)
   out
 }
@@ -840,7 +826,7 @@ cast_safe_ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
     if (!ok[i]) next
     if (length(kx)) {
       d2 <- (lon[i] - kx)^2 + (lat[i] - ky)^2
-      if (min(d2) <= min_dist_m^2) next
+      if (min(d2) < min_dist_m^2) next
     }
     keep[i] <- TRUE
     kx <- c(kx, lon[i]); ky <- c(ky, lat[i])

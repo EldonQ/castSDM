@@ -380,6 +380,8 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   list(
     train    = data[train_idx, keep_cols, drop = FALSE],
     test     = data[-train_idx, keep_cols, drop = FALSE],
+    train_index = train_idx,
+    test_index = setdiff(seq_len(nrow(data)), train_idx),
     env_vars = final_vars,
     split    = sp$method,
     split_type = sp$type
