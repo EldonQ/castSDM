@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 #' Fit Species Distribution Models
 #'
 #' Trains one or more SDM algorithms on prepared data. Supported models:
@@ -31,12 +32,14 @@
 #' @param prevalence_target Numeric in (0, 1), or `NULL`. When supplied,
 #'   presence and background rows are weighted so that the *weighted*
 #'   prevalence equals `prevalence_target` (weight = target/n per class),
-#'   following the standard presence-background correction (presence weight
-#'   `n_bg/n_pres` is an equivalent parameterisation; biomod2 defaults to a
-#'   0.5 target). RF accepts the weights; GAM is fitted unweighted and
-#'   calibrated with the shared logit offset; MaxEnt has no row-weight
+#'   with `n_bg/n_pres` an equivalent relative presence weight at target 0.5.
+#'   RF uses these weights for case sampling; GAM is fitted unweighted and
+#'   shifted with the shared logit offset; MaxEnt has no row-weight
 #'   interface and is always fitted unweighted. Default `NULL` (unweighted:
 #'   outputs stay relative suitabilities under the sampled prevalence).
+#'   The shift makes the weighted mean training score equal to the target;
+#'   it does not calibrate ecological occurrence probabilities. Native and
+#'   shifted OOF diagnostics are retained by [cast_cv()] and [cast_diagnose()].
 #' @param num_threads Integer. Threads for the Random Forest learner. Default
 #'   `1` (safe under fold-parallel cross-validation; raise for a single fit).
 #' @param seed Integer or `NULL`. Base random seed.
@@ -254,14 +257,15 @@ cast_fit <- function(data,
     }
   }
 
-  # ---- Prevalence calibration (fitted offsets) ----------------------------
+  # ---- Weighted training score shift (fitted offsets) ---------------------
   # With a prevalence target, every engine is shifted on the logit scale so
   # the weighted mean training prediction equals the target. Engines fitted
   # with case weights land near zero shift on their own; maxnet has no row
-  # weights and needs the shift to reach the same calibration scale as the
-  # rest of the ensemble. The offsets are applied inside
+  # weights. This is a score convention, not occurrence-probability
+  # calibration or evidence of better calibration on independent data.
+  # The offsets are applied inside
   # predict_single_model(), so CV folds, evaluation, projection, effects and
-  # importance all consume the calibrated scores.
+  # importance all consume the shifted scores.
   calibration <- NULL
   if (!is.null(prevalence_target)) {
     offsets <- stats::setNames(rep(0, length(fitted_models)),
@@ -280,6 +284,7 @@ cast_fit <- function(data,
     }
     calibration <- list(
       method = "logit_shift",
+      interpretation = "weighted_training_score_shift_not_occurrence_probability",
       prevalence_target = prevalence_target,
       offsets = offsets
     )
@@ -287,7 +292,7 @@ cast_fit <- function(data,
       shown <- paste0(names(offsets), " = ",
                       formatC(offsets, digits = 3, format = "f"),
                       collapse = ", ")
-      cli::cli_inform("Prevalence calibration (target {prevalence_target}): {shown}.")
+      cli::cli_inform("Weighted training score shift (target {prevalence_target}): {shown}.")
     }
   }
 
@@ -405,11 +410,10 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
       f <- stats::as.formula(
         paste("presence ~", paste(pred_terms, collapse = " + "))
       )
-      # Fit unweighted and let the shared post-fit logit offset calibrate
-      # prevalence. Passing fractional case weights to a binomial GAM triggers
-      # R's "non-integer #successes" warning and can destabilise the outer
-      # gam.fit3 iterations; the offset gives the same ensemble scale without
-      # changing the likelihood.
+      # The declared GAM policy is an unweighted binomial likelihood followed
+      # by an optional weighted training-score shift. The shift changes the
+      # score origin; it is not equivalent to a weighted GAM fit or evidence
+      # of probability calibration. RF's weighted sampling is a separate rule.
       m <- tryCatch(
         mgcv::gam(f, data = df, family = stats::binomial(),
                   method = "REML", select = TRUE,

@@ -75,8 +75,8 @@ fold. Default \code{FALSE}.}
 
 \item{tune_folds}{Inner folds for the grid search. Default \code{3}.}
 
-\item{prevalence_target}{Numeric in (0, 1), or \code{NULL} for uncalibrated
-scores. Default \code{0.5}.}
+\item{prevalence_target}{Numeric in (0, 1), or \code{NULL} for native engine
+scores. Default \code{0.5}. See \code{\link[=cast_fit]{cast_fit()}} for weighting and score semantics.}
 
 \item{cv_k}{Number of outer spatial folds. Default \code{5}.}
 
@@ -121,9 +121,11 @@ handling and reproducibility settings. Pass it to \code{\link[=cast_run]{cast_ru
 }
 \details{
 Defaults are deliberate protocol choices, not recommendations for every
-data set: in particular \code{prevalence_target = 0.5} calibrates every engine
+data set: in particular \code{prevalence_target = 0.5} shifts every engine
 (including MaxEnt, whose fit accepts no row weights, via a stored
-logit-scale offset) to one common scale before ensembling, and
+logit-scale offset) to a common weighted training mean before ensembling.
+This does not establish probability calibration or improve every engine.
+Native and shifted OOF diagnostics support training-side assessment, and
 \code{clamp = TRUE} caps predictors to their training range at prediction
 time, so all engines extrapolate under the same rule. MESS and AOA
 diagnostics are reported alongside either way.

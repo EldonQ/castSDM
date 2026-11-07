@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # cast_run(): the single production pipeline ---------------------------------
 #
 # One orchestration driven by a cast_protocol(): prepare -> select -> fit ->
@@ -254,7 +255,8 @@ cast_run <- function(species_data,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
     protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
-    protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed)
+    protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed,
+    protocol$clamp)
   cv <- stage("04_cv", cv_inputs, cast_cv(
     split$train, screen = screen,
     select_method = protocol$select_method, select_args = select_args,
@@ -268,16 +270,20 @@ cast_run <- function(species_data,
     rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
-    num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
+    num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose,
+    clamp = protocol$clamp
   ))
   cv_tables <- list(
     cv_metrics = cv$metrics,
     cv_fold_metrics = cv$fold_metrics,
     cv_selection_frequency = cv$selection_freq,
     cv_oof_predictions = cv$oof,
-    cv_fold_status = data.frame(
+    cv_native_oof_predictions = cv$native_oof,
+    cv_fold_info = cv$fold_info,
+    cv_score_offsets = cv$offsets,
+    cv_fold_status = cv$repeat_status %||% data.frame(
       fold = seq_along(cv$fold_status), status = cv$fold_status,
-      selected = vapply(cv$selections %||% vector("list", length(cv$fold_status)),
+      selected = vapply((cv$selections %||% vector("list", length(cv$fold_status)))[seq_along(cv$fold_status)],
                         paste, character(1), collapse = ";"),
       stringsAsFactors = FALSE)
   )
@@ -287,22 +293,22 @@ cast_run <- function(species_data,
                       protocol$block_size, protocol$buffer, protocol$buffer_unit,
                       protocol$tune, protocol$tune_folds,
                       protocol$threshold_method, protocol$aoa,
-                      protocol$prevalence_target, protocol$seed)),
+                      protocol$prevalence_target, protocol$seed, protocol$clamp)),
     cv, tables = cv_tables)
 
   # ---- 5. One-shot hold-out evaluation (out-of-fold thresholds) -----------
   if (verbose) cli::cli_h2("Evaluate: hold-out split, out-of-fold thresholds")
   stage_started <- Sys.time()
   eval_result <- stage("05_evaluate", list(.cast_fit_identity(fit), split$test,
-    cv$thresholds, protocol$threshold_method), cast_evaluate(
+    cv$thresholds, protocol$threshold_method, protocol$clamp), cast_evaluate(
     fit, split$test,
     threshold_method = protocol$threshold_method,
-    thresholds = cv$thresholds
+    thresholds = cv$thresholds, clamp = protocol$clamp
   ))
   if (verbose) print(eval_result)
   add_receipt("05_evaluate",
     .cast_digest(list(fit, split$test, cv$thresholds,
-                      protocol$threshold_method)),
+                      protocol$threshold_method, protocol$clamp)),
     eval_result, tables = list(holdout_metrics = eval_result$metrics))
 
   # ---- 6. Full-data refit (tuned configuration frozen) --------------------
@@ -424,6 +430,8 @@ cast_run <- function(species_data,
     fit_full = fit_full, call = cl, protocol = protocol,
     projection = projection, output_dir = output_dir, receipts = receipts
   )
+  result$diagnostics <- cast_diagnose(result,
+    output_dir = if (!is.null(out)) file.path(output_dir, "diagnostics"))
   if (!is.null(out)) {
     stage_started <- Sys.time()
     report_path <- file.path(output_dir, "odmap_report.md")

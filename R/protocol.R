@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Analysis protocol ----------------------------------------------------------
 #
 # Single declaration point for the scientific settings that drive cast_run().
@@ -15,9 +16,11 @@
 #' handling and reproducibility settings. Pass it to [cast_run()].
 #'
 #' Defaults are deliberate protocol choices, not recommendations for every
-#' data set: in particular `prevalence_target = 0.5` calibrates every engine
+#' data set: in particular `prevalence_target = 0.5` shifts every engine
 #' (including MaxEnt, whose fit accepts no row weights, via a stored
-#' logit-scale offset) to one common scale before ensembling, and
+#' logit-scale offset) to a common weighted training mean before ensembling.
+#' This does not establish probability calibration or improve every engine.
+#' Native and shifted OOF diagnostics support training-side assessment, and
 #' `clamp = TRUE` caps predictors to their training range at prediction
 #' time, so all engines extrapolate under the same rule. MESS and AOA
 #' diagnostics are reported alongside either way.
@@ -47,8 +50,8 @@
 #' @param tune Run the per-engine grid search inside every outer training
 #'   fold. Default `FALSE`.
 #' @param tune_folds Inner folds for the grid search. Default `3`.
-#' @param prevalence_target Numeric in (0, 1), or `NULL` for uncalibrated
-#'   scores. Default `0.5`.
+#' @param prevalence_target Numeric in (0, 1), or `NULL` for native engine
+#'   scores. Default `0.5`. See [cast_fit()] for weighting and score semantics.
 #' @param cv_k Number of outer spatial folds. Default `5`.
 #' @param n_repeat Number of independent spatial-blocking repeats. Default `1`.
 #' @param block_method `"blockcv"` (default; blockCV spatial blocks with

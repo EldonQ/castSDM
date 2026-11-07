@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Shared row-block I/O. Model-specific calculations stay in their callers.
 .cast_finite_rows <- function(x) rowSums(!is.finite(as.matrix(x))) == 0L
 
@@ -79,7 +80,8 @@
   writer$overwrite <- overwrite
   tryCatch({
     terra::writeStart(writer$raster, writer$temp, overwrite = TRUE,
-      wopt = list(datatype = datatype, gdal = c(paste0("COMPRESS=", compression), "TILED=YES")))
+      wopt = list(datatype = datatype, gdal = c(paste0("COMPRESS=", compression),
+        "TILED=YES", "INTERLEAVE=BAND")))
     writer$open <- TRUE
   }, error = function(e) {
     unlink(writer$temp)

@@ -30,7 +30,8 @@ cast_cv(
   maxent_classes = NULL,
   maxent_regmult = NULL,
   num_threads = 1L,
-  fold_ids = NULL
+  fold_ids = NULL,
+  clamp = FALSE
 )
 }
 \arguments{
@@ -96,8 +97,9 @@ held-out folds never influence the chosen hyperparameters. Default
 Default \code{3}.}
 
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. Passed to
-\code{\link[=cast_fit]{cast_fit()}} in every outer fold: presence/background rows are weighted
-so the fitted prevalence equals the target (weight = target/n per class).
+\code{\link[=cast_fit]{cast_fit()}} in every outer fold. RF uses weighted case sampling;
+engines receive a logit shift fixing the weighted mean training score.
+This is not ecological probability calibration.
 Evaluation metrics remain unweighted. Default \code{NULL}.}
 
 \item{n_repeat}{Integer >= 1. Number of independent spatial-blocking
@@ -147,6 +149,10 @@ such as \code{blockCV}, aligned with data rows. Values must cover \code{1:k}.
 Use \code{n_repeat = 1} for a fixed external design. This allows physical block
 sizes or basin groups to be chosen independently of castSDM's automatic
 blocking; supplied assignments are returned unchanged.}
+
+\item{clamp}{Clamp each fold's test predictors to that fold's training
+range for all engines. Default \code{FALSE}; \code{\link[=cast_run]{cast_run()}} supplies its protocol.
+AOA continues to use original predictors.}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.

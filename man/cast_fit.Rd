@@ -56,12 +56,14 @@ scoring (MaxEnt; RF scores out-of-bag). Default \code{3}.}
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL}. When supplied,
 presence and background rows are weighted so that the \emph{weighted}
 prevalence equals \code{prevalence_target} (weight = target/n per class),
-following the standard presence-background correction (presence weight
-\code{n_bg/n_pres} is an equivalent parameterisation; biomod2 defaults to a
-0.5 target). RF accepts the weights; GAM is fitted unweighted and
-calibrated with the shared logit offset; MaxEnt has no row-weight
+with \code{n_bg/n_pres} an equivalent relative presence weight at target 0.5.
+RF uses these weights for case sampling; GAM is fitted unweighted and
+shifted with the shared logit offset; MaxEnt has no row-weight
 interface and is always fitted unweighted. Default \code{NULL} (unweighted:
-outputs stay relative suitabilities under the sampled prevalence).}
+outputs stay relative suitabilities under the sampled prevalence).
+The shift makes the weighted mean training score equal to the target;
+it does not calibrate ecological occurrence probabilities. Native and
+shifted OOF diagnostics are retained by \code{\link[=cast_cv]{cast_cv()}} and \code{\link[=cast_diagnose]{cast_diagnose()}}.}
 
 \item{num_threads}{Integer. Threads for the Random Forest learner. Default
 \code{1} (safe under fold-parallel cross-validation; raise for a single fit).}

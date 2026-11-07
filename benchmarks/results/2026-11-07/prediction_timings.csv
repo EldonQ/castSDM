@@ -1,0 +1,7 @@
+"replicate","method","elapsed_s"
+1,"reference",1.95
+1,"optimized",1.94
+2,"optimized",1.93
+2,"reference",1.96
+3,"reference",1.96
+3,"optimized",1.92

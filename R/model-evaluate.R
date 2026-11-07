@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 #' Evaluate Fitted Models
 #'
 #' Computes discrimination, threshold-dependent, calibration, and suitability
@@ -22,10 +23,14 @@
 #'   out-of-fold predictions, so the held-out labels never influence the
 #'   operating point. `NA`/missing entries per model fall back to the
 #'   in-sample selection for that model.
+#' @param clamp Clamp predictors to this fit's training range before every
+#'   engine prediction. Default `FALSE`; [cast_run()] supplies its protocol.
 #'
 #' @return A `cast_eval` object (S3 class) whose `threshold_source` records
 #'   whether thresholds were caller-supplied (`"out_of_fold_cv"`) or selected
-#'   on in-sample training predictions (`"in_sample_training"`).
+#'   on in-sample training predictions (`"in_sample_training"`). Without
+#'   training or supplied thresholds, binary metrics are unassessed and
+#'   `threshold_source` is `"unavailable"`; test labels never select a threshold.
 #'
 #' @details
 #' - **AUC**: Area Under the Receiver Operating Characteristic curve,
@@ -43,8 +48,11 @@
 #'
 #' @export
 cast_evaluate <- function(fit, test_data, response = "presence",
-                          threshold_method = "max_tss", thresholds = NULL) {
+                          threshold_method = "max_tss", thresholds = NULL,
+                          clamp = FALSE) {
   check_suggested("pROC", "for AUC computation")
+  if (!is.logical(clamp) || length(clamp) != 1L || is.na(clamp))
+    cli::cli_abort("clamp must be TRUE or FALSE.")
 
   # `NULL[["presence"]]` is NULL, `sum(is.na(NULL))` is 0 and
   # `all(logical(0) %in% c(0, 1))` is TRUE, so the response check below
@@ -74,8 +82,12 @@ cast_evaluate <- function(fit, test_data, response = "presence",
     X_test_raw[[col]] <- as.numeric(X_test_raw[[col]])
   }
   X_test_raw <- .cast_impute(X_test_raw, fit$scaling$impute)
+  if (clamp && !is.null(fit$scaling$reference))
+    X_test_raw <- .cast_clamp(X_test_raw, fit$scaling$reference)
 
   results <- list()
+  predictions <- data.frame(obs = Y_test)
+  native_predictions <- data.frame(obs = Y_test)
   fallback_used <- FALSE
   used_thresholds <- stats::setNames(rep(NA_real_, length(fit$models)),
                                      names(fit$models))
@@ -83,13 +95,17 @@ cast_evaluate <- function(fit, test_data, response = "presence",
   for (mdl_name in names(fit$models)) {
     mdl_info <- fit$models[[mdl_name]]
 
-    preds <- tryCatch(
-      predict_single_model(mdl_info, X_test_raw),
-      error = function(e) rep(NA_real_, nrow(test_data))
+    pair <- tryCatch(
+      predict_single_model(mdl_info, X_test_raw, output = "both"),
+      error = function(e) list(score = rep(NA_real_, nrow(test_data)),
+                              native = rep(NA_real_, nrow(test_data)))
     )
+    preds <- pair$score
+    predictions[[paste0("HSS_", mdl_name)]] <- preds
+    native_predictions[[paste0("HSS_", mdl_name)]] <- pair$native
 
     threshold <- if (!is.null(thresholds)) {
-      unname(thresholds[[mdl_name]]) %||% NA_real_
+      unname(thresholds[mdl_name]) %||% NA_real_
     } else {
       NA_real_
     }
@@ -107,12 +123,14 @@ cast_evaluate <- function(fit, test_data, response = "presence",
         threshold <- tryCatch(cast_threshold(p_train, y_train,
           method = threshold_method), error = function(e) NA_real_)
       } else {
-        cli::cli_warn("Fit lacks stored training responses; selecting the threshold on evaluation data is optimistic.")
+        cli::cli_warn("Fit lacks stored training responses; binary metrics are unassessed without a supplied threshold.")
       }
     }
     used_thresholds[[mdl_name]] <- if (is.finite(threshold)) threshold else NA_real_
-    ev <- evaluate_model_full(preds, Y_test, threshold = threshold,
+    has_threshold <- is.finite(threshold)
+    ev <- evaluate_model_full(preds, Y_test, threshold = if (has_threshold) threshold else .5,
                               threshold_method = threshold_method)
+    if (!has_threshold) ev[c("tss", "sedi", "kappa", "tss_threshold")] <- NA_real_
     results[[mdl_name]] <- data.frame(
       model       = mdl_name,
       auc_mean    = ev["auc"],
@@ -128,6 +146,8 @@ cast_evaluate <- function(fit, test_data, response = "presence",
       omission_10_mean = ev["omission_10"],
       mpa_mean    = ev["mpa"],
       tss_threshold = ev["tss_threshold"],
+      omission_at_threshold_mean = if (has_threshold && any(Y_test == 1 & is.finite(preds)))
+        mean(preds[Y_test == 1 & is.finite(preds)] < threshold) else NA_real_,
       stringsAsFactors = FALSE,
       row.names = NULL
     )
@@ -136,16 +156,21 @@ cast_evaluate <- function(fit, test_data, response = "presence",
   metrics_df <- do.call(rbind, results)
   rownames(metrics_df) <- NULL
 
-  threshold_source <- if (is.null(thresholds)) {
+  threshold_source <- if (!any(is.finite(used_thresholds))) {
+    "unavailable"
+  } else if (is.null(thresholds)) {
     "in_sample_training"
   } else if (fallback_used) {
     "mixed"
   } else {
     "out_of_fold_cv"
   }
-  new_cast_eval(metrics = metrics_df, cv_source = FALSE,
+  result <- new_cast_eval(metrics = metrics_df, cv_source = FALSE,
                 thresholds = used_thresholds,
-                threshold_source = threshold_source)
+                threshold_source = threshold_source,
+                predictions = predictions, native_predictions = native_predictions)
+  result$clamp <- clamp
+  result
 }
 
 
@@ -163,7 +188,9 @@ cast_evaluate <- function(fit, test_data, response = "presence",
 #' @return Numeric vector of predictions.
 #' @keywords internal
 #' @noRd
-predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
+predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
+                                 output = c("score", "native", "both")) {
+  output <- match.arg(output)
   offset <- mdl_info$offset %||% 0
   if (identical(mdl_info$type, "external")) {
     p <- mdl_info$predict_function(mdl_info$model, X_raw)
@@ -171,9 +198,10 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
         any(is.infinite(p)) || any(p[is.finite(p)] < 0 | p[is.finite(p)] > 1)) {
       cli::cli_abort("External model {.val {mdl_info$name}} must return one suitability in [0, 1] per row.")
     }
-    return(.cast_apply_offset(as.numeric(p), offset))
+    return(.cast_prediction_output(as.numeric(p), offset, output))
   }
-  if (is.null(mdl_info$model)) return(rep(NA_real_, nrow(X_raw)))
+  if (is.null(mdl_info$model))
+    return(.cast_prediction_output(rep(NA_real_, nrow(X_raw)), offset, output))
 
   nm <- mdl_info$name
   # Engine namespaces are Suggests: fitting loads them, but a fit object
@@ -183,7 +211,7 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
   # predict with, so NA preserves the per-model robustness contract.
   engine_pkg <- .cast_engine_package(nm)
   if (!is.null(engine_pkg) && !requireNamespace(engine_pkg, quietly = TRUE)) {
-    return(rep(NA_real_, nrow(X_raw)))
+    return(.cast_prediction_output(rep(NA_real_, nrow(X_raw)), offset, output))
   }
   p <- if (nm == "rf") {
     # predict.ranger() draws a random seed from R's RNG when `seed` is not
@@ -205,5 +233,11 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE) {
   } else {
     rep(NA_real_, nrow(X_raw))
   }
-  .cast_apply_offset(p, offset)
+  .cast_prediction_output(p, offset, output)
+}
+
+.cast_prediction_output <- function(p, offset, output) {
+  if (output == "native") return(p)
+  score <- .cast_apply_offset(p, offset)
+  if (output == "both") list(native = p, score = score) else score
 }

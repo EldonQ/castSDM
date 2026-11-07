@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 test_that("additive GAM term reuse equals direct clamped calibrated prediction", {
   skip_if_not_installed("mgcv")
   set.seed(276)
@@ -86,7 +87,8 @@ test_that("installed scenario workers equal sequential execution", {
   two <- cast_compare(fit, a, futures, list(first = "x", second = "z"),
     resources = list(cores = 2, workers = 2), verbose = FALSE)
   expect_equal(two$summary, one$summary)
-  expect_equal(two$results, one$results)
+  scientific <- function(results) lapply(results, function(x) { x$timings <- NULL; x })
+  expect_equal(scientific(two$results), scientific(one$results))
   skip_if_not_installed("terra")
   raster <- terra::rast(nrows = 3, ncols = 4, nlyrs = 2)
   terra::values(raster) <- as.matrix(a); names(raster) <- names(a)

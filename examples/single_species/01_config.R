@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Scientific settings live in one cast_protocol(); paths and data QC stay here.
 castsdm_species_configs <- function(root) {
   data_root <- Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data")
@@ -18,6 +19,9 @@ castsdm_species_configs <- function(root) {
     freshwater_river_buffer_m = 100, freshwater_occurrence_buffer_km = 10,
     domain_min_presence_coverage = .95,
     occurrence_uncertainty_m = 1000, occurrence_keep_unknown_uncertainty = TRUE,
+    # Keep the completed study's cohort unless a new analysis is declared.
+    occurrence_year_range = NULL, occurrence_keep_unknown_year = TRUE,
+    occurrence_year_semantics = "record year; sampling/publication meaning unverified",
     occurrence_thin_km = 1, occurrence_thin_order = "random",
     occurrence_basis_of_record = c("HUMAN_OBSERVATION", "MACHINE_OBSERVATION",
       "OBSERVATION", "PRESERVED_SPECIMEN", "MATERIAL_SAMPLE", "MATERIAL_CITATION",
@@ -38,7 +42,8 @@ castsdm_species_configs <- function(root) {
       prevalence_target = .5, clamp = TRUE, num_threads = resources$cores, seed = seed),
     # One total budget: 3 scenario processes, at most 4 RF threads each.
     resources = resources,
-    support_probs = c(.01, .99), driver_attribution = FALSE,
+    support_probs = c(.01, .99), diagnostic_thresholds = c(.3, .5, .7),
+    driver_attribution = FALSE,
     scenario_climate_model = "bcc_csm2_mr",
     scenario_ssps = c("ssp126", "ssp245", "ssp585"),
     scenario_periods = c("2021_2040", "2041_2070", "2071_2100"),

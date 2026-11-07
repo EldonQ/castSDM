@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Shared execution contracts; no scientific defaults depend on output paths.
 .cast_code_identity <- function(fun) {
   # AST serialization can change when R JIT compiles embedded closures.
@@ -149,15 +150,16 @@
     X <- current
     X[switched] <- future[switched]
     out <- matrix(NA_real_, nrow(current), length(active), dimnames = list(NULL, active))
+    idx <- changed_rows %||% rep(TRUE, nrow(X))
+    if (!is.null(base)) out[,] <- base
     for (m in active) {
       info <- fit$models[[m]]
+      if (!any(idx)) next
       if (!is.null(prepared[[m]])) {
         p <- prepared[[m]]; cols <- unname(terms[[m]][intersect(switched, names(terms[[m]]))])
-        eta <- p$eta + if (length(cols)) rowSums(p$delta[, cols, drop = FALSE]) else 0
-        out[, m] <- .cast_apply_offset(info$model$family$linkinv(eta), info$offset)
+        eta <- p$eta[idx] + if (length(cols)) rowSums(p$delta[idx, cols, drop = FALSE]) else 0
+        out[idx, m] <- .cast_apply_offset(info$model$family$linkinv(eta), info$offset)
       } else {
-        idx <- changed_rows %||% rep(TRUE, nrow(X))
-        if (!is.null(base)) out[, m] <- base[, m]
         if (any(idx)) {
           p <- tryCatch(predict_single_model(info, X[idx, , drop = FALSE]),
             error = function(e) cli::cli_abort("Prediction failed for {.val {m}}: {conditionMessage(e)}"))

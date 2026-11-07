@@ -21,7 +21,8 @@ cast_compare(
   resources = list(),
   resume = TRUE,
   overwrite = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  thresholds = NULL
 )
 
 \method{summary}{cast_comparison}(object, thresholds = NULL, ...)
@@ -73,10 +74,12 @@ artifacts can be resumed without overwriting.}
 
 \item{verbose}{Print the execution plan and progress.}
 
-\item{object}{A comparison object.}
+\item{thresholds}{Optional additional diagnostic thresholds, counted during
+prediction. Changing these reuses verified predictions; it never refits.
+\code{summary(x, thresholds = ...)} also supports other thresholds by reading
+saved predictions. Counts use \code{>=} and report their domain denominators.}
 
-\item{thresholds}{Optional vector for \code{summary()}. Computes threshold
-sensitivity from saved four-corner predictions without fitting/prediction.}
+\item{object}{A comparison object.}
 
 \item{...}{Additional plotting arguments, or ignored by summary/print.}
 }
@@ -94,6 +97,17 @@ the same positive-weight models and common finite domain. Model SD is
 calculated after within-model paired contrasts, never from surface SDs.
 Every active model must return finite predictions on eligible inputs;
 otherwise the comparison fails instead of changing weights or domains.
+}
+\details{
+Marginal support is assessed before clamping. \code{summary_common_support}
+and \code{binary_common_support} use the intersection of finite inputs and
+training quantile bounds over current and all requested futures; their
+denominators are identical across scenarios. The legacy \verb{*_supported}
+tables use each scenario's own subset. Neither is multivariate AOA.
+\code{agreement} reports the fraction of cells with both positive and negative
+model contrasts and mean majority-sign agreement (unweighted across
+active models, zeros neutral within 1e-12). One model is unassessed.
+These summaries and SDs describe model disagreement, not confidence.
 }
 \examples{
 reference <- data.frame(temperature = seq(-1, 1, length.out = 20), land = rep(0:1, 10))

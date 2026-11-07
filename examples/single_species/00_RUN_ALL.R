@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 # or Rscript 00_RUN_ALL.R [--dry-run]
 local({
@@ -15,7 +16,7 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN"),
-    minimum_cast = "0.26.0")
+    minimum_cast = "0.27.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)

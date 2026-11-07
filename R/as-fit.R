@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 #' Use Externally Fitted SDMs for Scenario Comparisons
 #'
 #' Wraps mature modelling tools without fitting or changing their models.
@@ -15,6 +16,9 @@
 #'   one numeric suitability in `[0, 1]` per row, or a named list of such
 #'   functions with exactly the same names as `models`. Missing predictions
 #'   are allowed; they remain missing in paired attribution.
+#'   Predictions must be deterministic and row independent: batching or
+#'   reordering rows must not change their scores. Scenarios reuse identical
+#'   rows and raster block sizes may differ with the resource budget.
 #' @return A [cast_fit] wrapper. External objects and callbacks are retained
 #'   together; load their required packages in a new R session. No response
 #'   labels or validation scores are inferred. Supply externally validated

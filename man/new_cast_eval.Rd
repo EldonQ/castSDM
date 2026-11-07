@@ -8,7 +8,9 @@ new_cast_eval(
   metrics,
   cv_source = FALSE,
   thresholds = NULL,
-  threshold_source = NULL
+  threshold_source = NULL,
+  predictions = NULL,
+  native_predictions = NULL
 )
 }
 \arguments{
@@ -22,7 +24,13 @@ Default \code{FALSE}.}
 
 \item{threshold_source}{Character. \code{"out_of_fold_cv"} when thresholds were
 caller-supplied (e.g. \code{cv$thresholds}), \code{"in_sample_training"} when
-selected on the fit's own training predictions, or \code{"mixed"}.}
+selected on the fit's own training predictions, \code{"mixed"}, or
+\code{"unavailable"} when no training/supplied threshold exists.}
+
+\item{predictions}{Held-out responses and shifted model scores.}
+
+\item{native_predictions}{The same fitted engines' scores before the
+weighted training score shift. These are not fits with different weights.}
 }
 \value{
 A \code{cast_eval} object.

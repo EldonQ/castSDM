@@ -36,7 +36,8 @@ outside the groups as static.
 
 ```{r comparison}
 comparison <- cast_compare(fit, current, future,
-  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
+  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE,
+  thresholds = c(.3, .5, .7))
 summary(comparison)[, c("component", "mean", "mean_supported", "n_valid")]
 ```
 
@@ -79,6 +80,9 @@ protocol <- cast_protocol(models = "rf", select_method = "full", rf_ntree = 30,
   cv_k = 2, block_method = "grid", aoa = FALSE, seed = 42)
 run <- cast_run(species_data, protocol = protocol, verbose = FALSE)
 summary(run)
+run$diagnostics$holdout
+run$diagnostics$folds
+run$diagnostics$score_views_oof
 comparison_run <- cast_compare(run, current, future,
   groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
 comparison_run$threshold_source
@@ -87,6 +91,16 @@ comparison_run$threshold_source
 Selection and tuning repeat inside CV folds. Independent hold-out data do not
 choose weights. A usable pooled out-of-fold surface supplies the comparison
 threshold; otherwise comparison returns continuous results only.
+
+The automatic diagnostics include the frozen ensemble on the independent
+hold-out, even without a prediction map. Training OOF native/shifted score
+views preserve the same fitted engines and weights; they are descriptive,
+not a new policy selected from hold-out labels. A weighted mean training-score
+shift is not ecological probability calibration. Brier scores and reliability
+bins concern the sampled response; background points are not known absences.
+The protocol's clamp is used consistently in CV, evaluation and prediction;
+AOA assesses original inputs. Historical results before 0.27.0 did not apply
+the protocol clamp in CV or hold-out evaluation and should not be relabelled.
 
 For aligned rasters, use the same call with `SpatRaster` objects, a mask and
 `output_dir`. The advanced vignette demonstrates a small raster comparison.

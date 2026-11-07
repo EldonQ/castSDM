@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Regression tests for defects fixed in 0.7.0 -------------------------------
 
 test_that("single-predictor MaxEnt preserves default features and background augmentation", {
@@ -191,7 +192,10 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     },
     cast_fit = function(...) list(env_vars = "x", scaling = list(impute = c(x = 0)),
                                   models = list(gam = list(model = TRUE))),
-    predict_single_model = function(info, x) plogis(x$x),
+    predict_single_model = function(info, x, output = "score") {
+      p <- plogis(x$x)
+      if (output == "both") list(score = p, native = p) else p
+    },
     evaluate_model_full = function(...) c(auc = .7, tss = .4, cbi = .3)
   )
   expect_warning(cv <- cast_cv(dat, k = 3, models = "gam", buffer = 1.5,

@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # S3 Class Constructors -----------------------------------------------------
 
 #' Create a cast_select Object
@@ -102,16 +103,22 @@ new_cast_fit <- function(models, cast_vars, env_vars, scaling, screen = NULL,
 #' @param thresholds Named numeric vector of the thresholds actually applied.
 #' @param threshold_source Character. `"out_of_fold_cv"` when thresholds were
 #'   caller-supplied (e.g. `cv$thresholds`), `"in_sample_training"` when
-#'   selected on the fit's own training predictions, or `"mixed"`.
+#'   selected on the fit's own training predictions, `"mixed"`, or
+#'   `"unavailable"` when no training/supplied threshold exists.
+#' @param predictions Held-out responses and shifted model scores.
+#' @param native_predictions The same fitted engines' scores before the
+#'   weighted training score shift. These are not fits with different weights.
 #'
 #' @return A `cast_eval` object.
 #' @keywords internal
 #' @export
 new_cast_eval <- function(metrics, cv_source = FALSE,
-                          thresholds = NULL, threshold_source = NULL) {
+                          thresholds = NULL, threshold_source = NULL,
+                          predictions = NULL, native_predictions = NULL) {
   structure(
     list(metrics = metrics, cv_source = cv_source,
-         thresholds = thresholds, threshold_source = threshold_source),
+         thresholds = thresholds, threshold_source = threshold_source,
+         predictions = predictions, native_predictions = native_predictions),
     class = "cast_eval"
   )
 }
@@ -140,6 +147,10 @@ new_cast_eval <- function(metrics, cv_source = FALSE,
 #' @param aoa Named list with the area-of-applicability calibration
 #'   (`threshold`, `di_oof`, `n_di`, `method`), or `NULL` when
 #'   [cast_cv()] ran with `aoa = FALSE`.
+#' @param native_oof First-repeat OOF scores from the same fitted engines,
+#'   before the weighted training score shift.
+#' @param fold_info First-repeat row-level fold, response and coordinates.
+#' @param offsets First-repeat fitted score shift by fold and model.
 #'
 #' @return A `cast_cv` object.
 #' @keywords internal
@@ -149,7 +160,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
                         selections = list(), screens = list(),
                         selection_freq = NULL, oof = NULL, fold_status = NULL,
                         threshold_method = "max_tss", n_repeat = 1L,
-                        aoa = NULL, pred_folds = NULL) {
+                        aoa = NULL, pred_folds = NULL, native_oof = NULL,
+                        fold_info = NULL, offsets = NULL) {
   structure(
     list(
       metrics      = metrics,
@@ -169,7 +181,8 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       # Per-model count of folds that actually produced predictions. Carried
       # so a caller can see WHY a threshold fell back to 0.5 instead of
       # having to infer it from a missing value.
-      pred_folds   = pred_folds
+      pred_folds   = pred_folds,
+      native_oof = native_oof, fold_info = fold_info, offsets = offsets
     ),
     class = "cast_cv"
   )

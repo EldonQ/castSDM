@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # One package pipeline, followed by one paired scenario comparison.
 case_training_year <- function(preparation, split) {
   qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
@@ -34,17 +35,45 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast026_", cfg$scenario_lulc_product))
+  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast027_", cfg$scenario_lulc_product))
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
   lock <- filelock::lock(file.path(out, ".case.lock"), timeout = 0)
   if (is.null(lock)) stop("Another process is writing this case: ", out)
   on.exit(filelock::unlock(lock), add = TRUE)
+  claim_file <- file.path(out, "run_claim.rds")
+  scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
+    "output_root", "cache_root", "preparation_root", "diagnostic_thresholds"))]
+  scientific_cfg$protocol$num_threads <- NULL
+  claim <- list(schema = "cast_case_claim/1", config = scientific_cfg,
+    package = as.character(utils::packageVersion("castSDM")),
+    sources = unname(tools::md5sum(file.path(cfg$example_root,
+      c("02_pipeline.R", "prepare_data.R", "data_adapter.R", "scenario_case.R")))))
+  claim$key <- digest::digest(claim, algo = "sha256")
+  previous <- if (file.exists(claim_file)) readRDS(claim_file) else NULL
+  if ((!is.null(previous) && !identical(previous$key, claim$key)) ||
+      (is.null(previous) && file.exists(file.path(out, "case.rds"))))
+    stop("This output belongs to a different/older analysis. Set a new CAST_RUN_ID: ", out)
+  if (is.null(previous)) saveRDS(claim, claim_file)
   # A failed rerun must never leave a previous completion marker.
   completion <- file.path(out, "completion.rds")
   if (file.exists(completion)) unlink(completion)
   preparation <- prepare_species(cfg)
+  qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
+  years <- suppressWarnings(as.numeric(qc$year[qc$used_in_model %in% TRUE]))
+  periods <- cut(years, c(-Inf, 1949, 1979, 1999, 2009, 2019, Inf),
+    labels = c("before_1950", "1950_1979", "1980_1999", "2000_2009", "2010_2019", "2020_onward"))
+  year_counts <- as.data.frame(table(periods, useNA = "always"))
+  names(year_counts) <- c("record_period", "n_model_presences")
+  utils::write.csv(year_counts, file.path(out, "occurrence_years.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(taxon = cfg$species_name, taxon_level = cfg$taxon_level,
+    year_semantics = cfg$occurrence_year_semantics,
+    declared_first_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[1L],
+    declared_last_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[2L],
+    preprocessing_scope = cfg$preprocessing_scope,
+    interpretation = "Pooled historical records; spatial hold-out is not external or temporal validation."),
+    file.path(out, "case_design.csv"), row.names = FALSE)
   data <- data.table::fread(file.path(preparation,
     paste0(cfg$species_name, "_model_data.csv")), data.table = FALSE)
   p <- cfg$protocol
@@ -74,7 +103,9 @@ run_species <- function(cfg) {
   comparison <- castSDM::cast_compare(result, current, scenarios$future,
     groups = scenarios$groups, mask = mask, support_probs = cfg$support_probs,
     domain = "common", resources = cfg$resources,
-    output_dir = file.path(out, "comparison"))
+    output_dir = file.path(out, "comparison"), thresholds = cfg$diagnostic_thresholds)
+  castSDM::cast_diagnose(result, comparison = comparison,
+    output_dir = file.path(out, "diagnostics"))
   if (isTRUE(cfg$driver_attribution)) {
     # Explicitly optional: only the chosen report scenario, on the same domain.
     common <- terra::rast(file.path(out, "comparison", ".cache", "common_domain.tif"))
@@ -91,7 +122,8 @@ run_species <- function(cfg) {
     session = utils::capture.output(utils::sessionInfo()))
   saveRDS(case, file.path(out, "case.rds"))
   case_figures(comparison, out, scenarios$report)
-  sensitivity <- summary(comparison, thresholds = c(.3, .5, .7))
+  case_validation_figure(result, out)
+  sensitivity <- summary(comparison, thresholds = cfg$diagnostic_thresholds)
   utils::write.csv(sensitivity, file.path(out, "threshold_sensitivity.csv"), row.names = FALSE)
   saveRDS(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     package_version = as.character(utils::packageVersion("castSDM")), case = "case.rds"), completion)

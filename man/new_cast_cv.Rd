@@ -19,7 +19,10 @@ new_cast_cv(
   threshold_method = "max_tss",
   n_repeat = 1L,
   aoa = NULL,
-  pred_folds = NULL
+  pred_folds = NULL,
+  native_oof = NULL,
+  fold_info = NULL,
+  offsets = NULL
 )
 }
 \arguments{
@@ -58,6 +61,13 @@ metrics were aggregated over (1 = single run).}
 \item{aoa}{Named list with the area-of-applicability calibration
 (\code{threshold}, \code{di_oof}, \code{n_di}, \code{method}), or \code{NULL} when
 \code{\link[=cast_cv]{cast_cv()}} ran with \code{aoa = FALSE}.}
+
+\item{native_oof}{First-repeat OOF scores from the same fitted engines,
+before the weighted training score shift.}
+
+\item{fold_info}{First-repeat row-level fold, response and coordinates.}
+
+\item{offsets}{First-repeat fitted score shift by fold and model.}
 }
 \value{
 A \code{cast_cv} object.

@@ -18,7 +18,10 @@ castSDM cannot infer how the external tool fitted or transformed data.}
 \item{predict_function}{Function with arguments \verb{(model, newdata)} returning
 one numeric suitability in \verb{[0, 1]} per row, or a named list of such
 functions with exactly the same names as \code{models}. Missing predictions
-are allowed; they remain missing in paired attribution.}
+are allowed; they remain missing in paired attribution.
+Predictions must be deterministic and row independent: batching or
+reordering rows must not change their scores. Scenarios reuse identical
+rows and raster block sizes may differ with the resource budget.}
 }
 \value{
 A \link{cast_fit} wrapper. External objects and callbacks are retained

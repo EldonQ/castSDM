@@ -1,3 +1,28 @@
+# castSDM 0.27.0
+
+- Add `cast_diagnose()` and automatic run diagnostics: frozen-ensemble hold-out
+  evaluation even without maps, fold composition/AOA, selection frequencies,
+  sampled-response baselines, reliability bins and metric definitions.
+- Retain native and shifted OOF/hold-out scores from one engine prediction.
+  Clarify that logit offsets fix weighted training mean scores, not ecological
+  probability calibration. Never choose a new policy from hold-out labels.
+- Correct protocol clamping: `cast_run()` now applies its declared clamp in
+  fold testing and hold-out evaluation as well as maps. Standalone defaults
+  remain unclamped. New validation may differ from historical results.
+  Evaluation without any training/supplied threshold leaves binary metrics
+  unassessed instead of optimizing them on hold-out labels.
+- Add all-scenario common-support summaries, paired sign conflict/agreement
+  and explicit denominators alongside scenario-specific support summaries.
+- Count requested sensitivity thresholds inside prediction blocks; reuse
+  saved counts, and use persistent tile-aligned reads for other thresholds.
+  Extra diagnostic thresholds do not trigger prediction. Save phase timings.
+- Reuse exactly unchanged corners per row, retain paired model contrasts and
+  write band-interleaved tiled rasters. Add reproducible bounded benchmarks;
+  they do not establish a whole-workflow speedup or predictive improvement.
+- Update the single-species example to `cast027_*` outputs, automatic
+  diagnostics, explicit taxon/year provenance, optional declared year QC and
+  common map scales. Existing `cast026_*` scientific outputs are preserved.
+
 # castSDM 0.26.0
 
 - New `cast_compare()` constructs paired grouped scenarios with frozen model

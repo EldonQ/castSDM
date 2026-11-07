@@ -23,3 +23,5 @@
 ^\.RData$
 ^tools$
 ^examples$
+^benchmarks$
+^MEE_READINESS\.md$

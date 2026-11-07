@@ -1,4 +1,4 @@
-# 单物种应用示例（castSDM >= 0.26.0）
+# 单物种应用示例（castSDM >= 0.27.0）
 
 入口是 `00_RUN_ALL.R`。案例保留数据特有的发生记录质控、分析域和未来文件匹配；
 拟合、空间交叉验证、缓存、四角场景比较和归因均调用已安装的 castSDM。
@@ -14,7 +14,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 
 不需要先 `setwd()`，也不需要手动 `library()` 或设置 `.libPaths()`。
 入口会以脚本所在位置定位配置，并自动优先加入项目的 `E:/Package/.rlib_cast`，
-其中已经安装 castSDM 0.26.0 和 `filelock`。不会在正式运行中自动联网安装软件。
+其中已经安装 castSDM 0.27.0 和 `filelock`。不会在正式运行中自动联网安装软件。
 若仍有缺失或过旧依赖，会一次列出并给出安装命令。已经加载的 castSDM 若与项目版
 一致，会直接复用；若是旧版或开发版，入口会只切换 castSDM 到项目安装版，保留工作区
 对象及其他已加载包，不再仅因路径不同要求重启。极少数其他包正在导入 castSDM、
@@ -54,7 +54,7 @@ remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 | 示例根目录 | 脚本所在目录，可用 `CAST_EXAMPLE_ROOT` 改写 |
 | R 包库 | 自动识别项目 `.rlib_cast`；自定义位置可设 `CAST_R_LIBRARY` |
 | 物种 | `Schizothoracinae`，可用 `CAST_SPECIES` 选择 `Callosciurus_erythraeus` |
-| 运行标识 | `cast026_glu` 或 `cast026_hlu`，可用 `CAST_RUN_ID` 改写 |
+| 运行标识 | `cast027_glu` 或 `cast027_hlu`，可用 `CAST_RUN_ID` 改写 |
 
 GBIF 经纬度数据使用外部 PROJ `cs2cs` 转到环境库 CRS，须把其可执行文件加入
 `PATH`；这是本数据适配器的要求。`nsdm_occ` 输入应已为投影米坐标。
@@ -73,8 +73,8 @@ Rscript 00_RUN_ALL.R
 本机也可直接使用 Rscript 的完整路径；入口会自动设置项目库：
 
 ```powershell
-& "D:\R\R-4.4.3\bin\Rscript.exe" .\00_RUN_ALL.R --dry-run
-& "D:\R\R-4.4.3\bin\Rscript.exe" .\00_RUN_ALL.R
+& "D:\R\R-4.4.3\bin\x64\Rscript.exe" .\00_RUN_ALL.R --dry-run
+& "D:\R\R-4.4.3\bin\x64\Rscript.exe" .\00_RUN_ALL.R
 ```
 
 `--dry-run` 只检查依赖、配置和输入清单是否存在，不准备数据、不拟合、不投影。
@@ -106,22 +106,24 @@ Rscript 00_RUN_ALL.R
 - `training/`：包生成的模型、折外预测、验证指标、阶段记录和 ODMAP 报告。
 - `scenario_table.csv`：所选动态变量对应的精确未来文件及年份。
 - `comparison/`：四角预测、八项对比、配对模型 SD、支持域及表格。
-- `threshold_sensitivity.csv`：阈值 0.3、0.5、0.7 的敏感性，读取保存的预测计算。
+- `diagnostics/`：单模型与冻结集成的留出评价、训练层评分诊断、空间折组成与 AOA、选择频率、共同支持域和模型方向冲突。
+- `threshold_sensitivity.csv`：阈值 0.3、0.5、0.7 的敏感性，预测时累计，之后直接读取计数。
+- `occurrence_years.csv`、`case_design.csv`：实际建模记录的年代分布、分类层级、年份字段含义及设计限制。
 - `figures/`：报告场景的 PNG/PDF 预览。论文图件仍需按科学问题单独审定。
 - `case.rds`：案例配置和结果路径；`completion.rds` 仅表示本次计算与导出完成。
 
-数据准备保存在 `output/.prepared/<物种>/`，训练阶段缓存保存在
+数据准备保存在 `output/.prepared/<物种>/<内容指纹>/`，训练阶段缓存保存在
 `output/.training-cache/`。不要把 `completion.rds` 当作模型或论文质量验收证明。
 
 ```powershell
-Rscript 04_REPLOT.R output/cast026_glu/Schizothoracinae
+Rscript 04_REPLOT.R output/cast027_glu/Schizothoracinae
 ```
 
 重绘只读取已保存的比较栅格，不拟合、不预测、不计算响应曲线。
 在 R 会话中重绘，可先设置结果目录再 source 入口：
 
 ```r
-Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast026_glu/Schizothoracinae")
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast027_glu/Schizothoracinae")
 source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
 Sys.unsetenv("CAST_CASE_DIR")
 ```
@@ -145,4 +147,20 @@ HLU 使用与气候相同的 2030/2055/2085 年。映射会记录在场景表中
 支持检查使用边际训练分位数。二值结果使用 `>=`；表格计数单位为有效像元，
 面积解释须核实等面积投影和像元面积。新版本修复 AOA 最近邻定义，旧 AOA 数值须重算。
 
-本次维护未运行这套完整应用；小型合成数据验证由包测试和 R CMD check 执行。
+新版默认写入 `cast027_*`，不会覆盖已经完成的 `cast026_*`。新版修正了协议截断在
+CV、留出评价和地图之间的一致性，后续指标可能变化，不能给旧指标换上新版标签。
+评分偏移只固定加权训练均值；`score_views_oof.csv` 比较同一拟合的原生与偏移评分，
+不使用留出集选择策略，也不代表更换 RF 拟合权重后的效果。
+
+`summary_common_support.csv`、`binary_common_support.csv` 对所有未来使用同一支持域；
+原有支持域表仍按每个情景分别计算。`agreement.csv` 报告模型正负方向冲突，不能
+解释为显著性。常数预测器、Brier 和 PR-AUC 的解释都依赖发生/背景的抽样比例。
+诊断提供冻结阈值遗漏率，以及训练 OOF 发生分数 5%/10% 分位阈值的留出遗漏率；
+原来的 `omission_5/10` 是评价样本分数的顶部比例诊断，定义不同。
+
+年份筛选默认关闭。确认 `year` 的含义后，可在新分析配置中设置
+`occurrence_year_range = c(2000, 2022)` 和 `occurrence_keep_unknown_year = FALSE`。
+该选择会进入数据准备缓存标识，并在 QC 中记录剔除原因，不自动将记录年视作采样年。
+科学配置改变时，运行声明会在改写既有结果前要求新的 `CAST_RUN_ID`；诊断阈值和
+硬件预算可以在同一次分析中更改。不同数据准备写入不同内容指纹目录。
+本次维护未运行这套完整应用；验证使用合成数据和旧结果的有限切片，不重新拟合案例。

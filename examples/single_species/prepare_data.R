@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Case-specific occurrence QC, domain and background preparation.
 # Numerical fitting, validation and scenario comparison belong to castSDM.
 `%||%` <- function(x, y) if (is.null(x) || !length(x)) y else x
@@ -39,6 +40,17 @@ gbif_taxon_ok <- function(raw, target) {
     ok <- ok | (!is.na(v) & (v == target | startsWith(v, paste0(target, " "))))
   }
   ok
+}
+
+case_year_checks <- function(year, cfg) {
+  limits <- cfg$occurrence_year_range
+  if (!is.null(limits) && (!is.numeric(limits) || length(limits) != 2L ||
+      any(!is.finite(limits)) || limits[1L] > limits[2L]))
+    stop("occurrence_year_range must be NULL or c(first_year, last_year).")
+  known <- is.finite(year) & year > 0
+  list(outside_declared_years = if (is.null(limits)) rep(FALSE, length(year)) else
+    known & (year < limits[1L] | year > limits[2L]),
+    unknown_year = !known & !isTRUE(cfg$occurrence_keep_unknown_year %||% TRUE))
 }
 
 read_occurrences <- function(cfg) {
@@ -96,6 +108,7 @@ read_occurrences <- function(cfg) {
     raw$qc_unknown_uncertainty <- is.na(raw$coordinateUncertaintyInMeters)
     valid_xy <- is.finite(raw$decimalLongitude) & is.finite(raw$decimalLatitude) &
       abs(raw$decimalLongitude) <= 180 & abs(raw$decimalLatitude) < 90
+    raw$year <- if ("year" %in% names(raw)) suppressWarnings(as.numeric(raw$year)) else NA_real_
     checks <- list(
       invalid_coordinates = !valid_xy,
       wrong_taxon = !taxon_ok,
@@ -108,6 +121,7 @@ read_occurrences <- function(cfg) {
         (raw$coordinateUncertaintyInMeters < 0 |
          raw$coordinateUncertaintyInMeters > cfg$occurrence_uncertainty_m),
       unknown_uncertainty = raw$qc_unknown_uncertainty & !cfg$occurrence_keep_unknown_uncertainty)
+    checks <- c(checks, case_year_checks(raw$year, cfg))
     raw$qc_reason <- "kept"
     for (reason in names(checks)) raw$qc_reason[raw$qc_reason == "kept" & checks[[reason]]] <- reason
     mask <- terra::rast(file.path(cfg$nsdm_data_root, "mask_china.tif"))
@@ -147,15 +161,19 @@ read_occurrences <- function(cfg) {
     out <- data.frame(
       lon = as.numeric(raw[[lon]]), lat = as.numeric(raw[[lat]]),
       year = year, source_file = raw$source_file, stringsAsFactors = FALSE)
-    out <- out[is.finite(out$lon) & is.finite(out$lat), , drop = FALSE]
-    out <- out[!duplicated(out[, c("lon", "lat")]), , drop = FALSE]
     occurrence_audit <- data.frame(
       source_file = out$source_file,
       x_albers = out$lon, y_albers = out$lat,
       lon = out$lon, lat = out$lat, year = out$year,
       grid_cell = NA_integer_, qc_reason = "kept", used_in_model = FALSE,
       stringsAsFactors = FALSE)
-    out <- out[, c("lon", "lat"), drop = FALSE]
+    checks <- c(list(invalid_coordinates = !is.finite(out$lon) | !is.finite(out$lat)),
+      case_year_checks(out$year, cfg))
+    for (reason in names(checks)) occurrence_audit$qc_reason[
+      occurrence_audit$qc_reason == "kept" & checks[[reason]]] <- reason
+    eligible <- which(occurrence_audit$qc_reason == "kept")
+    occurrence_audit$qc_reason[eligible[duplicated(out[eligible, c("lon", "lat")])]] <- "duplicate_coordinate"
+    out <- out[occurrence_audit$qc_reason == "kept", c("lon", "lat"), drop = FALSE]
     attr(out, "occurrence_audit") <- occurrence_audit
     return(out)
   }
@@ -198,6 +216,7 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
                                cfg$bg_strategy),
     preprocessing_scope = cfg$preprocessing_scope %||% "unspecified",
     config = cfg[c("input_type", "occurrence_uncertainty_m", "occurrence_keep_unknown_uncertainty",
+                   "occurrence_year_range", "occurrence_keep_unknown_year", "occurrence_year_semantics",
                    "occurrence_thin_km", "occurrence_thin_order", "occurrence_basis_of_record",
                    "preprocessing_scope",
                    "domain_mode", "freshwater_river_distance_raster",
@@ -232,14 +251,11 @@ prepare_species <- function(cfg) {
          if (length(tg_file)) tg_file else "<not set>")
   }
   tg_md5 <- if (length(tg_file) == 1L && file.exists(tg_file)) unname(tools::md5sum(tg_file)) else NA_character_
-  out_dir <- file.path(cfg$preparation_root, cfg$species_name)
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  lock <- filelock::lock(file.path(out_dir, ".preparation.lock"), timeout = 0)
-  if (is.null(lock)) stop("Another process is preparing this case: ", out_dir)
+  preparation_parent <- file.path(cfg$preparation_root, cfg$species_name)
+  dir.create(preparation_parent, recursive = TRUE, showWarnings = FALSE)
+  lock <- filelock::lock(file.path(preparation_parent, ".preparation.lock"), timeout = 0)
+  if (is.null(lock)) stop("Another process is preparing this case: ", preparation_parent)
   on.exit(filelock::unlock(lock), add = TRUE)
-  data_file <- file.path(out_dir, paste0(cfg$species_name, "_model_data.csv"))
-  domain_file <- file.path(out_dir, "analysis_domain_mask.tif")
-  manifest_file <- file.path(out_dir,"preparation_manifest.rds")
   # Prepare the eligible current pool once. The screen, the fitted model and
   # the scenario table all operate on subsets of this same prepared table, so a
   # change of model variables never rebuilds the occurrence/background data.
@@ -249,9 +265,16 @@ prepare_species <- function(cfg) {
   # the fingerprint is the second line of defence and must be complete.
   prep_inputs <- prep_fingerprint_inputs(cfg, case_file_manifest(current),
                                          tg_file, tg_md5)
-  prep_fp <- digest::digest(prep_inputs)
+  prep_fp <- digest::digest(prep_inputs, algo = "sha256")
+  # A new cohort/domain never replaces the preparation referenced by an old run.
+  out_dir <- file.path(preparation_parent, prep_fp)
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  data_file <- file.path(out_dir, paste0(cfg$species_name, "_model_data.csv"))
+  domain_file <- file.path(out_dir, "analysis_domain_mask.tif")
+  manifest_file <- file.path(out_dir, "preparation_manifest.rds")
   old <- if (file.exists(manifest_file)) tryCatch(readRDS(manifest_file), error = function(e) NULL) else NULL
-  artifacts <- c(data_file, domain_file)
+  artifacts <- c(data_file, domain_file, file.path(out_dir,
+    c("occurrence_qc.csv", "occurrence_qc_counts.csv", "analysis_domain_summary.csv")))
   if (!is.null(old) && identical(old$fingerprint, prep_fp) && all(file.exists(artifacts)) &&
       identical(unname(tools::md5sum(artifacts)), old$artifacts)) {
     message("Verified preparation cache: ", cfg$species_name)
@@ -475,6 +498,6 @@ prepare_species <- function(cfg) {
   }
   prep_inputs$dropped_layers <- dropped
   saveRDS(list(fingerprint = prep_fp, inputs = prep_inputs,
-    artifacts = unname(tools::md5sum(c(data_file, domain_file)))), manifest_file)
+    artifacts = unname(tools::md5sum(artifacts))), manifest_file)
   invisible(out_dir)
 }

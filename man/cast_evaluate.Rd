@@ -9,7 +9,8 @@ cast_evaluate(
   test_data,
   response = "presence",
   threshold_method = "max_tss",
-  thresholds = NULL
+  thresholds = NULL,
+  clamp = FALSE
 )
 }
 \arguments{
@@ -30,11 +31,16 @@ thresholds, applied to the held-out predictions. Pass
 out-of-fold predictions, so the held-out labels never influence the
 operating point. \code{NA}/missing entries per model fall back to the
 in-sample selection for that model.}
+
+\item{clamp}{Clamp predictors to this fit's training range before every
+engine prediction. Default \code{FALSE}; \code{\link[=cast_run]{cast_run()}} supplies its protocol.}
 }
 \value{
 A \code{cast_eval} object (S3 class) whose \code{threshold_source} records
 whether thresholds were caller-supplied (\code{"out_of_fold_cv"}) or selected
-on in-sample training predictions (\code{"in_sample_training"}).
+on in-sample training predictions (\code{"in_sample_training"}). Without
+training or supplied thresholds, binary metrics are unassessed and
+\code{threshold_source} is \code{"unavailable"}; test labels never select a threshold.
 }
 \description{
 Computes discrimination, threshold-dependent, calibration, and suitability

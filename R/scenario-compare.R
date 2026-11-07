@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 .cast_compare_inputs <- function(fit, current, future, groups, mask) {
   vars <- fit$env_vars
   if (!is.list(groups) || length(groups) != 2L || is.null(names(groups)) ||
@@ -57,28 +58,46 @@
        mask = mask, raster = raster, vars = vars)
 }
 
-.cast_compare_common_mask <- function(plan, block_size, path = NULL) {
+.cast_compare_common_mask <- function(plan, block_size, path = NULL,
+                                      bounds = NULL, support_path = NULL) {
   if (!plan$raster) {
     ok <- .cast_finite_rows(plan$current[, plan$vars, drop = FALSE])
-    for (x in plan$future) ok <- ok & .cast_finite_rows(x)
+    supported <- if (!is.null(bounds)) .cast_attribution_inside(plan$current[, plan$vars, drop = FALSE], bounds) else NULL
+    for (x in plan$future) {
+      ok <- ok & .cast_finite_rows(x)
+      if (!is.null(bounds)) supported <- supported & .cast_attribution_inside(x, bounds)
+    }
     if (!is.null(plan$mask)) ok <- ok & is.finite(plan$mask) & plan$mask != 0
-    return(ok)
+    return(list(domain = ok, support = if (!is.null(bounds)) ok & supported))
   }
   r <- plan$current
   writer <- .cast_raster_writer(r, path, "common_domain", datatype = "INT1U", overwrite = TRUE)
   on.exit(.cast_writer_abort(writer), add = TRUE)
+  support_writer <- if (!is.null(bounds)) .cast_raster_writer(r, support_path,
+    "common_support", datatype = "INT1U", overwrite = TRUE)
+  if (!is.null(support_writer)) on.exit(.cast_writer_abort(support_writer), add = TRUE)
   rows <- max(1L, as.integer(block_size/terra::ncol(r)))
   for (row in seq.int(1L, terra::nrow(r), by = rows)) {
     count <- min(rows, terra::nrow(r)-row+1L)
     ok <- .cast_mask_rows(plan$mask, row, count, count*terra::ncol(r))
+    supported <- rep(FALSE, length(ok))
     if (any(ok)) {
-      ok <- ok & .cast_finite_rows(.cast_raster_block(r, row, count))
-      for (x in plan$future) ok <- ok & .cast_finite_rows(.cast_raster_block(x, row, count))
+      a <- .cast_raster_block(r, row, count)
+      ok <- ok & .cast_finite_rows(a)
+      if (!is.null(bounds)) supported <- .cast_attribution_inside(a, bounds)
+      for (x in plan$future) {
+        b <- .cast_raster_block(x, row, count)
+        ok <- ok & .cast_finite_rows(b)
+        if (!is.null(bounds)) supported <- supported & .cast_attribution_inside(b, bounds)
+      }
     }
     .cast_writer_block(writer, as.integer(ok), row, count)
+    if (!is.null(support_writer)) .cast_writer_block(support_writer,
+      as.integer(ok & !is.na(supported) & supported), row, count)
   }
   .cast_writer_finish(writer)
-  path
+  if (!is.null(support_writer)) .cast_writer_finish(support_writer)
+  list(domain = path, support = if (!is.null(bounds)) support_path)
 }
 
 .cast_compare_baseline <- function(fit, plan, weights, clamp, block_size, path = NULL) {
@@ -124,7 +143,17 @@
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
   context <- .cast_prediction_context(fit, weights, a, b, clamp)
-  predictions <- list(base, context$predict(names(b)), context$predict(groups[[1L]]), context$predict(groups[[2L]]))
+  changed <- lapply(groups, function(vars) Reduce(`|`, lapply(vars,
+    function(v) context$current[[v]] != context$future[[v]])))
+  both <- changed[[1L]] & changed[[2L]]
+  joint <- context$predict(names(b), base = base,
+    changed_rows = changed[[1L]] | changed[[2L]])
+  first <- second <- base
+  first[changed[[1L]] & !changed[[2L]], ] <- joint[changed[[1L]] & !changed[[2L]], , drop = FALSE]
+  second[!changed[[1L]] & changed[[2L]], ] <- joint[!changed[[1L]] & changed[[2L]], , drop = FALSE]
+  predictions <- list(base, joint,
+    context$predict(groups[[1L]], base = first, changed_rows = both),
+    context$predict(groups[[2L]], base = second, changed_rows = both))
   ok <- Reduce(`&`, lapply(predictions, function(x) rowSums(!is.finite(x)) == 0L))
   if (any(!ok)) cli::cli_abort(c(
     "An active model returned non-finite predictions on the eligible comparison domain.",
@@ -143,18 +172,33 @@
   sd[!ok, ] <- NA_real_
   supported <- if (is.null(bounds)) rep(NA, nrow(a)) else
     .cast_attribution_inside(a, bounds) & .cast_attribution_inside(b, bounds)
-  list(faces = faces, effects = effects, sd = sd, support = supported)
+  list(faces = faces, effects = effects, sd = sd, support = supported,
+       sign = .cast_sign_values(per_model))
 }
 
 .cast_compare_one <- function(fit, plan, scenario, weights, threshold, bounds, clamp,
-                              baseline, domain, block_size, filename = NULL) {
+                              baseline, domain, block_size, filename = NULL,
+                              common_support = NULL, thresholds = numeric()) {
   current <- plan$current; future <- plan$future[[scenario]]
   layers <- c("current", "joint", "climate", "lulc", .cast_factorial_names(),
-              paste0("sd_", .cast_factorial_names()), "support")
+              paste0("sd_", .cast_factorial_names()), "support", "common_support",
+              "sign_agreement_joint", "sign_conflict_joint")
   acc <- .cast_factorial_accumulator()
+  common_acc <- .cast_factorial_accumulator()
+  cuts <- .cast_threshold_accumulator(unique(c(threshold, thresholds)))
+  sign_acc <- .cast_sign_accumulator(length(weights))
+  seconds <- c(read_current = 0, read_future = 0, read_baseline = 0,
+    predict = 0, write = 0)
+  timed <- function(phase, expr) {
+    start <- proc.time()[["elapsed"]]
+    value <- force(expr)
+    seconds[phase] <<- seconds[phase] + proc.time()[["elapsed"]]-start
+    value
+  }
   if (plan$raster) {
     base_r <- terra::rast(baseline)
     domain_r <- if (is.character(domain)) terra::rast(domain) else plan$mask
+    support_r <- if (is.character(common_support)) terra::rast(common_support) else NULL
     writer <- .cast_raster_writer(current, filename, layers, datatype = "FLT8S", overwrite = TRUE)
     on.exit(.cast_writer_abort(writer), add = TRUE)
     rows <- max(1L, as.integer(block_size/terra::ncol(current)))
@@ -176,25 +220,46 @@
     }
     z <- matrix(NA_real_, n, length(layers), dimnames = list(NULL, layers))
     if (any(keep)) {
-      a <- if (plan$raster) .cast_raster_block(current, first, count) else current[idx, plan$vars, drop = FALSE]
-      b <- if (plan$raster) .cast_raster_block(future, first, count) else future[idx, , drop = FALSE]
-      base <- if (plan$raster) as.matrix(.cast_raster_block(base_r, first, count)) else baseline[idx, , drop = FALSE]
+      a <- timed("read_current", if (plan$raster) .cast_raster_block(current, first, count) else current[idx, plan$vars, drop = FALSE])
+      b <- timed("read_future", if (plan$raster) .cast_raster_block(future, first, count) else future[idx, , drop = FALSE])
+      base <- timed("read_baseline", if (plan$raster) as.matrix(.cast_raster_block(base_r, first, count)) else baseline[idx, , drop = FALSE])
       keep <- keep & .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {
-        p <- .cast_compare_block(fit, a[keep, , drop = FALSE], b[keep, , drop = FALSE],
-          plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp)
+        p <- timed("predict", .cast_compare_block(fit, a[keep, , drop = FALSE], b[keep, , drop = FALSE],
+          plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp))
         .cast_factorial_accumulate(acc, p$faces, p$effects, p$support,
           if (!is.null(threshold)) (p$faces >= threshold)*1, model_sd = p$sd)
-        z[keep, ] <- cbind(p$faces, p$effects, p$sd, as.numeric(p$support))
+        cs <- if (is.null(common_support)) NULL else if (plan$raster)
+          .cast_mask_rows(support_r, first, count, n)[keep] else common_support[idx][keep]
+        if (!is.null(cs)) .cast_factorial_accumulate(common_acc,
+          p$faces[cs, , drop = FALSE], p$effects[cs, , drop = FALSE], rep(TRUE, sum(cs)),
+          if (!is.null(threshold)) (p$faces[cs, , drop = FALSE] >= threshold)*1,
+          model_sd = p$sd[cs, , drop = FALSE])
+        .cast_threshold_accumulate(cuts, p$faces, p$support, cs)
+        .cast_sign_accumulate(sign_acc, p$sign, p$support, cs)
+        z[keep, ] <- cbind(p$faces, p$effects, p$sd, as.numeric(p$support),
+          if (is.null(cs)) rep(NA_real_, sum(keep)) else as.numeric(cs),
+          p$sign$agreement[, 3L], p$sign$conflict[, 3L])
       }
     }
-    if (plan$raster) .cast_writer_block(writer, z, first, count) else data[idx, ] <- z
+    if (plan$raster) timed("write", .cast_writer_block(writer, z, first, count)) else data[idx, ] <- z
   }
-  if (plan$raster) .cast_writer_finish(writer)
+  if (plan$raster) timed("write", .cast_writer_finish(writer))
   list(summary = .cast_factorial_summary(acc, !is.null(bounds)),
     binary = if (!is.null(threshold)) .cast_factorial_binary(acc$binary, acc$n_binary),
     binary_supported = if (!is.null(threshold) && !is.null(bounds))
       .cast_factorial_binary(acc$binary_supported, acc$n_binary_supported),
+    summary_common_support = if (!is.null(common_support)) {
+      s <- .cast_factorial_summary(common_acc, FALSE)
+      s$n_domain <- acc$moments[, "n"]
+      s$support_share <- ifelse(s$n_domain > 0, s$n_valid/s$n_domain, NA_real_)
+      s
+    },
+    binary_common_support = if (!is.null(threshold) && !is.null(common_support))
+      .cast_factorial_binary(common_acc$binary, common_acc$n_binary),
+    agreement = .cast_sign_summary(sign_acc, !is.null(bounds), !is.null(common_support)),
+    threshold_sensitivity = .cast_threshold_summary(cuts, !is.null(bounds), !is.null(common_support)),
+    timings = data.frame(phase = names(seconds), elapsed_s = as.numeric(seconds)),
     data = if (!plan$raster) as.data.frame(data), artifact = if (plan$raster) basename(filename))
 }
 
@@ -215,9 +280,11 @@
   }
   value <- .cast_compare_one(job$fit, plan, job$scenario, job$weights,
     job$threshold, job$bounds, job$clamp, job$baseline, job$domain,
-    job$block_size, job$file)
+    job$block_size, job$file, job$common_support, job$thresholds)
   .cast_cache_write(value, job$receipt, job$key, if (plan$raster) job$file else character())
-  list(value = value, elapsed = as.numeric(difftime(Sys.time(), start, units = "secs")))
+  list(value = value, elapsed = as.numeric(difftime(Sys.time(), start, units = "secs")),
+    started = format(start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
 }
 
 .cast_compare_tasks <- function(jobs, workers) {
@@ -289,6 +356,10 @@
 #'   the declared default is equal weights; no validation scores are invented.
 #' @param threshold Optional finite threshold. Otherwise a usable pooled OOF
 #'   threshold is inherited when available; no binary result is invented.
+#' @param thresholds Optional additional diagnostic thresholds, counted during
+#'   prediction. Changing these reuses verified predictions; it never refits.
+#'   `summary(x, thresholds = ...)` also supports other thresholds by reading
+#'   saved predictions. Counts use `>=` and report their domain denominators.
 #' @param mask Optional aligned raster mask, or numeric/logical table-row mask.
 #' @param support_probs Training marginal quantiles, default `c(.01, .99)`.
 #'   `NULL` disables support. Missing training references give unassessed support.
@@ -325,8 +396,10 @@
 cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL,
     threshold = NULL, mask = NULL, support_probs = c(.01, .99), clamp = FALSE,
     domain = c("common", "scenario"), output_dir = NULL, resources = list(),
-    resume = TRUE, overwrite = FALSE, verbose = TRUE) {
+    resume = TRUE, overwrite = FALSE, verbose = TRUE, thresholds = NULL) {
   domain <- match.arg(domain)
+  wall_start <- Sys.time()
+  thresholds <- .cast_check_thresholds(thresholds)
   protocol <- NULL
   if (inherits(fit, "cast_result")) {
     run <- fit; fit <- run$fit_full %||% run$fit; cv <- cv %||% run$cv
@@ -387,14 +460,17 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     (8 * (4*length(plan$vars) + 16*length(weights) + 32) * 4))))
   if (verbose) cli::cli_inform("Compare {length(plan$future)} future{?s}; groups {.val {names(groups)}}; {length(weights)} active models; {length(plan$static)} static predictors; {domain} domain.")
   memo <- new.env(parent = emptyenv())
+  identity_start <- Sys.time()
   fit_key <- .cast_fit_identity(fit)
   current_key <- .cast_data_identity(plan$current, memo)
   future_keys <- vapply(plan$future, .cast_data_identity, character(1), memo = memo)
   mask_key <- if (!is.null(plan$mask)) .cast_data_identity(plan$mask, memo) else NULL
+  identity_elapsed <- as.numeric(difftime(Sys.time(), identity_start, units = "secs"))
   events <- list()
   event <- function(stage, start, reused, scenario = NA_character_) {
     events[[length(events)+1L]] <<- data.frame(stage = stage, scenario = scenario, cache_hit = reused,
       elapsed_s = as.numeric(difftime(Sys.time(), start, units = "secs")),
+      started = format(start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
       finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   }
   start <- Sys.time()
@@ -411,16 +487,19 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   }
   event("current_prediction", start, reused)
   start <- Sys.time()
-  common_key <- .cast_digest(list(current_key, future_keys, mask_key, .cast_code_identity(.cast_compare_common_mask)))
+  common_key <- .cast_digest(list(current_key, future_keys, mask_key, bounds,
+    .cast_code_identity(.cast_compare_common_mask)))
   common_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "domain.rds")
-  common <- if (domain == "common" && resume) .cast_cache_read(common_receipt, common_key) else NULL
+  needs_common <- domain == "common" || !is.null(bounds)
+  common <- if (needs_common && resume) .cast_cache_read(common_receipt, common_key) else NULL
   reused <- !is.null(common)
-  if (reused && plan$raster) common <- file.path(cache_dir, common)
-  if (domain == "common" && !reused) {
+  if (reused && plan$raster) common <- lapply(common, function(x) if (!is.null(x)) file.path(cache_dir, x))
+  if (needs_common && !reused) {
     common <- .cast_compare_common_mask(plan, block_size,
-      if (plan$raster) file.path(cache_dir, "common_domain.tif"))
-    .cast_cache_write(if (plan$raster) basename(common) else common, common_receipt, common_key,
-      if (plan$raster) common else character())
+      if (plan$raster) file.path(cache_dir, "common_domain.tif"), bounds,
+      if (plan$raster) file.path(cache_dir, "common_support.tif"))
+    .cast_cache_write(if (plan$raster) lapply(common, function(x) if (!is.null(x)) basename(x)) else common,
+      common_receipt, common_key, if (plan$raster) unlist(common, use.names = FALSE) else character())
   }
   event("common_domain", start, reused)
   results <- list()
@@ -428,7 +507,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   for (scenario in names(plan$future)) {
     start <- Sys.time()
     key <- .cast_digest(list(fit_key, current_key, future_keys[[scenario]], mask_key,
-      if (domain == "common") common_key, plan$groups, weights, threshold, support_probs, clamp,
+      if (needs_common) common_key, plan$groups, weights, threshold, support_probs, clamp,
       .cast_code_identity(.cast_compare_one), .cast_code_identity(.cast_compare_block), .cast_code_identity(.cast_factorial_accumulate)))
     receipt <- if (!is.null(raster_dir)) file.path(raster_dir, paste0(scenario, ".rds"))
     x <- if (resume) .cast_cache_read(receipt, key) else NULL
@@ -441,17 +520,29 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       job_plan$future <- plan$future[scenario]
       jobs[[scenario]] <- list(fit = fit, plan = job_plan, scenario = scenario,
         weights = weights, threshold = threshold, bounds = bounds, clamp = clamp,
-        baseline = baseline, domain = common, block_size = block_size, file = file,
+        baseline = baseline, domain = if (domain == "common") common$domain,
+        common_support = common$support, thresholds = thresholds,
+        block_size = block_size, file = file,
         key = key, receipt = receipt, threads = budget$threads, scratch_dir = budget$scratch_dir)
       next
     }
     x$raster_file <- if (plan$raster) file else NULL
+    missing_cuts <- setdiff(thresholds, x$threshold_sensitivity$threshold)
+    if (length(missing_cuts)) {
+      extra <- .cast_threshold_scan(x, missing_cuts, !is.null(bounds), !is.null(common$support),
+        memory_mb = min(256, budget$worker_memory_mb))
+      x$threshold_sensitivity <- rbind(x$threshold_sensitivity, extra)
+      saved <- x; saved$raster_file <- NULL
+      .cast_cache_write(saved, receipt, key, if (plan$raster) file else character())
+    }
     x$scenario <- scenario
     results[[scenario]] <- x
     event("scenario", start, reused, scenario)
     if (verbose) cli::cli_inform("{scenario}: {if (reused) 'verified cache' else 'computed'}")
   }
+  dispatch_start <- Sys.time()
   computed <- .cast_compare_tasks(jobs, budget$workers)
+  dispatch_elapsed <- as.numeric(difftime(Sys.time(), dispatch_start, units = "secs"))
   for (scenario in names(computed)) {
     x <- computed[[scenario]]$value
     x$raster_file <- if (plan$raster) jobs[[scenario]]$file else NULL
@@ -459,7 +550,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     results[[scenario]] <- x
     events[[length(events)+1L]] <- data.frame(stage = "scenario", scenario = scenario,
       cache_hit = FALSE, elapsed_s = computed[[scenario]]$elapsed,
-      finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+      started = computed[[scenario]]$started, finished = computed[[scenario]]$finished)
     if (verbose) cli::cli_inform("{scenario}: computed")
   }
   results <- results[names(plan$future)]
@@ -473,17 +564,27 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     do.call(rbind, rows)
   }
   result <- structure(list(summary = combine("summary"), binary = combine("binary"),
-    binary_supported = combine("binary_supported"), results = results, groups = plan$groups,
+    binary_supported = combine("binary_supported"),
+    summary_common_support = combine("summary_common_support"),
+    binary_common_support = combine("binary_common_support"), agreement = combine("agreement"),
+    threshold_sensitivity = combine("threshold_sensitivity"),
+    timings = combine("timings"),
+    runtime = data.frame(phase = c("input_identity", "scenario_dispatch_wall", "comparison_wall_before_export"),
+      elapsed_s = c(identity_elapsed, dispatch_elapsed,
+        as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
+    common_support_file = if (plan$raster) common$support,
+    results = results, groups = plan$groups,
     static = plan$static, weights = weights, threshold = threshold, threshold_source = threshold_source,
     domain = domain, support_probs = support_probs, support_assessed = !is.null(bounds),
     resources = budget, events = do.call(rbind, events),
     contract = .cast_factorial_contract(), output_dir = output_dir,
-    provenance = list(schema = "cast_comparison/1", model = fit_key, current = current_key,
+    provenance = list(schema = "cast_comparison/2", model = fit_key, current = current_key,
       future = future_keys, mask = mask_key, session = utils::capture.output(utils::sessionInfo()))),
     class = "cast_comparison")
   if (!is.null(output_dir)) {
     tables <- file.path(output_dir, "tables"); dir.create(tables, showWarnings = FALSE)
-    for (field in c("summary", "binary", "binary_supported", "events", "contract")) {
+    for (field in c("summary", "binary", "binary_supported", "summary_common_support",
+        "binary_common_support", "agreement", "threshold_sensitivity", "timings", "runtime", "events", "contract")) {
       path <- file.path(tables, paste0(field, ".csv"))
       if (!is.null(result[[field]])) utils::write.csv(result[[field]], path, row.names = FALSE) else
         if (file.exists(path)) unlink(path)
@@ -502,46 +603,37 @@ print.cast_comparison <- function(x, ...) {
 }
 
 .cast_compare_thresholds <- function(object, thresholds) {
-  if (!is.numeric(thresholds) || !length(thresholds) || any(!is.finite(thresholds)) || anyDuplicated(thresholds))
-    cli::cli_abort("thresholds must be unique finite numbers.")
+  thresholds <- .cast_check_thresholds(thresholds)
   rows <- list()
   for (scenario in names(object$results)) {
     result <- object$results[[scenario]]
-    raster <- !is.null(result$raster_file)
-    input <- if (raster) terra::rast(result$raster_file)[[c("current", "joint", "climate", "lulc", "support")]] else
-      result$data[, c("current", "joint", "climate", "lulc", "support"), drop = FALSE]
-    counts <- array(0, c(length(thresholds), 4L, 2L))
-    n <- numeric(2L)
-    if (raster) {
-      block_rows <- max(1L, as.integer(100000L/terra::ncol(input)))
-      starts <- seq.int(1L, terra::nrow(input), by = block_rows)
-    } else starts <- seq.int(1L, nrow(input), by = 100000L)
-    for (first in starts) {
-      x <- if (raster) terra::values(input, row = first,
-        nrows = min(block_rows, terra::nrow(input)-first+1L), mat = TRUE) else
-        as.matrix(input[seq.int(first, min(nrow(input), first+99999L)), , drop = FALSE])
-      valid <- rowSums(!is.finite(x[, 1:4, drop = FALSE])) == 0L
-      supported <- valid & is.finite(x[, 5L]) & x[, 5L] != 0
-      n <- n + c(sum(valid), sum(supported))
-      for (i in seq_along(thresholds)) {
-        counts[i, , 1L] <- counts[i, , 1L] + colSums(x[valid, 1:4, drop = FALSE] >= thresholds[i])
-        counts[i, , 2L] <- counts[i, , 2L] + colSums(x[supported, 1:4, drop = FALSE] >= thresholds[i])
-      }
-    }
-    for (i in seq_along(thresholds)) for (d in seq_len(if (object$support_assessed) 2L else 1L)) {
-      b <- .cast_factorial_binary(counts[i, , d], n[d])
-      b$scenario <- scenario; b$threshold <- thresholds[i]
-      b$domain <- c("full", "supported")[d]
-      rows[[length(rows)+1L]] <- b
-    }
+    cached <- result$threshold_sensitivity
+    missing <- setdiff(thresholds, cached$threshold)
+    if (length(missing)) cached <- rbind(cached, .cast_threshold_scan(result,
+      missing, object$support_assessed, !is.null(object$summary_common_support)))
+    b <- cached[cached$threshold %in% thresholds, , drop = FALSE]
+    b <- b[order(match(b$threshold, thresholds), match(b$domain,
+      c("full", "supported", "common_supported"))), , drop = FALSE]
+    b$scenario <- scenario
+    rows[[length(rows)+1L]] <- b
   }
-  do.call(rbind, rows)
+  if (!length(rows)) return(NULL)
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out
 }
 
 #' @rdname cast_compare
 #' @param object A comparison object.
-#' @param thresholds Optional vector for `summary()`. Computes threshold
-#'   sensitivity from saved four-corner predictions without fitting/prediction.
+#' @details Marginal support is assessed before clamping. `summary_common_support`
+#'   and `binary_common_support` use the intersection of finite inputs and
+#'   training quantile bounds over current and all requested futures; their
+#'   denominators are identical across scenarios. The legacy `*_supported`
+#'   tables use each scenario's own subset. Neither is multivariate AOA.
+#'   `agreement` reports the fraction of cells with both positive and negative
+#'   model contrasts and mean majority-sign agreement (unweighted across
+#'   active models, zeros neutral within 1e-12). One model is unassessed.
+#'   These summaries and SDs describe model disagreement, not confidence.
 #' @param ... Additional plotting arguments, or ignored by summary/print.
 #' @export
 summary.cast_comparison <- function(object, thresholds = NULL, ...) {
@@ -556,7 +648,24 @@ plot.cast_comparison <- function(x, scenario = names(x$results)[1L],
   if (!is.null(y$raster_file)) {
     r <- terra::rast(y$raster_file)
     if (!all(layers %in% names(r))) cli::cli_abort("Unknown comparison layers.")
-    terra::plot(r[[layers]], ...)
+    old <- graphics::par(mfrow = grDevices::n2mfrow(length(layers)),
+                         mar = c(2.5, 2.5, 3, 5))
+    on.exit(graphics::par(old), add = TRUE)
+    effect_layers <- intersect(layers, .cast_factorial_names())
+    limits <- if (length(effect_layers)) terra::minmax(r[[effect_layers]], compute = FALSE) else numeric()
+    finite <- abs(limits[is.finite(limits)])
+    effect_limit <- if (length(finite) && max(finite) > 0) max(finite) else 1
+    for (layer in layers) {
+      surface <- layer %in% c("current", "joint", "climate", "lulc")
+      effect <- layer %in% .cast_factorial_names()
+      dots <- list(...)
+      if (is.null(dots$range)) dots$range <- if (surface) c(0, 1) else
+        if (effect) c(-effect_limit, effect_limit) else NULL
+      if (is.null(dots$col)) dots$col <- grDevices::hcl.colors(101,
+        if (effect) "Blue-Red 3" else "Viridis")
+      if (is.null(dots$main)) dots$main <- layer
+      do.call(terra::plot, c(list(x = r[[layer]]), dots))
+    }
   } else {
     d <- y$summary[y$summary$component %in% layers, ]
     if (!nrow(d)) cli::cli_abort("Unknown comparison layers.")

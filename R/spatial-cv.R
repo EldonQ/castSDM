@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 #' Nested Spatial Cross-Validation for SDMs
 #'
 #' Variable selection is re-fitted inside every outer training fold. This
@@ -49,8 +50,9 @@
 #' @param tune_folds Integer. Folds for the inner grid-search scoring.
 #'   Default `3`.
 #' @param prevalence_target Numeric in (0, 1), or `NULL`. Passed to
-#'   [cast_fit()] in every outer fold: presence/background rows are weighted
-#'   so the fitted prevalence equals the target (weight = target/n per class).
+#'   [cast_fit()] in every outer fold. RF uses weighted case sampling;
+#'   engines receive a logit shift fixing the weighted mean training score.
+#'   This is not ecological probability calibration.
 #'   Evaluation metrics remain unweighted. Default `NULL`.
 #' @param n_repeat Integer >= 1. Number of independent spatial-blocking
 #'   repeats (Barbet-Massin et al. 2012-style replicated evaluation).
@@ -103,6 +105,9 @@
 #'   Use `n_repeat = 1` for a fixed external design. This allows physical block
 #'   sizes or basin groups to be chosen independently of castSDM's automatic
 #'   blocking; supplied assignments are returned unchanged.
+#' @param clamp Clamp each fold's test predictors to that fold's training
+#'   range for all engines. Default `FALSE`; [cast_run()] supplies its protocol.
+#'   AOA continues to use original predictors.
 cast_cv <- function(data,
                     screen = NULL,
                     select_method = "screen",
@@ -126,8 +131,10 @@ cast_cv <- function(data,
                     verbose = TRUE,
                     rf_mtry = NULL,
                     maxent_classes = NULL, maxent_regmult = NULL,
-                    num_threads = 1L, fold_ids = NULL) {
+                    num_threads = 1L, fold_ids = NULL, clamp = FALSE) {
   block_method <- match.arg(block_method)
+  if (!is.logical(clamp) || length(clamp) != 1L || is.na(clamp))
+    cli::cli_abort("clamp must be TRUE or FALSE.")
   if (!is.logical(aoa) || length(aoa) != 1L || is.na(aoa)) {
     cli::cli_abort("{.arg aoa} must be TRUE or FALSE.")
   }
@@ -259,7 +266,7 @@ cast_cv <- function(data,
     # AOA (model-independent, standardized fold space). Two DI sets per fold:
     #   held  -- every test row to its nearest training-row neighbour;
     #   train -- every training row to its nearest OTHER training neighbour
-    #            (k = 2 skips the self-match), the distribution Meyer &
+    #            (get.knn excludes self), the distribution Meyer &
     #            Pebesma (2021) threshold.
     di_fold <- NULL
     di_fold_train <- NULL
@@ -303,8 +310,10 @@ cast_cv <- function(data,
       .cast_check_numeric_predictors(x_test, arg = "data")
       for (nm in names(x_test)) x_test[[nm]] <- as.numeric(x_test[[nm]])
       x_test <- .cast_impute(x_test, fit$scaling$impute)
-      pred <- tryCatch(
-        predict_single_model(info, x_test),
+      if (clamp && !is.null(fit$scaling$reference))
+        x_test <- .cast_clamp(x_test, fit$scaling$reference)
+      pair <- tryCatch(
+        predict_single_model(info, x_test, output = "both"),
         error = function(e) {
           # A silent NA vector here used to flow straight into the OOF
           # surface and then into the ensemble threshold, so a model that
@@ -313,11 +322,13 @@ cast_cv <- function(data,
             "Prediction failed in fold %d for %s: %s",
             fold_i, mdl, conditionMessage(e)
           ))
-          rep(NA_real_, nrow(test))
+          list(score = rep(NA_real_, nrow(test)), native = rep(NA_real_, nrow(test)))
         }
       )
+      pred <- pair$score
       pred_ok[[mdl]] <- length(pred) == nrow(test) && any(is.finite(pred))
-      updates[[mdl]] <- list(idx = test_idx, pred = pred)
+      updates[[mdl]] <- list(idx = test_idx, pred = pred,
+                            native = pair$native, offset = info$offset %||% 0)
     }
     list(updates = updates, selected = fold_screen$selected,
          screen = fold_screen, di = di_fold, di_train = di_fold_train,
@@ -353,6 +364,8 @@ cast_cv <- function(data,
     }
 
     oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
+    native_oof <- oof
+    offsets <- list()
     oof_di <- rep(NA_real_, nrow(data))
     train_di <- numeric(0)
     selections <- vector("list", k)
@@ -381,6 +394,9 @@ cast_cv <- function(data,
       for (mdl in names(res$updates)) {
         upd <- res$updates[[mdl]]
         oof[[mdl]][upd$idx] <- upd$pred
+        native_oof[[mdl]][upd$idx] <- upd$native
+        offsets[[length(offsets) + 1L]] <- data.frame(fold = i, model = mdl,
+                                                     offset = upd$offset)
       }
       for (mdl in names(res$pred_ok %||% list())) {
         if (isTRUE(res$pred_ok[[mdl]])) pred_folds[[mdl]] <- pred_folds[[mdl]] + 1L
@@ -391,7 +407,9 @@ cast_cv <- function(data,
     # prediction available downstream, and cast_ensemble() needs it to
     # threshold the ensemble rather than averaging per-model thresholds.
     oof_df <- data.frame(obs = data[[response]])
+    native_df <- oof_df
     for (mdl in models) oof_df[[paste0("HSS_", mdl)]] <- oof[[mdl]]
+    for (mdl in models) native_df[[paste0("HSS_", mdl)]] <- native_oof[[mdl]]
     thresholds <- vapply(models, function(mdl) {
       pred <- oof[[mdl]]
       ok <- is.finite(pred)
@@ -460,7 +478,8 @@ cast_cv <- function(data,
     }
     fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
 
-    list(folds = folds, fold_df = fold_df, oof_df = oof_df,
+    list(folds = folds, fold_df = fold_df, oof_df = oof_df, native_oof = native_df,
+         offsets = if (length(offsets)) do.call(rbind, offsets) else NULL,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
          skipped_single = skipped_single, di = oof_di,
@@ -576,15 +595,26 @@ cast_cv <- function(data,
     )
   }
 
-  new_cast_cv(
+  result <- new_cast_cv(
     metrics = metrics, fold_metrics = fold_df_all, folds = reps[[1]]$folds,
     k = k, block_method = block_method, thresholds = reps[[1]]$thresholds,
     selections = selections_all, screens = do.call(c, lapply(reps, `[[`, "screens")),
     selection_freq = selection_freq, oof = reps[[1]]$oof_df,
     fold_status = fold_status_final, threshold_method = threshold_method,
     n_repeat = n_repeat, aoa = aoa_info,
-    pred_folds = if (length(reps)) reps[[1]]$pred_folds else NULL
+    pred_folds = if (length(reps)) reps[[1]]$pred_folds else NULL,
+    native_oof = reps[[1]]$native_oof,
+    fold_info = data.frame(row = seq_len(nrow(data)), fold = reps[[1]]$folds,
+                           obs = data[[response]], lon = data$lon, lat = data$lat),
+    offsets = reps[[1]]$offsets
   )
+  result$clamp <- clamp
+  result$repeat_status <- do.call(rbind, lapply(seq_along(reps), function(i) {
+    rp <- reps[[i]]
+    data.frame(replicate = i, fold = seq_len(k), status = rp$fold_status,
+      selected = vapply(rp$selections, paste, character(1), collapse = ";"))
+  }))
+  result
 }
 
 #' Aggregate Fold-Level Metrics Per Model (single blocking)

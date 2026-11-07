@@ -1,0 +1,10 @@
+"replicate","method","elapsed_s","user_s","system_s"
+1,"legacy_pixel",7.43,6.13,1.31
+1,"persistent_pixel",0.829999999999998,0.609999999999999,0.22
+1,"persistent_band",0.520000000000003,0.41,0.11
+2,"persistent_band",0.599999999999998,0.419999999999998,0.17
+2,"persistent_pixel",1.05,0.809999999999999,0.23
+2,"legacy_pixel",7.45,5.96,1.46
+3,"legacy_pixel",7.56,6.33,1.21
+3,"persistent_pixel",1.04,0.82,0.220000000000001
+3,"persistent_band",0.539999999999999,0.359999999999999,0.19

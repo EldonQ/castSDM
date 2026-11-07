@@ -40,7 +40,8 @@ Every active model must predict finite values on the eligible domain.
 ## A small raster calculation
 
 Grids and CRS must already match. Outputs contain four predictions, eight
-contrasts, eight paired SD layers and a support flag. Empty masked blocks are
+contrasts, eight paired SD layers, scenario and common support flags, and
+joint sign-agreement/conflict layers (24 layers total). Empty masked blocks are
 skipped and current model predictions are reused across futures.
 
 ```{r raster, eval=requireNamespace("terra", quietly=TRUE)}
@@ -95,6 +96,28 @@ drivers$summary
 Support checks marginal training quantiles on original inputs even when
 predictions are clamped. It cannot establish multivariate support or ecological
 transportability. Contrasts remain model-conditional.
+
+## Compare the same supported subset across futures
+
+```{r common-support}
+hotter <- transform(current, temperature = temperature + .8)
+multiple <- cast_compare(fit, current, list(warm = future, hot = hotter),
+  groups = list(climate = "temperature", land_use = "land"),
+  weights = c(a = .4, b = .6), thresholds = c(.3, .5, .7), verbose = FALSE)
+multiple$summary_common_support[, c("scenario", "component", "n_valid", "support_share", "mean")]
+multiple$agreement[, c("scenario", "component", "domain", "mixed_sign_share")]
+summary(multiple, thresholds = .5)
+```
+
+Common support intersects finite inputs and training marginal bounds over
+current and every requested future; it has identical counts across scenarios.
+The original supported summaries still use each scenario's own subset.
+Sign agreement is the largest fraction of active models in the positive,
+negative or neutral category (tolerance 1e-12), without model weights. Conflict
+requires both positive and negative contrasts; one model is unassessed.
+These statistics describe model disagreement, not confidence or significance.
+Requested thresholds are counted inside prediction blocks and cached;
+additional thresholds read saved predictions without calling an engine.
 
 ## Resources and caches
 

@@ -6,7 +6,8 @@
 joint predictions from a frozen fit. Fixed positive model weights and an
 explicit finite domain make the comparisons auditable. Results contain
 continuous contrasts, optional thresholded range counts, training-support
-diagnostics and paired model SD.
+diagnostics, model sign disagreement and paired model SD. `cast_diagnose()`
+connects independent ensemble evaluation to the scenario diagnostics.
 
 ## Installation
 
@@ -33,7 +34,8 @@ fit <- cast_as_fit(list(glm = model), current,
   function(model, newdata) predict(model, newdata, type = "response"))
 future <- transform(current, temperature = temperature + .5, land = land + .1)
 comparison <- cast_compare(fit, current, future,
-  groups = list(climate = "temperature", land_use = "land"))
+  groups = list(climate = "temperature", land_use = "land"),
+  thresholds = c(.3, .5, .7))
 summary(comparison)
 plot(comparison)
 ```
@@ -41,6 +43,8 @@ plot(comparison)
 Without usable cross-validation or a supplied threshold there is no binary
 range estimate. `summary(comparison, thresholds = c(.3, .5, .7))` calculates
 sensitivity from saved predictions without fitting or predicting again.
+Pass diagnostic thresholds into `cast_compare()` to count them during
+prediction. Other thresholds use a bounded, persistent raster reader.
 
 ## Fit, validate, compare
 
@@ -58,6 +62,11 @@ comparison <- cast_compare(run, current_raster, future_rasters,
   groups = list(climate = climate_variables, land_use = land_use_variables),
   mask = analysis_mask, output_dir = "results/comparison",
   resources = list(cores = 8, workers = 2, memory_mb = 4096))
+diagnostics <- cast_diagnose(run, comparison,
+  output_dir = "results/diagnostics")
+diagnostics$holdout
+diagnostics$folds
+diagnostics$score_views_oof
 ```
 
 Tables and aligned `terra::SpatRaster` inputs share a numerical kernel.
@@ -68,6 +77,18 @@ share grid, extent and CRS. No automatic resampling occurs.
 The [single-species example](examples/single_species/README.md) supplies
 occurrence QC, domain masks, exact future-file mapping and saved-output plots.
 Training and comparison use public package functions.
+
+`run$diagnostics` is saved even without a map: per-engine and frozen-ensemble
+hold-out scores, training-prevalence baseline, fold counts/locations/AOA,
+selection frequency and first-repeat OOF native/shifted score views. The native
+view uses the same fits and class weights. OOF comparisons are descriptive;
+they never select a policy from hold-out labels. `prevalence_target` specifies
+a weighted training mean score, not calibrated occurrence probabilities.
+Brier/log loss and reliability bins concern the sampled binary response.
+For presence/background data, background points are not verified absences.
+Legacy `omission_5/10` metrics use top-percent cutoffs of evaluation scores;
+diagnostics also report omission at the frozen threshold and at training OOF
+presence-score 5th/10th percentiles, with explicit threshold columns.
 
 ## Interpretation
 
@@ -98,6 +119,14 @@ marginal quantiles on unclamped inputs and cannot establish joint support.
 Full-domain and supported summaries remain separate. Requested clamping
 applies uniformly to all engines.
 
+`summary_common_support` and `binary_common_support` intersect current and
+**all** requested futures' finite inputs and training marginal bounds. These
+use the same subset across scenarios. Existing `*_supported` summaries use
+each scenario's subset. `agreement` quantifies positive/negative conflicts
+and majority-sign agreement among active models (zero tolerance 1e-12).
+Neither marginal support nor sign agreement is statistical confidence.
+AOA is a separate multivariate validation diagnostic.
+
 Binary predictions use `suitability >= threshold`. Binary summaries count
 valid grid cells or table rows, not square kilometres. Area interpretation
 requires an appropriate equal-area grid or a separate area-weighted analysis.
@@ -115,6 +144,10 @@ Current predictions are shared across futures. Additive univariate logit GAMs
 reuse exact terms for partial scenarios; other structures use ordinary
 prediction. A total core and memory budget bounds scenario workers and RF
 threads. Workers require an installed matching package.
+Exactly unchanged group inputs reuse the matching corner prediction per row,
+after the declared clamp. Outputs use band-interleaved tiled GeoTIFFs. Saved
+phase timings distinguish input reads, prediction/contrast calculations and
+writes from worker/parent wall time. Budgets do not promise peak process RSS.
 
 Training-stage cache keys depend on data, scientific settings and relevant
 code, independently of output paths and future scenarios. Comparison receipts
@@ -125,6 +158,9 @@ Caching avoids repeated work and does not replace scientific validation.
 
 See `vignette("castSDM")` and `vignette("castSDM-advanced")` for executable
 examples and the detailed contracts.
+Bounded performance observations are documented in [benchmarks](benchmarks/README.md);
+submission evidence and limits are assessed in [MEE_READINESS.md](MEE_READINESS.md).
+The [AI-assisted maintenance record](inst/AI_ASSISTANCE.md) identifies its scope.
 
 ## License
 
