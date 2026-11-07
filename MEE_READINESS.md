@@ -68,7 +68,7 @@ AOA alone does not explain it. Keep a used hold-out for retrospective diagnosis,
 and use new validation for a changed scientific policy.
 
 The software now supports the diagnostics needed for this examination, but a
-full 0.27.0 real-case rerun has deliberately not been performed by maintenance.
+full 0.27.x real-case rerun has deliberately not been performed by maintenance.
 The local single-species entry is ready for the author to run. Because 0.27.0
 fixes validation clamping, historical metrics cannot be relabelled as new ones.
 

@@ -155,6 +155,9 @@ also verify model/input content and output hashes before reuse. OS file locks
 prevent simultaneous writes. Resume in the same directory; choose a new
 comparison directory or `overwrite = TRUE` after changing scientific inputs.
 Caching avoids repeated work and does not replace scientific validation.
+Fingerprints omit R's `srcfile` display metadata so source-preserving installs
+also resume across serialization; actual model/data/code changes invalidate
+the receipt. Schema-1 caches are preserved and recomputed under schema 2.
 
 See `vignette("castSDM")` and `vignette("castSDM-advanced")` for executable
 examples and the detailed contracts.

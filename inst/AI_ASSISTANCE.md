@@ -1,8 +1,9 @@
 # AI-assisted maintenance record
 
-On 7 November 2026, OpenAI Codex assisted changes for castSDM 0.27.0, including
+On 7 November 2026, OpenAI Codex assisted changes for castSDM 0.27.0/0.27.1, including
 diagnostic interfaces, score and validation semantics, scenario reductions,
-raster I/O, examples, tests, benchmarks and documentation. Changed R sources
+raster I/O, source-preserving cache fingerprints, examples, tests, benchmarks
+and documentation. Changed R sources
 carry a short annotation referring to this record. Exact application build and
 model identifiers were not exposed in this maintenance session and are not
 invented here. Authors should record identifiers available in their own client

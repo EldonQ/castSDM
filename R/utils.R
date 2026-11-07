@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Internal Utility Functions ---------------------------------------------------
 
 #' Validate Species Data Input
@@ -679,7 +680,8 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
 #' Returns a stable hash of an arbitrary R object, used to parameterise
 #' step- and tile-level checkpoints so that stale caches are never replayed
 #' after a configuration or data change. Uses \pkg{digest} when available
-#' and falls back to a fast FNV-1a hash over the serialised object.
+#' using SHA-256 over canonical serialization. R source-file bookkeeping is
+#' excluded; scientific values and executable expressions remain included.
 #'
 #' @param x Any R object.
 #' @param len Number of hash characters to return (default all).
@@ -687,7 +689,16 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
 #' @keywords internal
 #' @noRd
 .cast_digest <- function(x, len = NULL) {
-  out <- digest::digest(x, algo = "sha256", serializeVersion = 3L)
+  # R_KEEP_PKG_SOURCE retains srcref -> srcfilealias environments in model
+  # calls. Their in-memory bookkeeping changes on an RDS roundtrip. Actual
+  # calls, model values, attributes and executable code remain in the hash;
+  # only R's source-file metadata is represented by a stable token.
+  source_reference <- function(value) {
+    if (is.environment(value) && inherits(value, "srcfile"))
+      "castSDM:source_file_metadata/v1" else NULL
+  }
+  raw <- serialize(x, NULL, version = 3L, refhook = source_reference)
+  out <- digest::digest(raw, algo = "sha256", serialize = FALSE)
   if (!is.null(len)) out <- substr(out, 1L, len)
   out
 }

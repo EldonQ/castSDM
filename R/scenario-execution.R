@@ -57,7 +57,7 @@
 .cast_cache_read <- function(path, key) {
   if (is.null(path) || !file.exists(path)) return(NULL)
   x <- tryCatch(readRDS(path), error = function(e) NULL)
-  if (!is.list(x) || !identical(x$schema, "cast_cache/1") || !identical(x$key, key) ||
+  if (!is.list(x) || !identical(x$schema, "cast_cache/2") || !identical(x$key, key) ||
       !identical(x$digest, .cast_digest(x$value))) return(NULL)
   if (length(x$files)) {
     files <- file.path(dirname(path), names(x$files))
@@ -73,7 +73,7 @@
       normalizePath(dirname(path), winslash = "/", mustWork = FALSE)))
     cli::cli_abort("Cached artifacts must share their receipt directory.")
   hashes <- if (length(files)) stats::setNames(unname(tools::md5sum(files)), basename(files)) else character()
-  .cast_atomic_rds(list(schema = "cast_cache/1", key = key, value = value,
+  .cast_atomic_rds(list(schema = "cast_cache/2", key = key, value = value,
     digest = .cast_digest(value), files = hashes), path)
   invisible(value)
 }

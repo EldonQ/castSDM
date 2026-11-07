@@ -1,3 +1,12 @@
+# castSDM 0.27.1
+
+- Fix cache validation when R retains package source references (including
+  GitHub Actions). Canonical serialization ignores only `srcfile` metadata,
+  while retaining actual calls, models, data and executable dependencies.
+  Source-preserving installs now resume model stages across RDS roundtrips.
+- Advance cache receipts to schema 2. Older caches are left intact and are
+  recomputed under the corrected fingerprint rather than silently trusted.
+
 # castSDM 0.27.0
 
 - Add `cast_diagnose()` and automatic run diagnostics: frozen-ensemble hold-out

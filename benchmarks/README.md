@@ -29,6 +29,9 @@ Windows 10 x64 build 19045, R 4.4.3, castSDM 0.27.0; Intel Xeon w7-3455
 (24 physical / 48 logical cores). Prediction used four RF threads. Three warm
 filesystem trials alternated method order, without concurrent R workloads.
 Raw timing/count tables are in [results/2026-11-07](results/2026-11-07).
+The subsequent 0.27.1 cache-fingerprint fix does not change these measured
+prediction or threshold-reader kernels; the recorded trials remain labelled
+with their actual 0.27.0 runtime version.
 
 ### Threshold-only I/O
 
