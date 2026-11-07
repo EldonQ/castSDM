@@ -4,16 +4,44 @@
 拟合、空间交叉验证、缓存、四角场景比较和归因均调用已安装的 castSDM。
 默认生成 9 个联合未来的比较，逐变量归因默认关闭。
 
-## 安装与路径
+## 直接在 R / RStudio 中运行
 
-先安装包和示例需要的依赖。开发源码修改后须重新安装，再运行示例。
+本次入口修正后，请先重启一次 R，清除会话中可能已加载的旧版 castSDM。
+然后直接运行：
 
 ```r
+source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
+```
+
+不需要先 `setwd()`，也不需要手动 `library()` 或设置 `.libPaths()`。
+入口会以脚本所在位置定位配置，并自动优先加入项目的 `E:/Package/.rlib_cast`，
+其中已经安装 castSDM 0.26.0 和 `filelock`。不会在正式运行中自动联网安装软件。
+若仍有缺失或过旧依赖，会一次列出并给出安装命令；若会话已加载另一份 castSDM，
+会要求重启 R 后重新执行，避免混用不同代码。
+
+默认运行 `Schizothoracinae`。改物种或另开一个结果目录：
+
+```r
+Sys.setenv(CAST_SPECIES = "Callosciurus_erythraeus", CAST_RUN_ID = "analysis_01")
+source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
+```
+
+恢复默认物种和运行标识用 `Sys.unsetenv(c("CAST_SPECIES", "CAST_RUN_ID"))`。
+`01_config.R` 是科学参数和资源预算的编辑入口，其他辅助文件通常不需要改动。
+
+## 安装与路径
+
+本机项目库已经就绪。只有更换机器、更新包或入口确实报告缺依赖时，才需要安装。
+开发源码修改后须重新安装，再运行示例。安装到和入口相同的项目库：
+
+```r
+.libPaths(c("E:/Package/.rlib_cast", .libPaths()))
 install.packages(c("remotes", "terra", "sf", "data.table", "ranger", "maxnet",
-  "mgcv", "glmnet", "pROC", "blockCV", "FNN", "digest", "filelock"))
-remotes::install_github("EldonQ/castSDM")
+  "mgcv", "glmnet", "pROC", "blockCV", "FNN", "digest", "filelock"),
+  lib = .libPaths()[1L], repos = "https://cloud.r-project.org")
+remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 # 或在本机安装源码：
-# install.packages("E:/Package/cast", repos = NULL, type = "source")
+# install.packages("E:/Package/cast", repos = NULL, type = "source", lib = .libPaths()[1L])
 ```
 
 `01_config.R` 集中定义协议与案例参数。默认路径对应当前工作目录的数据布局：
@@ -23,6 +51,7 @@ remotes::install_github("EldonQ/castSDM")
 | 环境库 | `E:/CHECO26/N-SDM/data`，可用 `CAST_DATA_ROOT` 改写 |
 | 发生记录 | `E:/Package/castSDM_workflows/species_occ`，可用 `CAST_OCCURRENCE_ROOT` 改写 |
 | 示例根目录 | 脚本所在目录，可用 `CAST_EXAMPLE_ROOT` 改写 |
+| R 包库 | 自动识别项目 `.rlib_cast`；自定义位置可设 `CAST_R_LIBRARY` |
 | 物种 | `Schizothoracinae`，可用 `CAST_SPECIES` 选择 `Callosciurus_erythraeus` |
 | 运行标识 | `cast026_glu` 或 `cast026_hlu`，可用 `CAST_RUN_ID` 改写 |
 
@@ -40,10 +69,9 @@ Rscript 00_RUN_ALL.R --dry-run
 Rscript 00_RUN_ALL.R
 ```
 
-本次验证安装在 `E:/Package/.rlib_cast`。本机可直接使用以下命令：
+本机也可直接使用 Rscript 的完整路径；入口会自动设置项目库：
 
 ```powershell
-$env:R_LIBS_USER = "E:/Package/.rlib_cast"
 & "D:\R\R-4.4.3\bin\Rscript.exe" .\00_RUN_ALL.R --dry-run
 & "D:\R\R-4.4.3\bin\Rscript.exe" .\00_RUN_ALL.R
 ```
@@ -89,6 +117,14 @@ Rscript 04_REPLOT.R output/cast026_glu/Schizothoracinae
 ```
 
 重绘只读取已保存的比较栅格，不拟合、不预测、不计算响应曲线。
+在 R 会话中重绘，可先设置结果目录再 source 入口：
+
+```r
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast026_glu/Schizothoracinae")
+source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
+Sys.unsetenv("CAST_CASE_DIR")
+```
+
 原论文运行目录保留；本入口使用新的结果布局，不读取旧版本缓存或旧的结果对象。
 
 ## 可调参数与解释边界
