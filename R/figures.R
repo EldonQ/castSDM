@@ -1,4 +1,23 @@
 # AI-assisted restoration; scope and verification: inst/AI_ASSISTANCE.md.
+.cast_figure_pdf_backend <- function(prefer = getOption("castSDM.figure_pdf_device", "auto")) {
+  if (identical(prefer, "pdf")) return("pdf")
+  if (identical(prefer, "cairo")) return("cairo")
+  if (!isTRUE(capabilities("cairo"))) return("pdf")
+  path <- tempfile(fileext = ".pdf")
+  device <- grDevices::dev.cur()
+  on.exit({
+    if (grDevices::dev.cur() != device) grDevices::dev.off()
+    unlink(path)
+  }, add = TRUE)
+  ready <- tryCatch(suppressWarnings({
+    grDevices::cairo_pdf(path, family = "Arial")
+    grid::grid.text("castSDM", gp = grid::gpar(fontfamily = "Arial"))
+    grDevices::dev.off()
+    TRUE
+  }), error = function(e) FALSE)
+  if (ready) "cairo" else "pdf"
+}
+
 # Construct the layout once on the first export device. Reusing the grob
 # avoids rebuilding every large raster panel for the matching PDF.
 .cast_figure_export <- function(plot, path, width_mm, height_mm, dpi, grob = NULL) {
@@ -6,8 +25,13 @@
     ragg::agg_png(path, width = width_mm, height = height_mm, units = "mm",
       res = dpi, background = "white")
   } else if (endsWith(path, ".pdf")) {
-    grDevices::cairo_pdf(path, width = width_mm/25.4, height = height_mm/25.4,
-      family = "Arial", bg = "white")
+    if (identical(getOption("castSDM.figure_pdf_device", "cairo"), "pdf")) {
+      grDevices::pdf(path, width = width_mm/25.4, height = height_mm/25.4,
+        family = "Helvetica", bg = "white", useDingbats = FALSE)
+    } else {
+      grDevices::cairo_pdf(path, width = width_mm/25.4, height = height_mm/25.4,
+        family = "Arial", bg = "white")
+    }
   } else if (endsWith(path, ".svg")) {
     svglite::svglite(path, width = width_mm/25.4, height = height_mm/25.4,
       bg = "white", system_fonts = list(sans = "Arial"))
@@ -59,6 +83,8 @@
 #' @param width_mm,dpi Export width and PNG resolution, defaults `183` and
 #'   `600`; matching PDF exports retain vector boundaries/text and embed dense
 #'   gridded data as rasters. Display colour clipping is reported on maps.
+#'   Cairo/Arial is preferred; systems without a working Cairo text device use
+#'   standard PDF/Helvetica. The selected backend/font is recorded.
 #' @param resources Resource budget for diagnostic prediction; see [cast_compare()].
 #' @param verbose Print diagnostic and figure progress.
 #' @param formats Export formats. Defaults to `c("png", "pdf")` to preserve the
@@ -118,7 +144,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
   lock <- .cast_lock(file.path(output_dir, ".figures.lock"))
   on.exit(filelock::unlock(lock), add = TRUE)
-  old_options <- options(castSDM.font_family = "Arial", castSDM.figure_width_mm = width_mm)
+  pdf_device <- if ("pdf" %in% formats) .cast_figure_pdf_backend() else "cairo"
+  font_family <- if (pdf_device == "pdf") "Helvetica" else "Arial"
+  old_options <- options(castSDM.font_family = font_family, castSDM.figure_width_mm = width_mm,
+    castSDM.figure_pdf_device = pdf_device)
   on.exit(options(old_options), add = TRUE)
   data_dir <- file.path(output_dir, ".data")
   data <- .cast_figure_data(object, comparison, scenario, data_dir,
@@ -227,11 +256,17 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     output_dir = output_dir, data_file = file.path(data_dir, "figure_data.rds"),
     data_md5 = data_md5,
     scenario = scenario, basemap = basemap, dpi = dpi, width_mm = width_mm, formats = formats,
+    font_family = font_family, pdf_device = pdf_device,
     display_resolution = display_resolution, render_only = render_only,
     interpretation = "Frozen-model diagnostics; source scientific rasters are unchanged.",
     visual_QA = "not performed automatically"), class = "cast_figures")
   .cast_atomic_rds(result, manifest_path)
-  if (any(status$status == "failed")) cli::cli_abort("Figure exports failed; inspect figure_status.csv for exact reasons. Other successful exports are retained.")
+  if (any(status$status == "failed")) {
+    failed <- status[status$status == "failed", ]
+    details <- unique(paste0(failed$path, ": ", failed$reason))
+    cli::cli_abort(c("Figure exports failed: {paste(utils::head(details, 3L), collapse = '; ')}",
+      i = "Inspect figure_status.csv for all reasons; other successful exports are retained."))
+  }
   if (verbose) cli::cli_inform("Figure collection: {sum(status$status == 'written_not_visually_checked')} exports written; {sum(status$status == 'unavailable')} unavailable outputs documented.")
   result
 }

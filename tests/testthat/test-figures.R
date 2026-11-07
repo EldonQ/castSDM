@@ -92,11 +92,14 @@ test_that("complete figure inventory includes the legacy set and render-only nev
     stop("Render-only must not call an engine")
   }, print = FALSE)
   on.exit(untrace("predict.ranger", where = asNamespace("ranger")), add = TRUE)
+  withr::local_options(castSDM.figure_pdf_device = "pdf")
   again <- cast_figures(run, cmp, figures$output_dir, response_grid = 3,
     display_resolution = .2, include = "07", render_only = TRUE,
     basemap = "china", width_mm = 89, dpi = 72, verbose = FALSE,
     formats = c("png", "pdf", "svg"))
   expect_equal(tracker$n, 0L)
+  expect_identical(again$pdf_device, "pdf")
+  expect_identical(again$font_family, "Helvetica")
   expect_equal(nrow(again$status), 7L)
   expect_identical(again$requested, "07_model_performance")
   expect_true(all(figures$status$path %in% again$status$path))

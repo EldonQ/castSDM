@@ -104,6 +104,8 @@ reprojection; original scientific rasters and counts remain unchanged.
 
 Optional `formats = c("png", "pdf", "svg", "tiff")` adds editable SVG and
 submission TIFF exports from the same cached layout. The default remains PNG/PDF.
+Cairo/Arial is preferred; a system without a working Cairo text device uses
+standard PDF/Helvetica and records that choice in the export manifest.
 
 `run$diagnostics` is saved even without a map: per-engine and frozen-ensemble
 hold-out scores, training-prevalence baseline, fold counts/locations/AOA,

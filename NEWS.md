@@ -8,6 +8,8 @@
   constructed layout. SVG and TIFF are optional export formats.
   Screening catalogues paginate every scored predictor; numerically
   underflowed zero p-values are retained at the machine-positive display floor.
+  PDF export probes Cairo text support and falls back to standard PDF/Helvetica
+  when unavailable; failed exports report the actual device error directly.
 - Add `cast_figures()` with the full numbered 01-10 collection plus selection,
   threshold, weights, AOA and available contrast/SD/support/driver atlases.
   Export every available scenario/layer and write explicit inventory/status

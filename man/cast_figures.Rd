@@ -61,7 +61,9 @@ unchanged. Discrete layers use nearest-neighbour display resampling.}
 
 \item{width_mm, dpi}{Export width and PNG resolution, defaults \code{183} and
 \code{600}; matching PDF exports retain vector boundaries/text and embed dense
-gridded data as rasters. Display colour clipping is reported on maps.}
+gridded data as rasters. Display colour clipping is reported on maps.
+Cairo/Arial is preferred; systems without a working Cairo text device use
+standard PDF/Helvetica. The selected backend/font is recorded.}
 
 \item{resources}{Resource budget for diagnostic prediction; see \code{\link[=cast_compare]{cast_compare()}}.}
 
