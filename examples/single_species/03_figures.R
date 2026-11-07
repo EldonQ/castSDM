@@ -1,51 +1,53 @@
-# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
-# Saved predictions only: replotting never fits a model or computes a PDP.
-case_figures <- function(comparison, out_dir, scenario) {
-  dir.create(file.path(out_dir, "figures"), showWarnings = FALSE)
-  draw <- function() plot(comparison, scenario = scenario,
-    layers = c("current", "joint", "joint_change", "interaction"))
-  grDevices::png(file.path(out_dir, "figures", "scenario_comparison.png"),
-    width = 2400, height = 2000, res = 250)
-  tryCatch(draw(), finally = grDevices::dev.off())
-  grDevices::pdf(file.path(out_dir, "figures", "scenario_comparison.pdf"), width = 9.6, height = 8)
-  tryCatch(draw(), finally = grDevices::dev.off())
-  invisible(out_dir)
+# Complete publication figure collection using the package's established maps.
+# Numerical diagnostic products are cached; render_only never predicts/refits.
+case_figure_stacks <- function(out_dir, result, scenario) {
+  vars <- (result$fit_full %||% result$fit)$env_vars
+  pool <- utils::read.csv(file.path(out_dir, "training_pool.csv"), stringsAsFactors = FALSE)
+  paths <- pool$path[match(vars, pool$layer)]
+  if (anyNA(paths) || any(!file.exists(paths))) stop("Current figure predictor sources are missing; use render-only with a complete figure-data cache.")
+  current <- terra::rast(paths); names(current) <- vars
+  table <- utils::read.csv(file.path(out_dir, "scenario_table.csv"), stringsAsFactors = FALSE)
+  table <- table[table$scenario == scenario, , drop = FALSE]
+  if (!nrow(table)) stop("No saved predictor mapping for reporting scenario: ", scenario)
+  future_paths <- paths
+  for (i in seq_len(nrow(table))) {
+    hit <- match(table$layer[i], vars)
+    if (!is.na(hit)) future_paths[hit] <- table$path[i]
+  }
+  if (any(!file.exists(future_paths))) stop("Future figure predictor sources are missing; use render-only with a complete figure-data cache.")
+  future <- terra::rast(future_paths); names(future) <- vars
+  list(current = current, future = future)
 }
 
-case_validation_figure <- function(run, out_dir) {
-  info <- run$cv$fold_info
-  metrics <- run$cv$fold_metrics
-  if (is.null(info) || is.null(metrics) || !nrow(metrics)) return(invisible(out_dir))
-  if ("replicate" %in% names(metrics)) metrics <- metrics[metrics$replicate == 1, ]
-  colors <- grDevices::hcl.colors(run$cv$k, "Dark 3")
-  draw <- function() {
-    old <- graphics::par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3, 1))
-    on.exit(graphics::par(old), add = TRUE)
-    graphics::plot(info$lon, info$lat, col = colors[info$fold],
-      pch = ifelse(info$obs == 1, 16, 46), cex = ifelse(info$obs == 1, .45, .7),
-      ylim = range(info$lat, finite = TRUE) + c(0, .15*diff(range(info$lat, finite = TRUE))),
-      xlab = "X (input coordinate units)", ylab = "Y (input coordinate units)",
-      main = "Training spatial folds: repeat 1")
-    graphics::legend("topleft", legend = paste("F", seq_len(run$cv$k)),
-      col = colors, pch = 16, bty = "n", cex = .75, ncol = run$cv$k)
-    models <- unique(metrics$model)
-    values <- vapply(models, function(m) {
-      z <- metrics[metrics$model == m, ]
-      z$auc[match(seq_len(run$cv$k), z$fold)]
-    }, numeric(run$cv$k))
-    graphics::matplot(seq_len(run$cv$k), values, type = "b", pch = seq_along(models),
-      col = seq_along(models), lty = 1, ylim = c(0, 1), xaxt = "n",
-      xlab = "Spatial fold", ylab = "ROC AUC", main = "OOF discrimination: descriptive")
-    graphics::axis(1, at = seq_len(run$cv$k))
-    graphics::abline(h = .5, lty = 3, col = "grey60")
-    graphics::legend("bottomright", legend = models, col = seq_along(models),
-      pch = seq_along(models), lty = 1, bty = "n", cex = .8)
+case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NULL,
+                         current = NULL, future = NULL, attribution = NULL,
+                         render_only = FALSE, include = "all") {
+  if (is.null(result)) result <- readRDS(file.path(out_dir, "training", "result.rds"))
+  result$output_dir <- file.path(out_dir, "training")
+  if (is.null(cfg)) {
+    case_file <- file.path(out_dir, "case.rds")
+    cfg <- if (file.exists(case_file)) readRDS(case_file)$cfg else list()
   }
-  for (format in c("png", "pdf")) {
-    path <- file.path(out_dir, "figures", paste0("spatial_validation.", format))
-    if (format == "png") grDevices::png(path, width = 2400, height = 1200, res = 250) else
-      grDevices::pdf(path, width = 9.6, height = 4.8)
-    tryCatch(draw(), finally = grDevices::dev.off())
+  if (!render_only && (is.null(current) || is.null(future))) {
+    stacks <- case_figure_stacks(out_dir, result, scenario)
+    current <- stacks$current; future <- stacks$future
   }
-  invisible(out_dir)
+  figures <- castSDM::cast_figures(result, comparison,
+    output_dir = file.path(out_dir, "figures"), scenario = scenario,
+    current = current, future = future, attribution = attribution,
+    basemap = "china", include = include, render_only = render_only,
+    response_grid = cfg$figure_response_grid %||% 50L,
+    display_resolution = cfg$figure_display_resolution %||% .02,
+    width_mm = 183, dpi = 600,
+    resources = cfg$resources %||% list(cores = 4, memory_mb = 2048))
+  # Remove only the obsolete generic previews, after successful replacement.
+  if ("02_habitat_change" %in% figures$status$figure &&
+      all(figures$status$status[figures$status$figure == "02_habitat_change"] == "written_not_visually_checked")) {
+    for (name in c("scenario_comparison.png", "scenario_comparison.pdf",
+                   "spatial_validation.png", "spatial_validation.pdf")) {
+      path <- file.path(out_dir, "figures", name)
+      if (file.exists(path)) unlink(path)
+    }
+  }
+  invisible(figures)
 }

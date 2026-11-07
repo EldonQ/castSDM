@@ -1,6 +1,6 @@
 # AI-assisted maintenance record
 
-On 7 November 2026, OpenAI Codex assisted changes for castSDM 0.27.0/0.27.1, including
+On 7 November 2026, OpenAI Codex assisted changes for castSDM 0.27.0/0.27.1/0.28.0, including
 diagnostic interfaces, score and validation semantics, scenario reductions,
 raster I/O, source-preserving cache fingerprints, examples, tests, benchmarks
 and documentation. Changed R sources
@@ -19,3 +19,9 @@ data permissions, scientific conclusions and the final disclosure wording.
 
 This record covers the named maintenance changes; it is not a claim that no
 other part of the project previously used AI assistance.
+
+The 0.28.0 restoration reuses the established cartography and original numbered
+figure layouts, adds a complete figure/export interface and caches diagnostic
+products separately from rendering. Existing scientific fits and predictions
+are preserved; figure tests include native-grid classification and proof that
+render-only output does not call a fitted engine.

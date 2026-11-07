@@ -640,32 +640,39 @@ summary.cast_comparison <- function(object, thresholds = NULL, ...) {
   if (is.null(thresholds)) object$summary else .cast_compare_thresholds(object, thresholds)
 }
 
+#' @rdname cast_compare
+#' @param x A saved comparison object to print or plot.
+#' @param scenario Saved scenario name for plotting.
+#' @param layers Saved prediction/contrast layers to plot.
+#' @param basemap Geographic background for plotting: `"world"`, `"china"`
+#'   or `"none"`; China retains the established South China Sea inset.
 #' @export
 plot.cast_comparison <- function(x, scenario = names(x$results)[1L],
-                                 layers = c("climate_main", "lulc_main", "joint_change", "interaction"), ...) {
+                                 layers = c("climate_main", "lulc_main", "joint_change", "interaction"),
+                                 basemap = c("world", "china", "none"), ...) {
+  basemap <- match.arg(basemap)
   if (!scenario %in% names(x$results)) cli::cli_abort("Unknown scenario.")
   y <- x$results[[scenario]]
   if (!is.null(y$raster_file)) {
     r <- terra::rast(y$raster_file)
     if (!all(layers %in% names(r))) cli::cli_abort("Unknown comparison layers.")
-    old <- graphics::par(mfrow = grDevices::n2mfrow(length(layers)),
-                         mar = c(2.5, 2.5, 3, 5))
-    on.exit(graphics::par(old), add = TRUE)
+    check_suggested("ggplot2", "for cartographic comparison plots")
+    check_suggested("patchwork", "for multi-panel comparison plots")
     effect_layers <- intersect(layers, .cast_factorial_names())
     limits <- if (length(effect_layers)) terra::minmax(r[[effect_layers]], compute = FALSE) else numeric()
     finite <- abs(limits[is.finite(limits)])
     effect_limit <- if (length(finite) && max(finite) > 0) max(finite) else 1
-    for (layer in layers) {
+    plots <- lapply(layers, function(layer) {
       surface <- layer %in% c("current", "joint", "climate", "lulc")
       effect <- layer %in% .cast_factorial_names()
-      dots <- list(...)
-      if (is.null(dots$range)) dots$range <- if (surface) c(0, 1) else
-        if (effect) c(-effect_limit, effect_limit) else NULL
-      if (is.null(dots$col)) dots$col <- grDevices::hcl.colors(101,
-        if (effect) "Blue-Red 3" else "Viridis")
-      if (is.null(dots$main)) dots$main <- layer
-      do.call(terra::plot, c(list(x = r[[layer]]), dots))
-    }
+      discrete <- layer %in% c("support", "common_support", "sign_conflict_joint")
+      cast_plot_effect_map(y$raster_file, layer, gsub("_", " ", layer),
+        if (surface) "Suitability" else gsub("_", " ", layer), signed = effect,
+        limits = if (surface || discrete || layer == "sign_agreement_joint") c(0, 1) else
+          if (effect) c(-effect_limit, effect_limit) else NULL,
+        method = if (discrete) "near" else "bilinear", basemap = basemap)
+    })
+    return(patchwork::wrap_plots(plots, ncol = min(2L, length(plots))))
   } else {
     d <- y$summary[y$summary$component %in% layers, ]
     if (!nrow(d)) cli::cli_abort("Unknown comparison layers.")

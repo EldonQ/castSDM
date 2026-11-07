@@ -39,8 +39,10 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   log10_p <- identical(imp_col, "stage1_p")
   if (log10_p) {
     p_raw <- suppressWarnings(as.numeric(scr$stage1_p))
-    p_raw[!is.finite(p_raw) | p_raw <= 0] <- NA_real_
-    scr$filter_score <- -log10(p_raw)
+    p_raw[!is.finite(p_raw) | p_raw < 0] <- NA_real_
+    # Stored zeros can arise from numerical underflow. Retain these strongest
+    # signals at the machine-positive display floor; never omit the predictor.
+    scr$filter_score <- -log10(pmax(p_raw, .Machine$double.xmin))
     imp_col <- "filter_score"
   } else {
     scr[[imp_col]] <- suppressWarnings(as.numeric(scr[[imp_col]]))
@@ -804,8 +806,8 @@ load_basemap <- function(type = "world") {
   # Toggle spherical geometry off for the read only; restore the user's
   # global s2 setting on exit so plotting never mutates session state.
   prev_s2 <- sf::sf_use_s2()
-  sf::sf_use_s2(FALSE)
-  on.exit(sf::sf_use_s2(prev_s2), add = TRUE)
+  suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(prev_s2)), add = TRUE)
   basemap <- tryCatch(
     sf::st_read(shp_path, quiet = TRUE),
     error = function(e) NULL
@@ -1053,9 +1055,12 @@ load_basemap <- function(type = "world") {
         } else {
           ggplot2::aes(x = .data$lon, y = .data$lat, fill = .data[[value_var]])
         }
-        # Sparse display grids need their declared cell size; otherwise the
-        # raster geom infers spacing from gaps and may shift painted cells.
-        inset <- inset + if (is.null(cell_size)) {
+        # Share the declared-grid anchoring used by the main map. Dense inset
+        # data stay rasterized in PDF without shifting across missing columns.
+        grid_data <- .cast_regular_raster_grid(sub, cell_size)
+        inset <- inset + if (!is.null(grid_data)) {
+          ggplot2::geom_raster(data = grid_data, mapping = raster_aes, na.rm = TRUE)
+        } else if (is.null(cell_size)) {
           ggplot2::geom_raster(data = sub, mapping = raster_aes)
         } else {
           ggplot2::geom_tile(data = sub, mapping = raster_aes,

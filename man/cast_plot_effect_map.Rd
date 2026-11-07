@@ -16,7 +16,8 @@ cast_plot_effect_map(
   boundary = NULL,
   bounds = NULL,
   feather = 0,
-  method = c("bilinear", "near")
+  method = c("bilinear", "near"),
+  basemap = "china"
 )
 }
 \arguments{
@@ -37,6 +38,9 @@ cast_plot_effect_map(
 \item{method}{Raster display resampling: \code{"bilinear"} for continuous values
 or \code{"near"} for categorical layers and binary range flags. Unsigned binary
 layers with \code{limits = c(0, 1)} use a discrete outside/inside legend.}
+
+\item{basemap}{Geographic background: \code{"china"} (default), \code{"world"},
+or \code{"none"}. China maps retain the package's South China Sea inset.}
 }
 \value{
 A ggplot drawn using the package cartographic assets.

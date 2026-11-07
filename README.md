@@ -78,6 +78,33 @@ The [single-species example](examples/single_species/README.md) supplies
 occurrence QC, domain masks, exact future-file mapping and saved-output plots.
 Training and comparison use public package functions.
 
+## Complete publication figures
+
+The complete numbered collection uses the established cartography, palettes,
+province borders and South China Sea inset. It includes validation, habitat
+change, driver explanation, support/disagreement, factorial contrasts,
+response curves, ROC/PR/reliability, range classes, MESS and every future
+scenario, plus the available supplementary layer/driver atlases.
+
+```r
+figures <- cast_figures(run, comparison, "results/figures",
+  current = current_raster, future = reporting_future_raster, basemap = "china",
+  resources = list(cores = 8, memory_mb = 4096))
+# Change only rendering: no model refit, diagnostic prediction or PDP work.
+figures <- cast_figures(run, comparison, "results/figures",
+  basemap = "china", render_only = TRUE)
+```
+
+The first complete export computes missing frozen-model driver, PDP and MESS
+products; this can be expensive. Verified numerical products are cached apart
+from rendering. PNG (183 mm, 600 dpi by default), PDF, source CSVs and a figure
+inventory/status manifest are written. Missing inputs are reported explicitly.
+Native-grid range classes use the frozen threshold before display-only
+reprojection; original scientific rasters and counts remain unchanged.
+
+Optional `formats = c("png", "pdf", "svg", "tiff")` adds editable SVG and
+submission TIFF exports from the same cached layout. The default remains PNG/PDF.
+
 `run$diagnostics` is saved even without a map: per-engine and frozen-ensemble
 hold-out scores, training-prevalence baseline, fold counts/locations/AOA,
 selection frequency and first-repeat OOF native/shifted score views. The native

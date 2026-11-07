@@ -43,7 +43,7 @@ castsdm_species_configs <- function(root) {
     # One total budget: 3 scenario processes, at most 4 RF threads each.
     resources = resources,
     support_probs = c(.01, .99), diagnostic_thresholds = c(.3, .5, .7),
-    driver_attribution = FALSE,
+    figure_response_grid = 50L, figure_display_resolution = .02,
     scenario_climate_model = "bcc_csm2_mr",
     scenario_ssps = c("ssp126", "ssp245", "ssp585"),
     scenario_periods = c("2021_2040", "2041_2070", "2071_2100"),

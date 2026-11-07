@@ -41,13 +41,16 @@
 #' @param method Raster display resampling: `"bilinear"` for continuous values
 #'   or `"near"` for categorical layers and binary range flags. Unsigned binary
 #'   layers with `limits = c(0, 1)` use a discrete outside/inside legend.
+#' @param basemap Geographic background: `"china"` (default), `"world"`,
+#'   or `"none"`. China maps retain the package's South China Sea inset.
 #' @return A ggplot drawn using the package cartographic assets.
 #' @export
 cast_plot_effect_map <- function(path, layer, title, legend, signed = FALSE,
                            limits = NULL, breaks = NULL, mask = NULL,
                            boundary = NULL, bounds = NULL, feather = 0,
-                           method = c("bilinear", "near")) {
+                           method = c("bilinear", "near"), basemap = "china") {
   method <- match.arg(method)
+  basemap <- match.arg(basemap, c("china", "world", "none"))
   if (is.null(path) || !file.exists(path)) stop("Missing raster for ", layer)
   df <- .cast_display_raster(path, layer = layer, method = method, mask = mask, keep_outside = TRUE,
                       feather_deg = feather)
@@ -99,5 +102,6 @@ cast_plot_effect_map <- function(path, layer, title, legend, signed = FALSE,
     subtitle = paste(c(if (length(unique(finite)) == 1L)
       sprintf("Constant finite value: %g", finite[1]) else NULL, stretch_note),
       collapse = " | "),
-    legend_name = legend, boundary = boundary, bounds = bounds, feather = feather)
+    legend_name = legend, boundary = boundary, bounds = bounds, feather = feather,
+    basemap = basemap, raster = TRUE)
 }

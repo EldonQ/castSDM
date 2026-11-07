@@ -1,3 +1,24 @@
+# castSDM 0.28.0
+
+- Restore publication cartography for comparison plots, including the China
+  provincial outline, dashline, South China Sea inset and established palettes.
+  Dense gridded layers are embedded efficiently in PDF while text/borders stay
+  vector; no generic terra preview replaces the cartographic figures.
+  Transparent grid anchors preserve sparse-cell positions; PNG/PDF reuse one
+  constructed layout. SVG and TIFF are optional export formats.
+  Screening catalogues paginate every scored predictor; numerically
+  underflowed zero p-values are retained at the machine-positive display floor.
+- Add `cast_figures()` with the full numbered 01-10 collection plus selection,
+  threshold, weights, AOA and available contrast/SD/support/driver atlases.
+  Export every available scenario/layer and write explicit inventory/status
+  reasons for unavailable products, with per-figure source tables.
+- Cache fixed/PDP curves, native-grid range classes, frozen-model driver maps,
+  MESS and display grids separately from rendering. `render_only = TRUE` never
+  predicts or refits. Original model/scenario rasters remain untouched.
+- Reconnect the full collection to the single-species run/replot entries;
+  default new runs use `cast028_*`. Side-by-side pure-R package installations
+  protect existing running sessions. Capture script hashes at run entry.
+
 # castSDM 0.27.1
 
 - Fix cache validation when R retains package source references (including

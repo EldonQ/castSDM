@@ -1,8 +1,8 @@
-# 单物种应用示例（castSDM >= 0.27.1）
+# 单物种应用示例（castSDM >= 0.28.0）
 
 入口是 `00_RUN_ALL.R`。案例保留数据特有的发生记录质控、分析域和未来文件匹配；
 拟合、空间交叉验证、缓存、四角场景比较和归因均调用已安装的 castSDM。
-默认生成 9 个联合未来的比较，逐变量归因默认关闭。
+默认生成 9 个联合未来的比较，并导出完整地图和诊断图；逐变量归因分析报告场景。
 
 ## 直接在 R / RStudio 中运行
 
@@ -13,8 +13,9 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 ```
 
 不需要先 `setwd()`，也不需要手动 `library()` 或设置 `.libPaths()`。
-入口会以脚本所在位置定位配置，并自动优先加入项目的 `E:/Package/.rlib_cast`，
-其中已经安装 castSDM 0.27.1 和 `filelock`。不会在正式运行中自动联网安装软件。
+入口以脚本所在位置定位配置，自动选择项目库中最新的 castSDM，包括
+`E:/Package/.rlib_cast` 和 `E:/Package/.rlib_cast_versions/<版本>`。
+显式设置的 `CAST_R_LIBRARY` 或示例内 `.library` 优先。不会在正式运行中自动联网安装软件。
 若仍有缺失或过旧依赖，会一次列出并给出安装命令。已经加载的 castSDM 若与项目版
 一致，会直接复用；若是旧版或开发版，入口会只切换 castSDM 到项目安装版，保留工作区
 对象及其他已加载包，不再仅因路径不同要求重启。极少数其他包正在导入 castSDM、
@@ -33,12 +34,15 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 ## 安装与路径
 
 本机项目库已经就绪。只有更换机器、更新包或入口确实报告缺依赖时，才需要安装。
-开发源码修改后须重新安装，再运行示例。安装到和入口相同的项目库：
+开发源码修改后须重新安装，再运行示例。已有任务运行时使用独立版本库，避免改写其加载的包：
 
 ```r
-.libPaths(c("E:/Package/.rlib_cast", .libPaths()))
+lib <- "E:/Package/.rlib_cast_versions/0.28.0"
+dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+.libPaths(c(lib, "E:/Package/.rlib_cast", .libPaths()))
 install.packages(c("remotes", "terra", "sf", "data.table", "ranger", "maxnet",
-  "mgcv", "glmnet", "pROC", "blockCV", "FNN", "digest", "filelock"),
+  "mgcv", "glmnet", "pROC", "blockCV", "FNN", "digest", "filelock",
+  "ggplot2", "patchwork", "scales", "ragg"),
   lib = .libPaths()[1L], repos = "https://cloud.r-project.org")
 remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 # 或在本机安装源码：
@@ -52,9 +56,9 @@ remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 | 环境库 | `E:/CHECO26/N-SDM/data`，可用 `CAST_DATA_ROOT` 改写 |
 | 发生记录 | `E:/Package/castSDM_workflows/species_occ`，可用 `CAST_OCCURRENCE_ROOT` 改写 |
 | 示例根目录 | 脚本所在目录，可用 `CAST_EXAMPLE_ROOT` 改写 |
-| R 包库 | 自动识别项目 `.rlib_cast`；自定义位置可设 `CAST_R_LIBRARY` |
+| R 包库 | 自动识别 `.rlib_cast` 和 `.rlib_cast_versions`；自定义位置可设 `CAST_R_LIBRARY` |
 | 物种 | `Schizothoracinae`，可用 `CAST_SPECIES` 选择 `Callosciurus_erythraeus` |
-| 运行标识 | `cast027_glu` 或 `cast027_hlu`，可用 `CAST_RUN_ID` 改写 |
+| 运行标识 | `cast028_glu` 或 `cast028_hlu`，可用 `CAST_RUN_ID` 改写 |
 
 GBIF 经纬度数据使用外部 PROJ `cs2cs` 转到环境库 CRS，须把其可执行文件加入
 `PATH`；这是本数据适配器的要求。`nsdm_occ` 输入应已为投影米坐标。
@@ -109,33 +113,55 @@ Rscript 00_RUN_ALL.R
 - `diagnostics/`：单模型与冻结集成的留出评价、训练层评分诊断、空间折组成与 AOA、选择频率、共同支持域和模型方向冲突。
 - `threshold_sensitivity.csv`：阈值 0.3、0.5、0.7 的敏感性，预测时累计，之后直接读取计数。
 - `occurrence_years.csv`、`case_design.csv`：实际建模记录的年代分布、分类层级、年份字段含义及设计限制。
-- `figures/`：报告场景的 PNG/PDF 预览。论文图件仍需按科学问题单独审定。
+- `figures/`：完整 PNG（600 dpi）与 PDF 图集，宽 183 mm；沿用中国省界、南海插图与原有配色。
+- `figures/source_data/`：每类图对应的数值表、版本与显示设置、可用性说明。
+- `figures/figure_inventory.csv`、`figure_status.csv`：全部可生成图的清单、实际导出状态及缺失原因。
+- `figures/.data/`：响应曲线、驱动分解、MESS、原生网格范围分类和绘图网格的独立缓存。
 - `case.rds`：案例配置和结果路径；`completion.rds` 仅表示本次计算与导出完成。
 
 数据准备保存在 `output/.prepared/<物种>/<内容指纹>/`，训练阶段缓存保存在
 `output/.training-cache/`。不要把 `completion.rds` 当作模型或论文质量验收证明。
 
 ```powershell
-Rscript 04_REPLOT.R output/cast027_glu/Schizothoracinae
+Rscript 04_REPLOT.R output/cast028_glu/Schizothoracinae
 ```
 
-重绘只读取已保存的比较栅格，不拟合、不预测、不计算响应曲线。
-在 R 会话中重绘，可先设置结果目录再 source 入口：
+默认输出 01–10：空间验证、生境变化、环境驱动、支持域与模型分歧、两组情景分解、
+所有变量的响应曲线、模型性能、范围变化类别、MESS 外推和全部未来适宜度。
+扩展输出包括变量筛选及稳定性、阈值敏感性、模型权重与损失、固定响应剖面、AOA，
+以及所有可用情景对比层、配对 SD、支持域、方向冲突和每个动态驱动的地图集。
+变量筛选概览保留前 30 名和全部最终变量，所有有效分数另以每页最多 45 个变量的
+`S_selection_*` 图集完整输出，避免超长图或缩成小字。数值计算得到的零 p 值在对数图中
+使用正规化最小正数作为显示下限，原始分数保存在 CSV 中。
+输入不足的图会明确记录原因，不静默省略。
+
+首次为旧结果补齐图集时，需要从已保存模型计算缺失的响应曲线、逐变量地图和 MESS；
+这一步可能较慢，完成后单独缓存，不重新拟合模型或改写原始科学栅格。
+以后的默认重绘复用校验通过的缓存。严格仅重绘时加 `--render-only`；
+如果缓存不完整，该模式会直接提示，不调用模型预测。
+原生栅格先按固定阈值分类，绘图网格默认 0.02 度；连续图用双线性、类别图用最近邻，
+统计表仍采用原生网格。图上标明显示色限与被压缩到色限的像元数。
+
+在 R 会话中重绘已经恢复图集的旧 `cast026`，可运行：
 
 ```r
-Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast027_glu/Schizothoracinae")
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast026_glu/Schizothoracinae",
+           CAST_RENDER_ONLY = "1")
 source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
-Sys.unsetenv("CAST_CASE_DIR")
+Sys.unsetenv(c("CAST_CASE_DIR", "CAST_RENDER_ONLY"))
 ```
 
-原论文运行目录保留；本入口使用新的结果布局，不读取旧版本缓存或旧的结果对象。
+只更新部分图时可设置 `CAST_FIGURES = "02,05,10"`，完成后清除该环境变量。
+重绘部分图会保留其他图的导出记录。旧 `cast026` / `cast027` 的完整结果目录也可补图；
+`04_REPLOT.R` 要求科学阶段已完成，不对仍在计算的目录操作。新训练使用新目录。
 
 ## 可调参数与解释边界
 
 `01_config.R` 的 `protocol` 是训练科学设置的唯一入口。总资源预算默认
 12 核、3 个场景进程、8000 MB；比较阶段每进程最多 4 个 RF 线程，训练阶段按
 协议最多用 12 个 RF 线程。修改配置开头的 `resources` 即同步控制两阶段资源。
-需要逐变量归因时，显式设置 `driver_attribution = TRUE`；仅分析报告场景。
+完整图集默认计算并缓存报告场景的逐变量归因。`figure_response_grid` 和
+`figure_display_resolution` 只控制响应图网格和地图显示分辨率。
 
 GLU 的中期/末期土地利用快照为 2050/2100，气候代表年为 2055/2085；
 HLU 使用与气候相同的 2030/2055/2085 年。映射会记录在场景表中，二者不能在论文
@@ -147,7 +173,7 @@ HLU 使用与气候相同的 2030/2055/2085 年。映射会记录在场景表中
 支持检查使用边际训练分位数。二值结果使用 `>=`；表格计数单位为有效像元，
 面积解释须核实等面积投影和像元面积。新版本修复 AOA 最近邻定义，旧 AOA 数值须重算。
 
-新版默认写入 `cast027_*`，不会覆盖已经完成的 `cast026_*`。新版修正了协议截断在
+新版默认写入 `cast028_*`，不会覆盖已有 `cast026_*` / `cast027_*`。0.27 修正了协议截断在
 CV、留出评价和地图之间的一致性，后续指标可能变化，不能给旧指标换上新版标签。
 评分偏移只固定加权训练均值；`score_views_oof.csv` 比较同一拟合的原生与偏移评分，
 不使用留出集选择策略，也不代表更换 RF 拟合权重后的效果。
@@ -164,4 +190,4 @@ CV、留出评价和地图之间的一致性，后续指标可能变化，不能
 该选择会进入数据准备缓存标识，并在 QC 中记录剔除原因，不自动将记录年视作采样年。
 科学配置改变时，运行声明会在改写既有结果前要求新的 `CAST_RUN_ID`；诊断阈值和
 硬件预算可以在同一次分析中更改。不同数据准备写入不同内容指纹目录。
-本次维护未运行这套完整应用；验证使用合成数据和旧结果的有限切片，不重新拟合案例。
+绘图维护使用合成数据与已保存的真实案例结果验证，不重新拟合完整案例。

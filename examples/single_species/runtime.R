@@ -7,11 +7,27 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
   ancestor <- root
   repeat {
     candidates <- c(candidates, file.path(ancestor, ".rlib_cast"))
+    versions <- file.path(ancestor, ".rlib_cast_versions")
+    if (dir.exists(versions)) candidates <- c(candidates,
+      list.dirs(versions, recursive = FALSE, full.names = TRUE))
     parent <- dirname(ancestor)
     if (identical(parent, ancestor)) break
     ancestor <- parent
   }
   libraries <- unique(candidates[nzchar(candidates) & dir.exists(candidates)])
+  # Do not overwrite a package library used by a running R process. An
+  # explicitly selected library retains precedence over side-by-side versions.
+  if (!nzchar(override) && !dir.exists(file.path(root, ".library")) && length(libraries)) {
+    with_cast <- libraries[file.exists(file.path(libraries, "castSDM", "DESCRIPTION"))]
+    if (length(with_cast)) {
+      newest <- Reduce(function(a, b) {
+        av <- read.dcf(file.path(a, "castSDM", "DESCRIPTION"), fields = "Version")[[1L]]
+        bv <- read.dcf(file.path(b, "castSDM", "DESCRIPTION"), fields = "Version")[[1L]]
+        if (utils::compareVersion(bv, av) > 0) b else a
+      }, with_cast)
+      libraries <- c(newest, setdiff(libraries, newest))
+    }
+  }
   if (length(libraries)) .libPaths(c(libraries, .libPaths()))
 
   packages <- unique(packages)

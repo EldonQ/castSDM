@@ -15,8 +15,8 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
-    "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN"),
-    minimum_cast = "0.27.1")
+    "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN",
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -24,6 +24,7 @@ local({
   cfg <- castsdm_species_configs(root)[[taxon]]
   if (is.null(cfg)) stop("Unknown CAST_SPECIES: ", taxon)
   cfg$runtime <- runtime
+  cfg$runtime$script_hashes <- tools::md5sum(list.files(root, pattern = "\\.R$", full.names = TRUE))
   for (path in c(cfg$occurrence_file, cfg$nsdm_pool_csv, cfg$future_layers_csv))
     if (!file.exists(path)) stop("Missing input: ", path, ". Check paths or run 00_INVENTORY.R.")
   if (cfg$input_type == "gbif" && !nzchar(Sys.which("cs2cs")))

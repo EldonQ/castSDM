@@ -12,13 +12,18 @@ local({
   if (!length(roots)) stop("Cannot locate runtime.R; source 04_REPLOT.R using its full path.")
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
-  case_runtime_setup(root, c("castSDM", "terra"), minimum_cast = "0.26.0")
+  case_runtime_setup(root, c("castSDM", "terra", "sf", "ggplot2", "patchwork", "scales", "ragg"),
+    minimum_cast = "0.28.0")
   args <- commandArgs(TRUE)
-  directory <- Sys.getenv("CAST_CASE_DIR", if (length(args) == 1L) args[1L] else "")
+  positional <- args[!startsWith(args, "--")]
+  directory <- Sys.getenv("CAST_CASE_DIR", if (length(positional) == 1L) positional[1L] else "")
   if (!nzchar(directory)) stop("Supply the case directory: Rscript 04_REPLOT.R <directory>, or set CAST_CASE_DIR before source().")
   out <- normalizePath(directory, winslash = "/", mustWork = TRUE)
+  if (!file.exists(file.path(out, "case.rds")))
+    stop("This case has not finished its scientific stages yet; choose a completed output directory.")
   case <- readRDS(file.path(out, "case.rds"))
   if (!identical(case$schema, "cast_single_species/1")) stop("Unsupported case bundle.")
+  sys.source(file.path(root, "prepare_data.R"), envir = environment())
   sys.source(file.path(root, "03_figures.R"), envir = environment())
   comparison <- readRDS(file.path(out, case$comparison))
   # Rebase relative scenario artifacts if the output bundle was moved.
@@ -26,5 +31,9 @@ local({
     if (!is.null(x$artifact)) x$raster_file <- file.path(out, "comparison", "rasters", x$artifact)
     x
   })
-  case_figures(comparison, out, case$report_scenario)
+  run <- readRDS(file.path(out, case$training))
+  render_only <- identical(Sys.getenv("CAST_RENDER_ONLY"), "1") || "--render-only" %in% args
+  include <- strsplit(Sys.getenv("CAST_FIGURES", "all"), ",", fixed = TRUE)[[1L]]
+  case_figures(comparison, out, case$report_scenario, result = run, cfg = case$cfg,
+    render_only = render_only, include = include)
 })

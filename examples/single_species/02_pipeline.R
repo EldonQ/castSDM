@@ -35,7 +35,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast027_", cfg$scenario_lulc_product))
+  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -106,23 +106,17 @@ run_species <- function(cfg) {
     output_dir = file.path(out, "comparison"), thresholds = cfg$diagnostic_thresholds)
   castSDM::cast_diagnose(result, comparison = comparison,
     output_dir = file.path(out, "diagnostics"))
-  if (isTRUE(cfg$driver_attribution)) {
-    # Explicitly optional: only the chosen report scenario, on the same domain.
-    common <- terra::rast(file.path(out, "comparison", ".cache", "common_domain.tif"))
-    castSDM::cast_attribution(result$fit_full, current,
-      scenarios$future[[scenarios$report]], drivers = unlist(scenarios$groups, use.names = FALSE),
-      weights = comparison$weights, mask = common, clamp = p$clamp,
-      support_probs = cfg$support_probs, resources = cfg$resources,
-      filename = file.path(out, "driver_attribution.tif"))
-  }
   case <- list(schema = "cast_single_species/1", species = cfg$species_name,
     cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
     training = "training/result.rds", comparison = "comparison/comparison.rds",
-    script_hashes = tools::md5sum(list.files(cfg$example_root, pattern = "\\.R$", full.names = TRUE)),
+    script_hashes = cfg$runtime$script_hashes %||%
+      tools::md5sum(list.files(cfg$example_root, pattern = "\\.R$", full.names = TRUE)),
     session = utils::capture.output(utils::sessionInfo()))
   saveRDS(case, file.path(out, "case.rds"))
-  case_figures(comparison, out, scenarios$report)
-  case_validation_figure(result, out)
+  # Every available figure is exported. Driver/PDP/MESS products are computed
+  # once from frozen fits, then cached independently of style and rendering.
+  case_figures(comparison, out, scenarios$report, result = result, cfg = cfg,
+    current = current, future = scenarios$future[[scenarios$report]])
   sensitivity <- summary(comparison, thresholds = cfg$diagnostic_thresholds)
   utils::write.csv(sensitivity, file.path(out, "threshold_sensitivity.csv"), row.names = FALSE)
   saveRDS(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),

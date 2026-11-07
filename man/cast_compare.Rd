@@ -3,6 +3,7 @@
 \name{cast_compare}
 \alias{cast_compare}
 \alias{summary.cast_comparison}
+\alias{plot.cast_comparison}
 \title{Compare Grouped Environmental Scenarios with Frozen SDMs}
 \usage{
 cast_compare(
@@ -26,6 +27,14 @@ cast_compare(
 )
 
 \method{summary}{cast_comparison}(object, thresholds = NULL, ...)
+
+\method{plot}{cast_comparison}(
+  x,
+  scenario = names(x$results)[1L],
+  layers = c("climate_main", "lulc_main", "joint_change", "interaction"),
+  basemap = c("world", "china", "none"),
+  ...
+)
 }
 \arguments{
 \item{fit}{A \link{cast_fit} or the \code{cast_result} returned by \code{\link[=cast_run]{cast_run()}}.}
@@ -82,6 +91,15 @@ saved predictions. Counts use \code{>=} and report their domain denominators.}
 \item{object}{A comparison object.}
 
 \item{...}{Additional plotting arguments, or ignored by summary/print.}
+
+\item{x}{A saved comparison object to print or plot.}
+
+\item{scenario}{Saved scenario name for plotting.}
+
+\item{layers}{Saved prediction/contrast layers to plot.}
+
+\item{basemap}{Geographic background for plotting: \code{"world"}, \code{"china"}
+or \code{"none"}; China retains the established South China Sea inset.}
 }
 \value{
 A \code{cast_comparison} with combined \code{summary}, optional binary tables,
