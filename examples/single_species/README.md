@@ -6,8 +6,7 @@
 
 ## 直接在 R / RStudio 中运行
 
-本次入口修正后，请先重启一次 R，清除会话中可能已加载的旧版 castSDM。
-然后直接运行：
+直接运行，无需先重启 R：
 
 ```r
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
@@ -16,8 +15,10 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 不需要先 `setwd()`，也不需要手动 `library()` 或设置 `.libPaths()`。
 入口会以脚本所在位置定位配置，并自动优先加入项目的 `E:/Package/.rlib_cast`，
 其中已经安装 castSDM 0.26.0 和 `filelock`。不会在正式运行中自动联网安装软件。
-若仍有缺失或过旧依赖，会一次列出并给出安装命令；若会话已加载另一份 castSDM，
-会要求重启 R 后重新执行，避免混用不同代码。
+若仍有缺失或过旧依赖，会一次列出并给出安装命令。已经加载的 castSDM 若与项目版
+一致，会直接复用；若是旧版或开发版，入口会只切换 castSDM 到项目安装版，保留工作区
+对象及其他已加载包，不再仅因路径不同要求重启。极少数其他包正在导入 castSDM、
+无法切换的情况，可改用下面的 Rscript 命令独立运行。
 
 默认运行 `Schizothoracinae`。改物种或另开一个结果目录：
 

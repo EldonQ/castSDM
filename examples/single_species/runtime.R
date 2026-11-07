@@ -44,26 +44,63 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
       paste(instructions, collapse = "\n"), call. = FALSE)
   }
 
-  # Do not mix a previously loaded development/old castSDM with worker installs.
+  # castSDM is a pure-R package. Switch just this namespace when an old/dev
+  # copy is loaded; do not require an interactive R restart for a path change.
+  reattach_cast <- FALSE
+  if ("castSDM" %in% packages && "castSDM" %in% loadedNamespaces()) {
+    selected <- installed$castSDM
+    active_path <- normalizePath(getNamespaceInfo("castSDM", "path"), winslash = "/")
+    active_version <- as.character(getNamespaceVersion("castSDM"))
+    code_files <- file.path("R", paste0("castSDM.", c("rdb", "rdx")))
+    active_files <- file.path(active_path, code_files)
+    selected_files <- file.path(selected$path, code_files)
+    same_code <- identical(active_version, selected$version) &&
+      (identical(active_path, selected$path) ||
+        (all(file.exists(c(active_files, selected_files))) &&
+          identical(unname(tools::md5sum(active_files)), unname(tools::md5sum(selected_files)))))
+    if (!same_code) {
+      users <- getNamespaceUsers("castSDM")
+      if (length(users)) stop("Cannot switch castSDM while it is imported by: ",
+        paste(users, collapse = ", "),
+        ". Run 00_RUN_ALL.R with Rscript in a separate R process.", call. = FALSE)
+      has_native <- any(vapply(getLoadedDLLs(), function(dll)
+        startsWith(normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE),
+          paste0(active_path, "/")), logical(1)))
+      if (has_native)
+        stop("The loaded castSDM has native code; run the entry with Rscript in a separate R process.", call. = FALSE)
+      message("Switching castSDM ", active_version, " (", active_path,
+        ") -> ", selected$version, " (", selected$path, ")")
+      reattach_cast <- "package:castSDM" %in% search()
+      if ("pkgload" %in% loadedNamespaces() && pkgload::is_dev_package("castSDM")) {
+        pkgload::unload("castSDM", quiet = TRUE)
+      } else {
+        if (reattach_cast) detach("package:castSDM", unload = FALSE, character.only = TRUE)
+        unloadNamespace("castSDM")
+      }
+    }
+  }
+  # Leave already loaded native dependencies in place. A genuine version
+  # mismatch matters for workers, whereas a same-version path difference does not.
   conflicting <- vapply(intersect(packages, loadedNamespaces()), function(package) {
     selected <- installed[[package]]
-    different_version <- !identical(as.character(getNamespaceVersion(package)), selected$version)
-    different_cast <- package == "castSDM" && !identical(
-      normalizePath(getNamespaceInfo(package, "path"), winslash = "/"), selected$path)
-    different_version || different_cast
+    !identical(as.character(getNamespaceVersion(package)), selected$version)
   }, logical(1))
-  if (any(conflicting)) stop("Restart R, then source the entry again. This session has a different loaded copy of: ",
-    paste(names(conflicting)[conflicting], collapse = ", "), call. = FALSE)
+  if (any(conflicting)) stop("Loaded dependency versions differ from the project library: ",
+    paste(names(conflicting)[conflicting], collapse = ", "),
+    ". Run the entry with Rscript in a separate R process.", call. = FALSE)
   failures <- vapply(packages, function(package) {
     tryCatch({ loadNamespace(package); "" }, error = function(e) conditionMessage(e))
   }, character(1))
   if (any(nzchar(failures))) stop("Cannot load required packages:\n",
     paste(paste(names(failures)[nzchar(failures)], failures[nzchar(failures)], sep = ": "),
       collapse = "\n"), call. = FALSE)
+  if (reattach_cast) library("castSDM", lib.loc = dirname(installed$castSDM$path), character.only = TRUE)
   versions <- data.frame(package = packages,
-    version = vapply(installed, `[[`, character(1), "version"),
-    path = vapply(installed, `[[`, character(1), "path"), row.names = NULL)
+    version = vapply(packages, function(package) as.character(getNamespaceVersion(package)), character(1)),
+    path = vapply(packages, function(package)
+      normalizePath(getNamespaceInfo(package, "path"), winslash = "/"), character(1)), row.names = NULL)
   if ("castSDM" %in% packages)
-    message("castSDM ", installed$castSDM$version, " | R library: ", dirname(installed$castSDM$path))
+    message("castSDM ", getNamespaceVersion("castSDM"), " | R library: ",
+      dirname(getNamespaceInfo("castSDM", "path")))
   invisible(list(libraries = .libPaths(), dependencies = versions))
 }
