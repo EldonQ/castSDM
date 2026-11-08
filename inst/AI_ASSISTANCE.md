@@ -25,3 +25,9 @@ figure layouts, adds a complete figure/export interface and caches diagnostic
 products separately from rendering. Existing scientific fits and predictions
 are preserved; figure tests include native-grid classification and proof that
 render-only output does not call a fitted engine.
+
+On 8 November 2026, maintenance for 0.28.1 addressed PSOCK startup validation,
+isolated worker loading, early compatibility checks and an audited example
+resume path. It does not alter prediction methods. Regression evidence includes
+installed-package scenario parity, startup isolation and preserved scientific
+cache identities; no full real-case research pipeline is rerun for this fix.

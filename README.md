@@ -173,6 +173,9 @@ Current predictions are shared across futures. Additive univariate logit GAMs
 reuse exact terms for partial scenarios; other structures use ordinary
 prediction. A total core and memory budget bounds scenario workers and RF
 threads. Workers require an installed matching package.
+Worker startup uses the caller's exact package library without user/site
+startup profiles. Loaded identities are checked in the caller before input
+hashing or raster scans; mismatch messages identify the version, path or code.
 Exactly unchanged group inputs reuse the matching corner prediction per row,
 after the declared clamp. Outputs use band-interleaved tiled GeoTIFFs. Saved
 phase timings distinguish input reads, prediction/contrast calculations and

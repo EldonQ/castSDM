@@ -16,7 +16,7 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.0")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.1")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -32,5 +32,8 @@ local({
   if (identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% commandArgs(TRUE)) {
     message("Preflight OK: ", taxon, "; no preparation, training or raster projection started.")
     invisible(cfg)
-  } else run_species(cfg)
+  } else {
+    case_runtime_resume_patch(cfg)
+    run_species(cfg)
+  }
 })

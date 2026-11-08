@@ -1,3 +1,16 @@
+# castSDM 0.28.1
+
+- Strip source/bytecode namespace references from serialized bootstrap closures,
+  preventing a default-library copy from loading before worker library setup.
+  Materialize namespace identities in each process and compare in the caller. Pin workers to
+  the caller's installation and isolate startup profiles; genuine version,
+  path, R-version and code mismatches still fail with precise diagnostics.
+- Verify workers before expensive input hashing/current prediction/common
+  domain scans, reuse the verified cluster, and record worker startup time.
+- Preserve 0.28.0 scientific fingerprints and caches for this worker-only patch.
+  The example can resume an otherwise identical 0.28.0 case with an audited
+  maintenance record; scientific configuration/source changes remain guarded.
+
 # castSDM 0.28.0
 
 - Restore publication cartography for comparison plots, including the China

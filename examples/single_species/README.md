@@ -1,4 +1,4 @@
-# 单物种应用示例（castSDM >= 0.28.0）
+# 单物种应用示例（castSDM >= 0.28.1）
 
 入口是 `00_RUN_ALL.R`。案例保留数据特有的发生记录质控、分析域和未来文件匹配；
 拟合、空间交叉验证、缓存、四角场景比较和归因均调用已安装的 castSDM。
@@ -37,7 +37,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 开发源码修改后须重新安装，再运行示例。已有任务运行时使用独立版本库，避免改写其加载的包：
 
 ```r
-lib <- "E:/Package/.rlib_cast_versions/0.28.0"
+lib <- "E:/Package/.rlib_cast_versions/0.28.1"
 dir.create(lib, recursive = TRUE, showWarnings = FALSE)
 .libPaths(c(lib, "E:/Package/.rlib_cast", .libPaths()))
 install.packages(c("remotes", "terra", "sf", "data.table", "ranger", "maxnet",
@@ -102,6 +102,12 @@ Rscript 00_RUN_ALL.R
 相同运行标识用于续跑，包会校验缓存内容和输出摘要。更改科学输入后，应设置新的
 `CAST_RUN_ID`；训练缓存独立于结果目录，可在数据和训练设置一致时复用。
 损坏或陈旧的比较栅格不会被当作成功结果使用。
+
+0.28.1 修复初始化函数携带源码引用、导致工作进程提前加载系统旧包的问题。
+工作进程在隔离启动后固定加载主进程的安装库，
+实际版本、路径和核心代码由主进程核对，并在读取大型栅格前完成预检。
+本补丁不改变预测方法或训练设置，兼容 0.28.0 的训练、预测和图件数值指纹。配置和科学脚本未变的
+`cast028_*` 案例会自动续跑，版本升级另记入 `maintenance.rds`；训练结果不会被改标。
 
 ## 输出与重绘
 

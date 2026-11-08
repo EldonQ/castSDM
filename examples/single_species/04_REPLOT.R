@@ -13,7 +13,7 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, c("castSDM", "terra", "sf", "ggplot2", "patchwork", "scales", "ragg"),
-    minimum_cast = "0.28.0")
+    minimum_cast = "0.28.1")
   args <- commandArgs(TRUE)
   positional <- args[!startsWith(args, "--")]
   directory <- Sys.getenv("CAST_CASE_DIR", if (length(positional) == 1L) positional[1L] else "")

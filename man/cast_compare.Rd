@@ -73,7 +73,11 @@ A temporary directory is used when omitted for raster inputs.}
 \item{resources}{Optional named list: total \code{cores} (default 1), \code{workers}
 (default up to 4), total \code{memory_mb} (default 1024), and existing \code{scratch_dir}.
 The budget determines blocks and learner threads. Scientific definitions
-and cache keys do not depend on worker counts or output paths.}
+and cache keys do not depend on worker counts or output paths.
+Local workers start without user/site startup profiles, use the caller's
+exact installed castSDM library, and verify their loaded namespace before
+input hashing or raster prediction. Version/path/code mismatches are
+reported separately; the safety check is not bypassed.}
 
 \item{resume}{Reuse matching receipts only after input/model and output hashes
 are verified. Defaults to \code{TRUE}.}

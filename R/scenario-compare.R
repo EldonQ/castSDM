@@ -287,23 +287,14 @@
     finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
 }
 
-.cast_compare_tasks <- function(jobs, workers) {
+.cast_compare_tasks <- function(jobs, workers, cluster = NULL) {
   if (workers < 2L || length(jobs) < 2L) return(lapply(jobs, .cast_compare_task))
   workers <- min(workers, length(jobs))
-  cl <- parallel::makePSOCKcluster(workers)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
-  initialize <- function(libs, version, code) {
-    .libPaths(libs)
-    loadNamespace("castSDM")
-    if (!identical(as.character(utils::packageVersion("castSDM")), version) ||
-        !identical(utils::getFromNamespace(".cast_code_identity", "castSDM")(
-          utils::getFromNamespace(".cast_compare_one", "castSDM")), code))
-      stop("Worker castSDM differs from the calling session. Install the current package before parallel use.")
-    TRUE
+  cl <- cluster
+  if (is.null(cl)) {
+    cl <- .cast_start_compare_cluster(workers)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
   }
-  environment(initialize) <- baseenv()
-  parallel::clusterCall(cl, initialize, .libPaths(), as.character(utils::packageVersion("castSDM")),
-    .cast_code_identity(.cast_compare_one))
   for (i in seq_along(jobs)) {
     if (jobs[[i]]$plan$raster) {
       p <- jobs[[i]]$plan
@@ -318,6 +309,7 @@
     })
   }
   task <- function(job) utils::getFromNamespace(".cast_compare_task", "castSDM")(job)
+  task <- utils::removeSource(task)
   environment(task) <- baseenv()
   parallel::parLapplyLB(cl, jobs, task)
 }
@@ -373,6 +365,10 @@
 #'   (default up to 4), total `memory_mb` (default 1024), and existing `scratch_dir`.
 #'   The budget determines blocks and learner threads. Scientific definitions
 #'   and cache keys do not depend on worker counts or output paths.
+#'   Local workers start without user/site startup profiles, use the caller's
+#'   exact installed castSDM library, and verify their loaded namespace before
+#'   input hashing or raster prediction. Version/path/code mismatches are
+#'   reported separately; the safety check is not bypassed.
 #' @param resume Reuse matching receipts only after input/model and output hashes
 #'   are verified. Defaults to `TRUE`.
 #' @param overwrite Replace stale public artifacts; default `FALSE`. Matching
@@ -459,6 +455,14 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   block_size <- max(1L, as.integer(min(1000000, budget$worker_memory_mb*1e6/
     (8 * (4*length(plan$vars) + 16*length(weights) + 32) * 4))))
   if (verbose) cli::cli_inform("Compare {length(plan$future)} future{?s}; groups {.val {names(groups)}}; {length(weights)} active models; {length(plan$static)} static predictors; {domain} domain.")
+  cluster <- NULL
+  worker_start <- Sys.time()
+  if (budget$workers > 1L && length(plan$future) > 1L) {
+    cluster <- .cast_start_compare_cluster(min(budget$workers, length(plan$future)))
+    on.exit(parallel::stopCluster(cluster), add = TRUE)
+    if (verbose) cli::cli_inform("Verified {length(cluster)} scenario workers against the calling installation.")
+  }
+  worker_elapsed <- as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
   memo <- new.env(parent = emptyenv())
   identity_start <- Sys.time()
   fit_key <- .cast_fit_identity(fit)
@@ -541,7 +545,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     if (verbose) cli::cli_inform("{scenario}: {if (reused) 'verified cache' else 'computed'}")
   }
   dispatch_start <- Sys.time()
-  computed <- .cast_compare_tasks(jobs, budget$workers)
+  computed <- .cast_compare_tasks(jobs, budget$workers, cluster)
   dispatch_elapsed <- as.numeric(difftime(Sys.time(), dispatch_start, units = "secs"))
   for (scenario in names(computed)) {
     x <- computed[[scenario]]$value
@@ -569,8 +573,8 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     binary_common_support = combine("binary_common_support"), agreement = combine("agreement"),
     threshold_sensitivity = combine("threshold_sensitivity"),
     timings = combine("timings"),
-    runtime = data.frame(phase = c("input_identity", "scenario_dispatch_wall", "comparison_wall_before_export"),
-      elapsed_s = c(identity_elapsed, dispatch_elapsed,
+    runtime = data.frame(phase = c("worker_startup", "input_identity", "scenario_dispatch_wall", "comparison_wall_before_export"),
+      elapsed_s = c(worker_elapsed, identity_elapsed, dispatch_elapsed,
         as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
     common_support_file = if (plan$raster) common$support,
     results = results, groups = plan$groups,

@@ -79,6 +79,10 @@
 }
 
 .cast_fit_identity <- function(fit) {
+  package <- as.character(utils::packageVersion("castSDM"))
+  # This explicitly declared worker-only patch keeps 0.28.0 prediction/cache
+  # semantics. Later releases invalidate conservatively unless reviewed here.
+  if (identical(package, "0.28.1")) package <- "0.28.0"
   models <- lapply(fit$models, function(m) {
     if (is.function(m$predict_function)) m$predict_function <- .cast_callback_identity(m$predict_function)
     m
@@ -87,7 +91,7 @@
   versions <- vapply(engines[nzchar(engines)], function(p) {
     if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "missing"
   }, character(1))
-  .cast_digest(list(package = as.character(utils::packageVersion("castSDM")),
+  .cast_digest(list(package = package,
     models = models, env_vars = fit$env_vars, scaling = fit$scaling,
     calibration = fit$calibration, engines = versions, predictor = .cast_code_identity(predict_single_model),
     contrast = .cast_code_identity(.cast_factorial_values), context = .cast_code_identity(.cast_prediction_context),

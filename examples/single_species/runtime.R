@@ -1,3 +1,4 @@
+# AI-assisted maintenance (2026-11-08); scope: inst/AI_ASSISTANCE.md.
 # Runtime setup shared by the example entry points. No fitting or raster work.
 case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
   override <- Sys.getenv("CAST_R_LIBRARY", "")
@@ -119,4 +120,50 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
     message("castSDM ", getNamespaceVersion("castSDM"), " | R library: ",
       dirname(getNamespaceInfo("castSDM", "path")))
   invisible(list(libraries = .libPaths(), dependencies = versions))
+}
+
+# Only this declared maintenance pair can migrate an otherwise identical claim.
+case_runtime_resume_patch <- function(cfg) {
+  current_version <- as.character(getNamespaceVersion("castSDM"))
+  if (!identical(current_version, "0.28.1")) return(invisible(FALSE))
+  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
+  if (!grepl("^[A-Za-z0-9_-]+$", run_id)) return(invisible(FALSE))
+  out <- file.path(cfg$output_root, run_id, cfg$species_name)
+  claim_file <- file.path(out, "run_claim.rds")
+  if (!file.exists(claim_file)) return(invisible(FALSE))
+  lock <- filelock::lock(file.path(out, ".case.lock"), timeout = 0)
+  if (is.null(lock)) stop("Another process is writing this case: ", out, call. = FALSE)
+  on.exit(filelock::unlock(lock), add = TRUE)
+  previous <- readRDS(claim_file)
+  if (!identical(previous$schema, "cast_case_claim/1") ||
+      !identical(previous$package, "0.28.0")) return(invisible(FALSE))
+  scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
+    "output_root", "cache_root", "preparation_root", "diagnostic_thresholds"))]
+  scientific_cfg$protocol$num_threads <- NULL
+  sources <- unname(tools::md5sum(file.path(cfg$example_root,
+    c("02_pipeline.R", "prepare_data.R", "data_adapter.R", "scenario_case.R"))))
+  if (!identical(previous$config, scientific_cfg) || !identical(previous$sources, sources))
+    return(invisible(FALSE))
+  fields <- c("schema", "config", "package", "sources")
+  if (!identical(previous$key, digest::digest(previous[fields], algo = "sha256")))
+    stop("The saved case claim failed its content check: ", claim_file, call. = FALSE)
+  updated <- previous[fields]
+  updated$package <- current_version
+  updated$key <- digest::digest(updated, algo = "sha256")
+  history_file <- file.path(out, "maintenance.rds")
+  history <- if (file.exists(history_file)) readRDS(history_file) else
+    list(schema = "cast_case_maintenance/1", entries = list())
+  if (!identical(history$schema, "cast_case_maintenance/1"))
+    stop("Unsupported case maintenance history: ", history_file, call. = FALSE)
+  recorded <- any(vapply(history$entries, function(x) identical(x$to$key, updated$key), logical(1)))
+  if (!recorded) history$entries[[length(history$entries)+1L]] <- list(
+    utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    reason = "0.28.1 worker-bootstrap-only patch; scientific inputs, source hashes and prediction contract unchanged.",
+    from = previous, to = updated)
+  # Reuse the package atomic publisher in this version-specific adapter.
+  publish <- utils::getFromNamespace(".cast_atomic_rds", "castSDM")
+  publish(history, history_file)
+  publish(updated, claim_file)
+  message("Resuming the unchanged 0.28.0 analysis with the 0.28.1 worker fix; maintenance receipt recorded.")
+  invisible(TRUE)
 }
