@@ -1,4 +1,4 @@
-# AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
+# AI-assisted maintenance (2026-11-08); scope and verification: inst/AI_ASSISTANCE.md.
 test_that("worker identity checks reject real differences with specific diagnostics", {
   expected <- list(version = "0.28.1", path = "/library/castSDM", R = "4.4.3", code = "same code")
   expect_true(.cast_check_compare_worker(expected, expected, 1L))
@@ -123,8 +123,10 @@ test_that("installed scenario workers equal sequential execution", {
   futures <- setNames(lapply(seq_len(9L), function(i) transform(a, x = x + i*.1)),
     paste0("future_", seq_len(9L)))
   one <- cast_compare(fit, a, futures, list(first = "x", second = "z"), verbose = FALSE)
+  # R CMD check permits at most two simultaneous worker processes. Nine
+  # scenarios still exercise scheduling beyond the size of the pool.
   two <- cast_compare(fit, a, futures, list(first = "x", second = "z"),
-    resources = list(cores = 3, workers = 3), verbose = FALSE)
+    resources = list(cores = 2, workers = 2), verbose = FALSE)
   expect_equal(two$summary, one$summary)
   scientific <- function(results) lapply(results, function(x) { x$timings <- NULL; x })
   expect_equal(scientific(two$results), scientific(one$results))
@@ -141,7 +143,7 @@ test_that("installed scenario workers equal sequential execution", {
     mask = c(0, rep(1, 11)), threshold = .5, verbose = FALSE)
   actual <- cast_compare(fit, raster, future_rasters, list(first = "x", second = "z"),
     mask = mask, threshold = .5, output_dir = directory,
-    resources = list(cores = 3, workers = 3, memory_mb = 96), verbose = FALSE)
+    resources = list(cores = 2, workers = 2, memory_mb = 96), verbose = FALSE)
   expect_equal(actual$summary, expected$summary, tolerance = 1e-12)
   expect_equal(actual$binary, expected$binary)
   expect_true(all(vapply(actual$results, function(x) file.exists(x$raster_file), logical(1))))
