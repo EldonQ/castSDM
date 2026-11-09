@@ -1,3 +1,14 @@
+# castSDM 0.28.2
+
+- Reject missing local file-backed comparison inputs before worker startup,
+  hashing, prediction or output creation; recheck sources in scenario tasks
+  and include the scenario name in worker failures.
+- Support the CHECO26 `reg` layout and legacy `glo` inventories with stable
+  predictor identifiers. Example preflight now validates physical files in
+  both inventories, including in dry-run mode.
+- Preserve the 0.28.0/0.28.1 numerical prediction and training cache contracts;
+  these changes validate I/O and do not change model methods.
+
 # castSDM 0.28.1
 
 - Strip source/bytecode namespace references from serialized bootstrap closures,

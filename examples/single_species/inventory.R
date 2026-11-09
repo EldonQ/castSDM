@@ -1,4 +1,4 @@
-# Metadata inventory for the national 1 km glo library.
+# Metadata inventory for the national 1 km reg library (legacy glo supported).
 #
 # The inventory is the only place that knows the directory layout. It writes
 # one current-layer table and one future-layer table; the model, the screen and
@@ -29,6 +29,13 @@ glo_inventory_files <- function(root) {
   )
 }
 
+case_covariate_scope <- function(data_root) {
+  for (scope in c("reg", "glo"))
+    if (dir.exists(file.path(data_root, "covariates", scope))) return(scope)
+  stop("Environmental library not found below ", file.path(data_root, "covariates"),
+    "; expected reg or legacy glo.", call. = FALSE)
+}
+
 .glo_scale <- function(layer) {
   if (grepl("_f1000$", layer)) return("f1000")
   if (grepl("_f5000$", layer)) return("f5000")
@@ -53,7 +60,7 @@ glo_inventory_files <- function(root) {
   gsub("_(19|20|21)[0-9]{2}(?=_|$)", "", x, perl = TRUE)
 }
 
-# One current layer. `rel` is the path below covariates/glo/.
+# One current layer. `rel` is the path below covariates/reg/ or legacy glo/.
 glo_current_meta_one <- function(path, rel, data_root) {
   seg <- strsplit(rel, "/", fixed = TRUE)[[1]]
   group <- seg[1]
@@ -63,7 +70,7 @@ glo_current_meta_one <- function(path, rel, data_root) {
   layer <- if (identical(group, "bioclim")) {
     basename(dirname(path))
   } else {
-    gsub("-", "_", sub("^glo_", "", stem))
+    gsub("-", "_", sub("^(reg|glo)_", "", stem))
   }
   year <- suppressWarnings(as.integer(seg[grepl("^(19|20|21)[0-9]{2}$", seg)][1]))
   scale <- .glo_scale(layer)
@@ -109,13 +116,13 @@ glo_current_meta_one <- function(path, rel, data_root) {
 }
 
 glo_future_meta_one <- function(path) {
-  rel <- sub("^.*/covariates/glo/", "", normalizePath(path, winslash = "/"))
+  rel <- sub("^.*/covariates/(reg|glo)/", "", normalizePath(path, winslash = "/"))
   seg <- strsplit(rel, "/", fixed = TRUE)[[1]]
   group <- seg[1]
   product <- seg[2]
   dataset <- paste(seg[1:2], collapse = "/")
   stem <- sub("[.]tif$", "", basename(path))
-  layer_future <- gsub("-", "_", sub("^glo_", "", stem))
+  layer_future <- gsub("-", "_", sub("^(reg|glo)_", "", stem))
   year <- suppressWarnings(as.integer(seg[grepl("^(19|20|21)[0-9]{2}$", seg)][1]))
   ssp <- seg[grepl("^ssp[0-9]+$", seg)][1]
   scale <- .glo_scale(layer_future)
@@ -214,10 +221,10 @@ glo_coverage <- function(paths, mask, verbose = TRUE) {
   out
 }
 
-#' Build the current/future inventory for the glo library.
+#' Build the current/future inventory for the reg or legacy glo library.
 #'
 #' @param root Workflow root containing `config/`.
-#' @param data_root Project data root containing `covariates/glo` and
+#' @param data_root Project data root containing `covariates/reg` (or legacy `glo`) and
 #'   `mask_china.tif`.
 #' @param coverage_min Minimum finite share on the land mask for a current layer.
 #' @param coverage_csv Optional CSV with `path`/`cover` columns to reuse; when
@@ -229,11 +236,10 @@ glo_inventory_build <- function(root, data_root, coverage_min = 0.95,
                                 coverage_csv = NULL, check_geom = TRUE,
                                 verbose = TRUE) {
   if (!requireNamespace("terra", quietly = TRUE)) {
-    stop("Package 'terra' is required to build the glo inventory.")
+    stop("Package 'terra' is required to build the environmental inventory.")
   }
-  glo_root <- file.path(data_root, "covariates", "glo")
+  glo_root <- file.path(data_root, "covariates", case_covariate_scope(data_root))
   mask_file <- file.path(data_root, "mask_china.tif")
-  if (!dir.exists(glo_root)) stop("glo library not found: ", glo_root)
   if (!file.exists(mask_file)) stop("Land mask not found: ", mask_file)
   files <- glo_inventory_files(root)
   dir.create(dirname(files$current_all), recursive = TRUE, showWarnings = FALSE)
@@ -305,6 +311,7 @@ glo_inventory_build <- function(root, data_root, coverage_min = 0.95,
   version <- data.frame(
     created_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     data_root = normalizePath(data_root, winslash = "/", mustWork = TRUE),
+    covariate_scope = basename(glo_root),
     n_current = nrow(current),
     n_current_kept = sum(current$status == "kept"),
     n_eligible_glu = sum(current$eligible_glu),

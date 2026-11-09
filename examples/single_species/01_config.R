@@ -2,6 +2,7 @@
 # Scientific settings live in one cast_protocol(); paths and data QC stay here.
 castsdm_species_configs <- function(root) {
   data_root <- Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data")
+  scope <- case_covariate_scope(data_root)
   occurrence_root <- Sys.getenv("CAST_OCCURRENCE_ROOT",
     "E:/Package/castSDM_workflows/species_occ")
   seed <- 42L
@@ -58,7 +59,8 @@ castsdm_species_configs <- function(root) {
       nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_glu.csv"),
       scenario_lulc_product = "glu", domain_mode = "freshwater_river",
       freshwater_river_distance_raster = file.path(data_root,
-        "covariates/glo/dist/h90m/stream-dist-proximity/glo_dist_h90m_stream-dist-proximity.tif"))),
+        "covariates", scope, "dist/h90m/stream-dist-proximity",
+        paste0(scope, "_dist_h90m_stream-dist-proximity.tif")))),
     Callosciurus_erythraeus = utils::modifyList(common, list(
       species_name = "Callosciurus_erythraeus", taxon_level = "species-level GBIF records",
       input_type = "nsdm_occ",

@@ -278,6 +278,7 @@
     plan$future <- lapply(plan$future, terra::unwrap)
     if (!is.null(plan$mask)) plan$mask <- terra::unwrap(plan$mask)
   }
+  .cast_assert_compare_sources(plan)
   value <- .cast_compare_one(job$fit, plan, job$scenario, job$weights,
     job$threshold, job$bounds, job$clamp, job$baseline, job$domain,
     job$block_size, job$file, job$common_support, job$thresholds)
@@ -308,7 +309,9 @@
       m
     })
   }
-  task <- function(job) utils::getFromNamespace(".cast_compare_task", "castSDM")(job)
+  task <- function(job) tryCatch(
+    utils::getFromNamespace(".cast_compare_task", "castSDM")(job),
+    error = function(e) stop("Scenario ", job$scenario, ": ", conditionMessage(e), call. = FALSE))
   task <- utils::removeSource(task)
   environment(task) <- baseenv()
   parallel::parLapplyLB(cl, jobs, task)
@@ -338,6 +341,8 @@
 #' otherwise the comparison fails instead of changing weights or domains.
 #' @param fit A [cast_fit] or the `cast_result` returned by [cast_run()].
 #' @param current Current predictor frame or `SpatRaster`/path.
+#'   Local file-backed sources must remain available throughout comparison;
+#'   missing sources fail before hashing, prediction or output creation.
 #' @param future Future environment or uniquely named list of environments.
 #'   All grouped predictors are required. Omitted static layers inherit current;
 #'   supplied static layers must remain equal to current.
@@ -417,6 +422,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   old <- options(castSDM.predict_threads = budget$threads, castSDM.compare_threads = budget$cores)
   on.exit(options(old), add = TRUE)
   plan <- .cast_compare_inputs(fit, current, future, groups, mask)
+  .cast_assert_compare_sources(plan)
   if (plan$raster) {
     old_temp <- terra::terraOptions(print = FALSE)$tempdir
     terra::terraOptions(tempdir = budget$scratch_dir)

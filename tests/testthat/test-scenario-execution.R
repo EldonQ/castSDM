@@ -133,9 +133,13 @@ test_that("installed scenario workers equal sequential execution", {
   skip_if_not_installed("terra")
   raster <- terra::rast(nrows = 3, ncols = 4, nlyrs = 2)
   terra::values(raster) <- as.matrix(a); names(raster) <- names(a)
-  future_rasters <- lapply(futures, function(x) {
-    r <- terra::rast(raster); terra::values(r) <- as.matrix(x); r
-  })
+  sources <- tempfile("compare-sources-"); dir.create(sources)
+  on.exit(unlink(sources, recursive = TRUE), add = TRUE)
+  raster <- terra::writeRaster(raster, file.path(sources, "current.tif"), datatype = "FLT8S")
+  future_rasters <- setNames(lapply(names(futures), function(scenario) {
+    r <- terra::rast(raster); terra::values(r) <- as.matrix(futures[[scenario]])
+    terra::writeRaster(r, file.path(sources, paste0(scenario, ".tif")), datatype = "FLT8S")
+  }), names(futures))
   mask <- raster[[1]]; terra::values(mask) <- c(0, rep(1, 11))
   directory <- tempfile("compare-workers-")
   on.exit(unlink(directory, recursive = TRUE), add = TRUE)

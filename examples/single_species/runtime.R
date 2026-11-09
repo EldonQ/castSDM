@@ -122,10 +122,12 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
   invisible(list(libraries = .libPaths(), dependencies = versions))
 }
 
-# Only this declared maintenance pair can migrate an otherwise identical claim.
+# Only declared I/O maintenance versions can migrate an otherwise identical claim.
 case_runtime_resume_patch <- function(cfg) {
   current_version <- as.character(getNamespaceVersion("castSDM"))
-  if (!identical(current_version, "0.28.1")) return(invisible(FALSE))
+  compatible <- switch(current_version, `0.28.1` = "0.28.0",
+    `0.28.2` = c("0.28.0", "0.28.1"), character())
+  if (!length(compatible)) return(invisible(FALSE))
   run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) return(invisible(FALSE))
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
@@ -136,7 +138,7 @@ case_runtime_resume_patch <- function(cfg) {
   on.exit(filelock::unlock(lock), add = TRUE)
   previous <- readRDS(claim_file)
   if (!identical(previous$schema, "cast_case_claim/1") ||
-      !identical(previous$package, "0.28.0")) return(invisible(FALSE))
+      !previous$package %in% compatible) return(invisible(FALSE))
   scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
     "output_root", "cache_root", "preparation_root", "diagnostic_thresholds"))]
   scientific_cfg$protocol$num_threads <- NULL
@@ -158,12 +160,32 @@ case_runtime_resume_patch <- function(cfg) {
   recorded <- any(vapply(history$entries, function(x) identical(x$to$key, updated$key), logical(1)))
   if (!recorded) history$entries[[length(history$entries)+1L]] <- list(
     utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-    reason = "0.28.1 worker-bootstrap-only patch; scientific inputs, source hashes and prediction contract unchanged.",
+    reason = paste(current_version, "I/O-only patch; scientific inputs, source hashes and prediction contract unchanged."),
     from = previous, to = updated)
   # Reuse the package atomic publisher in this version-specific adapter.
   publish <- utils::getFromNamespace(".cast_atomic_rds", "castSDM")
   publish(history, history_file)
   publish(updated, claim_file)
-  message("Resuming the unchanged 0.28.0 analysis with the 0.28.1 worker fix; maintenance receipt recorded.")
+  message("Resuming the unchanged ", previous$package, " analysis with ", current_version,
+    "; maintenance receipt recorded.")
+  invisible(TRUE)
+}
+
+# Validate physical inputs even in --dry-run mode, before preparation or fitting.
+case_runtime_preflight <- function(cfg) {
+  tables <- lapply(c(cfg$nsdm_pool_csv, cfg$future_layers_csv), function(path) {
+    x <- utils::read.csv(path, stringsAsFactors = FALSE)
+    if (!"path" %in% names(x)) stop("Input inventory lacks its path column: ", path, call. = FALSE)
+    x$path
+  })
+  paths <- unique(c(unlist(tables, use.names = FALSE), cfg$occurrence_file,
+    file.path(cfg$nsdm_data_root, "mask_china.tif"),
+    if (identical(cfg$domain_mode, "freshwater_river")) cfg$freshwater_river_distance_raster,
+    if (identical(cfg$domain_mode, "custom_mask")) cfg$analysis_domain_mask_file))
+  missing <- paths[is.na(paths) | !nzchar(paths) | !file.exists(paths)]
+  if (length(missing)) stop("Missing physical input files (", length(missing), "):\n  ",
+    paste(utils::head(missing, 8L), collapse = "\n  "),
+    "\nUpdate the inventory after moving data: source 00_INVENTORY.R. ",
+    "Keep input files in place until the run finishes. No preparation or fitting started.", call. = FALSE)
   invisible(TRUE)
 }

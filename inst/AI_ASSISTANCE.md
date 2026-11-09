@@ -31,3 +31,8 @@ isolated worker loading, early compatibility checks and an audited example
 resume path. It does not alter prediction methods. Regression evidence includes
 installed-package scenario parity, startup isolation and preserved scientific
 cache identities; no full real-case research pipeline is rerun for this fix.
+
+On 9 November 2026, maintenance for 0.28.2 added local raster-source guards,
+physical-file example preflight and reg/legacy-glo inventory support. Dataset
+relocation was checked against saved content fingerprints; no new biological
+data, model refits or complete real-case raster projections were generated.

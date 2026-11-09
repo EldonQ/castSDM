@@ -16,7 +16,7 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.1")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.2")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -27,6 +27,7 @@ local({
   cfg$runtime$script_hashes <- tools::md5sum(list.files(root, pattern = "\\.R$", full.names = TRUE))
   for (path in c(cfg$occurrence_file, cfg$nsdm_pool_csv, cfg$future_layers_csv))
     if (!file.exists(path)) stop("Missing input: ", path, ". Check paths or run 00_INVENTORY.R.")
+  case_runtime_preflight(cfg)
   if (cfg$input_type == "gbif" && !nzchar(Sys.which("cs2cs")))
     stop("Add PROJ cs2cs to PATH for this data adapter before running.")
   if (identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% commandArgs(TRUE)) {

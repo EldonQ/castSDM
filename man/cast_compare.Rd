@@ -39,7 +39,9 @@ cast_compare(
 \arguments{
 \item{fit}{A \link{cast_fit} or the \code{cast_result} returned by \code{\link[=cast_run]{cast_run()}}.}
 
-\item{current}{Current predictor frame or \code{SpatRaster}/path.}
+\item{current}{Current predictor frame or \code{SpatRaster}/path.
+Local file-backed sources must remain available throughout comparison;
+missing sources fail before hashing, prediction or output creation.}
 
 \item{future}{Future environment or uniquely named list of environments.
 All grouped predictors are required. Omitted static layers inherit current;

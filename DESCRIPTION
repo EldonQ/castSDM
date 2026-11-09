@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Auditable Scenario Comparisons for Species Distribution Models
-Version: 0.28.1
+Version: 0.28.2
 Authors@R: c(
     person(
             "Liqiang", "Q",
