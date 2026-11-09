@@ -153,7 +153,7 @@
     colour = .data$model, linetype = .data$dataset)) +
     ggplot2::geom_hline(data = unique(d[, c("dataset", "sampled_prevalence")]),
       ggplot2::aes(yintercept = .data$sampled_prevalence, linetype = .data$dataset),
-      colour = "grey65", linewidth = .3) +
+      colour = "grey65", linewidth = .3, show.legend = FALSE) +
     ggplot2::geom_line(linewidth = .45) + ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
     ggplot2::scale_colour_brewer(palette = "Dark2") +
     ggplot2::labs(title = "Precision-recall", x = "Recall", y = "Precision", colour = NULL, linetype = NULL)
