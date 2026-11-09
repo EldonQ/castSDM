@@ -1,4 +1,18 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
+test_that("average precision handles constants, ties and known rankings", {
+  expect_equal(compute_average_precision(c(1, 0, 0, 0), rep(.2, 4)), .25)
+  expect_equal(compute_average_precision(c(1, 0, 1, 0), c(.9, .8, .7, .6)), 5/6)
+  y <- c(1, 0, 1, 0); p <- c(.9, .9, .1, .1)
+  expect_equal(compute_average_precision(y, p), .5)
+  expect_identical(compute_average_precision(y, p), compute_average_precision(y[c(2,1,4,3)], p))
+  expect_true(is.na(compute_average_precision(c(.5, 0, 1), c(.1, .2, .3))))
+  expect_true(is.na(compute_average_precision(rep(0, 3), 1:3)))
+  skip_if_not_installed("pROC")
+  row <- .cast_diagnostic_metrics(rep(.2, 4), c(1,0,0,0), NA_real_, "constant", "baseline", "none")
+  expect_equal(row$average_precision, row$sampled_prevalence)
+  expect_true(is.na(row$pr_auc))
+})
+
 test_that("native and shifted outputs share exactly one engine prediction", {
   calls <- 0L
   fit <- cast_as_fit(list(a = 1), data.frame(x = 1:4), function(model, newdata) {

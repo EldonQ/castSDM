@@ -22,6 +22,10 @@
 #' Brier scores, log loss and reliability bins concern the sampled binary
 #' response. With presence/background data they do not measure calibration of
 #' ecological occurrence probabilities. Background points are not known absences.
+#' Average precision (AP) uses the non-interpolated precision-recall step
+#' integral; a constant score has AP equal to sampled prevalence. Historical
+#' `pr_auc` uses trapezoidal interpolation and is retained with that definition,
+#' except in the constant-baseline row where it is omitted.
 #' Support is a marginal training-quantile diagnostic, distinct from multivariate
 #' AOA. Model sign agreement is descriptive, not statistical confidence.
 #' @examples
@@ -90,9 +94,10 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
   }
   bind <- function(x) if (length(x)) do.call(rbind, x) else NULL
   folds <- .cast_diagnostic_folds(cv)
-  definitions <- data.frame(metric = c("pr_auc", "brier/logloss", "omission_at_threshold",
+  definitions <- data.frame(metric = c("average_precision", "pr_auc", "brier/logloss", "omission_at_threshold",
     "omission_5/10 (legacy)", "mpa (legacy)", "native_same_fit", "common_support", "model_sd"),
-    definition = c("Precision-recall AUC; null level depends on sampled positive fraction.",
+    definition = c("Non-interpolated precision-recall step integral (AP); constant-score baseline equals sampled positive fraction.",
+    "Trapezoidal precision-recall area; not AP. A constant score gives (1 + prevalence)/2; omitted for the constant baseline row.",
     "Loss for sampled presence/background labels; not ecological probability calibration.",
     "Fraction of evaluation presences below the frozen training OOF threshold.",
     "Presence omission below the top 5/10 percent cutoff of all evaluation scores; not training-presence omission.",
@@ -100,11 +105,12 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
     "Same fitted engine before score shift; fitting weights and variables are unchanged.",
     "Finite and within marginal training bounds in current and ALL requested futures; not multivariate AOA.",
     "Sample SD of paired model contrasts; not SE, confidence interval or significance."))
-  notes <- data.frame(code = c("sampled_response", "holdout_policy", "oof_scope", "support_scope"),
+  notes <- data.frame(code = c("sampled_response", "holdout_policy", "oof_scope", "support_scope", "score_shift"),
     detail = c("Background labels are not verified absences; sampled prevalence changes probability losses and PR-AUC.",
       "Hold-out labels evaluate the declared policy only. Do not select a new policy on these labels.",
       "OOF score views, fold locations and AOA use repeat 1; fold_metrics and selection frequency cover all scheduled repeats.",
-      "Scenario-supported and all-scenario common-supported summaries have different denominators; quantify both."))
+      "Scenario-supported and all-scenario common-supported summaries have different denominators; quantify both.",
+      "Declared logit shifts standardize scores; they do not establish probability calibration. Native same-fit OOF views are descriptive, not a new fitted policy."))
   if (is.null(p)) notes <- rbind(notes, data.frame(code = "missing_holdout_predictions",
     detail = "Older evaluation lacks predictions. Supply the original test_data to add ensemble diagnostics without refitting."))
   if (is.data.frame(cv$oof) && is.null(cv$native_oof))
@@ -204,7 +210,8 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
     n_missing_score = n_total-length(obs), n_presence = sum(obs == 1),
     sampled_prevalence = if (length(obs)) mean(obs) else NA_real_,
     mean_score = if (length(pred)) mean(pred) else NA_real_,
-    auc = unname(ev["auc"]), pr_auc = unname(ev["pr_auc"]), tss = unname(ev["tss"]),
+    auc = unname(ev["auc"]), average_precision = compute_average_precision(obs, pred),
+    pr_auc = if (identical(view, "baseline")) NA_real_ else unname(ev["pr_auc"]), tss = unname(ev["tss"]),
     brier = unname(ev["brier"]), logloss = unname(ev["logloss"]),
     threshold = if (binary_ok) threshold else NA_real_, threshold_source = threshold_source,
     omission_at_threshold = if (binary_ok && any(obs == 1)) mean(pred[obs == 1] < threshold) else NA_real_,

@@ -85,6 +85,9 @@ selection, threshold, weight, AOA and all available contrast/driver atlases.
 Uses the package cartography, including China outlines and South China Sea
 inset when \code{basemap = "china"}. Numerical diagnostic products are cached
 separately from PNG/PDF rendering; fitted models are never refitted.
+Unchanged installed-package exports are reused after checking their data,
+code, rendering settings and file hashes. Missing or damaged exports are
+regenerated individually.
 }
 \details{
 The first complete export may compute expensive driver/PDP products from

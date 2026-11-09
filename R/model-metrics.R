@@ -85,8 +85,9 @@ cast_threshold <- function(pred, obs,
 #' Precision-Recall Area for Imbalanced Binary Data
 #'
 #' Trapezoidal area under the empirical precision-recall curve. Unlike ROC-AUC,
-#' this metric makes the sampled prevalence explicit: always report the
-#' presence:background ratio and the prevalence baseline alongside it.
+#' this metric depends on sampled prevalence and interpolation. A constant
+#' score yields `(1 + prevalence)/2`, not the chance AP baseline. Prefer
+#' average precision for comparison with sampled prevalence.
 #'
 #' @param obs Binary response vector.
 #' @param pred Numeric suitability scores.
@@ -107,6 +108,21 @@ compute_pr_auc <- function(obs, pred) {
   recall <- c(0, tp / n_pos)
   precision <- c(1, tp / pmax(1, tp + fp))
   sum(diff(recall) * (utils::head(precision, -1L) + utils::tail(precision, -1L)) / 2)
+}
+
+# Step integral of the precision-recall curve; ties enter as one group.
+# A constant prediction has AP equal to the sampled positive fraction.
+compute_average_precision <- function(obs, pred) {
+  ok <- !is.na(obs) & is.finite(pred)
+  obs <- obs[ok]; pred <- as.numeric(pred[ok])
+  if (!all(obs %in% c(0L, 1L)) || !all(c(0L, 1L) %in% obs)) return(NA_real_)
+  obs <- as.integer(obs)
+  ord <- order(pred, decreasing = TRUE)
+  p <- pred[ord]; y <- obs[ord]
+  ends <- c(which(diff(p) != 0), length(p))
+  recall <- c(0, cumsum(y)[ends]/sum(y))
+  precision <- cumsum(y)[ends]/ends
+  sum(diff(recall)*precision)
 }
 
 #' Symmetric Extremal Dependence Index

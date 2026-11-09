@@ -98,7 +98,9 @@ figures <- cast_figures(run, comparison, "results/figures",
 The first complete export computes missing frozen-model driver, PDP and MESS
 products; this can be expensive. Verified numerical products are cached apart
 from rendering. PNG (183 mm, 600 dpi by default), PDF, source CSVs and a figure
-inventory/status manifest are written. Missing inputs are reported explicitly.
+inventory/status manifest are written. Subsequent identical exports reuse
+files only after checking data, installed code, rendering settings and file
+hashes; missing or damaged files are regenerated. Missing inputs are reported explicitly.
 Native-grid range classes use the frozen threshold before display-only
 reprojection; original scientific rasters and counts remain unchanged.
 
@@ -115,6 +117,10 @@ they never select a policy from hold-out labels. `prevalence_target` specifies
 a weighted training mean score, not calibrated occurrence probabilities.
 Brier/log loss and reliability bins concern the sampled binary response.
 For presence/background data, background points are not verified absences.
+The printed evaluation and diagnostic tables report non-interpolated average
+precision (AP), whose constant-score baseline is the sampled positive fraction.
+Historical `pr_auc` is retained as a trapezoidal area; its constant-score value
+is `(1 + prevalence)/2`, so it is not compared with the AP baseline.
 Legacy `omission_5/10` metrics use top-percent cutoffs of evaluation scores;
 diagnostics also report omission at the frozen threshold and at training OOF
 presence-score 5th/10th percentiles, with explicit threshold columns.

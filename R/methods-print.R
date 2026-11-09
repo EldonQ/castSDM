@@ -55,7 +55,18 @@ print.cast_fit <- function(x, ...) {
 print.cast_eval <- function(x, ...) {
   src <- if (isTRUE(x$cv_source)) "Spatial CV" else "Hold-out test set"
   cli::cli_h1("castSDM Model Evaluation ({src})")
-  print(x$metrics)
+  metrics <- x$metrics
+  scores <- x$predictions
+  metrics$average_precision <- vapply(metrics$model, function(model) {
+    column <- paste0("HSS_", model)
+    if (!is.data.frame(scores) || !all(c("obs", column) %in% names(scores))) return(NA_real_)
+    compute_average_precision(scores$obs, scores[[column]])
+  }, numeric(1))
+  fields <- intersect(c("model", "auc_mean", "average_precision", "tss_mean",
+    "brier_mean", "logloss_mean", "omission_at_threshold_mean"), names(metrics))
+  print(metrics[, fields, drop = FALSE], row.names = FALSE)
+  cli::cli_text("AP is non-interpolated average precision; its constant-score baseline is the sampled positive fraction.")
+  cli::cli_text("Trapezoidal PR-AUC and legacy top-fraction omissions remain in x$metrics; they are different diagnostics.")
   invisible(x)
 }
 

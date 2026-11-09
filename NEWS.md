@@ -1,3 +1,24 @@
+# castSDM 0.28.3
+
+- Validate reporting-scenario driver maps through the attribution receipt,
+  including models, predictor content, mask and settings. Remove the duplicate
+  attribution-object cache that could reuse another scenario's driver maps.
+  `resume = TRUE` can reuse a verified attribution with `overwrite = TRUE`;
+  `resume = FALSE` forces recomputation.
+- Report non-interpolated average precision (AP) in diagnostics and the printed
+  evaluation summary. Its constant-score baseline is sampled prevalence. Keep
+  historical trapezoidal PR-AUC values unchanged, document their different
+  definition, and omit that area from the constant-baseline row. Add the sampled
+  prevalence references to PR plots without changing the map layouts.
+- Reuse figure exports only when numerical data, installed code, dependencies,
+  display settings and file hashes match. Regenerate missing or damaged exports
+  individually. Changes in evaluation data invalidate the diagnostic bundle;
+  incidental session information does not invalidate numerical figure caches.
+- Preserve the six training-stage and frozen-fit prediction identities. The
+  single-species entry resumes unchanged 0.28.0-0.28.2 analyses with a maintenance
+  receipt; preparation and diagnostic caches may refresh once after upgrading.
+  The complete figure collection and scientific fitting policy are retained.
+
 # castSDM 0.28.2
 
 - Reject missing local file-backed comparison inputs before worker startup,

@@ -68,14 +68,16 @@ temporary file is used. Ignored for tables.}
 
 \item{mask}{Optional raster mask; non-finite or zero mask cells are excluded.}
 
-\item{overwrite}{Whether to replace an existing raster output.}
+\item{overwrite}{Permit replacement of an existing raster when its receipt
+does not match. A verified receipt is reused when \code{resume = TRUE}.}
 
 \item{verbose}{Whether to report progress.}
 
 \item{resources}{Optional global resource budget; \code{cores} controls RF
 prediction threads in this single-process operation. See \code{\link[=cast_compare]{cast_compare()}}.}
 
-\item{resume}{Reuse a verified result receipt for an existing filename.}
+\item{resume}{Reuse a verified result receipt for an existing filename,
+including when \code{overwrite = TRUE}. Set \code{FALSE} to force recomputation.}
 
 \item{x}{A \code{cast_attribution} result for printing.}
 

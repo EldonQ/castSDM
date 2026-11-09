@@ -40,14 +40,5 @@ case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NUL
     display_resolution = cfg$figure_display_resolution %||% .02,
     width_mm = 183, dpi = 600,
     resources = cfg$resources %||% list(cores = 4, memory_mb = 2048))
-  # Remove only the obsolete generic previews, after successful replacement.
-  if ("02_habitat_change" %in% figures$status$figure &&
-      all(figures$status$status[figures$status$figure == "02_habitat_change"] == "written_not_visually_checked")) {
-    for (name in c("scenario_comparison.png", "scenario_comparison.pdf",
-                   "spatial_validation.png", "spatial_validation.pdf")) {
-      path <- file.path(out_dir, "figures", name)
-      if (file.exists(path)) unlink(path)
-    }
-  }
   invisible(figures)
 }

@@ -36,3 +36,12 @@ On 9 November 2026, maintenance for 0.28.2 added local raster-source guards,
 physical-file example preflight and reg/legacy-glo inventory support. Dataset
 relocation was checked against saved content fingerprints; no new biological
 data, model refits or complete real-case raster projections were generated.
+
+On 9 November 2026, maintenance for 0.28.3 removed a duplicate attribution-cache
+path, added non-interpolated AP diagnostics and verified figure-export reuse,
+and simplified the example maintenance adapter. Synthetic regression tests
+cover scenario switching, tied scores, unchanged exports and damaged-file
+repair. Training and frozen-fit identity checks use saved results without
+rerunning the research pipeline. Existing fitting policies and cartography
+remain unchanged; these maintenance checks do not establish publication
+readiness or external predictive validity.

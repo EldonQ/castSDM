@@ -151,6 +151,9 @@
     ggplot2::labs(title = "ROC", x = "False positive rate", y = "True positive rate", colour = NULL, linetype = NULL)
   pr <- ggplot2::ggplot(d, ggplot2::aes(.data$recall, .data$precision,
     colour = .data$model, linetype = .data$dataset)) +
+    ggplot2::geom_hline(data = unique(d[, c("dataset", "sampled_prevalence")]),
+      ggplot2::aes(yintercept = .data$sampled_prevalence, linetype = .data$dataset),
+      colour = "grey65", linewidth = .3) +
     ggplot2::geom_line(linewidth = .45) + ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
     ggplot2::scale_colour_brewer(palette = "Dark2") +
     ggplot2::labs(title = "Precision-recall", x = "Recall", y = "Precision", colour = NULL, linetype = NULL)
@@ -164,7 +167,7 @@
     ggplot2::coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
     ggplot2::labs(title = "Hold-out reliability\n(sampled responses)", x = "Mean predicted score",
       y = "Sampled positive fraction", colour = NULL)
-  caption <- "OOF curves are descriptive training diagnostics. Hold-out labels do not choose weights or thresholds. Reliability refers to sampled presence/background labels, not ecological occurrence probabilities."
+  caption <- "Grey PR lines mark sampled positive fractions (AP baselines). OOF curves are descriptive; hold-out labels do not choose weights or thresholds. Reliability concerns sampled labels, not ecological occurrence probabilities."
   if ("legacy_clamp_mismatch" %in% data$diagnostics$notes$code) caption <- paste(caption,
     "Legacy validation was unclamped while maps were clamped; historical metrics are preserved.")
   patchwork::wrap_plots(roc, pr, calibration, ncol = 3, guides = "collect") +

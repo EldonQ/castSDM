@@ -35,6 +35,10 @@ threshold. A new policy needs new validation; this function never chooses it.
 Brier scores, log loss and reliability bins concern the sampled binary
 response. With presence/background data they do not measure calibration of
 ecological occurrence probabilities. Background points are not known absences.
+Average precision (AP) uses the non-interpolated precision-recall step
+integral; a constant score has AP equal to sampled prevalence. Historical
+\code{pr_auc} uses trapezoidal interpolation and is retained with that definition,
+except in the constant-baseline row where it is omitted.
 Support is a marginal training-quantile diagnostic, distinct from multivariate
 AOA. Model sign agreement is descriptive, not statistical confidence.
 }

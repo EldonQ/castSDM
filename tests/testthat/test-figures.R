@@ -105,4 +105,68 @@ test_that("complete figure inventory includes the legacy set and render-only nev
   expect_true(all(figures$status$path %in% again$status$path))
   expect_true(any(endsWith(again$status$path, ".svg")))
   expect_true(all(again$status$status == "written_not_visually_checked"))
+  # Repeated installed exports skip rendering; a corrupted file alone is redrawn.
+  if (file.exists(file.path(getNamespaceInfo(asNamespace("castSDM"), "path"), "R", "castSDM.rdb"))) {
+    redraw <- function(dpi = 72) cast_figures(run, cmp, figures$output_dir, response_grid = 3,
+      display_resolution = .2, include = "07", render_only = TRUE, basemap = "china",
+      width_mm = 89, dpi = dpi, verbose = FALSE, formats = c("png", "pdf", "svg"))
+    files <- file.path(again$output_dir, again$status$path[again$status$figure == "07_model_performance"])
+    times <- file.info(files)$mtime
+    reused <- redraw()
+    expect_true(all(reused$status$cache_hit[reused$status$figure == "07_model_performance"]))
+    expect_identical(file.info(files)$mtime, times)
+    writeBin(charToRaw("corrupt PNG"), files[endsWith(files, ".png")])
+    repaired <- redraw()
+    rows <- repaired$status[repaired$status$figure == "07_model_performance", ]
+    expect_identical(rows$cache_hit[endsWith(rows$path, ".png")], FALSE)
+    expect_true(all(rows$cache_hit[!endsWith(rows$path, ".png")]))
+    resized <- redraw(96)
+    expect_false(any(resized$status$cache_hit[resized$status$figure == "07_model_performance"]))
+  }
+})
+
+test_that("reporting-scenario and evaluation changes invalidate the correct figure products", {
+  for (pkg in c("terra", "ranger", "pROC")) skip_if_not_installed(pkg)
+  set.seed(280)
+  d <- data.frame(lon = runif(100, 100, 102), lat = runif(100, 30, 32), x = rnorm(100), z = rnorm(100))
+  d$presence <- rbinom(100, 1, plogis(d$x-.3*d$z))
+  root <- tempfile("scenario-figures-"); dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  run <- cast_run(d, protocol = cast_protocol(models = "rf", select_method = "full", rf_ntree = 12,
+    cv_k = 2, block_method = "grid", aoa = FALSE, ensemble_min_score = 0, seed = 3),
+    output_dir = file.path(root, "training"), verbose = FALSE)
+  r <- terra::rast(nrows = 2, ncols = 3, nlyrs = 2, xmin = 100, xmax = 101,
+    ymin = 30, ymax = 31, crs = "EPSG:4326")
+  names(r) <- c("x", "z"); terra::values(r) <- cbind(seq(-1, 1, length.out = 6), sin(1:6))
+  a <- b <- r
+  terra::values(a) <- terra::values(r)+.2; terra::values(b) <- terra::values(r)-.8
+  cmp <- cast_compare(run, r, list(first = a, second = b), list(climate = "x", lulc = "z"),
+    output_dir = file.path(root, "comparison"), verbose = FALSE)
+  directory <- file.path(root, "data")
+  first <- .cast_figure_data(run, cmp, "first", directory, current = r, future = a,
+    response_grid = 3, display_resolution = .2, verbose = FALSE)
+  before <- terra::values(terra::rast(first$attribution$raster_file))[, "total_change"]
+  second <- .cast_figure_data(run, cmp, "second", directory, current = r, future = b,
+    response_grid = 3, display_resolution = .2, verbose = FALSE)
+  after <- terra::values(terra::rast(second$attribution$raster_file))[, "total_change"]
+  expected <- terra::values(terra::rast(cmp$results$second$raster_file))[, "joint_change"]
+  expect_equal(after, expected, tolerance = 1e-12)
+  expect_gt(max(abs(before-after)), .01)
+  expect_false(file.exists(file.path(directory, "driver_attribution.rds")))
+  tracker <- new.env(parent = emptyenv()); tracker$n <- 0L
+  trace("predict.ranger", where = asNamespace("ranger"), tracer = function() {
+    tracker$n <- tracker$n+1L; stop("Verified numerical caches must not predict")
+  }, print = FALSE)
+  on.exit(untrace("predict.ranger", where = asNamespace("ranger")), add = TRUE)
+  unchanged <- .cast_figure_data(run, cmp, "second", directory, response_grid = 3,
+    display_resolution = .2, render_only = TRUE, verbose = FALSE)
+  expect_identical(unchanged, second)
+  changed <- run; changed$eval$predictions$obs <- 1L-run$eval$predictions$obs
+  expect_error(.cast_figure_data(changed, cmp, "second", directory, response_grid = 3,
+    display_resolution = .2, render_only = TRUE, verbose = FALSE), "matching figure-data cache")
+  updated <- .cast_figure_data(changed, cmp, "second", directory, current = r, future = b,
+    response_grid = 3, display_resolution = .2, verbose = FALSE)
+  expect_identical(updated$evaluation$predictions, changed$eval$predictions)
+  expect_false(isTRUE(all.equal(updated$diagnostics$holdout$auc, second$diagnostics$holdout$auc)))
+  expect_equal(tracker$n, 0L)
 })

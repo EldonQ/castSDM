@@ -127,11 +127,13 @@
 #' @param filename GeoTIFF output path for raster inputs. When omitted a
 #'   temporary file is used. Ignored for tables.
 #' @param mask Optional raster mask; non-finite or zero mask cells are excluded.
-#' @param overwrite Whether to replace an existing raster output.
+#' @param overwrite Permit replacement of an existing raster when its receipt
+#'   does not match. A verified receipt is reused when `resume = TRUE`.
 #' @param verbose Whether to report progress.
 #' @param resources Optional global resource budget; `cores` controls RF
 #'   prediction threads in this single-process operation. See [cast_compare()].
-#' @param resume Reuse a verified result receipt for an existing filename.
+#' @param resume Reuse a verified result receipt for an existing filename,
+#'   including when `overwrite = TRUE`. Set `FALSE` to force recomputation.
 #'
 #' @return A `cast_attribution` list with `summary`, frozen `weights`,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
@@ -212,7 +214,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
       support_probs = support_probs, clamp = clamp, core = .cast_code_identity(.cast_attribution_block)))
     receipt <- paste0(filename, ".receipt.rds")
-    cached <- if (resume && !overwrite) .cast_cache_read(receipt, key) else NULL
+    cached <- if (resume) .cast_cache_read(receipt, key) else NULL
     if (!is.null(cached)) {
       cached$raster_file <- normalizePath(filename, winslash = "/")
       return(cached)

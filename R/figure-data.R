@@ -98,14 +98,19 @@
   .cast_check_fit(fit)
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
   bundle_path <- file.path(directory, "figure_data.rds")
-  base_key <- .cast_digest(list(.cast_fit_identity(fit), comparison$provenance,
-    comparison$weights, comparison$threshold, scenario, response_grid, display_resolution,
+  provenance <- comparison$provenance
+  provenance$session <- NULL
+  base_key <- .cast_digest(list(schema = "cast_figure_data/2", .cast_fit_identity(fit), provenance,
+    object[c("screen", "cv", "eval")], object$protocol$clamp,
+    comparison$weights, comparison$threshold, comparison$threshold_sensitivity,
+    scenario, response_grid, display_resolution,
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
-    .cast_code_identity(.cast_figure_classes)))
+    .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
+    .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision)))
   old <- if (file.exists(bundle_path)) tryCatch(readRDS(bundle_path), error = function(e) NULL) else NULL
   valid_old <- !is.null(old) && identical(old$key, base_key) &&
     !is.null(.cast_cache_read(bundle_path, base_key))
-  if (valid_old) {
+  if (valid_old && is.null(attribution)) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
     return(old$value)
   }
@@ -175,19 +180,8 @@
     future <- future[[fit$env_vars]]
   }
   report <- comparison$results[[scenario]]
-  if (is.null(attribution)) {
-    supplied <- file.path(directory, "driver_attribution.rds")
-    if (file.exists(supplied)) {
-      candidate <- readRDS(supplied)
-      receipt <- if (!is.null(candidate$raster_file)) paste0(candidate$raster_file, ".receipt.rds")
-      wrapper <- if (length(receipt) && file.exists(receipt)) readRDS(receipt) else NULL
-      if (!is.null(wrapper) && !is.null(.cast_cache_read(receipt, wrapper$key)) &&
-          identical(as.numeric(candidate$weights), as.numeric(comparison$weights)) &&
-          identical(names(candidate$weights), names(comparison$weights))) attribution <- candidate
-    }
-  }
   if (is.null(attribution) && !is.null(current) && !is.null(future)) {
-    if (verbose) cli::cli_inform("Computing reporting-scenario driver maps from frozen models; this diagnostic stage can be expensive and is cached.")
+    if (verbose) cli::cli_inform("Preparing reporting-scenario driver maps; reuse requires matching models, inputs, mask and settings.")
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
     attribution <- cast_attribution(fit, current, future,
@@ -195,8 +189,8 @@
       weights = comparison$weights, mask = domain,
       clamp = object$protocol$clamp %||% FALSE, support_probs = comparison$support_probs %||% c(.01, .99),
       resources = resources, block_size = 250000L,
+      overwrite = TRUE,
       filename = if (!is.null(domain)) file.path(directory, "driver_attribution.tif"))
-    saveRDS(attribution, file.path(directory, "driver_attribution.rds"))
   }
   if (is.null(attribution)) note("03_environmental_driver", "Current/future predictor inputs or an existing cast_attribution object are required.")
   mess <- NULL
@@ -204,7 +198,7 @@
     path <- file.path(directory, "mess_native.tif")
     memo <- new.env(parent = emptyenv())
     key <- .cast_digest(list(.cast_fit_identity(fit), .cast_data_identity(current, memo),
-      .cast_data_identity(future, memo), comparison$provenance, scenario, .cast_code_identity(.cast_figure_mess)))
+      .cast_data_identity(future, memo), provenance, scenario, .cast_code_identity(.cast_figure_mess)))
     mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path), path)
     outputs <- c(outputs, mess)
   } else note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
@@ -215,15 +209,15 @@
     input <- result$raster_file
     if (!is.null(comparison$threshold)) {
       path <- file.path(directory, paste0("range_", s, ".tif"))
-      key <- .cast_digest(list(comparison$provenance, s, comparison$threshold, .cast_code_identity(.cast_figure_classes)))
+      key <- .cast_digest(list(unname(tools::md5sum(input)), comparison$threshold, .cast_code_identity(.cast_figure_classes)))
       classes[[s]] <- cached(paste0("range_", s), key,
         .cast_figure_classes(result, comparison$threshold, path), path)
       outputs <- c(outputs, classes[[s]]); input <- c(input, classes[[s]])
     }
     if (s == scenario && !is.null(mess)) input <- c(input, mess)
     path <- file.path(directory, paste0("display_", s, ".tif"))
-    key <- .cast_digest(list(comparison$provenance, s, comparison$threshold, unname(tools::md5sum(input)),
-      display_resolution, if (s == scenario) mess, .cast_code_identity(.cast_figure_display)))
+    key <- .cast_digest(list(unname(tools::md5sum(input)),
+      display_resolution, .cast_code_identity(.cast_figure_display)))
     displays[[s]] <- cached(paste0("display_", s), key,
       .cast_figure_display(input, path, display_resolution), path)
     outputs <- c(outputs, displays[[s]])
@@ -252,7 +246,7 @@
   thresholds <- summary(comparison, thresholds = unique(c(comparison$threshold, .3, .5, .7)))
   origin_path <- file.path(object$output_dir %||% "", "manifest.rds")
   origin <- if (file.exists(origin_path)) readRDS(origin_path) else NULL
-  data <- list(schema = "cast_figure_data/1", screen = object$screen, cv = object$cv,
+  data <- list(schema = "cast_figure_data/2", screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,

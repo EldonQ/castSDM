@@ -56,6 +56,9 @@
 #' Uses the package cartography, including China outlines and South China Sea
 #' inset when `basemap = "china"`. Numerical diagnostic products are cached
 #' separately from PNG/PDF rendering; fitted models are never refitted.
+#' Unchanged installed-package exports are reused after checking their data,
+#' code, rendering settings and file hashes. Missing or damaged exports are
+#' regenerated individually.
 #'
 #' @param object A `cast_result` from [cast_run()].
 #' @param comparison A `cast_comparison` from [cast_compare()].
@@ -191,26 +194,65 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     table_rows[[name]] <- data.frame(path = file.path("source_data", basename(path)),
       rows = nrow(tables[[name]]), columns = ncol(tables[[name]]), md5 = unname(tools::md5sum(path)))
   }
+  manifest_path <- file.path(output_dir, "figure_manifest.rds")
+  previous_manifest <- if (file.exists(manifest_path))
+    tryCatch(readRDS(manifest_path), error = function(e) NULL) else NULL
+  data_md5 <- unname(tools::md5sum(file.path(data_dir, "figure_data.rds")))
+  code_file <- file.path(getNamespaceInfo(asNamespace("castSDM"), "path"), "R", "castSDM.rdb")
+  # Installed code is immutable for a run. Development namespaces always draw.
+  render_seed <- .cast_digest(list(data_md5, basemap, width_mm, dpi, font_family, pdf_device, as.character(getRversion()),
+    as.character(utils::packageVersion("castSDM")),
+    if (file.exists(code_file)) unname(tools::md5sum(code_file)),
+    vapply(c("ggplot2", "patchwork", "sf", "terra", "ragg", "svglite"), function(p)
+      if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "missing", character(1))))
+  previous_status <- previous_manifest$status
   status <- list()
   for (name in selected) {
     spec <- registry[[name]]
     paths <- file.path(output_dir, paste0(name, ".", formats))
     if (!spec$available) {
       status[[name]] <- data.frame(figure = name, path = basename(paths), status = "unavailable",
-        reason = spec$reason, warnings = "", width_mm = width_mm, height_mm = spec$height_mm)
+        reason = spec$reason, warnings = "", width_mm = width_mm, height_mm = spec$height_mm,
+        cache_hit = FALSE, render_key = "", md5 = NA_character_)
       if (verbose) cli::cli_inform("{name}: unavailable ({spec$reason})")
+      next
+    }
+    keys <- vapply(paths, function(path) .cast_digest(list(render_seed, name, spec$height_mm,
+      tools::file_ext(path))), character(1))
+    reusable <- rep(FALSE, length(paths))
+    previous_rows <- rep(NA_integer_, length(paths))
+    if (file.exists(code_file) && is.data.frame(previous_status) &&
+        all(c("render_key", "md5") %in% names(previous_status))) {
+      previous_rows <- match(basename(paths), previous_status$path)
+      for (i in which(!is.na(previous_rows) & file.exists(paths))) {
+        old <- previous_status[previous_rows[i], ]
+        reusable[i] <- identical(old$status, "written_not_visually_checked") &&
+          identical(old$render_key, unname(keys[i])) &&
+          identical(old$md5, unname(tools::md5sum(paths[i])))
+      }
+    }
+    if (all(reusable)) {
+      rows <- previous_status[previous_rows, , drop = FALSE]; rows$cache_hit <- TRUE
+      status[[name]] <- rows
+      if (verbose) cli::cli_inform("{name}: verified {length(paths)} figure exports.")
       next
     }
     if (verbose) cli::cli_inform("Rendering {name} ({width_mm} mm; {dpi} dpi; {paste(toupper(formats), collapse = ' + ')}).")
     plot <- tryCatch(spec$build(), error = identity)
     if (inherits(plot, "error")) {
       status[[name]] <- data.frame(figure = name, path = basename(paths), status = "failed",
-        reason = conditionMessage(plot), warnings = "", width_mm = width_mm, height_mm = spec$height_mm)
+        reason = conditionMessage(plot), warnings = "", width_mm = width_mm, height_mm = spec$height_mm,
+        cache_hit = FALSE, render_key = "", md5 = NA_character_)
       next
     }
     grob <- NULL
     export_rows <- vector("list", length(paths))
     for (i in seq_along(paths)) {
+      if (reusable[i]) {
+        export_rows[[i]] <- previous_status[previous_rows[i], , drop = FALSE]
+        export_rows[[i]]$cache_hit <- TRUE
+        next
+      }
       notes <- character()
       outcome <- tryCatch(withCallingHandlers({
         grob <- .cast_figure_export(plot, paths[i], width_mm, spec$height_mm, dpi, grob)
@@ -221,7 +263,9 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       export_rows[[i]] <- data.frame(figure = name, path = basename(paths[i]),
         status = if (inherits(outcome, "error")) "failed" else "written_not_visually_checked",
         reason = if (inherits(outcome, "error")) conditionMessage(outcome) else "",
-        warnings = paste(unique(notes), collapse = "; "), width_mm = width_mm, height_mm = spec$height_mm)
+        warnings = paste(unique(notes), collapse = "; "), width_mm = width_mm, height_mm = spec$height_mm,
+        cache_hit = FALSE, render_key = unname(keys[i]),
+        md5 = if (!inherits(outcome, "error")) unname(tools::md5sum(paths[i])) else NA_character_)
     }
     status[[name]] <- do.call(rbind, export_rows)
     rm(plot, grob); invisible(gc(FALSE))
@@ -229,10 +273,6 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   status <- do.call(rbind, status); rownames(status) <- NULL
   # A subset re-render must not erase the export record for the other figures.
   # Restrict retained rows to the same numerical bundle and current inventory.
-  manifest_path <- file.path(output_dir, "figure_manifest.rds")
-  previous_manifest <- if (file.exists(manifest_path))
-    tryCatch(readRDS(manifest_path), error = function(e) NULL) else NULL
-  data_md5 <- unname(tools::md5sum(file.path(data_dir, "figure_data.rds")))
   if (identical(previous_manifest$data_md5, data_md5) &&
       is.data.frame(previous_manifest$status) &&
       identical(names(previous_manifest$status), names(status))) {
@@ -267,7 +307,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     cli::cli_abort(c("Figure exports failed: {paste(utils::head(details, 3L), collapse = '; ')}",
       i = "Inspect figure_status.csv for all reasons; other successful exports are retained."))
   }
-  if (verbose) cli::cli_inform("Figure collection: {sum(status$status == 'written_not_visually_checked')} exports written; {sum(status$status == 'unavailable')} unavailable outputs documented.")
+  if (verbose) cli::cli_inform("Figure collection: {sum(status$status == 'written_not_visually_checked')} exports ready ({sum(status$cache_hit & status$figure %in% selected)} requested exports reused); {sum(status$status == 'unavailable')} unavailable outputs documented.")
   result
 }
 
