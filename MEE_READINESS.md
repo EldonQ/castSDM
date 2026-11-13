@@ -1,7 +1,7 @@
 # castSDM: evidence and submission readiness
 
 Engineering update: 13 November 2026 (journal guidance below was checked on
-7 November 2026). This is an engineering and evidence assessment,
+13 November 2026). This is an engineering and evidence assessment,
 not an editorial decision or a promise of acceptance.
 
 ## Position and contribution
@@ -31,6 +31,24 @@ changes and conditional response groups. A GUI, paired subtraction or adding
 these published methods does not establish methodological novelty. The
 case-specific value and comparative evidence still need to be demonstrated.
 
+Version 0.29.1 makes a narrower application question operational: for the same
+supported locations and the same environmental change, does its interpretation
+depend on the other predictors' background or the fitted engine? The overview
+compares a shared population, excludes unchanged scenario predictors from
+ranking, shows both configured-comparison backgrounds and reports sign
+reversals and active-model agreement. One focused driver has native maps of
+both responses and their diagnostics. These are descriptive checks of frozen
+models, not an ecological causal estimator or a new uncertainty interval.
+
+The closest comparison set must also include
+[GLOSSA (MEE 2026)](https://doi.org/10.1111/2041-210x.70167), which already
+provides a Shiny SDM workflow and reproducible outputs, and
+[MaskSDM (MEE 2026)](https://doi.org/10.1111/2041-210x.70200), which already
+studies predictor contributions with Shapley values. The proposed contribution
+needs a matched real-case comparison demonstrating what the combined
+background/model/support diagnostics reveal, rather than an unsupported claim
+that these tools cannot perform similar analyses.
+
 Existing tools already address important adjacent problems. [CAST](https://hannameyer.github.io/CAST/)
 provides spatial model training/assessment and [AOA](https://hannameyer.github.io/CAST/reference/aoa.html).
 [biomod2](https://biomodhub.github.io/biomod2/) provides multiple SDM engines,
@@ -48,7 +66,10 @@ including captions, statements and references. They require a worked example,
 a Code Checklist, review access to anonymised code/data, appropriate archiving,
 and disclosure/annotation of AI assistance. A manuscript should explain the
 ecological value beyond a manual or vignette. These requirements were checked
-on the review date; verify them again at submission.
+on the review date; verify them again at submission. GUI packages must export
+executable scripts for their graphical/statistical/analytical outputs. The
+0.29.1 bundle includes view state and a script restoring the completed request,
+selected layer, map view and point/profile query using the original inputs.
 
 The criteria below are our assessment, not additional journal rules or
 universal numerical acceptance thresholds.

@@ -43,7 +43,8 @@
 }
 
 .cast_attribution_block <- function(fit, current, future, drivers, weights,
-                                    bounds, reference = NULL, clamp = FALSE) {
+                                    bounds, reference = NULL, clamp = FALSE,
+                                    diagnostics = FALSE) {
   context <- .cast_prediction_context(fit, weights, current, future, clamp)
   predict <- context$predict
   # Requiring the same finite active models preserves a paired comparison.
@@ -93,6 +94,20 @@
     colnames(z) <- paste0(c("effect_", "retained_", "support_effect_",
                            "support_retained_", "effect_sd_", "retained_sd_"), v)
     out <- cbind(out, z)
+    if (diagnostics) {
+      # Existing per-model predictions suffice: no extra fitted-model calls.
+      oe <- average(effect); re <- average(retained)
+      agree <- function(p, mean) {
+        value <- rowMeans(sign(p) == sign(mean))
+        value[rowSums(!is.finite(p)) > 0L] <- NA_real_
+        value
+      }
+      direction <- .cast_response_direction(oe, re)
+      detail <- cbind(agree(effect, oe), agree(retained, re), direction, re - oe)
+      colnames(detail) <- paste0(c("effect_agreement_", "retained_agreement_",
+        "context_direction_", "context_gap_"), v)
+      out <- cbind(out, detail)
+    }
   }
   cbind(out, remainder = out[, "total_change"] - rowSums(effects))
 }
@@ -117,6 +132,9 @@
 #'   With `future = current` this computes finite-change responses without
 #'   materialising another environmental raster stack. These are explicitly
 #'   hypothetical predictor changes, not observed data or causal effects.
+#' @param diagnostics Also retain per-driver model sign agreement, background
+#'   direction classes and background response gaps. Default `FALSE`. Uses
+#'   predictions already calculated, without further fitted-model calls.
 #' @param cv Optional [cast_cv] object for ensemble weights.
 #' @param weights Optional named non-negative model weights, overriding `cv`.
 #' @param models Optional subset of fitted model names.
@@ -149,6 +167,13 @@
 #'   is total change minus the sum of driver-only effects: it includes joint
 #'   response and changes in any omitted drivers. `*_sd` layers describe
 #'   cross-model disagreement, not sampling uncertainty or confidence intervals.
+#'   With `diagnostics = TRUE`, `*_agreement_<driver>` is the fraction of
+#'   active models whose response sign equals the frozen ensemble's sign;
+#'   models count equally for this diagnostic. `context_direction_<driver>`
+#'   is -1 (both negative), 0 (both zero), 1 (both positive), 2 (opposite
+#'   signs), or 3 (zero in one background). `context_gap_<driver>` is retained
+#'   minus driver-only response. These diagnostics do not apply a minimum
+#'   ecological effect threshold and do not identify ecological causal effects.
 #'
 #' @details Comparisons are on the fitted suitability scale, using raw scenario
 #'   values without clamping or independent rescaling. Single-driver contrasts
@@ -170,7 +195,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              block_size = 50000L,
                              filename = NULL, mask = NULL, overwrite = FALSE,
                              verbose = TRUE, resources = list(), resume = TRUE,
-                             shifts = NULL) {
+                             shifts = NULL, diagnostics = FALSE) {
   .cast_check_fit(fit)
   budget <- .cast_resources(resources)
   old_options <- options(castSDM.predict_threads = budget$cores)
@@ -179,6 +204,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   decay <- .cast_check_decay(decay)
   .cast_check_scalar(block_size, "block_size", lower = 1, integer = TRUE)
   vars <- fit$env_vars
+  if (!is.logical(diagnostics) || length(diagnostics) != 1L || is.na(diagnostics))
+    cli::cli_abort("{.arg diagnostics} must be TRUE or FALSE.")
   if (is.null(drivers)) drivers <- vars
   if (!is.character(drivers) || anyNA(drivers) ||
       anyDuplicated(drivers) || !all(drivers %in% vars)) {
@@ -197,7 +224,9 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   }
   layer_names <- c("current", "future", "total_change", "support_total", "total_sd",
     unlist(lapply(drivers, function(v) paste0(c("effect_", "retained_",
-      "support_effect_", "support_retained_", "effect_sd_", "retained_sd_"), v))),
+      "support_effect_", "support_retained_", "effect_sd_", "retained_sd_",
+      if (diagnostics) c("effect_agreement_", "retained_agreement_",
+        "context_direction_", "context_gap_")), v))),
     "remainder")
   # The memory budget bounds block buffers; fitted learner objects are resident.
   cells_budget <- max(1, floor(budget$memory_mb * 1e6 /
@@ -227,6 +256,10 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       support_probs = support_probs, clamp = clamp,
       core = .cast_code_identity(.cast_attribution_block))
     if (!is.null(shifts)) signature$shifts <- shifts
+    if (diagnostics) {
+      signature$diagnostics <- TRUE
+      signature$direction <- .cast_code_identity(.cast_response_direction)
+    }
     key <- .cast_digest(signature)
     receipt <- paste0(filename, ".receipt.rds")
     cached <- if (resume) .cast_cache_read(receipt, key) else NULL
@@ -298,7 +331,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     z <- matrix(NA_real_, nrow(a), length(layer_names), dimnames = list(NULL, layer_names))
     if (any(keep)) z[keep, ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
       b[keep, , drop = FALSE], drivers, weights, bounds,
-      reference = reference, clamp = clamp)
+      reference = reference, clamp = clamp, diagnostics = diagnostics)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
     if (verbose) cli::cli_inform("Scenario attribution: block {i}/{length(starts)}")
@@ -329,7 +362,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   result <- structure(list(summary = summary, data = data,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
-    shifts = shifts,
+    shifts = shifts, diagnostics = diagnostics,
     interpretation = "Fitted-model environmental scenario comparisons on the suitability scale"),
     class = c("cast_attribution", "list"))
   if (raster) .cast_cache_write(result, receipt, key, filename)

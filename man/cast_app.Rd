@@ -10,7 +10,8 @@ cast_app(
   run = TRUE,
   launch.browser = interactive(),
   host = "127.0.0.1",
-  port = NULL
+  port = NULL,
+  state = NULL
 )
 }
 \arguments{
@@ -25,6 +26,10 @@ object without starting a server, computations or model fitting.}
 \item{launch.browser}{Open a browser when running, default \code{interactive()}.}
 
 \item{host, port}{Local Shiny server settings. Host defaults to \verb{127.0.0.1}.}
+
+\item{state}{Optional view-state list from an exported \code{view_state.rds}.
+Restores a saved view/response request, layer, map position and point query.
+Original case files must remain available. It never submits a workflow.}
 }
 \value{
 Invisibly the result of \code{shiny::runApp()}, or the app when \code{run = FALSE}.

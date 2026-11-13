@@ -15,7 +15,8 @@ cast_explore(
   maps = TRUE,
   output_dir = NULL,
   resources = list(),
-  resume = TRUE
+  resume = TRUE,
+  focus = NULL
 )
 }
 \arguments{
@@ -50,6 +51,11 @@ the real-location response table and grouping; it never predicts a full grid.}
 \item{resources}{Resource budget, as in \code{\link[=cast_attribution]{cast_attribution()}}.}
 
 \item{resume}{Reuse content-verified exploration artifacts.}
+
+\item{focus}{Optional selected driver for detailed maps. \code{NULL} automatically
+uses the largest mean absolute driver-only response on the shared support
+domain. Only this driver's two background responses, model sign agreement
+and background diagnostics are mapped, avoiding full maps for every driver.}
 }
 \value{
 A list of artifact paths, frozen settings, groups and interpretation.

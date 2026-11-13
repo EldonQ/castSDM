@@ -19,13 +19,28 @@
   pool <- utils::read.csv(file.path(directory, "training_pool.csv"), stringsAsFactors = FALSE)
   selected <- pool[match(fit$env_vars, pool$layer), , drop = FALSE]
   if (anyNA(selected$path)) cli::cli_abort("The case inventory lacks fitted predictors.")
+  metadata <- data.frame(layer = fit$env_vars, product = selected$product,
+    definition = NA_character_, units = NA_character_, source = NA_character_, notes = NA_character_)
+  dictionaries <- c(file.path(directory, "predictor_metadata.csv"),
+    file.path(case$cfg$example_root, "config", "predictor_metadata.csv"))
+  dictionaries <- dictionaries[file.exists(dictionaries)]
+  if (length(dictionaries)) {
+    dictionary <- utils::read.csv(dictionaries[1L], stringsAsFactors = FALSE)
+    required <- c("layer", "product", "definition", "units", "source", "notes")
+    if (!all(required %in% names(dictionary)) ||
+        anyDuplicated(paste(dictionary$product, dictionary$layer)))
+      cli::cli_abort("Predictor metadata needs unique product/layer keys and definition, units, source, notes.")
+    matched <- match(paste(metadata$product, metadata$layer), paste(dictionary$product, dictionary$layer))
+    found <- !is.na(matched)
+    metadata[found, required] <- dictionary[matched[found], required]
+  }
   scenarios <- utils::read.csv(file.path(directory, "scenario_table.csv"), stringsAsFactors = FALSE)
   comparison$results <- lapply(comparison$results, function(x) {
     if (!is.null(x$artifact)) x$raster_file <- file.path(directory, "comparison", "rasters", x$artifact)
     x
   })
   list(directory = directory, case = case, run = run, fit = fit,
-    comparison = comparison, pool = selected, scenarios = scenarios)
+    comparison = comparison, pool = selected, scenarios = scenarios, metadata = metadata)
 }
 
 .cast_explore_stacks <- function(project, scenario) {
@@ -89,7 +104,7 @@
   r <- if (inherits(path, "SpatRaster")) path else terra::rast(path)
   coarse <- terra::spatSample(r, size = min(pixels, terra::ncell(r)),
     method = "regular", as.raster = TRUE)
-  categorical <- grepl("^support|^response_group$", names(coarse))
+  categorical <- grepl("^support|^response_group$|^context_direction_|^(effect|retained)_agreement_", names(coarse))
   template <- leaflet::projectRasterForLeaflet(coarse[[1L]], method = "bilinear")
   out <- lapply(seq_len(terra::nlyr(coarse)), function(i)
     terra::project(coarse[[i]], template, method = if (categorical[i]) "near" else "bilinear"))
@@ -132,6 +147,10 @@
 #' @param maxdepth Maximum response tree depth. See [cast_response_groups()].
 #' @param maps Compute native-grid response/group rasters. `FALSE` only computes
 #'   the real-location response table and grouping; it never predicts a full grid.
+#' @param focus Optional selected driver for detailed maps. `NULL` automatically
+#'   uses the largest mean absolute driver-only response on the shared support
+#'   domain. Only this driver's two background responses, model sign agreement
+#'   and background diagnostics are mapped, avoiding full maps for every driver.
 #' @param output_dir Separate directory for exploration artifacts. Default
 #'   `interactive/` within the case. Research fits and existing figures are not overwritten.
 #' @param resources Resource budget, as in [cast_attribution()].
@@ -143,7 +162,7 @@
 cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = NULL,
                          context = c("current", "future"), sample_n = 5000L,
                          maxdepth = 3L, maps = TRUE, output_dir = NULL,
-                         resources = list(), resume = TRUE) {
+                         resources = list(), resume = TRUE, focus = NULL) {
   check_suggested("terra", "for saved-case exploration")
   check_suggested("rpart", "for descriptive response grouping")
   if (!is.logical(maps) || length(maps) != 1L || is.na(maps))
@@ -168,13 +187,17 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     variables <- names(shifts)
   }
   variables <- .cast_explore_selection(project, variables)
+  requested_focus <- focus
+  if (!is.null(focus) && (!is.character(focus) || length(focus) != 1L ||
+      is.na(focus) || !focus %in% variables))
+    cli::cli_abort("{.arg focus} must name one of the compared variables.")
   pair <- .cast_explore_pair(project, scenario, variables, shifts, context)
   a <- pair$current; b <- pair$future
   # Hash in the worker, with a shared memo so repeated/static files are read once.
   memo <- new.env(parent = emptyenv())
   invisible(.cast_resources(resources))
   settings <- list(scenario = scenario, variables = variables, shifts = shifts,
-    context = context, sample_n = sample_n, maxdepth = maxdepth, maps = maps,
+    context = context, sample_n = sample_n, maxdepth = maxdepth, maps = maps, focus = focus,
     weights = project$comparison$weights,
     clamp = project$run$protocol$clamp %||% FALSE,
     support_probs = project$comparison$support_probs,
@@ -187,8 +210,11 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     fit = .cast_fit_identity(project$fit),
     current = .cast_data_identity(a, memo), future = .cast_data_identity(b, memo),
     mask = .cast_data_identity(mask, memo), folds = project$run$cv$fold_info,
+    metadata = project$metadata,
     grouping = .cast_code_identity(cast_response_groups),
     membership = .cast_code_identity(.cast_response_nodes),
+    evidence = .cast_code_identity(.cast_response_evidence),
+    direction = .cast_code_identity(.cast_response_direction),
     compute = .cast_code_identity(cast_explore), attribution = .cast_code_identity(cast_attribution),
     sample = .cast_code_identity(.cast_explore_sample), pair = .cast_code_identity(.cast_explore_pair),
     group_map = .cast_code_identity(.cast_explore_group_map),
@@ -214,7 +240,13 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   response <- cast_attribution(project$fit, sample$current, sample$future,
     drivers = variables, weights = settings$weights, shifts = shifts,
     support_probs = settings$support_probs, clamp = settings$clamp,
-    resources = resources, verbose = FALSE)
+    resources = resources, verbose = FALSE, diagnostics = TRUE)
+  actual_future <- sample$future
+  for (v in names(shifts)) actual_future[[v]] <- actual_future[[v]] + shifts[[v]]
+  evidence <- .cast_response_evidence(response$data, variables, sample$current, actual_future)
+  ranked <- evidence$summary$driver[!is.na(evidence$summary$rank) & evidence$summary$rank == 1L]
+  if (is.null(focus) && length(ranked) == 1L) focus <- ranked
+  settings$focus <- focus
   cli::cli_inform("Selecting descriptive response groups using saved spatial folds.")
   supported <- response$data$support_total == 1
   groups <- tryCatch(cast_response_groups(sample$current, response$data$total_change,
@@ -222,9 +254,14 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   group_note <- if (inherits(groups, "error")) conditionMessage(groups) else NULL
   if (!is.null(group_note)) groups <- NULL
   points <- data.frame(source_cv_row = sample$row, x = sample$xy[, 1L], y = sample$xy[, 2L],
-    fold = sample$fold, response$data, group = if (is.null(groups)) NA_integer_ else groups$group)
+    fold = sample$fold, response$data, evidence$locations,
+    group = if (is.null(groups)) NA_integer_ else groups$group)
   utils::write.csv(points, file.path(directory, "responses.csv"), row.names = FALSE)
   utils::write.csv(response$summary, file.path(directory, "summary.csv"), row.names = FALSE)
+  utils::write.csv(evidence$summary, file.path(directory, "drivers_common.csv"), row.names = FALSE)
+  utils::write.csv(evidence$population, file.path(directory, "support_population.csv"), row.names = FALSE)
+  utils::write.csv(evidence$drivers, file.path(directory, "driver_ids.csv"), row.names = FALSE)
+  utils::write.csv(project$metadata, file.path(directory, "predictor_metadata.csv"), row.names = FALSE)
   if (!is.null(groups)) {
     utils::write.csv(groups$summary, file.path(directory, "groups.csv"), row.names = FALSE)
     utils::write.csv(groups$cv, file.path(directory, "group_tuning.csv"), row.names = FALSE)
@@ -234,10 +271,10 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   if (maps) {
     cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
     raw_file <- file.path(directory, "response.tif")
-    cast_attribution(project$fit, a, b, drivers = character(), weights = settings$weights,
+    cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
       shifts = shifts, support_probs = settings$support_probs, clamp = settings$clamp,
       mask = mask, filename = raw_file, overwrite = TRUE, resources = resources,
-      resume = resume)
+      resume = resume, diagnostics = TRUE)
     if (!is.null(groups)) group_file <- .cast_explore_group_map(groups, a,
       terra::rast(raw_file)[["support_total"]], file.path(directory, "groups.tif"))
     cli::cli_inform("Preparing a separate interactive preview (not the analysis grid).")
@@ -248,6 +285,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   }
   result <- list(schema = "cast_explore/1", directory = directory, key = key,
     case_dir = project$directory, settings = settings, summary = response$summary,
+    evidence = evidence,
     groups = groups, group_note = group_note, raster_file = raw_file,
     group_file = group_file, preview = preview,
     points_file = file.path(directory, "responses.csv"),
@@ -257,7 +295,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     "library(castSDM)", "args <- ", utils::capture.output(dput(list(case_dir = project$directory,
       scenario = scenario, variables = variables, shifts = shifts, context = context,
       sample_n = sample_n, maxdepth = maxdepth, maps = maps, output_dir = root,
-      resources = resources))), "result <- do.call(cast_explore, args)")
+      resources = resources, focus = requested_focus))), "result <- do.call(cast_explore, args)")
   writeLines(replay, file.path(directory, "reproduce.R"))
   files <- list.files(directory, full.names = TRUE)
   files <- files[!grepl("\\.lock$|exploration\\.rds$", files)]
@@ -271,7 +309,9 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   r <- terra::rast(source)
   r <- r[[c("current", "joint", "joint_change", "support", "sd_joint_change")]]
   names(r) <- c("current", "future", "total_change", "support_total", "total_sd")
-  key <- .cast_digest(list(unname(tools::md5sum(source)),
+  key <- .cast_digest(list(scenario = scenario, source = unname(tools::md5sum(source)),
+    fit = .cast_fit_identity(project$fit), weights = project$comparison$weights,
+    clamp = project$run$protocol$clamp %||% FALSE, support = project$comparison$support_probs,
     .cast_code_identity(.cast_explore_preview), .cast_code_identity(.cast_app_view),
     terra = as.character(utils::packageVersion("terra")),
     leaflet = as.character(utils::packageVersion("leaflet")), "cast_app_view/1"))

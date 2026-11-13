@@ -1,3 +1,19 @@
+# castSDM 0.29.1
+
+- Compare all driver responses on the same finite, range-supported saved
+  locations. Report actual predictor changes separately from zero model
+  response; unchanged scenario predictors are not ranked as drivers.
+- Show current- and future-background responses together, with background
+  sign reversals and model sign agreement. These diagnostics reuse existing
+  per-model predictions and require no additional fitted-model calls.
+- Automatically focus detailed maps on the unique largest scenario response;
+  retain tied ranks and do not choose a winner when the first rank is tied.
+  A selected driver exposes both background responses, sign agreement and
+  context diagnostics without predicting every driver's national map.
+- Export a GUI view state and executable replay script, including scenario,
+  selected layer, map view and native-grid point/profile query. Original real
+  case inputs remain required; replay never submits a research workflow.
+
 # castSDM 0.29.0
 
 - Add `cast_app()` for local browsing of completed real cases, native-grid

@@ -43,6 +43,13 @@ replay script. Display rasters are explicitly separate from the analysis grid.
 using supplied spatial folds and one-standard-error pruning. The method follows
 [published FME/cAME explanations](https://doi.org/10.32614/RJ-2024-024);
 environmental groups are descriptive and need not be geographically contiguous.
+The default driver overview now compares the same range-supported locations
+for every factor. It shows responses in both backgrounds of the configured
+comparison pair, their sign reversals and active-model sign agreement.
+Predictors unchanged in the supplied scenario are labelled and not ranked.
+Detailed native maps focus on one automatically selected or user-chosen
+factor, avoiding national predictions for every factor on each interaction.
+Tied first ranks do not trigger an arbitrary automatic choice.
 SHAP contributions, CATE, ecological causal effects, actual occupancy and
 probability changes are different quantities. The current presence/background
 case does not identify them merely by changing the estimator or adding a GUI.
@@ -53,6 +60,10 @@ The implementation reuses the existing fitted models and contrast kernel.
 response. Optional named `shifts` modify future predictors inside processing
 blocks without creating a full shifted raster stack. Related derived predictors
 should be changed using a consistent environmental scenario.
+
+GUI bundles also contain `view_state.rds` and `reproduce_view.R`, which restore
+the comparison, selected layer, map view and point/profile query. Run the script
+from the extracted bundle with the original real-case inputs available.
 
 ## Fit, validate, compare
 

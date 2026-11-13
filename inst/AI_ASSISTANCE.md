@@ -55,3 +55,11 @@ No new observations, artificial absence labels or simulated validation data
 were generated. The full user research pipeline was not run. Historical
 simulated unit fixtures remain in the repository but are excluded from the
 lightweight package-check execution used for this release.
+
+On 13 November 2026, 0.29.1 adds common-location response ranking, explicit
+unchanged-scenario states, before/after comparison-background diagnostics,
+per-model sign agreement, focused native response maps and GUI state replay.
+The real-case predictor dictionary records product-specific definitions and
+source references; missing definitions are not inferred from variable IDs.
+All scientific verification uses saved actual cases, observed raster values
+and tiny real-grid crops. It does not refit study models or run the full case.

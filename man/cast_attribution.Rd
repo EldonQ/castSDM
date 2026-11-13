@@ -27,7 +27,8 @@ cast_attribution(
   verbose = TRUE,
   resources = list(),
   resume = TRUE,
-  shifts = NULL
+  shifts = NULL,
+  diagnostics = FALSE
 )
 
 \method{print}{cast_attribution}(x, ...)
@@ -88,6 +89,10 @@ With \code{future = current} this computes finite-change responses without
 materialising another environmental raster stack. These are explicitly
 hypothetical predictor changes, not observed data or causal effects.}
 
+\item{diagnostics}{Also retain per-driver model sign agreement, background
+direction classes and background response gaps. Default \code{FALSE}. Uses
+predictions already calculated, without further fitted-model calls.}
+
 \item{x}{A \code{cast_attribution} result for printing.}
 
 \item{...}{Ignored.}
@@ -100,6 +105,13 @@ is full future minus future with that driver held current. \code{remainder}
 is total change minus the sum of driver-only effects: it includes joint
 response and changes in any omitted drivers. \verb{*_sd} layers describe
 cross-model disagreement, not sampling uncertainty or confidence intervals.
+With \code{diagnostics = TRUE}, \verb{*_agreement_<driver>} is the fraction of
+active models whose response sign equals the frozen ensemble's sign;
+models count equally for this diagnostic. \verb{context_direction_<driver>}
+is -1 (both negative), 0 (both zero), 1 (both positive), 2 (opposite
+signs), or 3 (zero in one background). \verb{context_gap_<driver>} is retained
+minus driver-only response. These diagnostics do not apply a minimum
+ecological effect threshold and do not identify ecological causal effects.
 }
 \description{
 Compares aligned current and future environments with one fitted SDM and

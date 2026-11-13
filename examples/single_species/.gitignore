@@ -1,4 +1,5 @@
-/config/
+/config/*
+!/config/predictor_metadata.csv
 /output/
 /.library/
 *.log

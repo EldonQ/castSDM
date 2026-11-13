@@ -15,7 +15,7 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, packages = c("castSDM", "terra", "ranger", "maxnet", "mgcv",
-    "shiny", "bslib", "leaflet", "callr", "rpart", "zip"), minimum_cast = "0.29.0")
+    "shiny", "bslib", "leaflet", "callr", "rpart", "zip"), minimum_cast = "0.29.1")
   sys.source(file.path(root, "01_config.R"), envir = environment())
   sys.source(file.path(root, "inventory.R"), envir = environment())
   configs <- castsdm_species_configs(root)

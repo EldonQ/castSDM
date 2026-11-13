@@ -41,6 +41,56 @@ independent <- cast_compare(project$fit, a, setNames(list(b), scenario),
 verified("attribution agrees with the separate factorial comparison kernel",
   same(total$data$total_change, independent$results[[1L]]$data$joint_change))
 
+diagnostic <- cast_attribution(project$fit, a, b, weights = weights, clamp = clamp,
+  diagnostics = TRUE, verbose = FALSE, resources = list(cores = 2L))
+verified("response diagnostics preserve every original prediction and support value",
+  same(diagnostic$data[names(full$data)], full$data))
+members <- lapply(names(weights), function(m) cast_attribution(project$fit, a, b,
+  models = m, weights = setNames(1, m), clamp = clamp, verbose = FALSE)$data)
+for (v in project$fit$env_vars) {
+  for (prefix in c("effect_", "retained_")) {
+    field <- paste0(prefix, v)
+    predictions <- do.call(cbind, lapply(members, `[[`, field))
+    expected <- rowMeans(sign(predictions) == sign(full$data[[field]]))
+    verified(paste("model sign agreement from independent saved engines", field),
+      same(diagnostic$data[[paste0(prefix, "agreement_", v)]], expected))
+  }
+}
+evidence <- internal(".cast_response_evidence")(diagnostic$data, project$fit$env_vars, a, b)
+bounds <- internal(".cast_support_bounds")(internal(".cast_reference")(project$fit, names(a)),
+  project$comparison$support_probs)
+eligible <- vapply(seq_len(nrow(a)), function(i) all(vapply(names(a), function(v)
+  is.finite(a[[v]][i]) && is.finite(b[[v]][i]) &&
+    a[[v]][i] >= bounds[[v]][1] && a[[v]][i] <= bounds[[v]][2] &&
+    b[[v]][i] >= bounds[[v]][1] && b[[v]][i] <= bounds[[v]][2], logical(1))), logical(1))
+verified("common ranking population agrees with actual training-reference ranges",
+  identical(evidence$locations$common_support, as.integer(eligible)))
+verified("all compared drivers have the same ranking denominator",
+  all(evidence$summary$n_common == sum(eligible)))
+verified("unchanged actual scenario predictors are explicitly excluded from ranking",
+  all(is.na(evidence$summary$rank[evidence$summary$status == "unchanged_scenario"])))
+for (v in names(a)) {
+  row <- evidence$summary[evidence$summary$driver == v, ]
+  verified(paste("common-domain signed response matches raw rows", v),
+    same(row$mean_only, mean(full$data[[paste0("effect_", v)]][eligible])) &&
+      same(row$mean_retained, mean(full$data[[paste0("retained_", v)]][eligible])))
+}
+write.csv(evidence$summary, file.path(output, "drivers_common.csv"), row.names = FALSE)
+write.csv(evidence$population, file.path(output, "support_population.csv"), row.names = FALSE)
+
+# Use genuinely missing cells from the real grid, never manufactured NAs.
+edge_a <- as.data.frame(terra::values(stacks$current, row = 1L, nrows = 1L))
+edge_b <- as.data.frame(terra::values(stacks$future, row = 1L, nrows = 1L))
+missing <- which(rowSums(is.finite(as.matrix(edge_a))) == 0L &
+  rowSums(is.finite(as.matrix(edge_b))) == 0L)
+if (length(missing)) {
+  edge_a <- edge_a[missing[1L], , drop = FALSE]; edge_b <- edge_b[missing[1L], , drop = FALSE]
+  absent <- cast_attribution(project$fit, edge_a, edge_b, weights = weights, verbose = FALSE)
+  absent <- internal(".cast_response_evidence")(absent$data, project$fit$env_vars, edge_a, edge_b)
+  verified("actual NoData cells are labelled missing, never unchanged or ranked",
+    all(absent$summary$status == "missing_predictor_pairs") && all(is.na(absent$summary$rank)))
+}
+
 # Reconstruct an actual projected future vector using its recorded differences.
 # No fabricated covariate values or response labels enter this check.
 i <- which(internal(".cast_finite_rows")(a) & internal(".cast_finite_rows")(b))[1L]
@@ -90,6 +140,23 @@ table <- cast_attribution(project$fit,
   drivers = character(), weights = weights, clamp = clamp, verbose = FALSE)
 verified("real native-grid crop and table responses agree",
   same(terra::values(terra::rast(native$raster_file)[["total_change"]], mat = FALSE), table$data$total_change))
+focused <- cast_attribution(project$fit, ra, rb, drivers = names(a)[1L], weights = weights,
+  clamp = clamp, filename = file.path(output, "real_crop_focused.tif"), diagnostics = TRUE,
+  verbose = FALSE, overwrite = TRUE, resources = list(cores = 2L))
+focused_table <- cast_attribution(project$fit,
+  as.data.frame(terra::values(ra, mat = TRUE)), as.data.frame(terra::values(rb, mat = TRUE)),
+  drivers = names(a)[1L], weights = weights, clamp = clamp, diagnostics = TRUE, verbose = FALSE)
+verified("focused real raster and table agree for both backgrounds and all diagnostics",
+  same(terra::values(terra::rast(focused$raster_file)), as.matrix(focused_table$data)))
+focus_preview <- internal(".cast_explore_preview")(terra::rast(focused$raster_file),
+  file.path(output, "real_crop_focused_preview.tif"), pixels = terra::ncell(ra))
+discrete <- grep("context_direction_|agreement_", focused$layers, value = TRUE)
+verified("real preview preserves direction classes and model-vote fractions",
+  all(vapply(discrete, function(field) {
+    a <- unique(na.omit(terra::values(terra::rast(focused$raster_file)[[field]], mat = FALSE)))
+    b <- unique(na.omit(terra::values(terra::rast(focus_preview)[[field]], mat = FALSE)))
+    length(a) > 0L && length(b) > 0L && all(vapply(b, function(x) any(abs(a - x) < 1e-6), logical(1)))
+  }, logical(1))))
 group_map <- internal(".cast_explore_group_map")(groups, ra,
   terra::rast(native$raster_file)[["support_total"]], file.path(output, "real_crop_groups.tif"))
 supported <- terra::values(terra::rast(native$raster_file)[["support_total"]], mat = FALSE) == 1
@@ -114,6 +181,15 @@ reused <- cast_explore(directory, maps = FALSE, sample_n = length(at),
   output_dir = file.path(output, "exploration"), resources = list(cores = 2L))
 verified("content-verified cache reuses unchanged real outputs",
   identical(explored$key, reused$key) && identical(stamp, file.info(reused$points_file)$mtime))
+replay <- new.env(parent = globalenv())
+sys.source(file.path(explored$directory, "reproduce.R"), envir = replay)
+verified("exported analysis script reuses the identical checked cache",
+  identical(explored$key, replay$result$key) && identical(stamp, file.info(replay$result$points_file)$mtime))
+verified("automatic map focus is the unique first-ranked changed driver",
+  identical(explored$settings$focus,
+    explored$evidence$summary$driver[explored$evidence$summary$rank %in% 1L]))
+verified("real-case source-specific variable definitions are exported",
+  file.exists(file.path(explored$directory, "predictor_metadata.csv")))
 
 worker <- internal(".cast_app_start")(list(operation = "response", case_dir = directory,
   maps = FALSE, sample_n = length(at), output_dir = file.path(output, "exploration"),
