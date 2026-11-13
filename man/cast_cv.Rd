@@ -59,7 +59,10 @@ Cannot override \code{data}, \code{response}, or \code{method}.}
 (\code{\link[blockCV:cv_spatial]{blockCV::cv_spatial()}}) with square blocks. The block size follows
 the range of spatial autocorrelation estimated by
 \code{\link[blockCV:cv_spatial_autocor]{blockCV::cv_spatial_autocor()}} (Roberts et al. 2017), or the
-user-supplied \code{block_size}. Falls back to \code{"grid"} with a warning when
+user-supplied \code{block_size}. If range estimation is unavailable, the
+blockCV extent-grid default is used with a warning and recorded as
+\code{blockcv_extent_grid}; no calibrated physical length is claimed.
+Falls back to \code{"grid"} with a warning when
 \pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
 \item \code{"grid"}: grid cells grouped into spatially contiguous folds via
 k-means on cell centroids (dependency-free fallback).
@@ -168,4 +171,13 @@ training-side DI values were collected), \code{di_oof}, \code{di_train} and
 \description{
 Variable selection is re-fitted inside every outer training fold. This
 prevents the held-out fold from influencing predictor choice.
+}
+\details{
+Threshold-dependent fold metrics use a threshold selected from
+pooled OOF labels, including that fold's labels. They describe the chosen
+training-side operating point; they are not an independent assessment of
+threshold choice. Use a separate hold-out with the frozen threshold for
+that assessment. Threshold-free discrimination scores have no such
+threshold-selection step. Fold dependence also limits interpretation of
+a one-SE screening rule as statistical uncertainty.
 }

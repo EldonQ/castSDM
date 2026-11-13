@@ -18,12 +18,10 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   scr <- x$scores
   scr$is_selected <- scr$variable %in% x$selected
 
-  # The score to plot must be the ONE the method actually ranked by. The
-  # elastic-net screen carries the univariate stage1_p ordering; the
-  # consensus screen carries fold selection frequency; "full" screens have
-  # no ranking and fall back to the selection indicator.
+  # Descriptive component signal for current screens. Historical p-value
+  # scores remain readable for frozen results; they do not select new models.
   imp_candidates <- if (identical(x$method, "screen")) {
-    c("stage1_p", "assoc")
+    c("group_signal_sd", "stage1_p", "assoc")
   } else {
     c("freq", "assoc")
   }
@@ -51,9 +49,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
   n_total <- nrow(scr)
   n_sel <- sum(scr$is_selected)
 
-  # Stage 2 scores only the stage-1 survivors, so thinned predictors carry no
-  # score. Plotting all of them crushes the axis into an unreadable band; keep
-  # only the scored predictors, then the top-scoring slice.
+  # Plot scored variables; qualification exclusions remain in the saved table.
   tested <- scr[is.finite(scr[[imp_col]]), , drop = FALSE]
   n_tested <- nrow(tested)
   tested <- tested[order(-tested[[imp_col]]), , drop = FALSE]
@@ -82,6 +78,7 @@ plot.cast_select <- function(x, var_labels = NULL, top = 20L, ...) {
 
   x_lab <- switch(imp_col,
     freq = "Fold selection frequency",
+    group_signal_sd = "Training SD of fitted variable contribution",
     filter_score = "Filter score  (-log10 p of the quadratic-logistic term)",
     assoc = "|marginal association|",
     importance_plot = "Selection indicator",
@@ -644,64 +641,24 @@ plot.cast_project <- function(x, scenario = NULL, basemap = "world", ...) {
 }
 
 
-#' Plot Predictor Importance
+#' Plot the Saved Selection Description
 #'
-#' Lollipop plot of the selection path: each admitted predictor with its
-#' admission rank (the elastic-net screen rank, 1 = strongest). Excluded
-#' predictors carry a missing rank and are not plotted.
-#'
+#' Shows the recorded descriptive variable signal or fold-selection frequency.
+#' Plot ordering does not determine variable selection or causal importance.
 #' @param x A `cast_importance` object (from [cast_importance()]).
 #' @param var_labels Optional named character vector for display labels.
-#' @param top Optional integer. Show only the `top` strongest predictors.
+#' @param top Optional integer. Show the top displayed scores plus all retained
+#'   variables; `NULL` shows every scored variable.
 #' @param ... Ignored.
-#'
 #' @return A `ggplot` object.
 #' @export
 plot.cast_importance <- function(x, var_labels = NULL, top = NULL, ...) {
-  check_suggested("ggplot2", "for plotting")
   eff <- x$effects
-  n_out <- sum(is.na(x$effects$step_added))
-  eff <- eff[!is.na(eff$step_added), , drop = FALSE]
-  if (!is.null(top) && is.finite(top)) {
-    eff <- utils::head(eff[order(eff$step_added), , drop = FALSE],
-                       as.integer(top))
-  }
-  eff <- eff[order(eff$step_added), , drop = FALSE]
-  x_measure <- eff$step_added
-  if (!is.null(var_labels)) {
-    eff$display <- ifelse(eff$variable %in% names(var_labels),
-                          var_labels[eff$variable], eff$variable)
-  } else {
-    eff$display <- eff$variable
-  }
-  eff$display <- factor(make.unique(as.character(eff$display)),
-                        levels = rev(make.unique(as.character(eff$display))))
-
-  plot_subtitle <- sprintf(
-    "%s | %d admitted, %d screened out",
-    x$metric %||% "aggregate rank", nrow(eff), n_out)
-
-  ggplot2::ggplot(eff, ggplot2::aes(
-    x = x_measure, y = .data$display
-  )) +
-    ggplot2::geom_vline(xintercept = 0.5, linetype = "solid",
-                        color = "grey50", linewidth = 0.4) +
-    ggplot2::geom_segment(
-      ggplot2::aes(x = 0.5, xend = x_measure,
-                   y = .data$display, yend = .data$display),
-      linewidth = 0.6, color = "#B2182B"
-    ) +
-    ggplot2::geom_point(size = 2.6, color = "#B2182B") +
-    ggplot2::labs(
-      title = "Selection path",
-      subtitle = plot_subtitle,
-      x = "Embedded-selection rank (1 = strongest)", y = ""
-    ) +
-    theme_cast(base_size = 11) +
-    ggplot2::theme(
-      legend.position = "none",
-      panel.grid.major.y = ggplot2::element_line(color = "grey93", linewidth = 0.3)
-    )
+  screen <- new_cast_select(eff$variable[eff$selected %in% TRUE], eff,
+    method = if ("group_signal_sd" %in% names(eff)) "screen" else "consensus")
+  plot(screen, var_labels = var_labels, top = top) +
+    ggplot2::labs(title = "Saved selection description",
+      caption = "Descriptive fitted-screen signal; not causal importance.")
 }
 
 

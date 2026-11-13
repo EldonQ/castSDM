@@ -29,17 +29,9 @@
 #'   Default all three.
 #' @param train_fraction Hold-out fraction rule: fraction of rows assigned
 #'   to the training split (spatial block split). Default `0.7`.
-#' @param select_method `"screen"` (independent elastic-net screen) or
+#' @param select_method `"screen"` (spatial elastic-net screen) or
 #'   `"full"` (keep every varying predictor). Default `"screen"`.
-#' @param select_keep Predictors forced through screening (see
-#'   [cast_select()]).
-#' @param select_corcut Absolute Pearson correlation threshold for the
-#'   collinearity filter. Default `0.7`.
-#' @param select_ncov Target covariate count for `"screen"` (`NULL` =
-#'   `ceiling(log2(n_presences))`).
-#' @param select_maxncov Maximum covariate count for `"screen"`. Default `12`.
-#' @param select_ensure_n Named minimum counts for the coverage groups passed
-#'   to [cast_run()] as `select_ensure`; see [cast_select()].
+#' @param select_inner_k Number of inner spatial folds for elastic-net penalty selection.
 #' @param holdout_blocks Number of blocks in the independent spatial hold-out.
 #' @param rf_ntree RF trees. Default `500`.
 #' @param rf_mtry RF `mtry` (`NULL` keeps the ranger default `sqrt(p)`).
@@ -55,7 +47,8 @@
 #' @param cv_k Number of outer spatial folds. Default `5`.
 #' @param n_repeat Number of independent spatial-blocking repeats. Default `1`.
 #' @param block_method `"blockcv"` (default; blockCV spatial blocks with
-#'   autocorrelation-range sizing), `"grid"` or `"env"` (see [cast_cv()]).
+#'   attempted autocorrelation-range sizing; actual extent-grid fallback
+#'   recorded when unavailable), `"grid"` or `"env"` (see [cast_cv()]).
 #' @param block_size Optional block edge length in metres for `"blockcv"`.
 #' @param buffer,buffer_unit Fold-boundary exclusion band for training rows
 #'   (see [cast_cv()]). Default `0`.
@@ -78,10 +71,7 @@ cast_protocol <- function(
   models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
   select_method = c("screen", "full"),
-  select_keep = character(0),
-  select_corcut = 0.7,
-  select_ncov = NULL,
-  select_maxncov = 12L,
+  select_inner_k = 5L,
   rf_ntree = 500L,
   rf_mtry = NULL,
   maxent_classes = NULL,
@@ -105,7 +95,6 @@ cast_protocol <- function(
   clamp = TRUE,
   num_threads = 1L,
   seed = NULL,
-  select_ensure_n = NULL,
   holdout_blocks = 20L
 ) {
   # Multi-value defaults document the allowed choices; the first element is
@@ -115,11 +104,7 @@ cast_protocol <- function(
     models = models,
     train_fraction = train_fraction,
     select_method = first(select_method),
-    select_keep = select_keep,
-    select_corcut = select_corcut,
-    select_ncov = select_ncov,
-    select_maxncov = select_maxncov,
-    select_ensure_n = select_ensure_n,
+    select_inner_k = select_inner_k,
     holdout_blocks = holdout_blocks,
     rf_ntree = rf_ntree,
     rf_mtry = rf_mtry,
@@ -165,10 +150,10 @@ cast_protocol <- function(
   }
   # Older serialized protocols inherit the previous hold-out default.
   p$holdout_blocks <- p$holdout_blocks %||% 20L
-  p$select_ensure_n <- p$select_ensure_n %||% NULL
+  removed <- intersect(names(p), c("select_keep", "select_corcut", "select_ncov", "select_maxncov", "select_ensure_n"))
+  if (length(removed)) cli::cli_abort("This protocol uses retired count/constrained screening settings: {.val {removed}}. Create a new cast_protocol(); old scientific results cannot be resumed as a new selection analysis.")
   required <- c(
-    "models", "train_fraction", "select_method", "select_keep",
-    "select_corcut", "select_ncov", "select_maxncov",
+    "models", "train_fraction", "select_method", "select_inner_k",
     "rf_ntree", "rf_mtry",
     "maxent_classes", "maxent_regmult", "threshold_method", "tune",
     "tune_folds", "prevalence_target", "cv_k", "n_repeat", "block_method",
@@ -201,25 +186,10 @@ cast_protocol <- function(
   }
   p$select_method <- enum_value(p$select_method, "select_method",
                                 c("screen", "full"))
-  if (!is.character(p$select_keep) || anyNA(p$select_keep) ||
-      anyDuplicated(p$select_keep)) {
-    cli::cli_abort("{.arg protocol$select_keep} must be unique predictor names.")
-  }
-  p$select_corcut <- .cast_check_scalar(p$select_corcut,
-    "protocol$select_corcut", lower = 0, upper = 1)
-  if (!is.null(p$select_ncov)) {
-    p$select_ncov <- .cast_check_scalar(p$select_ncov,
-      "protocol$select_ncov", lower = 1, integer = TRUE)
-  }
-  p$select_maxncov <- .cast_check_scalar(p$select_maxncov,
-    "protocol$select_maxncov", lower = 1, integer = TRUE)
+  p$select_inner_k <- .cast_check_scalar(p$select_inner_k,
+    "protocol$select_inner_k", lower = 2, integer = TRUE)
   p$holdout_blocks <- .cast_check_scalar(p$holdout_blocks,
     "protocol$holdout_blocks", lower = 2, integer = TRUE)
-  if (!is.null(p$select_ensure_n) && (!is.numeric(p$select_ensure_n) ||
-      is.null(names(p$select_ensure_n)) || anyDuplicated(names(p$select_ensure_n)) ||
-      anyNA(p$select_ensure_n) || any(!is.finite(p$select_ensure_n)) ||
-      any(p$select_ensure_n < 1 | p$select_ensure_n != floor(p$select_ensure_n))))
-    cli::cli_abort("protocol$select_ensure_n must be named positive integer group counts.")
   p$rf_ntree <- .cast_check_scalar(p$rf_ntree, "protocol$rf_ntree",
     lower = 1, integer = TRUE)
   if (!is.null(p$rf_mtry)) {
@@ -294,7 +264,7 @@ print.cast_protocol <- function(x, ...) {
   cli::cli_ul(c(
     "Engines: {fmt(x$models)}",
     "Split: train_fraction = {x$train_fraction}",
-    "Selection: {x$select_method} (corcut = {x$select_corcut}; ncov = {fmt(x$select_ncov)}; maxncov = {x$select_maxncov})",
+    "Selection: {x$select_method} (inner spatial folds = {x$select_inner_k}; no predictor-count target)",
     "Engine settings: rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
     "Tuning: tune = {x$tune} (tune_folds = {x$tune_folds})",
     "Threshold: {x$threshold_method}; prevalence_target = {fmt(x$prevalence_target)}",

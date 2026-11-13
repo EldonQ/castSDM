@@ -93,6 +93,22 @@ evaluation and full-data refitting. Scientific settings live in one
 `cast_protocol()`. Screening and tuning repeat inside outer CV folds; hold-out
 data do not determine ensemble weights or thresholds.
 
+The screen uses one mature method: binomial elastic net with linear/quadratic
+terms and inner spatial one-SE penalty selection. Binary inputs use linear
+terms only. There is no fixed variable count, top-coefficient truncation,
+minimum climate quota, univariate p-value ranking or automatic correlated-pair
+delete. Semantic qualification excludes identifiers and unencoded category/
+direction codes. Transformations are rebuilt within each training fold.
+This is transparent preprocessing, not a new selection algorithm or causal
+identification. Complex responses/interactions may be missed; correlated
+variables may substitute. Qualification, the full spatial risk curve and fold
+losses are saved. A null result is reported without forcing predictors.
+Version 0.31 requires a fresh analysis directory; old scientific fits cannot
+be resumed under the new selection rule.
+OOF thresholds are fitted training-side settings: fold TSS/SEDI/kappa at that
+pooled threshold are descriptive, since the fold labels participate in choosing
+it. Assess the frozen threshold on the separate hold-out.
+
 ```r
 # species_data: lon, lat, presence (0/1), and numeric predictors.
 protocol <- cast_protocol(models = c("rf", "maxent", "gam"), seed = 42)

@@ -18,7 +18,7 @@
   }
   for (root in roots) visit(root)
   packages <- switch(stage,
-    `01_prepare` = c("blockCV", "sf"), `02_select` = "glmnet",
+    `01_prepare` = c("blockCV", "sf"), `02_select` = c("glmnet", "blockCV", "sf"),
     `04_cv` = c("blockCV", "sf", "FNN", "glmnet", "pROC"),
     `05_evaluate` = "pROC", character())
   if (stage %in% c("03_fit", "04_cv", "06_refit"))

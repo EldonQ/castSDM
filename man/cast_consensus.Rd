@@ -23,11 +23,10 @@ into a selection-frequency table and a consensus variable set: predictors
 retained in at least \code{threshold} (a proportion) of the outer folds.
 }
 \details{
-Nested selection is re-run in every spatial fold, so a predictor selected
-in only one fold is likely a region-specific (or noise) association; a
-predictor selected in most folds is a candidate driver that transfers
-across regions. The frequency table makes that trade-off visible and the
-consensus set operationalises it.
+Frequencies describe stability under the recorded fold design. Correlated
+predictors may substitute for each other; frequency does not identify
+ecological causes or prove geographic transferability. This optional
+thresholded set is not used by the default automatic screen.
 }
 \seealso{
 \code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_fit]{cast_fit()}}

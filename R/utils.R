@@ -85,11 +85,11 @@ validate_species_data <- function(data,
 #' @noRd
 .cast_check_numeric_predictors <- function(x, arg = "data",
                                            call = parent.frame()) {
-  bad <- names(x)[!vapply(x, is.numeric, logical(1))]
+  bad <- names(x)[!vapply(x, function(v) is.numeric(v) || is.logical(v), logical(1))]
   if (length(bad)) {
     cli::cli_abort(c(
       "Non-numeric predictor{?s}: {.val {bad}}.",
-      i = "{.arg {arg}} must hold numeric predictors only; convert factors/characters to numeric before modelling."
+      i = "{.arg {arg}} requires semantically valid numeric predictors; do not convert factor level codes to numeric. Supply a documented encoding or exclude the variable."
     ), call = call)
   }
   invisible(x)
@@ -133,19 +133,11 @@ get_env_vars <- function(data, response = "presence",
   )
   exclude <- unique(c(response, coords, default_meta, meta))
   nms <- setdiff(names(data), exclude)
-  nms <- nms[vapply(data[nms], is.numeric, logical(1))]
+  nms <- nms[vapply(data[nms], function(v) is.numeric(v) || is.logical(v), logical(1))]
 
-  # Exclude near-zero-variance columns (e.g., occ = all 1s, constant flags)
-  # These carry no ecological signal and often indicate metadata slippage.
-  # `length(vals) <= 1L` guards var() of a single non-NA value (which returns
-  # NA); a near-constant column is dropped instead of injecting an NA name.
-  nms[vapply(nms, function(v) {
-    vals <- data[[v]]
-    vals <- vals[!is.na(vals)]
-    if (length(vals) <= 1L) return(FALSE)
-    vv <- stats::var(vals)
-    is.finite(vv) && vv > 1e-10
-  }, logical(1))]
+  # Exact non-constancy is invariant to legitimate changes of measurement unit.
+  nms[vapply(nms, function(v) .cast_is_varying(data[[v]]), logical(1))]
+
 }
 
 

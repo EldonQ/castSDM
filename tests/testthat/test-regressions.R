@@ -61,7 +61,6 @@ test_that("change classes mark non-binary cells as NA, never empty string", {
 })
 
 test_that("cast_vif rejects non-finite predictors with a targeted error", {
-  skip_if_not_installed("car")
   dat <- data.frame(
     a = rnorm(50), b = rnorm(50), c = rnorm(50),
     d = c(1, rep(Inf, 49))

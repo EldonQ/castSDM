@@ -141,7 +141,6 @@ test_that("cast_predict_tiled writes real predictions on a fresh output dir", {
 })
 
 test_that("cast_vif removes collinear columns", {
-  skip_if_not_installed("car")
   set.seed(12)
   n <- 60
   a <- rnorm(n); b <- a + rnorm(n, 0, 0.001)

@@ -21,7 +21,10 @@
 #'     ([blockCV::cv_spatial()]) with square blocks. The block size follows
 #'     the range of spatial autocorrelation estimated by
 #'     [blockCV::cv_spatial_autocor()] (Roberts et al. 2017), or the
-#'     user-supplied `block_size`. Falls back to `"grid"` with a warning when
+#'     user-supplied `block_size`. If range estimation is unavailable, the
+#'     blockCV extent-grid default is used with a warning and recorded as
+#'     `blockcv_extent_grid`; no calibrated physical length is claimed.
+#'     Falls back to `"grid"` with a warning when
 #'     \pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
 #'   - `"grid"`: grid cells grouped into spatially contiguous folds via
 #'     k-means on cell centroids (dependency-free fallback).
@@ -89,6 +92,14 @@
 #' @param verbose Print progress.
 #' @param rf_mtry,maxent_classes,maxent_regmult,num_threads Engine
 #'   settings as in [cast_fit()], applied in every outer training fold.
+#'
+#' @details Threshold-dependent fold metrics use a threshold selected from
+#'   pooled OOF labels, including that fold's labels. They describe the chosen
+#'   training-side operating point; they are not an independent assessment of
+#'   threshold choice. Use a separate hold-out with the frozen threshold for
+#'   that assessment. Threshold-free discrimination scores have no such
+#'   threshold-selection step. Fold dependence also limits interpretation of
+#'   a one-SE screening rule as statistical uncertainty.
 #'
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
 #'   Metrics include `auc_n_folds`, `tss_n_folds`, and `cbi_n_folds` counting
@@ -478,7 +489,7 @@ cast_cv <- function(data,
     }
     fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
 
-    list(folds = folds, fold_df = fold_df, oof_df = oof_df, native_oof = native_df,
+    list(folds = folds, fold_design = attr(folds, "design"), fold_df = fold_df, oof_df = oof_df, native_oof = native_df,
          offsets = if (length(offsets)) do.call(rbind, offsets) else NULL,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
@@ -608,6 +619,7 @@ cast_cv <- function(data,
                            obs = data[[response]], lon = data$lon, lat = data$lat),
     offsets = reps[[1]]$offsets
   )
+  result$fold_design <- lapply(reps, `[[`, "fold_design")
   result$clamp <- clamp
   result$repeat_status <- do.call(rbind, lapply(seq_along(reps), function(i) {
     rp <- reps[[i]]
@@ -711,7 +723,7 @@ make_spatial_folds <- function(lon, lat, k,
   method <- match.arg(method)
   n <- length(lon)
   k_use <- min(k, n)
-  if (k_use < 2L) return(rep(1L, n))
+  if (k_use < 2L) return(.cast_fold_design(rep(1L, n), method, "insufficient_rows"))
   if (method == "blockcv") {
     folds <- .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size)
     if (!is.null(folds)) return(folds)
@@ -736,9 +748,10 @@ make_spatial_folds <- function(lon, lat, k,
     if (sum(keep) < 2L) {
       cli::cli_abort("{.code block_method = \"env\"} needs at least two predictors with non-zero variance.")
     }
-    return(as.integer(factor(.cast_with_seed(seed, stats::kmeans(
+    ids <- as.integer(factor(.cast_with_seed(seed, stats::kmeans(
       scale(env[, keep, drop = FALSE]), centers = k_use, nstart = 10L
-    )$cluster))))
+    )$cluster)))
+    return(.cast_fold_design(ids, method, "env"))
   }
   # "grid" (also the blockcv fallback): spatially contiguous folds. Cells are
   # the atoms; their centroids are clustered into k spatial groups and each
@@ -753,12 +766,12 @@ make_spatial_folds <- function(lon, lat, k,
   cell_lat <- as.numeric(tapply(lat, cell, mean))
   n_cells <- length(cell_lon)
   if (n_cells <= k) {
-    return(as.integer(factor(cell, levels = names(counts))))
+    return(.cast_fold_design(as.integer(factor(cell, levels = names(counts))), method, "grid"))
   }
   km <- .cast_with_seed(seed,
     stats::kmeans(cbind(cell_lon, cell_lat), centers = k, nstart = 10L))
   fold_of_cell <- stats::setNames(km$cluster, names(counts))
-  as.integer(fold_of_cell[as.character(cell)])
+  .cast_fold_design(as.integer(fold_of_cell[as.character(cell)]), method, "grid")
 }
 
 #' blockCV-Backed Fold Assignment
@@ -794,6 +807,7 @@ make_spatial_folds <- function(lon, lat, k,
   if (is.null(pts) || any(sf::st_is_empty(pts))) return(NULL)
   column <- if (!is.null(y)) ".response" else NULL
   size <- block_size
+  range_error <- NULL
   if (is.null(size)) {
     size <- tryCatch({
       ac <- suppressWarnings(blockCV::cv_spatial_autocor(
@@ -802,8 +816,11 @@ make_spatial_folds <- function(lon, lat, k,
         plot = FALSE, progress = FALSE
       ))
       rng <- as.numeric(ac$range %||% NA_real_)
-      if (is.finite(rng) && rng > 0) rng else NULL
-    }, error = function(e) NULL)
+      if (is.finite(rng) && rng > 0) rng else {
+        range_error <- "No positive finite autocorrelation range was returned."
+        NULL
+      }
+    }, error = function(e) { range_error <<- conditionMessage(e); NULL })
   }
   blk <- tryCatch(
     suppressWarnings(blockCV::cv_spatial(
@@ -818,9 +835,24 @@ make_spatial_folds <- function(lon, lat, k,
   if (length(ids) != length(lon) || anyNA(ids)) return(NULL)
   # blockCV may return fewer than k non-empty folds on degenerate extents.
   if (!all(seq_len(k) %in% unique(ids))) return(NULL)
-  ids
+  out <- .cast_fold_design(ids, "blockcv",
+    if (is.null(size)) "blockcv_extent_grid" else "blockcv", size)
+  attr(out, "design")$size_source <- if (!is.null(block_size)) "caller" else
+    if (!is.null(size)) "response_autocorrelation_range" else "blockCV default extent grid; no calibrated range"
+  attr(out, "design")$range_error <- range_error
+  if (is.null(size)) {
+    attr(out, "design")$rows_cols <- eval(formals(blockCV::cv_spatial)$rows_cols)
+    cli::cli_warn("Spatial autocorrelation range unavailable; blockCV used its documented extent grid, not a calibrated physical block length. The effective design and reason are recorded.")
+  }
+  out
 }
 
+.cast_fold_design <- function(ids, requested, effective, size = NULL) {
+  attr(ids, "design") <- list(requested = requested, effective = effective,
+    block_size_m = size %||% NA_real_,
+    fallback = if (requested != effective) "requested design unavailable; explicit fallback" else NA_character_)
+  ids
+}
 
 #' Training Index with a Buffer Exclusion Band
 #'

@@ -43,12 +43,8 @@ Iteratively removes environmental variables with Variance Inflation Factor
 pre-filtering before VIF elimination.
 }
 \details{
-Removal stops early as a deliberate guard when fewer than five variables
-would remain: the function warns ("Fewer than 5 variables remaining") and
-returns the current set as \code{selected} instead of driving the collinearity
-purge to the point of a degenerate model. The stopping is therefore a
-documented behaviour, not a convergence failure; inspect \code{vif_log} to see
-how far the elimination got.
+Elimination continues until the declared VIF criterion is met or only one
+predictor remains; there is no environmental-variable count floor.
 }
 \references{
 Zuur, A.F., Ieno, E.N., & Elphick, C.S. (2010). A protocol for data

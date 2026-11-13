@@ -37,8 +37,7 @@ castsdm_species_configs <- function(root) {
     select_temporal_match = "npts", seed = seed,
     protocol = castSDM::cast_protocol(
       models = c("rf", "maxent", "gam"), select_method = "screen",
-      select_corcut = .7, select_maxncov = 12L,
-      select_ensure_n = c(climate = 1L),
+      select_inner_k = 5L,
       train_fraction = .7, holdout_blocks = 20L, block_method = "blockcv",
       cv_k = 5L, rf_ntree = 500L, tune = FALSE, aoa = TRUE,
       ensemble_method = "weighted", ensemble_min_score = 0,

@@ -271,16 +271,20 @@ case_inventory_build <- function(root, data_root, coverage_min = 0.95,
   current$status <- ifelse(current$geom_ok & is.finite(current$cover) &
                              current$cover >= coverage_min, "kept", "excluded")
 
-  current$eligible_glu <- current$status == "kept" &
+  metadata <- case_inventory_metadata(root, data_root, current)
+  current$role <- metadata$role[match(current$layer, metadata$layer)]
+  numeric_role <- current$role %in% c("numeric", "binary", "ordinal")
+  current$qualification <- ifelse(numeric_role, "eligible_numeric_role", "excluded_semantic_role")
+  current$eligible_glu <- current$status == "kept" & numeric_role &
     current$future_policy %in% c("climate", "static") &
     !(current$group == "lulc" & current$product != "glu1km")
-  current$eligible_hlu <- current$status == "kept" &
+  current$eligible_hlu <- current$status == "kept" & numeric_role &
     current$future_policy %in% c("climate", "static") &
     !(current$group == "lulc" & current$product != "hlu1km")
 
   current <- current[, c("group", "dataset", "product", "layer", "path",
                          "construct_id", "year", "scale", "stat", "is_climate",
-                         "future_policy", "cover", "status", "geom_ok",
+                         "future_policy", "role", "qualification", "cover", "status", "geom_ok",
                          "eligible_glu", "eligible_hlu")]
   current <- current[order(current$group, current$product, current$layer), ,
                      drop = FALSE]
@@ -312,8 +316,6 @@ case_inventory_build <- function(root, data_root, coverage_min = 0.95,
     if (!setequal(paste(present$ssp, present$year), expected))
       stop("Incomplete future-climate coverage for ", v, "; expected all nine real SSP/period combinations.")
   }
-  case_inventory_metadata(root, data_root, current)
-
   version <- data.frame(
     created_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     data_root = normalizePath(data_root, winslash = "/", mustWork = TRUE),
@@ -377,7 +379,14 @@ case_inventory_metadata <- function(root, data_root, current) {
   labels <- stats::setNames(climate_labels, c(sprintf("bio%02d", 1:19), "gdd0", "gdd5", "gdd10"))
   hit <- metadata$product == "chelsa21" & metadata$layer %in% names(labels)
   metadata$label[hit] <- paste0(metadata$layer[hit], " | ", labels[metadata$layer[hit]])
+  metadata$role <- utils::getFromNamespace(".cast_predictor_roles", "castSDM")(metadata$layer)
+  identifier <- grepl("identifier|globally unique|unique per", metadata$definition, ignore.case = TRUE)
+  metadata$role[identifier] <- "identifier"
+  direction <- grepl("D8 encoding|aspect.*angle", metadata$definition, ignore.case = TRUE)
+  metadata$role[direction] <- "cyclic"
+  metadata$role[grepl("Munsell hue", metadata$definition, ignore.case = TRUE)] <- "nominal"
   utils::write.csv(metadata, file.path(root, "config", "predictor_metadata.csv"), row.names = FALSE, fileEncoding = "UTF-8")
+  metadata
 }
 
 case_inventory_signature <- function(data_root) {

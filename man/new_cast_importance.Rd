@@ -4,15 +4,13 @@
 \alias{new_cast_importance}
 \title{Create a cast_importance Object}
 \usage{
-new_cast_importance(effects, metric = "brier", diagnostics = list())
+new_cast_importance(effects, metric = "selection_status", diagnostics = list())
 }
 \arguments{
-\item{effects}{A \code{data.frame} of the admission path: per-predictor
-\code{step_added} (elastic-net screen rank; \code{0} for prespecified predictors)
-and the admission \code{loss_gain} where a screen recorded one (\code{NA} for
-the screen).}
+\item{effects}{A per-variable table of qualification, selection and
+descriptive signal or selection frequency when available.}
 
-\item{metric}{Inner-CV loss minimised by the search (\code{"brier"} or \code{"auc"}).}
+\item{metric}{Name of the descriptive quantity, default \code{"selection_status"}.}
 
 \item{diagnostics}{Named list carried over from the screen.}
 }

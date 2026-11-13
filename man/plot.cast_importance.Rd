@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods-plot.R
 \name{plot.cast_importance}
 \alias{plot.cast_importance}
-\title{Plot Predictor Importance}
+\title{Plot the Saved Selection Description}
 \usage{
 \method{plot}{cast_importance}(x, var_labels = NULL, top = NULL, ...)
 }
@@ -11,7 +11,8 @@
 
 \item{var_labels}{Optional named character vector for display labels.}
 
-\item{top}{Optional integer. Show only the \code{top} strongest predictors.}
+\item{top}{Optional integer. Show the top displayed scores plus all retained
+variables; \code{NULL} shows every scored variable.}
 
 \item{...}{Ignored.}
 }
@@ -19,7 +20,6 @@
 A \code{ggplot} object.
 }
 \description{
-Lollipop plot of the selection path: each admitted predictor with its
-admission rank (the elastic-net screen rank, 1 = strongest). Excluded
-predictors carry a missing rank and are not plotted.
+Shows the recorded descriptive variable signal or fold-selection frequency.
+Plot ordering does not determine variable selection or causal importance.
 }

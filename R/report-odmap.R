@@ -63,12 +63,12 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
   } else {
     "[report] (no spatial prediction recorded in this object)"
   }
-  selection_line <- if (identical(screen_method, "screen")) {
-    sprintf(paste0("independent elastic-net screen: %d candidate%s filtered, ",
-                   "top %s retained"),
-            length(diag$filtered %||% sel_vars),
-            if (length(diag$filtered %||% sel_vars) == 1L) "" else "s",
-            format(diag$ncov %||% length(sel_vars)))
+  selection_line <- if (identical(screen_method, "screen") && identical(diag$algorithm, "elastic_net")) {
+    sprintf("spatial elastic-net screen: %d retained; inner spatial folds=%s, rule=%s; no predictor-count target",
+      length(sel_vars), diag$inner_k %||% NA_integer_,
+      diag$rule %||% "not recorded")
+  } else if (identical(screen_method, "screen")) {
+    sprintf("historical screen: %d retained; original selection policy in saved diagnostics", length(sel_vars))
   } else if (identical(screen_method, "full")) {
     "full (no data-driven screening; every varying predictor retained)"
   } else {

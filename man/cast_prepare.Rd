@@ -61,16 +61,16 @@ training/test sets.
 }
 \details{
 Auto-detects environmental variable columns by excluding coordinates,
-response, known metadata columns, and near-constant columns. If the
+response, known metadata columns, and constant columns. If the
 detection is incorrect, pass \code{env_vars} explicitly to override.
 
 The hold-out split defaults to a \strong{spatial block} split (whole spatial
 blocks are assigned to the test set), which gives a more honest estimate of
 transferable performance than a random split by reducing spatial
 autocorrelation leakage between train and test (Roberts et al. 2017). When
-coordinates are unavailable or a spatial split would leave a partition
-without both classes, it falls back to a \strong{presence-stratified} split that
-preserves prevalence, and finally to a random split.
+coordinates are unavailable or a spatial split cannot preserve both
+classes, it stops with a design diagnostic. A non-spatial split must be
+requested explicitly; it is never substituted silently.
 }
 \references{
 Roberts, D. R. et al. (2017). Cross-validation strategies for data with

@@ -103,24 +103,6 @@ test_that("cast_run restores the caller's RNG state", {
   expect_identical(get(".Random.seed", envir = globalenv()), state)
 })
 
-test_that("cast_run forwards selection metadata into the nested CV folds", {
-  skip_if_not_installed("ranger")
-  skip_if_not_installed("pROC")
-  skip_if_not_installed("glmnet")
-  skip_if_not_installed("mgcv")
-  dat <- run_smoke_data(n = 180, seed = 44)
-  protocol <- cast_protocol(
-    models = "rf", select_method = "screen", select_keep = "x2",
-    cv_k = 2L, block_method = "grid", aoa = FALSE, rf_ntree = 30L,
-    prevalence_target = NULL, seed = 5L
-  )
-  res <- cast_run(dat, protocol = protocol, verbose = FALSE)
-  expect_true("x2" %in% res$screen$selected)
-  expect_true(all(vapply(res$cv$screens, function(s) {
-    !is.null(s) && "x2" %in% s$selected
-  }, logical(1))))
-})
-
 test_that("cast_run rejects raster projections without an output_dir", {
   skip_if_not_installed("terra")
   dat <- run_smoke_data(n = 60, seed = 45)

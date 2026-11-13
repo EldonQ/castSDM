@@ -72,3 +72,15 @@ real delivered file inventories and saved real-case numerical outputs; no
 synthetic field data or ecological truth were introduced. The full new study
 was not fitted or projected during maintenance. Numerical replay of stored
 scores does not validate new fitted engines or new CHELSA scientific results.
+
+
+On 13 November 2026, Codex assisted 0.31.0 selection maintenance. The final
+implementation uses existing glmnet elastic net with linear/quadratic terms,
+inner spatial one-SE selection and semantic qualification. A discarded grouped
+spline prototype is not part of the release or its dependencies. No fabricated
+measurements, labels or simulated fixtures are used in release verification.
+Bounded selector/fitting checks use the author's actual saved CHELSA training
+rows and spatial folds. These are engineering checks, not a newly completed
+study or independent validation of the revised scientific policy. The full
+research workflow is left for the author to rerun. Legacy synthetic unit
+fixtures for other components remain excluded from the lightweight R check.

@@ -2,7 +2,7 @@
 % Please edit documentation in R/var-select.R
 \name{cast_select}
 \alias{cast_select}
-\title{Select Variables for Species Distribution Models}
+\title{Select Environmental Variables by Spatially Validated Elastic Net}
 \usage{
 cast_select(
   data,
@@ -10,87 +10,80 @@ cast_select(
   method = c("screen", "full"),
   seed = NULL,
   verbose = TRUE,
-  keep = character(0),
-  corcut = 0.7,
+  env_vars = NULL,
+  roles = NULL,
   var_id = NULL,
   category = NULL,
-  ncov = NULL,
-  maxncov = 12L,
-  weights = NULL,
-  ensure = NULL,
-  ensure_n = NULL,
-  env_vars = NULL
+  inner_k = 5L,
+  block_method = c("blockcv", "grid"),
+  block_size = NULL,
+  fold_ids = NULL
 )
 }
 \arguments{
-\item{data}{Data frame with response and predictors (coordinates allowed;
-they are never selected).}
+\item{data}{Predictor frame with a binary presence/background response.}
 
-\item{response}{Binary response column. Default \code{"presence"}.}
+\item{response}{Binary response name, default \code{"presence"}.}
 
-\item{method}{\code{"screen"} (default) or \code{"full"} (keep every predictor).}
+\item{method}{\code{"screen"} (spatial elastic net) or \code{"full"} (all eligible
+varying numeric predictors without statistical screening).}
 
-\item{seed}{Random seed.}
+\item{seed}{Random seed for spatial folds.}
 
-\item{verbose}{Print progress.}
+\item{verbose}{Print progress and the resulting variable count.}
 
-\item{keep}{Character vector forced through the screen (expert knowledge).}
+\item{env_vars}{Optional explicit predictor names. Coordinates and response
+are never predictors.}
 
-\item{corcut}{Absolute Pearson correlation threshold for pruning. Default
-\code{0.7} (Dormann et al. 2013).}
+\item{roles}{Optional named predictor-role vector: \code{numeric}, \code{binary},
+\code{ordinal}, \code{identifier}, \code{nominal}, or \code{cyclic}. Identifiers are excluded;
+nominal/cyclic codes require a declared numeric encoding before use.}
 
-\item{var_id}{Optional character vector aligned with the predictors giving
-a construct identity (e.g. all years/focal scales of one covariate share
-an id). The strongest-ranked member of each construct is retained.}
+\item{var_id, category}{Optional aligned character metadata, recorded only.
+Multiple scales of a construct are not forcibly reduced to one variable.}
 
-\item{category}{Optional character vector aligned with predictors. Accepted
-for API compatibility; the screen does not use category quotas.}
+\item{inner_k}{Number of inner spatial folds, default \code{5}.}
 
-\item{ncov}{Target number of covariates. Default \code{NULL} =
-\code{ceiling(log2(n_presences))}, capped at \code{maxncov}.}
+\item{block_method}{Spatial fold builder, \code{"blockcv"} or \code{"grid"}.}
 
-\item{maxncov}{Maximum number of covariates. Default \code{12}.}
+\item{block_size}{Optional spatial block size in metres.}
 
-\item{weights}{Optional numeric row weights used by the screen.}
-
-\item{ensure}{Optional named list of logical flag vectors aligned with the
-predictors, declaring coverage requirements. Each group is represented by
-at least one survivor; the representative is protected from the target cap.}
-
-\item{ensure_n}{Optional named integer vector aligned with \code{ensure}, giving
-the minimum number of survivors to retain from each coverage group. A
-value of \code{2} for \code{climate} reserves two climate slots inside the target.}
-
-\item{env_vars}{Optional explicit predictor set. \code{NULL} keeps auto-detection.}
+\item{fold_ids}{Optional externally supplied spatial fold assignments.}
 }
 \value{
-A \code{cast_select} object with \code{selected}, per-predictor \code{scores}, and
-diagnostics (filtered set, coefficients, lambda, coverage admissions).
+A \code{cast_select} with selected variables, qualification/reason table,
+spatial risk curve, fold losses and provenance. An empty selected set is
+a valid intercept-only result; no variable is forced into the model.
 }
 \description{
-Screen predictors before model fitting. \code{method = "screen"} applies a
-transparent sequence: low-information predictors are dropped, repeated
-constructs can be de-duplicated with \code{var_id}, correlated survivors are
-pruned at \code{corcut}, and the remaining set is screened with an L2-penalised
-(elastic-net) logistic model. \code{method = "full"} keeps every varying
-predictor and is the honest choice for a small prespecified set.
+Fits a binomial elastic net (equal L1/L2 mixing) to linear and quadratic
+environmental terms. Spatial validation selects the strongest penalty
+within one fold standard error of the minimum mean log loss. An original
+variable is retained when either of its terms has a nonzero coefficient.
+There is no predictor-count target, coefficient ranking or category quota.
 }
 \details{
-Selection serves parsimony for interpretation and projection; it does not
-identify a causal adjustment set.
+Linear and quadratic terms accommodate monotonic and simple
+unimodal responses without spline knots or a separate complexity search.
+Binary variables use one linear term. Centering/scaling and term creation
+are rebuilt using only the training rows of each inner fold. Elastic-net
+mixing is fixed at 0.5; the regularisation strength is spatially validated.
+Fold paths are aligned by their penalty/max-penalty ratio. The null model
+is evaluated explicitly. A minimum at the weak-penalty boundary extends
+the search. Failed fits/folds are reported, never silently dropped.
+The one-SE rule is a parsimony heuristic, not a confidence interval.
+Predictors must be complete and finite; no measurements or response labels
+are generated or imputed. Loss concerns sampled presence/background
+labels, not ecological occurrence probabilities. This simple additive
+screen can miss complex responses and pure interactions; correlated
+variables can substitute. Inspect outer-fold selection frequencies.
+Selection does not identify causal drivers.
 }
 \references{
-Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
-with it in ecological studies. \emph{Ecography} 36: 27-46.
-
-Zou, H. & Hastie, T. (2005). Regularization and variable selection via the
-elastic net. \emph{Journal of the Royal Statistical Society: Series B}
-67: 301-320.
-
-Friedman, J., Hastie, T. & Tibshirani, R. (2010). Regularization paths for
-generalized linear models via coordinate descent.
-\emph{Journal of Statistical Software} 33: 1-22.
+Friedman J, Hastie T, Tibshirani R (2010). Regularization paths
+for generalized linear models via coordinate descent. Journal of
+Statistical Software 33(1):1-22. doi:10.18637/jss.v033.i01.
 }
 \seealso{
-\code{\link[=cast_effect_table]{cast_effect_table()}}, \code{\link[=cast_importance]{cast_importance()}}
+\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_importance]{cast_importance()}}
 }

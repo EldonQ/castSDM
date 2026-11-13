@@ -8,7 +8,7 @@ case_pool_metadata <- function(cfg, vars) {
 case_scenarios <- function(cfg, selected, current, out_dir) {
   meta <- case_pool_metadata(cfg, selected)
   groups <- list(climate = selected[meta$future_policy == "climate"])
-  if (!length(groups$climate)) stop("At least one climate predictor is required for climate projections.")
+  if (!length(groups$climate)) stop("Spatial selection retained no climate predictor. Training results are saved, but this fitted configuration cannot support climate-response projections. No climate variable is forced into the model.", call. = FALSE)
   if (any(!meta$future_policy %in% c("climate", "static")))
     stop("Every nonclimate predictor must have a declared static future policy.")
   future <- case_inventory_read_future(cfg)

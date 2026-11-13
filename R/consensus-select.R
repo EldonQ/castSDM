@@ -1,15 +1,7 @@
 # Consensus selection -------------------------------------------------------
 #
-# Nested cross-validation re-runs the variable screen inside every outer
-# spatial fold (cast_cv()). A predictor that is retained in most folds is
-# conditionally informative across regions -- the operational counterpart of
-# "transferable driver". cast_consensus() aggregates the fold selections
-# into a frequency table and a thresholded consensus set, and returns a
-# cast_select object so the consensus set plugs straight into cast_fit().
-#
-# This answers the spatial-stability weakness honestly: instead of hiding
-# fold disagreement, the package surfaces it (cast_cv()$selection_freq) and
-# lets the user decide how stable the final set must be.
+# Fold inclusion frequencies describe selection stability, not causal or
+# geographic transferability. Consensus is an optional descriptive subset.
 
 #' Consensus Selection Across Spatial Folds
 #'
@@ -17,11 +9,10 @@
 #' into a selection-frequency table and a consensus variable set: predictors
 #' retained in at least `threshold` (a proportion) of the outer folds.
 #'
-#' Nested selection is re-run in every spatial fold, so a predictor selected
-#' in only one fold is likely a region-specific (or noise) association; a
-#' predictor selected in most folds is a candidate driver that transfers
-#' across regions. The frequency table makes that trade-off visible and the
-#' consensus set operationalises it.
+#' Frequencies describe stability under the recorded fold design. Correlated
+#' predictors may substitute for each other; frequency does not identify
+#' ecological causes or prove geographic transferability. This optional
+#' thresholded set is not used by the default automatic screen.
 #'
 #' @param cv A `cast_cv` object produced with a non-`NULL` `select_method`.
 #' @param threshold Minimum fold-selection frequency (in `[0, 1]`) for

@@ -1,3 +1,22 @@
+# castSDM 0.31.0
+
+- Replace the capped selector with binomial elastic net on linear/quadratic
+  terms. Select regularisation by inner spatial fold log loss and the one-SE
+  rule; repeat screening within each outer training fold. Remove fixed/adaptive
+  count targets, category quotas, univariate ranks and coefficient truncation.
+- Qualify predictor semantics before screening: exclude identifiers and
+  unencoded nominal/cyclic codes; retain varying binary/ordinal measurements.
+  Remove unit-dependent variance cutoffs. Save qualification, spatial losses,
+  the penalty path and actual fold design; accept a null selection honestly.
+- Stop rather than silently replacing an invalid spatial hold-out with a
+  random split. Record effective blockCV/grid designs, including the extent-grid
+  default when a physical autocorrelation range cannot be estimated, and GAM fallback formula/
+  reason; reject unconverged GAM fits. Standalone VIF uses observed predictors
+  directly and no count floor; remove its unused car dependency.
+- Use a fresh cast031_chelsa_ensmean workflow directory, preserving old results.
+  Do not force climate variables when data-driven screening selects none.
+  Keep the established publication cartography and climate-only future recipe.
+
 # castSDM 0.30.0
 
 - Ship one installed CHELSA workflow and `cast_workflow()`. Shiny now provides

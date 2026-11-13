@@ -9,9 +9,8 @@ print.cast_select <- function(x, ...) {
     "Selected variables: {n_selected}"
   ))
   d <- x$diagnostics
-  if (identical(x$method, "screen")) {
-    n_filt <- length(d$filtered %||% character(0))
-    cli::cli_text("Elastic-net screen: {n_filt} filtered covariate{?s}, target ncov = {d$ncov %||% NA}.")
+  if (identical(d$algorithm, "elastic_net")) {
+    cli::cli_text("Spatial elastic net; {d$status}. No prescribed predictor count.")
   } else if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")
   }
@@ -22,21 +21,10 @@ print.cast_select <- function(x, ...) {
 #' @export
 print.cast_importance <- function(x, ...) {
   eff <- x$effects
-  n_adm <- sum(!is.na(eff$step_added))
-  cli::cli_h1("castSDM Selection Path")
-  cli::cli_ul(c(
-    "Admission measure: {x$metric %||% 'aggregate rank'}",
-    "Admitted: {n_adm} / {nrow(eff)}"
-  ))
-  show <- utils::head(eff[order(is.na(eff$step_added), eff$step_added), , drop = FALSE], 10L)
-  disp <- data.frame(
-    variable = show$variable,
-    rank = show$step_added,
-    sig = ifelse(show$selected, "*", ""),
-    stringsAsFactors = FALSE
-  )
-  print(disp, row.names = FALSE)
-  cli::cli_text("Rank is the screen admission rank (1 = strongest); prespecified predictors are marked by design.")
+  cli::cli_h1("castSDM Saved Selection Description")
+  cli::cli_text("Measure: {x$metric %||% 'selection status'}; retained: {sum(eff$selected)} / {nrow(eff)}")
+  print(utils::head(eff, 10L), row.names = FALSE)
+  cli::cli_text("Descriptive fitted-screen signal is not causal importance.")
   invisible(x)
 }
 

@@ -15,12 +15,8 @@
 #' @param verbose Logical. Print iteration details. Default `TRUE`.
 #'
 #' @details
-#' Removal stops early as a deliberate guard when fewer than five variables
-#' would remain: the function warns ("Fewer than 5 variables remaining") and
-#' returns the current set as `selected` instead of driving the collinearity
-#' purge to the point of a degenerate model. The stopping is therefore a
-#' documented behaviour, not a convergence failure; inspect `vif_log` to see
-#' how far the elimination got.
+#' Elimination continues until the declared VIF criterion is met or only one
+#' predictor remains; there is no environmental-variable count floor.
 #'
 #' @return A list with components:
 #' \describe{
@@ -42,8 +38,7 @@ cast_vif <- function(data,
                      exclude = NULL,
                      expert_filter = NULL,
                      verbose = TRUE) {
-  threshold <- .cast_check_scalar(threshold, "threshold", lower = 0)
-  check_suggested("car", "for VIF computation")
+  threshold <- .cast_check_scalar(threshold, "threshold", lower = 1)
   if (!is.data.frame(data)) {
     cli::cli_abort("{.arg data} must be a data.frame.")
   }
@@ -89,49 +84,23 @@ cast_vif <- function(data,
 
   repeat {
     iteration <- iteration + 1L
-    if (length(current_vars) < 3) break
+    if (length(current_vars) < 2) break
 
-    # Build dummy response for VIF (use row index)
-    tmp <- dat_clean[, current_vars, drop = FALSE]
-    tmp$.y <- seq_len(nrow(tmp))
-    fmla <- stats::as.formula(
-      paste(".y ~", paste(current_vars, collapse = " + "))
-    )
-
-    # Check for aliased (perfectly collinear) terms
-    mod <- stats::lm(fmla, data = tmp)
-    al <- stats::alias(mod)
-    if (!is.null(al$Complete)) {
-      aliased_var <- rownames(al$Complete)[1]
-      if (verbose) {
-        cli::cli_inform(
-          "Perfect collinearity: removing {.val {aliased_var}}."
-        )
-      }
-      removed <- c(removed, aliased_var)
-      current_vars <- setdiff(current_vars, aliased_var)
+    # Standard VIF: regress each observed predictor on the other predictors.
+    # No manufactured response, row-index regression or absolute-unit cutoff.
+    tmp <- scale(as.matrix(dat_clean[, current_vars, drop = FALSE]))
+    varying <- vapply(dat_clean[, current_vars, drop = FALSE], .cast_is_varying, logical(1))
+    if (any(!varying)) {
+      removed <- c(removed, current_vars[!varying])
+      current_vars <- current_vars[varying]
       next
     }
-
-    vif_vals <- tryCatch(
-      car::vif(mod),
-      error = function(e) {
-        # Remove near-constant columns
-        sds <- vapply(
-          dat_clean[, current_vars, drop = FALSE],
-          stats::sd, numeric(1), na.rm = TRUE
-        )
-        bad <- names(sds[sds < 1e-10 & !is.na(sds)])
-        if (length(bad) > 0) {
-          removed <<- c(removed, bad)
-          current_vars <<- setdiff(current_vars, bad)
-          return(NULL)
-        }
-        # No recoverable cause: fail loudly instead of looping forever.
-        cli::cli_abort("VIF computation failed: {conditionMessage(e)}")
-      }
-    )
-    if (is.null(vif_vals)) next
+    vif_vals <- vapply(seq_along(current_vars), function(j) {
+      residual <- stats::lm.fit(cbind(1, tmp[, -j, drop = FALSE]), tmp[, j])$residuals
+      rss <- sum(residual^2); tss <- sum(tmp[, j]^2)
+      if (rss <= .Machine$double.eps*tss) Inf else tss/rss
+    }, numeric(1))
+    names(vif_vals) <- current_vars
 
     max_vif <- max(vif_vals)
     max_var <- names(which.max(vif_vals))
@@ -164,10 +133,6 @@ cast_vif <- function(data,
     removed <- c(removed, max_var)
     current_vars <- setdiff(current_vars, max_var)
 
-    if (length(current_vars) < 5) {
-      if (verbose) cli::cli_warn("Fewer than 5 variables remaining.")
-      break
-    }
   }
 
   log_df <- if (length(vif_log) > 0) {
@@ -195,16 +160,16 @@ cast_vif <- function(data,
 #' training/test sets.
 #'
 #' Auto-detects environmental variable columns by excluding coordinates,
-#' response, known metadata columns, and near-constant columns. If the
+#' response, known metadata columns, and constant columns. If the
 #' detection is incorrect, pass `env_vars` explicitly to override.
 #'
 #' The hold-out split defaults to a **spatial block** split (whole spatial
 #' blocks are assigned to the test set), which gives a more honest estimate of
 #' transferable performance than a random split by reducing spatial
 #' autocorrelation leakage between train and test (Roberts et al. 2017). When
-#' coordinates are unavailable or a spatial split would leave a partition
-#' without both classes, it falls back to a **presence-stratified** split that
-#' preserves prevalence, and finally to a random split.
+#' coordinates are unavailable or a spatial split cannot preserve both
+#' classes, it stops with a design diagnostic. A non-spatial split must be
+#' requested explicitly; it is never substituted silently.
 #'
 #' @param data A `data.frame` with columns: `lon`, `lat`, `presence` (0/1),
 #'   and environmental variables.
@@ -293,7 +258,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     meta_excluded    <- setdiff(all_numeric, c(final_vars, "presence"))
     const_excluded   <- meta_excluded[vapply(meta_excluded, function(v) {
       vals <- data[[v]][!is.na(data[[v]])]
-      length(vals) > 0 && stats::var(vals) <= 1e-10
+      !.cast_is_varying(vals)
     }, logical(1))]
     name_excluded <- setdiff(meta_excluded, const_excluded)
 
@@ -304,7 +269,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
         "i" = "All numeric columns: {.val {all_numeric}}",
         "i" = "Excluded (non-numeric): {.val {non_numeric_cols}}",
         "i" = "Excluded (known metadata names): {.val {name_excluded}}",
-        "i" = "Excluded (near-constant / variance \u2248 0): {.val {const_excluded}}",
+        "i" = "Excluded (constant or all missing): {.val {const_excluded}}",
         ">" = "Pass {.arg env_vars} to override: {.code cast_prepare(data, env_vars = c(...))}"
       ))
     }
@@ -321,7 +286,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
       }
       if (length(const_excluded) > 0) {
         cli::cli_inform(c(
-          "i" = "Excluded (near-constant, likely metadata): {.val {const_excluded}}"
+          "i" = "Excluded (constant in the supplied sample): {.val {const_excluded}}"
         ))
       }
       cli::cli_inform(c(
@@ -352,9 +317,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   const_in_train <- final_vars[vapply(final_vars, function(v) {
     vals <- data[[v]][train_idx]
     vals <- vals[!is.na(vals)]
-    if (length(vals) <= 1L) return(TRUE)
-    vv <- stats::var(vals)
-    !is.finite(vv) || vv <= 1e-10
+    !.cast_is_varying(vals)
   }, logical(1))]
   if (length(const_in_train) > 0L) {
     if (verbose) {
@@ -384,7 +347,8 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     test_index = setdiff(seq_len(nrow(data)), train_idx),
     env_vars = final_vars,
     split    = sp$method,
-    split_type = sp$type
+    split_type = sp$type,
+    fold_design = sp$design
   )
 }
 
@@ -420,8 +384,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
 
   # split == "spatial" (block_method "env" partitions in environmental space)
   if (!has_coords) {
-    if (verbose) cli::cli_warn("No {.val lon}/{.val lat}; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (no coords)", type = "stratified"))
+    cli::cli_abort("Spatial hold-out requires coordinates. Supply lon/lat or explicitly choose a non-spatial split.")
   }
   env_block <- if (identical(block_method, "env")) {
     cand <- setdiff(names(data), c("lon", "lat", response))
@@ -434,8 +397,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     error = function(e) NULL
   )
   if (is.null(blocks) || length(unique(blocks)) < 2L) {
-    if (verbose) cli::cli_warn("Blocking failed; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (block failed)", type = "stratified"))
+    cli::cli_abort("Spatial blocking failed; no random/stratified hold-out is substituted. Review coordinates and the spatial design.")
   }
   ub <- sample(unique(blocks))
   target_test <- round((1 - train_fraction) * n)
@@ -457,12 +419,11 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     length(unique(y[train_idx])) >= 2L && length(unique(y[test_idx])) >= 2L
   } else TRUE
   if (!length(train_idx) || !length(test_idx) || !ok_classes) {
-    if (verbose) cli::cli_warn("Spatial split degenerate; using stratified hold-out.")
-    return(list(train = make_stratified(), method = "stratified (spatial degenerate)", type = "stratified"))
+    cli::cli_abort("The spatial hold-out cannot preserve both response classes. Review the spatial design; no random split is substituted.")
   }
   list(train = sort(train_idx),
        method = sprintf("%s block (%s)",
                         if (identical(block_method, "env")) "environmental" else "spatial",
-                        block_method),
-       type = "spatial")
+                        (attr(blocks, "design")$effective %||% block_method)),
+       design = attr(blocks, "design"), type = "spatial")
 }

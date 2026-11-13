@@ -1,436 +1,231 @@
-# Variable selection ----------------------------------------------------------
-#
-# Two prespecified modes:
-#   "screen" -- variance/unique-value filter, optional construct de-duplication,
-#     correlation pruning, then an elastic-net logistic screen (glmnet).
-#   "full"   -- keep every varying predictor (no data-driven screening).
-#
-# The screen is fitted on the supplied data; cast_cv() re-runs it inside every
-# outer training fold, so held-out rows never influence predictor choice.
+# Elastic-net screening with spatial validation; no predictor-count target.
+# AI-assisted refactor (2026-11-13); see inst/AI_ASSISTANCE.md.
 
-#' Select Variables for Species Distribution Models
+#' Select Environmental Variables by Spatially Validated Elastic Net
 #'
-#' Screen predictors before model fitting. `method = "screen"` applies a
-#' transparent sequence: low-information predictors are dropped, repeated
-#' constructs can be de-duplicated with `var_id`, correlated survivors are
-#' pruned at `corcut`, and the remaining set is screened with an L2-penalised
-#' (elastic-net) logistic model. `method = "full"` keeps every varying
-#' predictor and is the honest choice for a small prespecified set.
+#' Fits a binomial elastic net (equal L1/L2 mixing) to linear and quadratic
+#' environmental terms. Spatial validation selects the strongest penalty
+#' within one fold standard error of the minimum mean log loss. An original
+#' variable is retained when either of its terms has a nonzero coefficient.
+#' There is no predictor-count target, coefficient ranking or category quota.
 #'
-#' Selection serves parsimony for interpretation and projection; it does not
-#' identify a causal adjustment set.
-#'
-#' @param data Data frame with response and predictors (coordinates allowed;
-#'   they are never selected).
-#' @param response Binary response column. Default `"presence"`.
-#' @param method `"screen"` (default) or `"full"` (keep every predictor).
-#' @param corcut Absolute Pearson correlation threshold for pruning. Default
-#'   `0.7` (Dormann et al. 2013).
-#' @param var_id Optional character vector aligned with the predictors giving
-#'   a construct identity (e.g. all years/focal scales of one covariate share
-#'   an id). The strongest-ranked member of each construct is retained.
-#' @param category Optional character vector aligned with predictors. Accepted
-#'   for API compatibility; the screen does not use category quotas.
-#' @param ncov Target number of covariates. Default `NULL` =
-#'   `ceiling(log2(n_presences))`, capped at `maxncov`.
-#' @param maxncov Maximum number of covariates. Default `12`.
-#' @param weights Optional numeric row weights used by the screen.
-#' @param ensure Optional named list of logical flag vectors aligned with the
-#'   predictors, declaring coverage requirements. Each group is represented by
-#'   at least one survivor; the representative is protected from the target cap.
-#' @param ensure_n Optional named integer vector aligned with `ensure`, giving
-#'   the minimum number of survivors to retain from each coverage group. A
-#'   value of `2` for `climate` reserves two climate slots inside the target.
-#' @param env_vars Optional explicit predictor set. `NULL` keeps auto-detection.
-#' @param keep Character vector forced through the screen (expert knowledge).
-#' @param seed Random seed.
-#' @param verbose Print progress.
-#'
-#' @return A `cast_select` object with `selected`, per-predictor `scores`, and
-#'   diagnostics (filtered set, coefficients, lambda, coverage admissions).
-#'
-#' @references
-#' Dormann, C. F. et al. (2013). Collinearity: a review of methods to deal
-#' with it in ecological studies. \emph{Ecography} 36: 27-46.
-#'
-#' Zou, H. & Hastie, T. (2005). Regularization and variable selection via the
-#' elastic net. \emph{Journal of the Royal Statistical Society: Series B}
-#' 67: 301-320.
-#'
-#' Friedman, J., Hastie, T. & Tibshirani, R. (2010). Regularization paths for
-#' generalized linear models via coordinate descent.
-#' \emph{Journal of Statistical Software} 33: 1-22.
-#'
-#' @seealso [cast_effect_table()], [cast_importance()]
+#' @param data Predictor frame with a binary presence/background response.
+#' @param response Binary response name, default `"presence"`.
+#' @param method `"screen"` (spatial elastic net) or `"full"` (all eligible
+#'   varying numeric predictors without statistical screening).
+#' @param seed Random seed for spatial folds.
+#' @param verbose Print progress and the resulting variable count.
+#' @param env_vars Optional explicit predictor names. Coordinates and response
+#'   are never predictors.
+#' @param roles Optional named predictor-role vector: `numeric`, `binary`,
+#'   `ordinal`, `identifier`, `nominal`, or `cyclic`. Identifiers are excluded;
+#'   nominal/cyclic codes require a declared numeric encoding before use.
+#' @param var_id,category Optional aligned character metadata, recorded only.
+#'   Multiple scales of a construct are not forcibly reduced to one variable.
+#' @param inner_k Number of inner spatial folds, default `5`.
+#' @param block_method Spatial fold builder, `"blockcv"` or `"grid"`.
+#' @param block_size Optional spatial block size in metres.
+#' @param fold_ids Optional externally supplied spatial fold assignments.
+#' @return A `cast_select` with selected variables, qualification/reason table,
+#'   spatial risk curve, fold losses and provenance. An empty selected set is
+#'   a valid intercept-only result; no variable is forced into the model.
+#' @details Linear and quadratic terms accommodate monotonic and simple
+#'   unimodal responses without spline knots or a separate complexity search.
+#'   Binary variables use one linear term. Centering/scaling and term creation
+#'   are rebuilt using only the training rows of each inner fold. Elastic-net
+#'   mixing is fixed at 0.5; the regularisation strength is spatially validated.
+#'   Fold paths are aligned by their penalty/max-penalty ratio. The null model
+#'   is evaluated explicitly. A minimum at the weak-penalty boundary extends
+#'   the search. Failed fits/folds are reported, never silently dropped.
+#'   The one-SE rule is a parsimony heuristic, not a confidence interval.
+#'   Predictors must be complete and finite; no measurements or response labels
+#'   are generated or imputed. Loss concerns sampled presence/background
+#'   labels, not ecological occurrence probabilities. This simple additive
+#'   screen can miss complex responses and pure interactions; correlated
+#'   variables can substitute. Inspect outer-fold selection frequencies.
+#'   Selection does not identify causal drivers.
+#' @references Friedman J, Hastie T, Tibshirani R (2010). Regularization paths
+#'   for generalized linear models via coordinate descent. Journal of
+#'   Statistical Software 33(1):1-22. doi:10.18637/jss.v033.i01.
+#' @seealso [cast_cv()], [cast_importance()]
 #' @export
-cast_select <- function(data, response = "presence",
-                        method = c("screen", "full"),
-                        seed = NULL, verbose = TRUE, keep = character(0),
-                        corcut = 0.7, var_id = NULL, category = NULL,
-                        ncov = NULL, maxncov = 12L, weights = NULL,
-                        ensure = NULL, ensure_n = NULL, env_vars = NULL) {
-  if (!missing(method) && (!is.character(method) || length(method) != 1L ||
-                          is.na(method) ||
-                          !method %in% c("screen", "full"))) {
-    cli::cli_abort("{.arg method} must be 'screen' or 'full'.")
-  }
-  method <- match.arg(method)
-  if (is.null(env_vars)) {
-    env_vars <- get_env_vars(data, response)
-  } else {
-    if (!is.character(env_vars) || anyNA(env_vars) || anyDuplicated(env_vars) ||
-        !all(env_vars %in% setdiff(names(data), c(response, "lon", "lat")))) {
-      cli::cli_abort("{.arg env_vars} must be unique predictor names in {.arg data}, not coordinates or the response.")
-    }
-    .cast_check_numeric_predictors(data[, env_vars, drop = FALSE], arg = "env_vars")
-    supported <- vapply(env_vars, function(v) {
-      z <- data[[v]][!is.na(data[[v]])]
-      variance <- if (length(z) > 1L) stats::var(z) else NA_real_
-      is.finite(variance) && variance > 1e-10
-    }, logical(1))
-    unsupported <- env_vars[!supported]
-    if (length(unsupported)) {
-      cli::cli_warn(c(
-        "{length(unsupported)} variable{?s} in {.arg env_vars} lack supported variation in this sample and cannot be selected:",
-        " " = "{.val {unsupported}}"))
-      env_vars <- env_vars[supported]
-    }
-  }
-  if (!is.character(keep) || anyNA(keep) || anyDuplicated(keep) ||
-      !all(keep %in% env_vars)) {
-    cli::cli_abort("{.arg keep} must contain unique numeric predictor names that vary in the training data, not coordinates or the response.")
-  }
-  .cast_check_response(data[[response]], response)
-  .cast_check_numeric_predictors(data[, env_vars, drop = FALSE], arg = "data")
-  if (!length(env_vars)) cli::cli_abort("Need at least one varying numeric predictor.")
-  if (method == "screen" && length(env_vars) < 2L) {
-    cli::cli_abort("Screening needs at least two predictors; use method = 'full' for a prespecified smaller set.")
-  }
-  if (!is.numeric(corcut) || length(corcut) != 1L || is.na(corcut) ||
-      corcut < 0 || corcut > 1) {
-    cli::cli_abort("{.arg corcut} must be a single number in [0, 1].")
-  }
-  align_metadata <- function(x, arg) {
-    if (is.null(x)) return(NULL)
-    if (!is.character(x) || anyNA(x)) {
-      cli::cli_abort("{.arg {arg}} must be NULL or an NA-free character vector aligned with the predictors.")
-    }
-    if (!is.null(names(x))) {
-      x <- x[match(env_vars, names(x))]
-    } else if (length(x) != length(env_vars)) {
-      cli::cli_abort("{.arg {arg}} must be NULL, named, or a character vector of length {length(env_vars)} aligned with the predictors.")
-    }
-    if (anyNA(x)) {
-      cli::cli_abort("{.arg {arg}} does not cover all predictors: {.val {env_vars[is.na(x)]}}.")
-    }
-    x
-  }
-  var_id <- align_metadata(var_id, "var_id")
-  category <- align_metadata(category, "category")
-  if (!is.null(ncov) && (!is.numeric(ncov) || length(ncov) != 1L ||
-                         is.na(ncov) || ncov < 1)) {
-    cli::cli_abort("{.arg ncov} must be NULL or a single positive integer.")
-  }
-  maxncov <- as.integer(maxncov)
-  if (is.na(maxncov) || maxncov < 1L) {
-    cli::cli_abort("{.arg maxncov} must be a positive integer.")
-  }
-  if (!is.null(weights) && (!is.numeric(weights) || length(weights) != nrow(data))) {
-    cli::cli_abort("{.arg weights} must be NULL or a numeric vector with one value per row of {.arg data}.")
-  }
-  if (!is.null(ensure)) {
-    if (!is.list(ensure) || !length(ensure) || is.null(names(ensure)) ||
-        any(!nzchar(names(ensure))) || anyDuplicated(names(ensure))) {
-      cli::cli_abort("{.arg ensure} must be NULL or a uniquely named list of logical flag vectors.")
-    }
-    for (nm in names(ensure)) {
-      f <- ensure[[nm]]
-      if (!is.logical(f) || anyNA(f)) {
-        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] must be a NA-free logical vector aligned with the predictors.")
-      }
-      if (!is.null(names(f))) {
-        f <- f[match(env_vars, names(f))]
-      } else if (length(f) != length(env_vars)) {
-        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] must be a logical vector of length {length(env_vars)} aligned with the predictors.")
-      }
-      if (anyNA(f)) {
-        cli::cli_abort("{.arg ensure}[[{.val {nm}}]] does not cover all predictors.")
-      }
-      ensure[[nm]] <- f
-    }
-  }
-  if (!is.null(ensure_n)) {
-    if (is.null(ensure) || !is.numeric(ensure_n) || is.null(names(ensure_n)) ||
-        anyNA(ensure_n) || anyDuplicated(names(ensure_n)) ||
-        any(!nzchar(names(ensure_n))) || any(ensure_n < 1) ||
-        any(!names(ensure_n) %in% names(ensure))) {
-      cli::cli_abort("{.arg ensure_n} must be a named positive-integer vector whose names are present in {.arg ensure}.")
-    }
-    ensure_names <- names(ensure_n)
-    ensure_n <- as.integer(ensure_n)
-    names(ensure_n) <- ensure_names
-  }
+cast_select <- function(data, response = "presence", method = c("screen", "full"),
+    seed = NULL, verbose = TRUE, env_vars = NULL, roles = NULL,
+    var_id = NULL, category = NULL, inner_k = 5L,
+    block_method = c("blockcv", "grid"), block_size = NULL, fold_ids = NULL) {
+  if (missing(method)) method <- "screen"
+  if (!is.character(method) || length(method) != 1L || is.na(method) ||
+      !method %in% c("screen", "full")) cli::cli_abort("method must be screen or full.")
+  block_method <- match.arg(block_method)
   if (!is.null(seed)) seed <- .cast_check_scalar(seed, "seed", integer = TRUE)
-
-  if (identical(method, "full")) {
-    scores <- data.frame(variable = env_vars, assoc = NA_real_,
-                         stage1_p = NA_real_, stage1_rank = NA_integer_,
-                         collinear_thinned = FALSE,
-                         step_added = NA_integer_,
-                         loss_gain = NA_real_,
-                         kept_by_design = env_vars %in% keep,
-                         selected_reason = "full",
-                         selected = TRUE)
-    return(new_cast_select(selected = env_vars, scores = scores,
-                           method = "full", diagnostics = list(keep = keep)))
+  if (!is.data.frame(data) || !response %in% names(data)) cli::cli_abort("Supply a predictor frame and binary response.")
+  .cast_check_response(data[[response]], response)
+  if (anyNA(data[[response]])) cli::cli_abort("The selection response must be complete.")
+  vars <- env_vars %||% get_env_vars(data, response)
+  if (!is.character(vars) || anyNA(vars) || anyDuplicated(vars) ||
+      any(!vars %in% setdiff(names(data), c(response, "lon", "lat"))))
+    cli::cli_abort("env_vars must name unique predictor columns, excluding coordinates and response.")
+  qualification <- .cast_predictor_qualification(data, vars, roles)
+  eligible <- qualification$variable[qualification$eligible]
+  metadata <- function(x, name) {
+    if (is.null(x)) return(rep(NA_character_, length(vars)))
+    if (!is.character(x) || anyNA(x)) cli::cli_abort("{name} must be character predictor metadata.")
+    if (!is.null(names(x))) x <- x[match(vars, names(x))]
+    if (length(x) != length(vars) || anyNA(x)) cli::cli_abort("{name} must cover every predictor.")
+    unname(x)
   }
-
-  .cast_screen_select(data, response, env_vars, keep, corcut,
-                      var_id, ncov, maxncov, weights, ensure, ensure_n,
-                      seed, verbose)
-}
-
-# ---- independent screen ----------------------------------------------------
-
-#' Univariate quadratic-logistic signal for ranking
-#'
-#' Smaller p-value of the two `poly(x, 2)` terms in `y ~ poly(x, 2)`.
-#' Returns `NA` when the fit fails.
-#' @keywords internal
-#' @noRd
-.cast_stage1_p <- function(data, response, v) {
-  tryCatch({
-    x <- suppressWarnings(as.numeric(data[[v]]))
-    y <- data[[response]]
-    ok <- is.finite(x) & !is.na(y)
-    x <- x[ok]; y <- y[ok]
-    if (length(x) < 10L || stats::sd(x) <= 0 || length(unique(y)) < 2L) return(NA_real_)
-    fit <- suppressWarnings(stats::glm(y ~ stats::poly(x, degree = 2),
-                                       family = stats::binomial()))
-    coefs <- suppressWarnings(summary(fit)$coefficients)
-    if (is.null(coefs) || nrow(coefs) < 3L) return(NA_real_)
-    p <- suppressWarnings(min(coefs[2:3, 4], na.rm = TRUE))
-    if (!is.finite(p)) NA_real_ else p
-  }, error = function(e) NA_real_)
-}
-
-#' Independent elastic-net screen
-#'
-#' The screen is deliberately independent of any external selection library:
-#' it combines a variance/unique-value filter, optional construct de-duplication,
-#' greedy correlation pruning, and an elastic-net logistic model fitted with
-#' \pkg{glmnet}. The elastic-net fit is used only to rank and subset survivors;
-#' final inference is performed by the fitted SDM engines.
-#' @keywords internal
-#' @noRd
-.cast_screen_select <- function(data, response, env_vars, keep, corcut,
-                                var_id, ncov, maxncov, weights, ensure,
-                                ensure_n, seed, verbose) {
-  check_suggested("glmnet", "for the elastic-net screen")
+  qualification$construct <- metadata(var_id, "var_id")
+  qualification$category <- metadata(category, "category")
+  qualification$selected <- FALSE
+  if (!length(eligible)) return(new_cast_select(character(), qualification, method,
+    list(status = "no_eligible_predictors", count_policy = "no prescribed predictor count")))
+  x <- data[, eligible, drop = FALSE]
+  .cast_check_numeric_predictors(x)
+  if (any(!is.finite(as.matrix(x)))) cli::cli_abort("Selection requires complete finite predictors; qualify or clean missing inputs explicitly.")
+  if (method == "full") {
+    qualification$selected <- qualification$eligible
+    qualification$reason[qualification$selected] <- "prespecified_full_set"
+    return(new_cast_select(eligible, qualification, method,
+      list(status = "selected", count_policy = "all eligible predictors")))
+  }
+  check_suggested("glmnet", "for spatial elastic-net variable selection")
+  inner_k <- .cast_check_scalar(inner_k, "inner_k", lower = 2, integer = TRUE)
+  folds <- .cast_selection_folds(data, response, fold_ids, inner_k, block_method, block_size, seed)
   y <- as.integer(data[[response]])
-  if (!all(y %in% c(0L, 1L))) cli::cli_abort("The screen response must be binary 0/1.")
-  X <- as.data.frame(data[, env_vars, drop = FALSE], check.names = FALSE)
-  for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
-
-  assoc <- vapply(env_vars, function(v) {
-    z <- suppressWarnings(stats::cor(X[[v]], y, use = "pairwise.complete.obs"))
-    if (is.finite(z)) abs(z) else 0
-  }, numeric(1))
-  stage1_p <- vapply(env_vars, function(v) .cast_stage1_p(data, response, v),
-                     numeric(1))
-  names(assoc) <- names(stage1_p) <- env_vars
-  ord <- order(is.na(stage1_p), stage1_p, -assoc, env_vars)
-
-  unique_n <- vapply(X, function(v) length(unique(v[is.finite(v)])), integer(1))
-  too_few <- names(unique_n)[unique_n < 5L]
-  forced_too_few <- intersect(too_few, keep)
-  if (length(forced_too_few)) {
-    cli::cli_abort(c(
-      "Forced covariate(s) have fewer than five unique finite values: {.val {forced_too_few}}.",
-      i = "The elastic-net screen cannot rank a near-constant forced layer."
-    ))
-  }
-  dropped <- setdiff(too_few, keep)
-  survivors <- setdiff(env_vars, dropped)
-
-  # One member per construct, strongest univariate signal first.
-  kept <- character(0)
-  seen_id <- character(0)
-  thinned <- stats::setNames(rep(FALSE, length(env_vars)), env_vars)
-  thinned[dropped] <- TRUE
-  if (!is.null(var_id)) names(var_id) <- env_vars
-  for (v in survivors[order(match(survivors, env_vars[ord]))]) {
-    id <- if (is.null(var_id)) v else unname(var_id[[v]])
-    if (id %in% seen_id) {
-      thinned[[v]] <- TRUE
+  full_basis <- .cast_selection_basis(x)
+  # glmnet's documented path floors depend on rows versus design columns.
+  floor <- if (nrow(x) < ncol(full_basis$matrix)) 0.01 else 0.0001
+  repeat {
+    if (verbose) cli::cli_inform("Selection: elastic-net path ({nrow(x)} rows; {length(eligible)} eligible predictors).")
+    fractions <- exp(seq(0, log(floor), length.out = 100L))
+    full <- .cast_selection_path(full_basis$matrix, y, fractions)
+    losses <- matrix(NA_real_, length(unique(folds)), length(fractions) + 1L,
+      dimnames = list(paste0("fold_", seq_len(length(unique(folds)))),
+        paste0("candidate_", 0:length(fractions))))
+    fold_details <- vector("list", nrow(losses))
+    for (i in seq_len(nrow(losses))) {
+      train <- folds != i; test <- !train
+      if (length(unique(y[train])) != 2L)
+        cli::cli_abort("Inner spatial fold {i} has a single-class training set. Change the spatial design; no random-fold fallback is used.")
+      basis <- .cast_selection_basis(x[train, , drop = FALSE])
+      losses[i, 1L] <- .cast_selection_loss(rep(stats::qlogis(mean(y[train])), sum(test)), y[test])
+      if (!length(basis$variables)) {
+        losses[i, -1L] <- losses[i, 1L]
+      } else {
+        path <- .cast_selection_path(basis$matrix, y[train], fractions)
+        design <- .cast_selection_design(basis, x[test, , drop = FALSE])
+        prediction <- as.matrix(stats::predict(path, newx = design, type = "link"))
+        losses[i, -1L] <- vapply(seq_along(fractions), function(j)
+          .cast_selection_loss(prediction[, j], y[test]), numeric(1))
+      }
+      fold_details[[i]] <- data.frame(fold = i, n_train = sum(train), n_test = sum(test),
+        train_presence = sum(y[train]), test_presence = sum(y[test]),
+        varying_predictors = length(basis$variables))
+      if (verbose) cli::cli_inform("Selection: inner spatial fold {i}/{nrow(losses)} evaluated.")
+    }
+    mean_loss <- colMeans(losses)
+    se <- apply(losses, 2L, stats::sd)/sqrt(nrow(losses))
+    best <- which.min(mean_loss)
+    curve <- data.frame(candidate = seq_along(mean_loss)-1L,
+      penalty_fraction = c(Inf, fractions), lambda = c(Inf, full$lambda),
+      mean_logloss = mean_loss, se = se, selected = FALSE)
+    if (best == nrow(curve)) {
+      floor <- floor/10
+      if (floor <= .Machine$double.eps) cli::cli_abort("The selection penalty boundary remains unresolved at numerical precision.")
+      if (verbose) cli::cli_inform("Selection: extending the weak-penalty search; no variable count is imposed.")
       next
     }
-    if (length(kept) && any(abs(stats::cor(X[[v]], X[, kept, drop = FALSE],
-        use = "pairwise.complete.obs")) > corcut, na.rm = TRUE)) {
-      thinned[[v]] <- TRUE
-      next
-    }
-    kept <- c(kept, v)
-    seen_id <- c(seen_id, id)
+    choice <- which(mean_loss <= mean_loss[best] + se[best])[1L]
+    curve$selected[choice] <- TRUE
+    beta <- if (choice == 1L) rep(0, ncol(full_basis$matrix)) else
+      as.numeric(stats::coef(full, s = curve$lambda[choice]))[-1L]
+    selected <- full_basis$variables[vapply(seq_along(full_basis$variables), function(j)
+      any(beta[full_basis$group == j] != 0), logical(1))]
+    break
   }
-  kept <- union(keep, kept)
-  # Forced predictors are admitted by design even when they duplicate or
-  # correlate with a screened survivor; the exclusion flag must describe the
-  # final candidate set, not the order of admission.
-  thinned[keep] <- FALSE
-  if (!length(kept)) {
-    cli::cli_abort("No predictor survived the variance/correlation screen.")
+  qualification$selected <- qualification$variable %in% selected
+  qualification$reason[qualification$eligible] <- "zero_terms_at_spatial_1se"
+  qualification$reason[qualification$selected] <- "nonzero_term_at_spatial_1se"
+  qualification$group_signal_sd <- NA_real_
+  for (j in seq_along(full_basis$variables)) {
+    at <- full_basis$group == j
+    signal <- as.numeric(full_basis$matrix[, at, drop = FALSE] %*% beta[at])
+    qualification$group_signal_sd[match(full_basis$variables[j], qualification$variable)] <- stats::sd(signal)
   }
-  n_pres <- sum(y == 1L)
-  target0 <- if (is.null(ncov)) max(1L, ceiling(log2(n_pres))) else as.integer(ncov)
-  target <- as.integer(min(target0, maxncov))
-  cap_binding <- target0 > maxncov
-  if (isTRUE(cap_binding)) {
-    cli::cli_warn(c(
-      "Covariate target exceeds maxncov ({maxncov}); the screen is truncated at {maxncov}.",
-      i = "This is a user-set complexity guardrail, not a data-derived optimum."
-    ))
-  }
+  diagnostics <- list(status = if (length(selected)) "selected" else "null_model_selected",
+    algorithm = "elastic_net", alpha = 0.5, terms = "linear + quadratic (binary: linear only)",
+    path_floor = floor, inner_k = nrow(losses), folds = folds,
+    fold_design = attr(folds, "design"), fold_details = do.call(rbind, fold_details),
+    risk_curve = curve, fold_losses = losses, choice = choice-1L,
+    lambda = curve$lambda[choice], penalty_fraction = curve$penalty_fraction[choice],
+    rule = "strongest penalty within one fold-SE of minimum mean spatial log loss; null included",
+    count_policy = "no prescribed predictor count; no protected category slots",
+    limitations = "Simple additive screen; complex responses and pure interactions may be missed, correlated variables may substitute; selection is not causality.",
+    software = c(glmnet = as.character(utils::packageVersion("glmnet"))))
+  if (verbose) cli::cli_inform("Spatial elastic net: {length(eligible)} eligible predictors; {length(selected)} retained by spatial 1-SE (no count target).")
+  new_cast_select(selected, qualification, method, diagnostics)
+}
 
-  selected <- kept
-  coefs <- stats::setNames(rep(NA_real_, length(kept)), kept)
-  lambda <- NA_real_
-  target_cap_applied <- FALSE
-  target_cap_dropped <- character(0)
-  n_screened_nonzero <- length(selected)
-  if (length(kept) > 1L) {
-    x <- as.matrix(X[, kept, drop = FALSE])
-    storage.mode(x) <- "double"
-    w <- if (is.null(weights)) NULL else as.numeric(weights) / mean(weights)
-    nfolds <- max(2L, min(5L, n_pres, sum(y == 0L), 10L))
-    foldid <- .cast_tune_folds(y, nfolds, seed)
-    cv <- tryCatch(
-      glmnet::cv.glmnet(x, y, family = "binomial", alpha = 0.5,
-                        weights = w, foldid = foldid,
-                        type.measure = "deviance", standardize = TRUE),
-      error = function(e) NULL)
-    if (!is.null(cv)) {
-      b <- as.matrix(stats::coef(cv, s = "lambda.1se"))
-      nz <- setdiff(rownames(b)[b[, 1L] != 0], "(Intercept)")
-      if (!length(nz)) {
-        b <- as.matrix(stats::coef(cv, s = "lambda.min"))
-        nz <- setdiff(rownames(b)[b[, 1L] != 0], "(Intercept)")
-      }
-      if (length(nz)) {
-        selected <- union(keep, nz)
-        coefs <- stats::setNames(as.numeric(b[, 1L]), rownames(b))
-        lambda <- cv$lambda.1se
-      }
-    }
-    if (!length(setdiff(selected, keep))) {
-      best <- kept[order(is.na(stage1_p[kept]), stage1_p[kept],
-                         -assoc[kept])][1]
-      selected <- union(keep, best)
-    }
-    n_screened_nonzero <- length(selected)
-  }
+.cast_selection_loss <- function(eta, y) {
+  if (any(!is.finite(eta))) cli::cli_abort("A selection model returned non-finite validation linear predictors.")
+  mean(pmax(eta, 0)-y*eta+log1p(exp(-abs(eta))))
+}
 
-  # Coverage requirements are applied before the target cap and are protected
-  # from it. Otherwise a pool with many static layers can fill every slot and
-  # push the required climate/LULC driver outside the target as an extra
-  # covariate.
-  ensured <- character(0)
-  if (!is.null(ensure)) {
-    coef_rank <- function(v) {
-      z <- abs(coefs[v])
-      z[is.na(z)] <- -Inf
-      z
-    }
-    for (nm in names(ensure)) {
-      flag <- stats::setNames(ensure[[nm]], env_vars)
-      need <- if (is.null(ensure_n) || is.na(ensure_n[nm])) 1L else
-        as.integer(ensure_n[[nm]])
-      cand <- intersect(selected, env_vars[flag])
-      cand <- cand[order(-coef_rank(cand), is.na(stage1_p[cand]),
-                        stage1_p[cand], cand)]
-      picks <- utils::head(cand, need)
-      if (length(picks) < need) {
-        pool <- setdiff(intersect(kept, env_vars[flag]), picks)
-        pool <- pool[order(is.na(stage1_p[pool]), stage1_p[pool], pool)]
-        add <- utils::head(pool, need - length(picks))
-        picks <- c(picks, add)
-        selected <- union(selected, add)
-      }
-      if (!length(picks)) {
-        cli::cli_warn("ensure[[{.val {nm}}]] has no survivor after filtering; coverage cannot be satisfied.")
-        next
-      }
-      if (length(picks) < need) {
-        cli::cli_warn("ensure[[{.val {nm}}]] requested {need} variable{?s} but only {length(picks)} survived filtering.")
-      }
-      ensured <- c(ensured, picks)
-    }
-  }
-  ensured <- unique(ensured)
-  selected <- union(keep, union(selected, ensured))
-  kept <- union(kept, ensured)
-  thinned[ensured] <- FALSE
+.cast_selection_path <- function(x, y, fractions) {
+  args <- list(x = x, y = y, family = "binomial", alpha = 0.5, standardize = TRUE)
+  pilot <- do.call(glmnet::glmnet, c(args, list(nlambda = 5L, lambda.min.ratio = 0.1)))
+  args$lambda <- pilot$lambda[1L] * fractions
+  fit <- do.call(glmnet::glmnet, args)
+  if (fit$jerr != 0L || length(fit$lambda) != length(fractions) || any(!is.finite(fit$beta@x)))
+    cli::cli_abort("Elastic-net solver did not complete the requested penalty path; no partially fitted path is used.")
+  fit
+}
 
-  if (length(selected) > target) {
-    selected_pre_cap <- selected
-    protected <- union(keep, ensured)
-    rank <- abs(coefs[selected])
-    rank[is.na(rank)] <- -Inf
-    extra <- setdiff(selected, protected)
-    n_extra <- max(0L, target - length(protected))
-    selected <- union(protected,
-                      extra[order(-rank[extra])][seq_len(min(length(extra), n_extra))])
-    target_cap_applied <- TRUE
-    target_cap_dropped <- setdiff(selected_pre_cap, selected)
+.cast_selection_folds <- function(data, response, ids, k, method, size, seed) {
+  if (is.null(ids)) {
+    if (!all(c("lon", "lat") %in% names(data)))
+      cli::cli_abort("Automatic selection requires spatial coordinates or externally supplied spatial fold_ids.")
+    ids <- make_spatial_folds(data$lon, data$lat, k = k, method = method,
+      seed = seed, y = data[[response]], block_size = size)
   }
-  if (verbose) {
-    cli::cli_inform(
-      "Screen: {length(env_vars)} -> {length(kept)} candidates after variance/collinearity; {length(selected)} selected (target {target}, maxncov {maxncov})."
-    )
-  }
+  if (!is.numeric(ids) || length(ids) != nrow(data) || any(!is.finite(ids)) ||
+      any(ids != as.integer(ids)) || length(unique(ids)) < 2L)
+    cli::cli_abort("fold_ids must assign every row to one of at least two spatial folds.")
+  design <- attr(ids, "design") %||% list(requested = "external", effective = "external", block_size_m = NA_real_)
+  out <- as.integer(factor(ids, levels = sort(unique(ids))))
+  attr(out, "design") <- design
+  out
+}
 
-  step_rank <- stats::setNames(rep(NA_integer_, length(env_vars)), env_vars)
-  if (any(is.finite(coefs))) {
-    ord_coef <- names(sort(abs(coefs[is.finite(coefs)]), decreasing = TRUE))
-    step_rank[ord_coef] <- seq_along(ord_coef)
+# Transform actual measurements, using training rows only; no imputation/jitter.
+.cast_selection_basis <- function(x) {
+  variables <- names(x)[vapply(x, .cast_is_varying, logical(1))]
+  specs <- matrices <- vector("list", length(variables))
+  for (j in seq_along(variables)) {
+    v <- x[[variables[j]]]
+    center <- mean(v); scale <- stats::sd(v)
+    z <- (v-center)/scale
+    quadratic <- length(unique(v)) > 2L
+    matrices[[j]] <- if (quadratic) cbind(z, z^2) else matrix(z, ncol = 1L)
+    specs[[j]] <- list(center = center, scale = scale, quadratic = quadratic)
   }
-  step_rank[keep] <- 0L
-  final_ranks <- data.frame(
-    variable = env_vars[ord],
-    stage1_rank = seq_along(env_vars),
-    coefficient = unname(coefs[env_vars[ord]]),
-    selected = env_vars[ord] %in% selected,
-    stringsAsFactors = FALSE
-  )
-  reason <- stats::setNames(rep("excluded", length(env_vars)), env_vars)
-  reason[selected] <- "screen"
-  reason[target_cap_dropped] <- "target_cap"
-  reason[ensured] <- "ensured"
-  reason[keep] <- "prespecified"
-  scores <- data.frame(
-    variable = env_vars,
-    assoc = unname(assoc[env_vars]),
-    stage1_p = unname(stage1_p[env_vars]),
-    stage1_rank = match(env_vars, env_vars[ord]),
-    collinear_thinned = unname(thinned[env_vars]),
-    step_added = unname(step_rank[env_vars]),
-    loss_gain = NA_real_,
-    kept_by_design = env_vars %in% keep,
-    selected_reason = unname(reason[env_vars]),
-    selected = env_vars %in% selected,
-    stringsAsFactors = FALSE)
-  new_cast_select(
-    selected = selected,
-    scores = scores,
-    method = "screen",
-    diagnostics = list(
-      keep = keep, corcut = corcut, ncov_target = target0, ncov = target,
-      ncov_use = length(selected), maxncov = maxncov,
-      cap_binding = cap_binding, target_cap_applied = target_cap_applied,
-      n_screened_nonzero = n_screened_nonzero,
-      n_dropped_by_target = length(target_cap_dropped),
-      target_cap_dropped = target_cap_dropped,
-      ensure_n = ensure_n, ensured = ensured, filtered = kept,
-      lambda = lambda, coefficients = coefs, n_pres = n_pres,
-      algorithms = "elastic_net", final_ranks = final_ranks))
+  names(specs) <- variables
+  design <- if (length(matrices)) do.call(cbind, matrices) else matrix(numeric(), nrow(x), 0L)
+  group <- rep(seq_along(variables), vapply(matrices, ncol, integer(1)))
+  # glmnet requires two design columns. The constant is an intercept basis,
+  # excluded internally for zero variance; it is never an environmental axis.
+  if (ncol(design) == 1L) { design <- cbind(design, 1); group <- c(group, 0L) }
+  colnames(design) <- paste0("term_", seq_len(ncol(design)))
+  list(matrix = design, group = group, variables = variables, specs = specs)
+}
+
+.cast_selection_design <- function(basis, x) {
+  parts <- lapply(basis$variables, function(v) {
+    spec <- basis$specs[[v]]; z <- (x[[v]]-spec$center)/spec$scale
+    if (spec$quadratic) cbind(z, z^2) else matrix(z, ncol = 1L)
+  })
+  out <- do.call(cbind, parts)
+  if (ncol(out) == 1L) out <- cbind(out, 1)
+  colnames(out) <- colnames(basis$matrix)
+  out
 }

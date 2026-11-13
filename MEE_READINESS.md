@@ -180,3 +180,57 @@ readiness or identify ecological causal effects from presence/background data.
   New CHELSA scientific results, full figure execution and post-fit result tabs
   require the user's new completed case. `examples/validate_real_case.R` checks
   a completed real case, including each engine's paired prediction exports.
+
+
+## 0.31.0 simpler selection and remaining limits
+
+Screening now has one statistical method: glmnet binomial elastic net with
+linear/quadratic terms, spatial inner-fold log loss and the one-SE parsimony
+rule. The L1/L2 mixing is declared as 0.5, not tuned against the inspected
+hold-out. See the [glmnet documentation](https://glmnet.stanford.edu/articles/glmnet.html).
+No retained-variable target, top-coefficient truncation, climate quota,
+univariate p-value ranking or automatic correlated-pair deletion remains.
+Identifiers and unencoded nominal/cyclic inputs are excluded before fitting;
+variable role, reason, risk curve and fold losses are saved. This is mature
+preprocessing, not the software's methodological novelty. Binary variables
+remain eligible; exact constancy replaces absolute-unit variance cutoffs.
+A null model is a legitimate outcome and stops environmental SDM fitting.
+No selected climate predictor stops climate projections after saving training.
+
+Bounded engineering verification uses actual saved 0.30 CHELSA training rows
+and their original spatial assignments. This preserves provenance but cannot
+represent a complete 0.31 rerun: semantic qualification changes the eligible
+pool and potentially the complete-case cohort. A new cast031_chelsa_ensmean
+directory is required. The full author workflow and national predictions are
+not run during maintenance. Opt-in reproduction is in tests/real-data/selection.R.
+
+Remaining issues need evidence rather than extra screening machinery:
+
+- A simple linear/quadratic screen can miss more complex responses and pure
+  interactions. Correlated variables can substitute; selected membership or
+  training component SD does not prove an ecological driver. The one-SE rule
+  is a heuristic under dependent spatial folds, not a confidence statement.
+- More variables can survive than under the former artificial cap. Downstream
+  GAM/MaxEnt complexity and runtime must be measured on the new run; a faster
+  selector does not guarantee a faster complete workflow. No new cap is used
+  to disguise this cost.
+- Native RF, MaxEnt and GAM scores have different fitting/weighting semantics.
+  The common weighted-mean 0.5 shift is not probability calibration. Saved
+  actual-case Brier/log loss require attention even when AUC is favourable.
+- Actual saved projected coordinates have no CRS attached to the data frame.
+  The blockCV autocorrelation-range calculation therefore cannot calibrate
+  their physical block size; its extent-grid default must not be reported as
+  autocorrelation-derived. The effective design, size source and reason are
+  now recorded and warned. Independent spatial-design assessment is still
+  needed; no CRS is guessed or fabricated.
+- Pooled OOF thresholds include every fold's labels. Fold threshold-dependent
+  metrics are descriptive; the frozen threshold needs separate hold-out
+  assessment. Failed or single-class outer folds require explicit scrutiny.
+- Pooled subfamily records, unknown coordinate uncertainty, historical-year/
+  climate mismatch, survey bias and the occurrence-informed river/locality
+  union domain limit ecological and causal interpretation. No response-map
+  wrapper repairs these data/design limitations.
+- A Shiny interface and paired effects alone are not novel. The paper still
+  needs matched comparisons showing whether background/support/model
+  diagnostics change a useful SDM interpretation, plus real usability and
+  reproducibility evidence. A clean package check does not establish MEE fit.

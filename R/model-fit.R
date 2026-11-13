@@ -184,7 +184,7 @@ cast_fit <- function(data,
   # -- Standardize (stored for prediction) --
   X_means <- colMeans(X_raw, na.rm = TRUE)
   X_sds   <- apply(X_raw, 2, stats::sd, na.rm = TRUE)
-  X_sds[X_sds < 1e-10] <- 1
+  X_sds[!is.finite(X_sds) | X_sds == 0] <- 1
 
   # -- Prevalence-correcting case weights (W3) --------------------------------
   # Weight = target/n per class, so the weighted prevalence is exactly the
@@ -414,11 +414,13 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
       # by an optional weighted training-score shift. The shift changes the
       # score origin; it is not equivalent to a weighted GAM fit or evidence
       # of probability calibration. RF's weighted sampling is a separate rule.
+      fallback_reason <- NULL
       m <- tryCatch(
         mgcv::gam(f, data = df, family = stats::binomial(),
                   method = "REML", select = TRUE,
                   control = mgcv::gam.control(maxit = 100L)),
         error = function(e) {
+          fallback_reason <<- conditionMessage(e)
           cli::cli_warn("GAM smooth fit failed ({e$message}); fitting a linear-only fallback. Inspect the fitted formula before interpreting responses.")
           flin <- stats::as.formula(
             paste("presence ~",
@@ -430,7 +432,11 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
                     control = mgcv::gam.control(maxit = 100L))
         }
       )
-      list(type = "traditional", model = m, name = "gam")
+      if (!isTRUE(m$converged)) cli::cli_abort("GAM did not converge; no unconverged fit is accepted.")
+      list(type = "traditional", model = m, name = "gam",
+        fit_policy = "unweighted binomial REML with optional later score shift",
+        fitted_formula = paste(deparse(stats::formula(m)), collapse = " "),
+        fallback_reason = fallback_reason)
     }
   )
 }

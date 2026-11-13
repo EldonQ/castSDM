@@ -2,39 +2,21 @@
 % Please edit documentation in R/conditional-effect.R
 \name{cast_importance}
 \alias{cast_importance}
-\title{Selection Path from the Screen}
+\title{Describe the Fitted Variable Screen}
 \usage{
 cast_importance(object)
 }
 \arguments{
-\item{object}{A \code{cast_select}, or a
-\code{cast_fit} / \code{cast_result} that carries such a screen.}
+\item{object}{A \code{cast_select}, \code{cast_fit}, or \code{cast_result} carrying a screen.}
 }
 \value{
-A \code{cast_importance} object.
+A \code{cast_importance} with the screen table and diagnostics.
 }
 \description{
-Turns a screen into a tidy per-predictor table carrying the admission
-path: each admitted predictor with its admission position (\code{step_added},
-the elastic-net screen rank; \code{0} for prespecified predictors) and, where
-the screen recorded one, the inner-CV loss improvement at admission
-(\code{loss_gain}, always \code{NA} for the screen).
-Excluded predictors are listed with missing steps and gains.
-}
-\section{Interpretation (read before citing)}{
-
-The table describes the \emph{fitted screening procedure}. It is not a
-causal effect and carries no p-values: a causal reading additionally
-requires a justified adjustment set, no uncontrolled confounding,
-consistency, joint support and adequate response and observation models.
-These assumptions are not verified by the ranking (Byrnes & Dee 2025).
-
-Read the path together with \code{\link[=cast_effect_table]{cast_effect_table()}} for response direction.
-}
-
-\references{
-Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
-data and unobserved confounding variables. \emph{Ecology Letters}, 28(1), e70023.
+Returns selection status, qualification reasons, and a descriptive
+training-scale group signal when available. Group signal is the standard
+deviation of a variable's fitted additive component on the selector training
+rows; it is not ecological importance, a causal effect or a p-value.
 }
 \seealso{
 \code{\link[=cast_select]{cast_select()}}, \code{\link[=cast_effect_table]{cast_effect_table()}}

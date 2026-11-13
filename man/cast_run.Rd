@@ -12,7 +12,7 @@ cast_run(
   protocol = cast_protocol(),
   select_var_id = NULL,
   select_category = NULL,
-  select_ensure = NULL,
+  select_roles = NULL,
   output_dir = NULL,
   report_meta = list(),
   verbose = TRUE,
@@ -41,8 +41,7 @@ become scenario labels. Requires \code{env_raster}.}
 passed to \code{\link[=cast_select]{cast_select()}} (e.g. variable-level identities and
 categories); must have one entry per predictor seen by the screen.}
 
-\item{select_ensure}{Data-aligned coverage requirements (named list of
-logical flag vectors) passed to \code{\link[=cast_select]{cast_select()}}.}
+\item{select_roles}{Named semantic predictor roles passed to \code{\link[=cast_select]{cast_select()}}.}
 
 \item{output_dir}{Optional directory for stage artifacts, tables, the
 ODMAP report and the run manifest. Created (recursively) when missing.}

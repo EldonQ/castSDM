@@ -1,10 +1,4 @@
-# Importance reporting ------------------------------------------------------
-#
-# cast_importance() tidies the screen's admission path: each admitted
-# predictor with its elastic-net screen rank and, for older screens that
-# carry one, the inner-CV loss improvement at admission.
-# It reuses the screen so no new estimation engine or hand-tuned knob is
-# introduced.
+# Descriptive reporting for the saved screen; no additional fitting.
 
 #' @keywords internal
 #' @noRd
@@ -26,71 +20,26 @@
   screen
 }
 
-#' Selection Path from the Screen
+#' Describe the Fitted Variable Screen
 #'
-#' Turns a screen into a tidy per-predictor table carrying the admission
-#' path: each admitted predictor with its admission position (`step_added`,
-#' the elastic-net screen rank; `0` for prespecified predictors) and, where
-#' the screen recorded one, the inner-CV loss improvement at admission
-#' (`loss_gain`, always `NA` for the screen).
-#' Excluded predictors are listed with missing steps and gains.
-#'
-#' @section Interpretation (read before citing):
-#' The table describes the \emph{fitted screening procedure}. It is not a
-#' causal effect and carries no p-values: a causal reading additionally
-#' requires a justified adjustment set, no uncontrolled confounding,
-#' consistency, joint support and adequate response and observation models.
-#' These assumptions are not verified by the ranking (Byrnes & Dee 2025).
-#'
-#' Read the path together with [cast_effect_table()] for response direction.
-#'
-#' @param object A `cast_select`, or a
-#'   `cast_fit` / `cast_result` that carries such a screen.
-#'
-#' @return A `cast_importance` object.
-#' @references
-#' Byrnes, J. E. K. & Dee, L. E. (2025). Causal inference with observational
-#' data and unobserved confounding variables. *Ecology Letters*, 28(1), e70023.
+#' Returns selection status, qualification reasons, and a descriptive
+#' training-scale group signal when available. Group signal is the standard
+#' deviation of a variable's fitted additive component on the selector training
+#' rows; it is not ecological importance, a causal effect or a p-value.
+#' @param object A `cast_select`, `cast_fit`, or `cast_result` carrying a screen.
+#' @return A `cast_importance` with the screen table and diagnostics.
 #' @seealso [cast_select()], [cast_effect_table()]
 #' @export
 cast_importance <- function(object) {
   screen <- .cast_extract_screen(object)
   sc <- screen$scores
-  needed <- "step_added"
-  if (!all(needed %in% names(sc))) {
-    cli::cli_abort(c(
-      "{.fn cast_importance} needs a screen carrying an admission path.",
-      i = "Run {.code cast_select()} first."))
-  }
-  loss_gain <- if ("loss_gain" %in% names(sc)) sc$loss_gain else rep(NA_real_, nrow(sc))
-  effects <- data.frame(
-    variable              = sc$variable,
-    step_added            = sc$step_added,
-    loss_gain             = loss_gain,
-    selected              = sc$selected,
-    kept_by_design        = sc$kept_by_design,
-    selected_reason       = sc$selected_reason,
-    stringsAsFactors = FALSE
-  )
-  effects <- effects[order(is.na(effects$step_added), effects$step_added), , drop = FALSE]
-  rownames(effects) <- NULL
-
-  diagnostics <- screen$diagnostics
-  diagnostics$measure <- "admission_rank"
-  # The screen's admission order is the elastic-net rank; loss_gain stays NA
-  # by design.
-  metric <- if (identical(screen$method, "screen")) {
-    "elastic-net screen rank"
-  } else {
-    screen$diagnostics$metric %||% "aggregate rank"
-  }
-  new_cast_importance(
-    effects = effects,
-    metric = metric,
-    diagnostics = diagnostics
-  )
+  cols <- intersect(c("variable", "role", "reason", "group_signal_sd", "freq",
+    "step_added", "selected", "selected_reason"), names(sc))
+  effects <- sc[, cols, drop = FALSE]
+  metric <- if ("group_signal_sd" %in% names(sc)) "training_group_signal_sd" else
+    if ("freq" %in% names(sc)) "fold_selection_frequency" else "selection_status"
+  new_cast_importance(effects = effects, metric = metric, diagnostics = screen$diagnostics)
 }
-
 
 #' @keywords internal
 #' @noRd

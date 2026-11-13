@@ -4,13 +4,8 @@
 #' Create a cast_select Object
 #'
 #' @param selected Character vector of selected variable names.
-#' @param scores A `data.frame` with per-variable scores. For
-#'   `method = "screen"`: marginal `assoc`, the univariate `stage1_p`
-#'   ranking signal, the `collinear_thinned` flag, the admission `step_added`
-#'   (`0` for prespecified predictors, `NA` for never-admitted ones; the
-#'   elastic-net rank when screened), the `loss_gain` (`NA` for the screen),
-#'   and the `selected` flag. For `method = "full"` the score columns are
-#'   `NA`.
+#' @param scores Per-variable qualification, role, eligibility and selection
+#'   reasons, plus descriptive fitted group signal where available.
 #' @param method Character screening-method identifier.
 #' @param diagnostics Named list of method diagnostics.
 #'
@@ -31,17 +26,15 @@ new_cast_select <- function(selected, scores, method = NULL, diagnostics = list(
 
 #' Create a cast_importance Object
 #'
-#' @param effects A `data.frame` of the admission path: per-predictor
-#'   `step_added` (elastic-net screen rank; `0` for prespecified predictors)
-#'   and the admission `loss_gain` where a screen recorded one (`NA` for
-#'   the screen).
-#' @param metric Inner-CV loss minimised by the search (`"brier"` or `"auc"`).
+#' @param effects A per-variable table of qualification, selection and
+#'   descriptive signal or selection frequency when available.
+#' @param metric Name of the descriptive quantity, default `"selection_status"`.
 #' @param diagnostics Named list carried over from the screen.
 #'
 #' @return A `cast_importance` object.
 #' @keywords internal
 #' @export
-new_cast_importance <- function(effects, metric = "brier",
+new_cast_importance <- function(effects, metric = "selection_status",
                                 diagnostics = list()) {
   structure(
     list(

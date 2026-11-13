@@ -9,13 +9,8 @@ new_cast_select(selected, scores, method = NULL, diagnostics = list())
 \arguments{
 \item{selected}{Character vector of selected variable names.}
 
-\item{scores}{A \code{data.frame} with per-variable scores. For
-\code{method = "screen"}: marginal \code{assoc}, the univariate \code{stage1_p}
-ranking signal, the \code{collinear_thinned} flag, the admission \code{step_added}
-(\code{0} for prespecified predictors, \code{NA} for never-admitted ones; the
-elastic-net rank when screened), the \code{loss_gain} (\code{NA} for the screen),
-and the \code{selected} flag. For \code{method = "full"} the score columns are
-\code{NA}.}
+\item{scores}{Per-variable qualification, role, eligibility and selection
+reasons, plus descriptive fitted group signal where available.}
 
 \item{method}{Character screening-method identifier.}
 

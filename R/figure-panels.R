@@ -370,7 +370,7 @@
           ggplot2::scale_y_discrete(labels = .cast_figure_variable_labels) +
           ggplot2::labs(title = sprintf("Complete screening ranks: page %d of %d", number, length(pages)),
             subtitle = sprintf("Ranks %d-%d of %d scored predictors", min(rows), max(rows), nrow(scored)),
-            caption = .cast_figure_wrap("Every scored predictor is retained across these pages. Stored zero p-values use the positive normalized machine floor for display only; original scores and exclusions remain in screening.csv. Screening scores are not causal importance."))
+            caption = .cast_figure_wrap("Every scored predictor is retained across these pages. Scores describe fitted selector components (historical screens retain their original score definitions); original values and qualification exclusions remain in screening.csv. Display ordering does not determine the selected set or identify causal importance."))
       }, max(100, length(rows)*3.5+45))
     })
   }

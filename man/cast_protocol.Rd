@@ -8,10 +8,7 @@ cast_protocol(
   models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
   select_method = c("screen", "full"),
-  select_keep = character(0),
-  select_corcut = 0.7,
-  select_ncov = NULL,
-  select_maxncov = 12L,
+  select_inner_k = 5L,
   rf_ntree = 500L,
   rf_mtry = NULL,
   maxent_classes = NULL,
@@ -35,7 +32,6 @@ cast_protocol(
   clamp = TRUE,
   num_threads = 1L,
   seed = NULL,
-  select_ensure_n = NULL,
   holdout_blocks = 20L
 )
 }
@@ -46,19 +42,10 @@ Default all three.}
 \item{train_fraction}{Hold-out fraction rule: fraction of rows assigned
 to the training split (spatial block split). Default \code{0.7}.}
 
-\item{select_method}{\code{"screen"} (independent elastic-net screen) or
+\item{select_method}{\code{"screen"} (spatial elastic-net screen) or
 \code{"full"} (keep every varying predictor). Default \code{"screen"}.}
 
-\item{select_keep}{Predictors forced through screening (see
-\code{\link[=cast_select]{cast_select()}}).}
-
-\item{select_corcut}{Absolute Pearson correlation threshold for the
-collinearity filter. Default \code{0.7}.}
-
-\item{select_ncov}{Target covariate count for \code{"screen"} (\code{NULL} =
-\code{ceiling(log2(n_presences))}).}
-
-\item{select_maxncov}{Maximum covariate count for \code{"screen"}. Default \code{12}.}
+\item{select_inner_k}{Number of inner spatial folds for elastic-net penalty selection.}
 
 \item{rf_ntree}{RF trees. Default \code{500}.}
 
@@ -83,7 +70,8 @@ scores. Default \code{0.5}. See \code{\link[=cast_fit]{cast_fit()}} for weightin
 \item{n_repeat}{Number of independent spatial-blocking repeats. Default \code{1}.}
 
 \item{block_method}{\code{"blockcv"} (default; blockCV spatial blocks with
-autocorrelation-range sizing), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).}
+attempted autocorrelation-range sizing; actual extent-grid fallback
+recorded when unavailable), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).}
 
 \item{block_size}{Optional block edge length in metres for \code{"blockcv"}.}
 
@@ -103,9 +91,6 @@ computed on the unclamped input).}
 
 \item{seed}{Base seed; every stage applies it locally without touching
 the caller's RNG state.}
-
-\item{select_ensure_n}{Named minimum counts for the coverage groups passed
-to \code{\link[=cast_run]{cast_run()}} as \code{select_ensure}; see \code{\link[=cast_select]{cast_select()}}.}
 
 \item{holdout_blocks}{Number of blocks in the independent spatial hold-out.}
 }

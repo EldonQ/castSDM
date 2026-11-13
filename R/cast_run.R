@@ -53,8 +53,7 @@
 #' @param select_var_id,select_category Data-aligned selection metadata
 #'   passed to [cast_select()] (e.g. variable-level identities and
 #'   categories); must have one entry per predictor seen by the screen.
-#' @param select_ensure Data-aligned coverage requirements (named list of
-#'   logical flag vectors) passed to [cast_select()].
+#' @param select_roles Named semantic predictor roles passed to [cast_select()].
 #' @param output_dir Optional directory for stage artifacts, tables, the
 #'   ODMAP report and the run manifest. Created (recursively) when missing.
 #' @param report_meta Optional named list of report metadata passed to
@@ -83,7 +82,7 @@ cast_run <- function(species_data,
                      protocol = cast_protocol(),
                      select_var_id = NULL,
                      select_category = NULL,
-                     select_ensure = NULL,
+                     select_roles = NULL,
                      output_dir = NULL,
                      report_meta = list(),
                      verbose = TRUE, prepared = NULL, cache_dir = NULL,
@@ -188,28 +187,34 @@ cast_run <- function(species_data,
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
   stage_started <- Sys.time()
-  selection_inputs <- list(split$train, protocol$select_method, protocol$select_keep,
-    protocol$select_corcut, protocol$select_ncov, protocol$select_maxncov,
-    select_var_id, select_category, select_ensure, protocol$select_ensure_n, protocol$seed)
+  selection_inputs <- list(split$train, protocol$select_method, protocol$select_inner_k,
+    select_var_id, select_category, select_roles, protocol$block_method, protocol$block_size, protocol$seed)
   screen <- stage("02_select", selection_inputs, cast_select(
     split$train,
     method = protocol$select_method,
-    keep = protocol$select_keep,
-    corcut = protocol$select_corcut,
+    inner_k = protocol$select_inner_k,
+    block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
+    block_size = protocol$block_size,
     var_id = select_var_id,
     category = select_category,
-    ncov = protocol$select_ncov,
-    maxncov = protocol$select_maxncov,
-    ensure = select_ensure,
-    ensure_n = protocol$select_ensure_n,
+    roles = select_roles,
     seed = protocol$seed, verbose = verbose
   ))
   add_receipt("02_select",
-    .cast_digest(list(split$train, protocol$select_method,
-                      protocol$select_keep, protocol$select_corcut,
-                      protocol$select_ncov, protocol$select_maxncov,
-                      protocol$seed)),
+    .cast_digest(selection_inputs),
     screen, tables = list(selection_scores = screen$scores))
+
+  if (!is.null(output_dir)) {
+    for (name in c("risk_curve", "fold_details", "fold_losses")) {
+      value <- screen$diagnostics[[name]]
+      if (is.matrix(value)) value <- data.frame(fold = seq_len(nrow(value)), as.data.frame(value))
+      if (is.data.frame(value)) utils::write.csv(value,
+        file.path(output_dir, "tables", paste0("selection_", name, ".csv")), row.names = FALSE)
+    }
+  }
+  if (!length(screen$selected)) cli::cli_abort(c(
+    "Spatial selection retained no environmental predictors ({screen$diagnostics$status}).",
+    i = "The selection and validation diagnostics were saved. No predictor is forced into an SDM; inspect the data/design before fitting or climate projection."))
 
   # ---- 3. Fit on the training split ---------------------------------------
   if (verbose) cli::cli_h2("Fit: engines on the training split")
@@ -238,19 +243,11 @@ cast_run <- function(species_data,
   # ---- 4. Nested spatial cross-validation (training split only) -----------
   if (verbose) cli::cli_h2("CV: nested spatial cross-validation (k = {protocol$cv_k})")
   stage_started <- Sys.time()
-  select_args <- switch(protocol$select_method,
-    screen = list(
-      corcut = protocol$select_corcut,
-      ncov = protocol$select_ncov,
-      maxncov = protocol$select_maxncov,
-      keep = protocol$select_keep,
-      ensure = select_ensure,
-      ensure_n = protocol$select_ensure_n,
-      var_id = select_var_id,
-      category = select_category
-    ),
-    full = list(keep = protocol$select_keep)
-  )
+  select_args <- list(
+    inner_k = protocol$select_inner_k,
+    block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
+    block_size = protocol$block_size, roles = select_roles,
+    var_id = select_var_id, category = select_category)
   cv_inputs <- list(split$train, select_args, protocol$models, protocol$cv_k,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
