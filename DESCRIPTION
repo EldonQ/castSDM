@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
-Title: Auditable Scenario Comparisons for Species Distribution Models
-Version: 0.28.3
+Title: Environmental Response Maps for Species Distribution Models
+Version: 0.29.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -18,7 +18,9 @@ Description: Auditable model-conditional comparisons of environmental scenarios
     contrast kernel. Random forest, MaxEnt and generalized additive model
     engines support variable screening, spatial cross-validation and full-data
     refitting. Content-verified stage caches and execution receipts support
-    reproducible workflows. Contrasts describe fitted suitability responses;
+    reproducible workflows. A local Shiny interface explores finite environmental
+    changes and descriptive response groups selected using spatial folds.
+    Contrasts describe fitted suitability responses;
     they do not establish real-world causal effects or occurrence probabilities.
 License: GPL (>= 3)
 URL: https://github.com/EldonQ/castSDM
@@ -35,6 +37,8 @@ Imports:
     filelock (>= 1.0.2)
 Suggests:
     blockCV,
+    bslib (>= 0.5.0),
+    callr (>= 3.7.0),
     car,
     FNN,
     future,
@@ -42,6 +46,7 @@ Suggests:
     ggplot2 (>= 3.4.0),
     glmnet,
     knitr,
+    leaflet (>= 2.2.0),
     maxnet,
     matrixStats,
     mgcv,
@@ -49,13 +54,16 @@ Suggests:
     pROC,
     ragg,
     ranger,
+    rpart,
     scales,
     rmarkdown,
     sf (>= 1.0.0),
+    shiny (>= 1.8.0),
     svglite,
     terra (>= 1.7.0),
     testthat (>= 3.0.0),
     viridisLite,
-    withr
+    withr,
+    zip
 Config/testthat/edition: 3
 VignetteBuilder: knitr

@@ -1,6 +1,6 @@
 # Fitted response contrasts require additional assumptions for causal interpretation.
 
-# Single-shift stub: one raw-unit shift per driver, signed delta, paired
+# Single-shift contrast: one raw-unit shift per driver, signed delta, paired
 # model averaging BEFORE any absolute value (per-engine abs would measure
 # disagreement, not the ensemble effect).
 .effect_predictions <- function(fit, X, driver, step, base = NULL, weights = NULL) {
@@ -82,8 +82,8 @@
 
 #' Shift Effect Table for Species Distribution Models
 #'
-#' Intervenes on each driver in turn with a single raw-unit shift (do-operator:
-#' shift the driver, hold every other driver fixed), and summarises the
+#' Changes each driver in turn by a single raw-unit shift, holding every other
+#' fitted predictor fixed, and summarises the
 #' resulting change in predicted suitability on `newdata`: the model-based
 #' shift effect (shift estimand) of the ensemble for each driver.
 #'
@@ -199,7 +199,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   attr(res, "support_probs") <- support_probs
   attr(res, "rows_input") <- nrow(newdata)
   attr(res, "rows_complete") <- nrow(X)
-  attr(res, "intervention") <- "do(driver += shift_raw) in raw units, all other drivers fixed"
+  attr(res, "intervention") <- "driver += shift_raw in raw units; other fitted predictors fixed"
   attr(res, "assumptions") <- .cast_effect_assumptions()
   class(res) <- c("cast_effect_table", "data.frame")
   res
@@ -235,7 +235,7 @@ print.cast_effect_table <- function(x, ...) {
 
 #' Shift Effect Maps for Species Distribution Models
 #'
-#' Intervenes on each driver with a single raw-unit shift across every valid
+#' Changes each driver by a single raw-unit shift across every valid
 #' cell of `current_stack` (all other drivers held fixed) and returns the
 #' spatially explicit equally weighted ensemble-mean change in suitability.
 #' Spatial counterpart of [cast_effect_table()] with the same hard
@@ -407,7 +407,7 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
   attr(res, "steps") <- steps
   attr(res, "support_probs") <- support_probs
   attr(res, "min_support") <- min_support
-  attr(res, "intervention") <- "do(driver += shift_raw) in raw units, all other drivers fixed; masked cells carry NA"
+  attr(res, "intervention") <- "driver += shift_raw in raw units; other fitted predictors fixed; masked cells carry NA"
   attr(res, "assumptions") <- .cast_effect_assumptions()
   res
 }

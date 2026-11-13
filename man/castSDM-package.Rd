@@ -4,11 +4,11 @@
 \name{castSDM-package}
 \alias{castSDM}
 \alias{castSDM-package}
-\title{castSDM: Auditable Scenario Comparisons for Species Distribution Models}
+\title{castSDM: Environmental Response Maps for Species Distribution Models}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-Auditable model-conditional comparisons of environmental scenarios using species distribution models. A paired 2 x 2 design separates two predictor groups, their joint change and interaction with fixed model weights, finite-domain checks, training-support diagnostics and paired model disagreement. Tables and bounded-memory raster processing share one contrast kernel. Random forest, MaxEnt and generalized additive model engines support variable screening, spatial cross-validation and full-data refitting. Content-verified stage caches and execution receipts support reproducible workflows. Contrasts describe fitted suitability responses; they do not establish real-world causal effects or occurrence probabilities.
+Auditable model-conditional comparisons of environmental scenarios using species distribution models. A paired 2 x 2 design separates two predictor groups, their joint change and interaction with fixed model weights, finite-domain checks, training-support diagnostics and paired model disagreement. Tables and bounded-memory raster processing share one contrast kernel. Random forest, MaxEnt and generalized additive model engines support variable screening, spatial cross-validation and full-data refitting. Content-verified stage caches and execution receipts support reproducible workflows. A local Shiny interface explores finite environmental changes and descriptive response groups selected using spatial folds. Contrasts describe fitted suitability responses; they do not establish real-world causal effects or occurrence probabilities.
 }
 \seealso{
 Useful links:

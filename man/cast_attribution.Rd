@@ -26,7 +26,8 @@ cast_attribution(
   overwrite = FALSE,
   verbose = TRUE,
   resources = list(),
-  resume = TRUE
+  resume = TRUE,
+  shifts = NULL
 )
 
 \method{print}{cast_attribution}(x, ...)
@@ -39,7 +40,9 @@ other tools with an explicit prediction callback and training reference.}
 stacks. Tables with \code{lon}/\code{lat} are matched by coordinates; otherwise rows
 must already be paired. Rasters must have identical geometry and CRS.}
 
-\item{drivers}{Unique fitted predictor names to compare. Default all.}
+\item{drivers}{Unique fitted predictor names to compare. Default all.
+Use \code{character()} for only the paired total response, without additional
+driver-only and retained-driver predictions.}
 
 \item{cv}{Optional \link{cast_cv} object for ensemble weights.}
 
@@ -78,6 +81,12 @@ prediction threads in this single-process operation. See \code{\link[=cast_compa
 
 \item{resume}{Reuse a verified result receipt for an existing filename,
 including when \code{overwrite = TRUE}. Set \code{FALSE} to force recomputation.}
+
+\item{shifts}{Optional named numeric vector of finite raw-unit changes,
+added to the corresponding future predictors inside processing blocks.
+With \code{future = current} this computes finite-change responses without
+materialising another environmental raster stack. These are explicitly
+hypothetical predictor changes, not observed data or causal effects.}
 
 \item{x}{A \code{cast_attribution} result for printing.}
 

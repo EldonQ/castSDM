@@ -110,6 +110,13 @@
 #'   stacks. Tables with `lon`/`lat` are matched by coordinates; otherwise rows
 #'   must already be paired. Rasters must have identical geometry and CRS.
 #' @param drivers Unique fitted predictor names to compare. Default all.
+#'   Use `character()` for only the paired total response, without additional
+#'   driver-only and retained-driver predictions.
+#' @param shifts Optional named numeric vector of finite raw-unit changes,
+#'   added to the corresponding future predictors inside processing blocks.
+#'   With `future = current` this computes finite-change responses without
+#'   materialising another environmental raster stack. These are explicitly
+#'   hypothetical predictor changes, not observed data or causal effects.
 #' @param cv Optional [cast_cv] object for ensemble weights.
 #' @param weights Optional named non-negative model weights, overriding `cv`.
 #' @param models Optional subset of fitted model names.
@@ -162,7 +169,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              support_probs = c(0.01, 0.99), clamp = FALSE,
                              block_size = 50000L,
                              filename = NULL, mask = NULL, overwrite = FALSE,
-                             verbose = TRUE, resources = list(), resume = TRUE) {
+                             verbose = TRUE, resources = list(), resume = TRUE,
+                             shifts = NULL) {
   .cast_check_fit(fit)
   budget <- .cast_resources(resources)
   old_options <- options(castSDM.predict_threads = budget$cores)
@@ -172,10 +180,14 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   .cast_check_scalar(block_size, "block_size", lower = 1, integer = TRUE)
   vars <- fit$env_vars
   if (is.null(drivers)) drivers <- vars
-  if (!is.character(drivers) || !length(drivers) || anyNA(drivers) ||
+  if (!is.character(drivers) || anyNA(drivers) ||
       anyDuplicated(drivers) || !all(drivers %in% vars)) {
     cli::cli_abort("{.arg drivers} must name unique fitted predictors.")
   }
+  if (!is.null(shifts) && (!is.numeric(shifts) || !length(shifts) ||
+      is.null(names(shifts)) || anyNA(names(shifts)) || anyDuplicated(names(shifts)) ||
+      !all(names(shifts) %in% vars) || any(!is.finite(shifts))))
+    cli::cli_abort("{.arg shifts} must be a finite numeric vector named by fitted predictors.")
   weights <- .cast_attribution_weights(fit, cv, models, weights, method,
     min_score, decay, fallback, min_metric_folds)
   reference <- .cast_reference(fit, vars)
@@ -209,10 +221,13 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
     lock <- .cast_lock(paste0(filename, ".lock"))
     on.exit(filelock::unlock(lock), add = TRUE)
-    key <- .cast_digest(list(fit = .cast_fit_identity(fit), weights = weights,
+    signature <- list(fit = .cast_fit_identity(fit), weights = weights,
       current = .cast_data_identity(current), future = .cast_data_identity(future),
       mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
-      support_probs = support_probs, clamp = clamp, core = .cast_code_identity(.cast_attribution_block)))
+      support_probs = support_probs, clamp = clamp,
+      core = .cast_code_identity(.cast_attribution_block))
+    if (!is.null(shifts)) signature$shifts <- shifts
+    key <- .cast_digest(signature)
     receipt <- paste0(filename, ".receipt.rds")
     cached <- if (resume) .cast_cache_read(receipt, key) else NULL
     if (!is.null(cached)) {
@@ -248,8 +263,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   sums <- matrix(0, 2 + 2 * length(drivers), 8,
     dimnames = list(NULL, c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd")))
   accumulate <- function(z) {
-    cols <- c("total_change", paste0("effect_", drivers),
-      paste0("retained_", drivers), "remainder")
+    cols <- c("total_change", if (length(drivers)) paste0("effect_", drivers),
+      if (length(drivers)) paste0("retained_", drivers), "remainder")
     for (j in seq_along(cols)) {
       col <- cols[j]; d <- z[, col]
       sc <- if (col %in% c("total_change", "remainder")) "support_total" else
@@ -277,6 +292,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       idx <- seq.int(first, min(n, first + block_size - 1L))
       a <- current[idx, vars, drop = FALSE]; b <- future[idx, vars, drop = FALSE]
     }
+    for (v in names(shifts)) b[[v]] <- b[[v]] + shifts[[v]]
     keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
     if (raster) keep <- keep & .cast_mask_rows(mask, first, count, nrow(a))
     z <- matrix(NA_real_, nrow(a), length(layer_names), dimnames = list(NULL, layer_names))
@@ -313,6 +329,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   result <- structure(list(summary = summary, data = data,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
+    shifts = shifts,
     interpretation = "Fitted-model environmental scenario comparisons on the suitability scale"),
     class = c("cast_attribution", "list"))
   if (raster) .cast_cache_write(result, receipt, key, filename)

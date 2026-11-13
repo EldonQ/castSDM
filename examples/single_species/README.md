@@ -1,8 +1,48 @@
-# 单物种应用示例（castSDM >= 0.28.3）
+# 单物种应用示例（castSDM >= 0.29.0）
 
 入口是 `00_RUN_ALL.R`。案例保留数据特有的发生记录质控、分析域和未来文件匹配；
 拟合、空间交叉验证、缓存、四角场景比较和归因均调用已安装的 castSDM。
 默认生成 9 个联合未来的比较，并导出完整地图和诊断图；逐变量归因分析报告场景。
+
+## Shiny 环境响应地图
+
+已有 `cast028_glu/Schizothoracinae` 完整结果时，可直接打开，无需重新训练：
+
+```r
+source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF-8")
+```
+
+入口沿用项目包库及 `CAST_SPECIES`、`CAST_RUN_ID`。打开指定结果目录：
+
+```r
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast028_glu/Schizothoracinae")
+source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF-8")
+```
+
+界面支持浏览已有情景、地图点击查询、改变前后与差值图、局地预测剖面、
+明确的假设指标改变、自动响应分组，以及原有正式图件浏览与下载。
+选择“组：climate”或“组：lulc”可保持该组已生成指标的一致情景变化；
+“假设单个指标改变”只表示该指标的模型敏感性，不能直接当成可实施的土地利用行动。
+模型输出是相对适宜度；自动分组不是 CATE，范围支持不是因果识别或联合支持证明。
+
+长计算在独立 R 进程运行，不会每次点击都重新训练模型。界面上“浏览已有情景”
+读取保存结果；“计算响应与自动分组”才启动所选方案的新计算。正式图件的样式、
+省界、南海插图和原有输出均保留。新结果单独写入 `interactive/<内容指纹>/`，
+包含样点响应、分组规则、空间折调参、设置、原生栅格、显示预览和 `reproduce.R`。
+缺乏足够支持时允许不分组或保留一个组，不强行制造正负类别。
+
+“运行与导出”中可手动提交已经配置好的 `00_RUN_ALL.R`，采用 `01_config.R` 的
+科学设置；打开 Shiny 本身不会运行管线。若完整案例尚未生成，先按下文运行管线，
+或在 Shiny 中点击运行按钮。新图层计算可能耗时，已有结果仍可浏览。
+
+仅检查入口依赖和界面构造、不启动服务器或计算：
+
+```powershell
+Rscript 05_SHINY.R --dry-run
+```
+
+Shiny 的可选依赖为 `shiny`、`bslib`、`leaflet`、`callr`、`rpart` 和 `zip`。
+入口发现缺依赖时会给出一次性安装命令，不在分析中自动联网安装。
 
 ## 直接在 R / RStudio 中运行
 
@@ -37,7 +77,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 开发源码修改后须重新安装，再运行示例。已有任务运行时使用独立版本库，避免改写其加载的包：
 
 ```r
-lib <- "E:/Package/.rlib_cast_versions/0.28.3"
+lib <- "E:/Package/.rlib_cast_versions/0.29.0"
 dir.create(lib, recursive = TRUE, showWarnings = FALSE)
 .libPaths(c(lib, "E:/Package/.rlib_cast", .libPaths()))
 install.packages(c("remotes", "terra", "sf", "data.table", "ranger", "maxnet",
@@ -47,6 +87,9 @@ install.packages(c("remotes", "terra", "sf", "data.table", "ranger", "maxnet",
 remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 # 或在本机安装源码：
 # install.packages("E:/Package/cast", repos = NULL, type = "source", lib = .libPaths()[1L])
+# 可选的 Shiny 界面依赖：
+install.packages(c("shiny", "bslib", "leaflet", "callr", "rpart", "zip"),
+  lib = .libPaths()[1L], repos = "https://cloud.r-project.org")
 ```
 
 `01_config.R` 集中定义协议与案例参数。默认路径对应当前工作目录的数据布局：
@@ -57,6 +100,7 @@ remotes::install_github("EldonQ/castSDM", lib = .libPaths()[1L])
 | 发生记录 | `E:/Package/castSDM_workflows/species_occ`，可用 `CAST_OCCURRENCE_ROOT` 改写 |
 | 示例根目录 | 脚本所在目录，可用 `CAST_EXAMPLE_ROOT` 改写 |
 | R 包库 | 自动识别 `.rlib_cast` 和 `.rlib_cast_versions`；自定义位置可设 `CAST_R_LIBRARY` |
+| 结果根目录 | 默认示例的 `output`；自定义位置可设 `CAST_OUTPUT_ROOT` |
 | 物种 | `Schizothoracinae`，可用 `CAST_SPECIES` 选择 `Callosciurus_erythraeus` |
 | 运行标识 | `cast028_glu` 或 `cast028_hlu`，可用 `CAST_RUN_ID` 改写 |
 
@@ -115,6 +159,9 @@ Rscript 00_RUN_ALL.R
 本补丁不改变预测方法、训练设置或地图样式，兼容 0.28.0–0.28.2 的六个训练阶段和冻结模型预测指纹。
 配置和科学脚本未变的 `cast028_*` 案例会自动续跑，版本升级另记入 `maintenance.rds`；
 训练结果不会被改标。升级后数据准备和诊断图件缓存可能刷新一次，不要求重训模型。
+0.29.0 新增可选环境响应应用，训练和冻结模型预测语义继续保持；
+未改变上述四个科学脚本和配置的旧案例可记录维护凭据后续跑。
+`05_SHINY.R` 可直接读取已有 0.28.x 完整结果，原有分析不必为打开界面重跑。
 
 ## 输出与重绘
 
@@ -131,6 +178,7 @@ Rscript 00_RUN_ALL.R
 - `figures/figure_inventory.csv`、`figure_status.csv`：全部可生成图的清单、实际导出状态及缺失原因。
 - `figures/.data/`：响应曲线、驱动分解、MESS、原生网格范围分类和绘图网格的独立缓存。
 - `case.rds`：案例配置和结果路径；`completion.rds` 仅表示本次计算与导出完成。
+- `interactive/`：用户主动提交的环境响应计算和地图预览，独立于研究模型和正式图件。
 
 数据准备保存在 `output/.prepared/<物种>/<内容指纹>/`，训练阶段缓存保存在
 `output/.training-cache/`。不要把 `completion.rds` 当作模型或论文质量验收证明。

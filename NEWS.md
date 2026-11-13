@@ -1,3 +1,27 @@
+# castSDM 0.29.0
+
+- Add `cast_app()` for local browsing of completed real cases, native-grid
+  point queries, scenario/explicit finite-change exploration, response groups,
+  existing publication figures and reproducible exports. Long calculations
+  run in a separate R process with the calling installation verified; opening
+  the interface does not run the research workflow.
+- Add `cast_explore()` using the existing paired attribution kernel. Real saved
+  CV locations and recorded spatial folds support descriptive response grouping;
+  native maps, bounded display previews and content-verified receipts are kept
+  separately in `interactive/`, leaving fitted models and formal figures intact.
+- Add `cast_response_groups()` with spatial-fold one-standard-error pruning,
+  a valid one-group outcome, explicit rules and missing/unsupported row handling.
+  These are finite-change model explanations following published FME/cAME ideas,
+  not a new causal estimator, CATE or independent ecological validation.
+- Allow total-only `cast_attribution(drivers = character())` and named raw-unit
+  `shifts` applied inside processing blocks, avoiding a duplicate shifted raster
+  stack. Existing no-shift prediction and cache contracts are retained.
+- Add the single-species `05_SHINY.R` entry and retain the existing complete
+  analysis/figure workflow. Unchanged 0.28.x studies can resume through the
+  audited version adapter; scientific scripts and settings remain unchanged.
+- Use real-case verification for this release. The lightweight CI package check
+  does not execute the historical simulated examples, vignettes or test fixtures.
+
 # castSDM 0.28.3
 
 - Validate reporting-scenario driver maps through the attribution receipt,

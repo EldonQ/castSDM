@@ -80,9 +80,9 @@
 
 .cast_fit_identity <- function(fit) {
   package <- as.character(utils::packageVersion("castSDM"))
-  # These reviewed maintenance patches keep 0.28.0 prediction/cache
+  # Reviewed maintenance/interface releases keep 0.28.0 prediction/cache
   # semantics. Later releases invalidate conservatively unless reviewed here.
-  if (package %in% c("0.28.1", "0.28.2", "0.28.3")) package <- "0.28.0"
+  if (package %in% c("0.28.1", "0.28.2", "0.28.3", "0.29.0")) package <- "0.28.0"
   models <- lapply(fit$models, function(m) {
     if (is.function(m$predict_function)) m$predict_function <- .cast_callback_identity(m$predict_function)
     m

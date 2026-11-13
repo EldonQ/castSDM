@@ -1,6 +1,6 @@
 # castSDM
 
-**Auditable scenario comparisons for species distribution models.**
+**Environmental response maps and auditable scenario comparisons for SDMs.**
 
 `cast_compare()` constructs current, first-group-only, second-group-only and
 joint predictions from a frozen fit. Fixed positive model weights and an
@@ -17,34 +17,42 @@ remotes::install_github("EldonQ/castSDM")
 install.packages(c("ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN", "sf", "terra"))
 ```
 
-## A complete small comparison
+## Open a completed real case
 
-This example supplies a fitted GLM through the public external-model adapter.
-External models supply their callback and training reference; evaluation
-scores are never invented for them.
+The optional Shiny interface queries native-grid results, compares actual
+scenario rasters or explicit hypothetical predictor shifts, and displays
+descriptive environmental response groups. Set `case_dir` to your completed
+[single-species workflow](examples/single_species/README.md) output.
 
 ```r
 library(castSDM)
-set.seed(42)
-current <- data.frame(temperature = rnorm(120), land = runif(120))
-observations <- transform(current,
-  presence = rbinom(120, 1, plogis(temperature - land)))
-model <- glm(presence ~ temperature + land, observations, family = binomial())
-fit <- cast_as_fit(list(glm = model), current,
-  function(model, newdata) predict(model, newdata, type = "response"))
-future <- transform(current, temperature = temperature + .5, land = land + .1)
-comparison <- cast_compare(fit, current, future,
-  groups = list(climate = "temperature", land_use = "land"),
-  thresholds = c(.3, .5, .7))
-summary(comparison)
-plot(comparison)
+install.packages(c("shiny", "bslib", "leaflet", "callr", "rpart", "zip"))
+cast_app(case_dir)
+
+# Real saved locations only; no full-grid prediction or model refitting:
+response <- cast_explore(case_dir, maps = FALSE)
+response$groups$summary
 ```
 
-Without usable cross-validation or a supplied threshold there is no binary
-range estimate. `summary(comparison, thresholds = c(.3, .5, .7))` calculates
-sensitivity from saved predictions without fitting or predicting again.
-Pass diagnostic thresholds into `cast_compare()` to count them during
-prediction. Other thresholds use a bounded, persistent raster reader.
+Long jobs run in an isolated R process. The app preserves the complete existing
+publication figures and puts new analysis artifacts in `interactive/`. Exports
+include settings, source data, spatial tuning losses, native rasters and an R
+replay script. Display rasters are explicitly separate from the analysis grid.
+
+`cast_response_groups()` summarises finite model responses with a small tree,
+using supplied spatial folds and one-standard-error pruning. The method follows
+[published FME/cAME explanations](https://doi.org/10.32614/RJ-2024-024);
+environmental groups are descriptive and need not be geographically contiguous.
+SHAP contributions, CATE, ecological causal effects, actual occupancy and
+probability changes are different quantities. The current presence/background
+case does not identify them merely by changing the estimator or adding a GUI.
+Marginal range flags cannot establish joint support or causal identification.
+
+The implementation reuses the existing fitted models and contrast kernel.
+`cast_attribution(..., drivers = character())` computes only the paired total
+response. Optional named `shifts` modify future predictors inside processing
+blocks without creating a full shifted raster stack. Related derived predictors
+should be changed using a consistent environmental scenario.
 
 ## Fit, validate, compare
 

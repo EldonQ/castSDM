@@ -7,6 +7,9 @@
 #' paired grouped scenarios using frozen model weights and an explicit domain.
 #' Supported summaries and paired model disagreement accompany the results.
 #' [cast_attribution()] provides optional individual-driver diagnostics.
+#' [cast_app()] supplies a local interactive workspace; [cast_explore()] and
+#' [cast_response_groups()] expose finite-change responses and descriptive
+#' environmental subgroups using saved real cases and spatial folds.
 #'
 #' The package also provides data preparation, variable selection, RF/
 #' MaxEnt/GAM fitting, nested spatial validation and raster projection. These

@@ -125,8 +125,8 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
 # Only reviewed maintenance versions can migrate an otherwise identical claim.
 case_runtime_resume_patch <- function(cfg) {
   current_version <- as.character(getNamespaceVersion("castSDM"))
-  if (!identical(current_version, "0.28.3")) return(invisible(FALSE))
-  compatible <- c("0.28.0", "0.28.1", "0.28.2")
+  if (!identical(current_version, "0.29.0")) return(invisible(FALSE))
+  compatible <- c("0.28.0", "0.28.1", "0.28.2", "0.28.3")
   run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) return(invisible(FALSE))
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
@@ -159,7 +159,7 @@ case_runtime_resume_patch <- function(cfg) {
   recorded <- any(vapply(history$entries, function(x) identical(x$to$key, updated$key), logical(1)))
   if (!recorded) history$entries[[length(history$entries)+1L]] <- list(
     utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-    reason = paste(current_version, "diagnostic/cache maintenance; scientific inputs, source hashes and prediction contract unchanged."),
+    reason = paste(current_version, "adds optional response exploration; scientific inputs, source hashes and prediction contract unchanged."),
     from = previous, to = updated)
   # Reuse the package atomic publisher in this version-specific adapter.
   publish <- utils::getFromNamespace(".cast_atomic_rds", "castSDM")

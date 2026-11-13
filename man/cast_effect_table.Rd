@@ -58,8 +58,8 @@ box before and after shifting), \code{support} (\code{n_supported / n}), and
 \code{mean_abs_dHSS}; read \code{mean_signed_dHSS} for the sign.
 }
 \description{
-Intervenes on each driver in turn with a single raw-unit shift (do-operator:
-shift the driver, hold every other driver fixed), and summarises the
+Changes each driver in turn by a single raw-unit shift, holding every other
+fitted predictor fixed, and summarises the
 resulting change in predicted suitability on \code{newdata}: the model-based
 shift effect (shift estimand) of the ensemble for each driver.
 }

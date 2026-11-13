@@ -45,3 +45,13 @@ repair. Training and frozen-fit identity checks use saved results without
 rerunning the research pipeline. Existing fitting policies and cartography
 remain unchanged; these maintenance checks do not establish publication
 readiness or external predictive validity.
+
+On 11-13 November 2026, Codex assisted castSDM 0.29.0: the optional local Shiny
+interface, isolated background jobs, saved-case exploration, finite predictor
+shifts, descriptive response grouping, real-case verification and workflow
+entry/documentation updates. Grouping follows published FME/cAME ideas with
+spatial tuning; it is not a new causal method, CATE or empirical causal truth.
+No new observations, artificial absence labels or simulated validation data
+were generated. The full user research pipeline was not run. Historical
+simulated unit fixtures remain in the repository but are excluded from the
+lightweight package-check execution used for this release.

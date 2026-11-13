@@ -16,7 +16,7 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.28.3")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.29.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -35,6 +35,8 @@ local({
     invisible(cfg)
   } else {
     case_runtime_resume_patch(cfg)
-    run_species(cfg)
+    out <- run_species(cfg)
+    message("Interactive exploration: source(\"", file.path(root, "05_SHINY.R"), "\", encoding = \"UTF-8\")")
+    invisible(out)
   }
 })

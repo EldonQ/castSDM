@@ -1,13 +1,16 @@
 # castSDM: evidence and submission readiness
 
-Review date: 7 November 2026. This is an engineering and evidence assessment,
+Engineering update: 13 November 2026 (journal guidance below was checked on
+7 November 2026). This is an engineering and evidence assessment,
 not an editorial decision or a promise of acceptance.
 
 ## Position and contribution
 
-Position castSDM as an **Applications software package** for auditable,
-model-conditional comparisons of two environmental driver groups. The primary
-interface is `cast_compare()`. `cast_run()` supplies optional built-in fitting;
+Position castSDM as an **Applications software package** for interactive,
+auditable environmental response maps from frozen SDMs. `cast_app()` and
+`cast_explore()` connect explicit environmental changes, native-grid queries
+and descriptive environmental subgroups. `cast_compare()` supplies paired
+two-group comparisons; `cast_run()` supplies optional built-in fitting and
 `cast_as_fit()` accepts external engines. `cast_diagnose()` joins validation to
 the interpretation of scenario comparisons.
 
@@ -17,6 +20,16 @@ support domains, paired model disagreement, consistent thresholds, bounded
 raster execution and content-verified reuse. A 2 x 2 contrast identity, spatial
 CV, RF/MaxEnt/GAM, marginal support and caching alone are not new methods.
 Do not advertise a new causal estimator or calibrated occurrence probability.
+
+Version 0.29.0 adds a local Shiny response workspace and descriptive
+environmental subgroups. The grouping follows published FME/cAME concepts;
+spatial-fold tuning of a tree summarises frozen-model outputs rather than
+validating ecological effects. SHAP spatial explanations/environmental change
+analysis already exist in [itsdm](https://doi.org/10.1111/2041-210X.14067),
+and [fmeffects](https://doi.org/10.32614/RJ-2024-024) already implements finite
+changes and conditional response groups. A GUI, paired subtraction or adding
+these published methods does not establish methodological novelty. The
+case-specific value and comparative evidence still need to be demonstrated.
 
 Existing tools already address important adjacent problems. [CAST](https://hannameyer.github.io/CAST/)
 provides spatial model training/assessment and [AOA](https://hannameyer.github.io/CAST/reference/aoa.html).
@@ -47,12 +60,13 @@ universal numerical acceptance thresholds.
 | Score semantics | Native/shifted scores retained from one prediction; sampled-response losses and baselines labelled | Native same-fit comparison does not test a new RF weighting or tuning policy |
 | Extrapolation | Declared clamp applied in CV, evaluation and maps; raw support/AOA retained | Marginal support is not multivariate support or transferability |
 | Sensitivity | All-scenario common support, model sign conflict, threshold counts with denominators | No sampling CI or significance; one GCM does not sample climate-model uncertainty |
-| Software quality | Executable vignettes, package checks, deterministic synthetic tests, verified receipts and bounded benchmarks | Local check is one OS/R setup; remote matrix results must be verified separately |
+| Software quality | Package checks, historical regression fixtures, verified receipts and bounded benchmarks; this release uses saved real-case verification | Lightweight CI does not execute historical simulated fixtures/examples; local evidence is one OS/R setup |
 | Reproducibility | Source, examples, benchmark scripts and environment manifests | Deposit a reviewed release/archive DOI and authorised data before submission |
 
 ## Case-specific evidence still needed
 
-The completed 0.26.0 freshwater case is preserved. It pools Schizothoracinae
+The completed freshwater cases, including the 0.28.x case used for software
+verification, are preserved. They pool Schizothoracinae
 records and must not be described as a single biological species. Record years
 span historical periods, and the meaning of `year` needs source verification.
 GLU snapshots and climate windows differ. The domain was constructed with all
@@ -67,20 +81,21 @@ using its actual locations, class composition and environmental coverage;
 AOA alone does not explain it. Keep a used hold-out for retrospective diagnosis,
 and use new validation for a changed scientific policy.
 
-The software now supports the diagnostics needed for this examination, but a
-full 0.27.x real-case rerun has deliberately not been performed by maintenance.
-The local single-species entry is ready for the author to run. Because 0.27.0
-fixes validation clamping, historical metrics cannot be relabelled as new ones.
+This release verifies saved real-case model outputs, real raster crops and
+interactive operations. Maintenance has not run the complete research workflow
+or refitted the study models. The local single-species and Shiny entries are
+ready for the author to run; saved metrics retain their original provenance.
 
 ## Minimum paper evidence to assemble next
 
 1. State one practical ecological question and show why inconsistent domains,
    weights or surface-level SD change its interpretation. Explain the user
    benefit of the comparison contract rather than claiming the arithmetic is new.
-2. Use a controlled example with a declared response to verify contrasts and
-   disagreement, plus a realistic, biologically defined worked example. A second
-   contrasting taxon/system would strengthen generality; it is our recommendation,
-   not a prescribed MEE species count.
+2. Use the current real records and saved model/raster outputs for reproducible
+   numerical parity and software checks. Do not treat generated model responses
+   as ecological causal truth or invent missing observations for validation.
+   A biologically defined, independent real-data validation would strengthen
+   ecological claims; the existing data cannot certify causal-effect accuracy.
 3. Compare a transparent reference implementation and relevant existing tools
    on identical fits, folds, grids, masks, precision, model counts and outputs.
    Include correctness, elapsed time, memory definition and setup/serialization

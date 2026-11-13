@@ -66,7 +66,7 @@ positivity or causal identification; holes inside the box are not
 detected.
 }
 \description{
-Intervenes on each driver with a single raw-unit shift across every valid
+Changes each driver by a single raw-unit shift across every valid
 cell of \code{current_stack} (all other drivers held fixed) and returns the
 spatially explicit equally weighted ensemble-mean change in suitability.
 Spatial counterpart of \code{\link[=cast_effect_table]{cast_effect_table()}} with the same hard

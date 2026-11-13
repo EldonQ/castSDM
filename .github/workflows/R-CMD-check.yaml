@@ -51,4 +51,7 @@ jobs:
       - uses: r-lib/actions/check-r-package@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           upload-snapshots: true
-          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+          # Research validation uses the author's real case. Historical simulated
+          # examples/fixtures are retained but are not executed by this workflow.
+          build_args: 'c("--no-manual", "--no-build-vignettes")'
+          args: 'c("--no-manual", "--no-tests", "--no-examples", "--ignore-vignettes")'

@@ -10,7 +10,7 @@ castsdm_species_configs <- function(root) {
   common <- list(
     example_root = root,
     nsdm_data_root = data_root,
-    output_root = file.path(root, "output"),
+    output_root = Sys.getenv("CAST_OUTPUT_ROOT", file.path(root, "output")),
     preparation_root = file.path(root, "output", ".prepared"),
     cache_root = file.path(root, "output", ".training-cache"),
     future_layers_csv = file.path(root, "config", "future_layers.csv"),
