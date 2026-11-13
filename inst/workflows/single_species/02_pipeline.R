@@ -35,7 +35,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast030_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -88,14 +88,13 @@ run_species <- function(cfg) {
     source = if (is.null(year)) "unavailable" else "training_presences_only",
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
-  ensure <- list(climate = stats::setNames(meta$future_policy == "climate", meta$layer),
-                 lulc = stats::setNames(meta$future_policy == "lulc", meta$layer))
+  ensure <- list(climate = stats::setNames(meta$future_policy == "climate", meta$layer))
   result <- castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
     select_var_id = stats::setNames(meta$construct_id, meta$layer),
     select_category = stats::setNames(meta$group, meta$layer), select_ensure = ensure,
     cache_dir = cfg$cache_root, output_dir = file.path(out, "training"),
     report_meta = list(taxon = cfg$species_name,
-      purpose = "Model-conditional climate and land-use scenario comparison"))
+      purpose = "CHELSA ensemble-mean climate projections; nonclimate predictors held current"))
   selected <- result$screen$selected
   current <- wf_load_current_stack(cfg, varnames = selected)
   scenarios <- case_scenarios(cfg, selected, current, out)
@@ -112,6 +111,8 @@ run_species <- function(cfg) {
     script_hashes = cfg$runtime$script_hashes %||%
       tools::md5sum(list.files(cfg$example_root, pattern = "\\.R$", full.names = TRUE)),
     session = utils::capture.output(utils::sessionInfo()))
+  file.copy(file.path(cfg$example_root, "config", "predictor_metadata.csv"),
+    file.path(out, "predictor_metadata.csv"), overwrite = TRUE)
   saveRDS(case, file.path(out, "case.rds"))
   # Every available figure is exported. Driver/PDP/MESS products are computed
   # once from frozen fits, then cached independently of style and rendering.

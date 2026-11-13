@@ -40,6 +40,19 @@ independent <- cast_compare(project$fit, a, setNames(list(b), scenario),
   domain = "scenario", verbose = FALSE, resources = list(cores = 2L))
 verified("attribution agrees with the separate factorial comparison kernel",
   same(total$data$total_change, independent$results[[1L]]$data$joint_change))
+if (length(project$comparison$groups) == 1L) {
+  for (m in names(weights)) {
+    engine <- cast_attribution(project$fit, a, b, drivers = character(), models = m,
+      weights = setNames(1, m), clamp = clamp, verbose = FALSE)$data
+    d <- independent$results[[1L]]$data
+    verified(paste("paired current/future/change exports match real saved engine", m),
+      same(d[[paste0("current_", m)]], engine$current) &&
+      same(d[[paste0("future_", m)]], engine$future) &&
+      same(d[[paste0("change_", m)]], engine$total_change))
+  }
+  verified("climate-only comparison contains no inapplicable factorial components",
+    identical(unique(independent$summary$component), "joint_change"))
+}
 
 diagnostic <- cast_attribution(project$fit, a, b, weights = weights, clamp = clamp,
   diagnostics = TRUE, verbose = FALSE, resources = list(cores = 2L))

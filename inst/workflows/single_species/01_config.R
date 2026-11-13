@@ -1,7 +1,9 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Scientific settings live in one cast_protocol(); paths and data QC stay here.
 castsdm_species_configs <- function(root) {
-  data_root <- Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data")
+  settings_file <- file.path(root, "workflow_settings.rds")
+  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
+  data_root <- Sys.getenv("CAST_DATA_ROOT", settings$data_dir %||% "E:/CHECO26/N-SDM/data")
   scope <- case_covariate_scope(data_root)
   occurrence_root <- Sys.getenv("CAST_OCCURRENCE_ROOT",
     "E:/Package/castSDM_workflows/species_occ")
@@ -36,7 +38,7 @@ castsdm_species_configs <- function(root) {
     protocol = castSDM::cast_protocol(
       models = c("rf", "maxent", "gam"), select_method = "screen",
       select_corcut = .7, select_maxncov = 12L,
-      select_ensure_n = c(climate = 2L, lulc = 1L),
+      select_ensure_n = c(climate = 1L),
       train_fraction = .7, holdout_blocks = 20L, block_method = "blockcv",
       cv_k = 5L, rf_ntree = 500L, tune = FALSE, aoa = TRUE,
       ensemble_method = "weighted", ensemble_min_score = 0,
@@ -45,19 +47,18 @@ castsdm_species_configs <- function(root) {
     resources = resources,
     support_probs = c(.01, .99), diagnostic_thresholds = c(.3, .5, .7),
     figure_response_grid = 50L, figure_display_resolution = .02,
-    scenario_climate_model = "bcc_csm2_mr",
-    scenario_ssps = c("ssp126", "ssp245", "ssp585"),
-    scenario_periods = c("2021_2040", "2041_2070", "2071_2100"),
-    scenario_climate_years = c(`2021_2040` = 2030, `2041_2070` = 2055, `2071_2100` = 2085),
-    scenario_lulc_years = c(`2021_2040` = 2030, `2041_2070` = 2050, `2071_2100` = 2100),
+    scenario_climate_model = "ensmean", climate_baseline = "1981_2010",
+    scenario_ssps = c("ssp126", "ssp370", "ssp585"),
+    scenario_periods = c("2011_2040", "2041_2070", "2071_2100"),
+    scenario_climate_years = c(`2011_2040` = 2025, `2041_2070` = 2055, `2071_2100` = 2085),
     scenario_report_ssp = "ssp585", scenario_report_period = "2071_2100")
-  list(
+  presets <- list(
     Schizothoracinae = utils::modifyList(common, list(
       species_name = "Schizothoracinae",
       taxon_level = "subfamily-level literature records",
       occurrence_file = file.path(occurrence_root, "Schizothoracinae_schisoft.csv"),
       nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_glu.csv"),
-      scenario_lulc_product = "glu", domain_mode = "freshwater_river",
+      current_lulc_product = "glu", domain_mode = "freshwater_river",
       freshwater_river_distance_raster = file.path(data_root,
         "covariates", scope, "dist/h90m/stream-dist-proximity",
         paste0(scope, "_dist_h90m_stream-dist-proximity.tif")))),
@@ -66,6 +67,22 @@ castsdm_species_configs <- function(root) {
       input_type = "nsdm_occ",
       occurrence_file = file.path(occurrence_root, "Callosciurus_erythraeus.csv"),
       nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_hlu.csv"),
-      scenario_lulc_product = "hlu",
-      scenario_lulc_years = c(`2021_2040` = 2030, `2041_2070` = 2055, `2071_2100` = 2085))))
+      current_lulc_product = "hlu")))
+  if (is.null(settings)) return(presets)
+  taxon <- settings$species
+  base <- presets[[taxon]] %||% utils::modifyList(common, list(
+    species_name = taxon, taxon_level = "user-declared taxon", current_lulc_product = "glu"))
+  base$occurrence_file <- settings$occurrence_file
+  base$nsdm_data_root <- data_root
+  base$domain_mode <- settings$domain %||% base$domain_mode
+  base$input_type <- settings$input_type %||% base$input_type
+  base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
+  base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
+  base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates/reg/dist/h90m/stream-dist-proximity/reg_dist_h90m_stream-dist-proximity.tif")
+  base$resources <- settings$resources %||% base$resources
+  base$protocol$models <- settings$models %||% base$protocol$models
+  base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
+  base$protocol$num_threads <- base$resources$cores
+  presets[[taxon]] <- base
+  presets
 }

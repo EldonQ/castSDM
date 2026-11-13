@@ -1,3 +1,20 @@
+# castSDM 0.30.0
+
+- Ship one installed CHELSA workflow and `cast_workflow()`. Shiny now provides
+  data configuration, physical input checks and explicit full-analysis submission.
+- Use CHELSA baseline 1981-2010 and delivered ensemble-mean SSP126/370/585
+  climates for 2011-2040, 2041-2070 and 2071-2100. Hold all other predictors
+  current. Save source units/definitions, exact mapping and ensemble limitations.
+  Require a new analysis directory when replacing CNClim with CHELSA.
+- Allow one changing predictor group in `cast_compare()`, exporting current,
+  future, paired change, support, disagreement and each active engine's layers.
+  Retain the two-group API; omit inapplicable factorial products in paired cases.
+- Simplify Shiny, fold advanced settings, protect against duplicate jobs, allow
+  cancellation, native-grid queries, complete case exports and view replay.
+  Preserve formal maps and all available figure exports.
+- Compute model agreement at changed supported sample locations. Keep legacy
+  unconditional columns and report actual common-population denominators.
+
 # castSDM 0.29.1
 
 - Compare all driver responses on the same finite, range-supported saved

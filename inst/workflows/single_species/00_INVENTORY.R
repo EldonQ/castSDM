@@ -14,5 +14,5 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, "terra")
   sys.source(file.path(root, "inventory.R"), envir = environment())
-  glo_inventory_build(root, Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data"))
+  case_inventory_build(root, Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data"))
 })

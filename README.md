@@ -2,8 +2,8 @@
 
 **Environmental response maps and auditable scenario comparisons for SDMs.**
 
-`cast_compare()` constructs current, first-group-only, second-group-only and
-joint predictions from a frozen fit. Fixed positive model weights and an
+`cast_compare()` directly compares current and future environments with one
+changing predictor group. Two groups additionally enable factorial contrasts. Fixed positive model weights and an
 explicit finite domain make the comparisons auditable. Results contain
 continuous contrasts, optional thresholded range counts, training-support
 diagnostics, model sign disagreement and paired model SD. `cast_diagnose()`
@@ -17,12 +17,33 @@ remotes::install_github("EldonQ/castSDM")
 install.packages(c("ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN", "sf", "terra"))
 ```
 
+## Run from the interface
+
+```r
+library(castSDM)
+cast_app()
+```
+
+The **Start** tab configures real data paths, occurrence records, analysis domain,
+models and resources. **Check data** checks physical inputs without fitting;
+**Run analysis** submits preparation, spatial validation, projections and the
+complete available figure collection to an isolated process. A new workspace
+uses the workflow shipped inside the installed package, with no source checkout.
+Paths/settings remain explicit and replayable. The current national-library
+adapter supports the documented CHELSA recipe; it is not a universal file importer.
+
+The [CHELSA workflow](inst/workflows/single_species/README.md) uses baseline
+1981–2010 and ensemble-mean climate for SSP126/370/585 in 2011–2040,
+2041–2070 and 2071–2100. All nonclimate predictors stay current. Mean-climate
+predictions do not quantify between-GCM uncertainty. Changed climate sources
+require a fresh model run and separate output directory.
+
 ## Open a completed real case
 
 The optional Shiny interface queries native-grid results, compares actual
 scenario rasters or explicit hypothetical predictor shifts, and displays
 descriptive environmental response groups. Set `case_dir` to your completed
-[single-species workflow](examples/single_species/README.md) output.
+[single-species workflow](inst/workflows/single_species/README.md) output.
 
 ```r
 library(castSDM)
@@ -78,7 +99,7 @@ protocol <- cast_protocol(models = c("rf", "maxent", "gam"), seed = 42)
 run <- cast_run(species_data, protocol = protocol,
   output_dir = "results/training", cache_dir = "cache/training")
 comparison <- cast_compare(run, current_raster, future_rasters,
-  groups = list(climate = climate_variables, land_use = land_use_variables),
+  groups = list(climate = climate_variables),
   mask = analysis_mask, output_dir = "results/comparison",
   resources = list(cores = 8, workers = 2, memory_mb = 4096))
 diagnostics <- cast_diagnose(run, comparison,
@@ -93,7 +114,7 @@ Unlisted fitted predictors are recorded as static. Their future layers may be
 omitted; supplied static values must equal current values. Inputs must already
 share grid, extent and CRS. No automatic resampling occurs.
 
-The [single-species example](examples/single_species/README.md) supplies
+The [single-species example](inst/workflows/single_species/README.md) supplies
 occurrence QC, domain masks, exact future-file mapping and saved-output plots.
 Training and comparison use public package functions.
 

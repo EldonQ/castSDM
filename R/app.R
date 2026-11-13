@@ -26,14 +26,35 @@
 
 .cast_app_layer <- function(result, layer) {
   r <- terra::rast(result$raster_file)
-  name <- if (identical(result$schema, "cast_app_view/1"))
-    switch(layer, future = "joint", total_change = "joint_change",
-      support_total = "support", total_sd = "sd_joint_change", layer) else layer
-  r[[name]]
+  name <- layer
+  if (identical(result$schema, "cast_app_view/1")) {
+    aliases <- c(future = "joint", total_change = "joint_change", support_total = "support", total_sd = "sd_joint_change")
+    at <- match(layer, names(aliases)); found <- !is.na(at)
+    name[found] <- unname(aliases[at[found]])
+  }
+  out <- r[[name]]; names(out) <- layer
+  out
 }
 
 .cast_app_point <- function(project, result, longitude, latitude, driver) {
   settings <- result$settings
+  source_paths <- c(project$pool$path, project$scenarios$path[project$scenarios$scenario == settings$scenario])
+  if (any(!file.exists(source_paths)) && !is.null(result$raster_file)) {
+    # Native results remain inspectable when historical source inputs are archived.
+    basic <- c("current", "future", "total_change", "support_total", "total_sd")
+    details <- if (!is.null(settings$focus)) paste0(c("effect_", "retained_", "effect_agreement_",
+      "retained_agreement_", "context_direction_", "context_gap_", "support_effect_", "support_retained_"), settings$focus)
+    has_details <- length(details) == 8L && all(details %in% names(terra::rast(result$raster_file)))
+    raster <- .cast_app_layer(result, c(basic, if (has_details) details))
+    xy <- terra::project(matrix(c(longitude, latitude), ncol = 2L), "EPSG:4326", terra::crs(raster))
+    native <- terra::extract(raster, xy); values <- native[, basic, drop = FALSE]
+    if (!is.finite(values$current)) cli::cli_abort("Click inside the saved analysis domain.")
+    return(list(values = values, group = NA_integer_, environment = NULL, curve = NULL,
+      driver_response = if (has_details) native[, details[1:6], drop = FALSE],
+      driver_support = if (has_details) native[, details[7:8], drop = FALSE],
+      driver = driver, longitude = longitude, latitude = latitude,
+      note = "Native saved values only: environmental sources are unavailable for profiles or new responses."))
+  }
   pair <- .cast_explore_pair(project, settings$scenario, settings$variables,
     settings$shifts, settings$context)
   xy <- matrix(c(longitude, latitude), ncol = 2L)
@@ -49,17 +70,19 @@
     weights = settings$weights, support_probs = project$comparison$support_probs,
     clamp = settings$clamp %||% FALSE, verbose = FALSE, diagnostics = TRUE)
   values <- paired$data[1L, c("current", "future", "total_change", "support_total", "total_sd")]
+  detail_fields <- if (!is.null(focus)) paste0(c("effect_", "retained_", "effect_agreement_",
+    "retained_agreement_", "context_direction_", "context_gap_", "support_effect_", "support_retained_"), focus)
+  details <- if (length(detail_fields)) paired$data[, detail_fields, drop = FALSE] else NULL
   # Read the native analysis mask/results, not a smoothed display pixel.
-  domain <- if (!is.null(result$raster_file))
-    terra::extract(.cast_app_layer(result, "current"), xy)[1L, 1L] else
-      terra::extract(terra::rast(file.path(project$case$preparation, "analysis_domain_mask.tif")), xy)[1L, 1L]
+  if (!is.null(result$raster_file)) {
+    available <- intersect(detail_fields, names(terra::rast(result$raster_file)))
+    native <- terra::extract(.cast_app_layer(result, c(names(values), available)), xy)
+    values <- native[, names(values), drop = FALSE]
+    if (length(available)) details[, available] <- native[, available, drop = FALSE]
+    domain <- values$current
+  } else domain <- terra::extract(terra::rast(file.path(project$case$preparation, "analysis_domain_mask.tif")), xy)[1L, 1L]
   if (!is.finite(domain) || (is.null(result$raster_file) && domain == 0))
     cli::cli_abort("\u8be5\u4f4d\u7f6e\u4e0d\u5728\u8fd9\u9879\u5206\u6790\u7684\u5171\u540c\u6709\u6548\u57df\u5185\u3002")
-  if (!is.null(result$raster_file)) {
-    fields <- names(values)
-    values <- as.data.frame(stats::setNames(lapply(fields, function(n)
-      terra::extract(.cast_app_layer(result, n), xy)[1L, 1L]), fields))
-  }
   group <- if (!is.null(result$groups) && isTRUE(values$support_total == 1))
     stats::predict(result$groups, before)[1L] else NA_integer_
   reference <- .cast_reference(project$fit, vars)[[driver]]
@@ -73,96 +96,12 @@
   curve <- as.numeric(predicted %*% settings$weights)
   curve[rowSums(!is.finite(predicted)) > 0L] <- NA_real_
   list(values = values, group = group,
-    driver_response = if (!is.null(focus)) paired$data[, paste0(c("effect_", "retained_",
-      "effect_agreement_", "retained_agreement_", "context_direction_", "context_gap_"), focus), drop = FALSE],
+    driver_response = if (!is.null(details)) details[, seq_len(6L), drop = FALSE],
+    driver_support = if (!is.null(details)) details[, 7:8, drop = FALSE],
     environment = data.frame(variable = vars, before = unlist(before[vars], use.names = FALSE),
       after = unlist(after[vars], use.names = FALSE), row.names = NULL),
     curve = data.frame(environment = grid, suitability = curve), driver = driver,
     longitude = longitude, latitude = latitude)
-}
-
-.cast_app_ui <- function(case_dir) {
-  shiny::fluidPage(
-    theme = bslib::bs_theme(version = 5, bootswatch = "flatly", primary = "#176B87"),
-    shiny::tags$head(shiny::tags$style(shiny::HTML(paste(
-      ".cast-panel{background:#f5f8fa;padding:18px;border-radius:10px;margin-bottom:16px}",
-      ".cast-note{color:#52616b;font-size:13px}.cast-heading{margin:20px 0}",
-      ".cast-map-caption{padding:8px 0;font-weight:600}table{font-size:13px}",
-      ".shiny-output-error-validation{color:#52616b} .cast-panel .btn{margin:3px 0}")))),
-    shiny::tags$div(class = "cast-heading", shiny::h2("castSDM \u00b7 \u73af\u5883\u54cd\u5e94\u5730\u56fe"),
-      shiny::tags$p(class = "cast-note", "\u6bd4\u8f83\u660e\u786e\u7684\u73af\u5883\u6539\u53d8\uff0c\u67e5\u770b\u9002\u5b9c\u5ea6\u54cd\u5e94\u53ca\u73af\u5883\u5206\u7ec4\u3002\u7ed3\u679c\u89e3\u91ca\u62df\u5408\u6a21\u578b\uff0c\u4e0d\u4ee3\u8868\u5df2\u8bc6\u522b\u7684\u751f\u6001\u56e0\u679c\u6548\u5e94\u3002")),
-    shiny::sidebarLayout(
-      shiny::sidebarPanel(width = 3, class = "cast-panel",
-        shiny::textInput("case_dir", "\u6848\u4f8b\u7ed3\u679c\u76ee\u5f55", value = case_dir),
-        shiny::actionButton("load_case", "\u6253\u5f00 / \u5237\u65b0\u6848\u4f8b", class = "btn-outline-primary"),
-        shiny::tags$hr(),
-        shiny::selectInput("scenario", "\u672a\u6765\u60c5\u666f", choices = character()),
-        shiny::actionButton("view", "\u6d4f\u89c8\u5df2\u6709\u60c5\u666f", class = "btn-outline-primary"),
-        shiny::tags$hr(),
-        shiny::radioButtons("mode", "\u73af\u5883\u6539\u53d8", choices = c(stats::setNames("scenario", "\u4f7f\u7528\u5df2\u6709\u60c5\u666f"),
-          stats::setNames("shift", "\u5047\u8bbe\u5355\u4e2a\u6307\u6807\u6539\u53d8"))),
-        shiny::selectInput("variables", "\u6539\u53d8\u54ea\u4e9b\u56e0\u5b50", choices = character()),
-        shiny::uiOutput("variable_definition"),
-        shiny::conditionalPanel("input.mode == 'shift'",
-          shiny::numericInput("shift", "\u6539\u53d8\u5e45\u5ea6\uff08\u6307\u6807\u539f\u59cb\u6570\u503c\u5355\u4f4d\uff09", value = NA_real_),
-          shiny::tags$p(class = "cast-note", "\u5355\u4e2a\u6d3e\u751f\u6307\u6807\u7684\u6539\u53d8\u4ec5\u4f5c\u654f\u611f\u6027\u5206\u6790\uff1b\u571f\u5730\u5229\u7528\u6bd4\u4f8b\u6216\u683c\u5c40\u53d8\u5316\u5e94\u4f18\u5148\u4f7f\u7528\u4e00\u81f4\u7684\u60c5\u666f\u56fe\u5c42\u3002")),
-        shiny::selectInput("context", "\u5176\u4ed6\u56e0\u5b50\u7684\u80cc\u666f", choices = c(
-          stats::setNames("current", "\u4fdd\u6301\u5f53\u524d\u503c"), stats::setNames("future", "\u4f7f\u7528\u9009\u5b9a\u672a\u6765\u60c5\u666f\u7684\u503c"))),
-        shiny::tags$details(shiny::tags$summary("\u8ba1\u7b97\u8bbe\u7f6e"),
-          shiny::numericInput("sample_n", "\u771f\u5b9e CV \u6837\u70b9\u4e0a\u9650", 5000L, min = 4L, step = 100L),
-          shiny::numericInput("maxdepth", "\u5206\u7ec4\u6811\u6700\u5927\u6df1\u5ea6", 3L, min = 1L, max = 8L),
-          shiny::numericInput("cores", "\u8ba1\u7b97\u7ebf\u7a0b", 4L, min = 1L),
-          shiny::checkboxInput("maps", "\u8ba1\u7b97\u539f\u751f\u7f51\u683c\u53ca\u5730\u56fe\u9884\u89c8", FALSE)),
-        shiny::actionButton("analyse", "\u8ba1\u7b97\u54cd\u5e94\u4e0e\u81ea\u52a8\u5206\u7ec4", class = "btn-primary"),
-        shiny::tags$hr(), shiny::uiOutput("status"),
-        shiny::tags$p(class = "cast-note", "\u957f\u8ba1\u7b97\u5728\u540e\u53f0\u6267\u884c\u3002\u8c03\u6574\u5de6\u4fa7\u9009\u9879\u540e\uff0c\u70b9\u51fb\u8ba1\u7b97\u624d\u66f4\u65b0\u7ed3\u679c\uff1b\u5730\u56fe\u6807\u9898\u59cb\u7ec8\u5bf9\u5e94\u5df2\u5b8c\u6210\u7684\u65b9\u6848\u3002")),
-      shiny::mainPanel(width = 9,
-        shiny::tabsetPanel(id = "result_tab",
-          shiny::tabPanel("\u6548\u5e94\u5730\u56fe", value = "map",
-            shiny::div(class = "cast-map-caption", shiny::uiOutput("map_caption")),
-            shiny::selectInput("layer", "\u663e\u793a\u56fe\u5c42", choices = c(
-              stats::setNames("total_change", "\u9002\u5b9c\u5ea6\u53d8\u5316"), stats::setNames("current", "\u6539\u53d8\u524d"), stats::setNames("future", "\u6539\u53d8\u540e"),
-              stats::setNames("support_total", "\u8303\u56f4\u652f\u6301\uff081 / 0\uff09"), stats::setNames("total_sd", "\u6a21\u578b\u95f4\u5206\u6b67"),
-              stats::setNames("response_group", "\u73af\u5883\u54cd\u5e94\u5206\u7ec4"))),
-            shiny::checkboxInput("supported_only", "\u4ec5\u663e\u793a\u8303\u56f4\u68c0\u67e5\u901a\u8fc7\u7684\u4f4d\u7f6e", TRUE),
-            leaflet::leafletOutput("map", height = 510),
-            shiny::tags$p(class = "cast-note", "\u9884\u89c8\u7ecf\u8fc7\u964d\u91c7\u6837\uff1b\u70b9\u51fb\u8bfb\u53d6\u539f\u751f\u7f51\u683c\u3002\u8303\u56f4\u652f\u6301\u4e0d\u7b49\u4e8e\u8054\u5408\u652f\u6301\u6216\u56e0\u679c\u8bc6\u522b\uff0c\u6a21\u578b\u95f4\u5206\u6b67\u4e0d\u662f\u7f6e\u4fe1\u533a\u95f4\u3002"),
-            shiny::fluidRow(shiny::column(5, shiny::h4("\u70b9\u51fb\u4f4d\u7f6e\u7684\u7ed3\u679c"), shiny::tableOutput("point")),
-              shiny::column(7, shiny::selectInput("profile_driver", "\u67e5\u770b\u5c40\u5730\u9884\u6d4b\u5256\u9762", choices = character()),
-                shiny::plotOutput("profile", height = 240))),
-            shiny::tags$details(shiny::tags$summary("\u6240\u9009\u56e0\u5b50\u7684\u4e24\u79cd\u80cc\u666f\u54cd\u5e94"), shiny::tableOutput("point_driver")),
-            shiny::tags$details(shiny::tags$summary("\u8be5\u4f4d\u7f6e\u7684\u73af\u5883\u503c"), shiny::tableOutput("environment"))),
-          shiny::tabPanel("\u56e0\u5b50\u54cd\u5e94", value = "drivers", shiny::h4("\u540c\u4e00\u6279\u4f4d\u7f6e\u4e0a\u7684\u56e0\u5b50\u54cd\u5e94"),
-            shiny::uiOutput("evidence_note"),
-            shiny::div(style = "overflow-x:auto", shiny::tableOutput("drivers")),
-            shiny::plotOutput("driver_plot", height = 360),
-            shiny::tags$details(shiny::tags$summary("\u6307\u6807\u5b9a\u4e49\u4e0e\u6765\u6e90"),
-              shiny::div(style = "overflow-x:auto", shiny::tableOutput("metadata"))),
-            shiny::selectInput("focus_driver", "\u67e5\u770b\u56e0\u5b50\u5730\u56fe\uff08\u9ed8\u8ba4\u9009\u62e9\u6700\u5927\u54cd\u5e94\uff09", choices = character()),
-            shiny::actionButton("map_driver", "\u8ba1\u7b97\u8be5\u56e0\u5b50\u7684\u4e24\u79cd\u80cc\u666f\u5730\u56fe", class = "btn-outline-primary"),
-            shiny::tags$p(class = "cast-note", "\u9010\u6307\u6807\u66ff\u6362\u63cf\u8ff0\u6a21\u578b\u654f\u611f\u6027\uff1b\u4e0d\u540c\u56e0\u5b50\u7684\u5b9e\u9645\u6539\u53d8\u91cf\u548c\u5355\u4f4d\u4e0d\u540c\u3002\u5e45\u5ea6\u6392\u5e8f\u4e0d\u662f\u6cbb\u7406\u6210\u672c\u6216\u56e0\u679c\u6548\u5e94\u6392\u5e8f\uff0c\u5355\u56e0\u5b50\u54cd\u5e94\u4e4b\u548c\u4e5f\u4e0d\u5fc5\u7b49\u4e8e\u603b\u53d8\u5316\u3002\u672a\u5165\u6a21\u56e0\u5b50\u4e0d\u4f5c\u4f30\u8ba1\u3002")),
-          shiny::tabPanel("\u54cd\u5e94\u5206\u7ec4", value = "groups", shiny::h4("\u81ea\u52a8\u8bc6\u522b\u7684\u73af\u5883\u5b50\u7fa4"),
-            shiny::uiOutput("group_note"), shiny::tableOutput("groups"),
-            shiny::plotOutput("group_plot", height = 270),
-            shiny::tags$p(class = "cast-note", "\u5206\u7ec4\u6c47\u603b\u51bb\u7ed3\u6a21\u578b\u7684\u54cd\u5e94\uff0c\u53ef\u80fd\u53ea\u6709\u4e00\u4e2a\u7ec4\u3002\u7a7a\u95f4\u6298\u7528\u4e8e\u9009\u62e9\u6811\u590d\u6742\u5ea6\uff1b\u5206\u7ec4\u4e0d\u662f CATE\uff0c\u4e5f\u4e0d\u6784\u6210\u72ec\u7acb\u751f\u6001\u9a8c\u8bc1\u3002\u5b50\u7fa4\u6620\u5c04\u540e\u4e0d\u4e00\u5b9a\u5730\u7406\u8fde\u7eed\u3002"),
-            shiny::tags$details(shiny::tags$summary("\u7a7a\u95f4\u6298\u8c03\u53c2\u4e0e\u8bef\u5dee"), shiny::tableOutput("tuning"))),
-          shiny::tabPanel("\u6a21\u578b\u4e0e\u6b63\u5f0f\u56fe\u4ef6", value = "figures", shiny::h4("\u4fdd\u5b58\u7684\u7559\u51fa\u8bc4\u4ef7"),
-            shiny::tableOutput("evaluation"), shiny::h4("\u539f\u6709\u8bba\u6587\u56fe\u4ef6"),
-            shiny::selectInput("figure", "\u56fe\u4ef6", choices = character()),
-            shiny::imageOutput("publication", height = "auto")),
-          shiny::tabPanel("\u8fd0\u884c\u4e0e\u5bfc\u51fa", value = "export", shiny::h4("\u5df2\u914d\u7f6e\u7684\u5b8c\u6574\u5de5\u4f5c\u6d41"),
-            shiny::tags$p("\u4f7f\u7528\u5355\u7269\u79cd\u914d\u7f6e\u6587\u4ef6\u4e2d\u7684\u79d1\u5b66\u8bbe\u7f6e\uff0c\u5728\u72ec\u7acb\u8fdb\u7a0b\u8fd0\u884c\u3002\u5df2\u6709\u6b63\u786e\u7ed3\u679c\u6309\u7ba1\u7ebf\u89c4\u5219\u7eed\u8dd1\uff1b\u5de5\u4f5c\u6d41\u4e0d\u4f1a\u56e0\u6253\u5f00\u5e94\u7528\u800c\u81ea\u52a8\u8fd0\u884c\u3002"),
-            shiny::uiOutput("workflow_path"),
-            shiny::actionButton("run_workflow", "\u8fd0\u884c\u5df2\u914d\u7f6e\u5de5\u4f5c\u6d41", class = "btn-outline-primary"),
-            shiny::h4("\u5f53\u524d\u5206\u6790\u5bfc\u51fa"),
-            shiny::downloadButton("download_points", "\u771f\u5b9e\u6837\u70b9\u54cd\u5e94\u8868"),
-            shiny::downloadButton("download_bundle", "\u5206\u6790\u5305\uff08\u542b\u6805\u683c\u4e0e\u590d\u73b0\u811a\u672c\uff09"),
-            shiny::downloadButton("download_figure", "\u6240\u9009\u6b63\u5f0f\u56fe\u4ef6"),
-            shiny::tags$details(shiny::tags$summary("\u540e\u53f0\u8ba1\u7b97\u65e5\u5fd7"), shiny::uiOutput("log")))
-        )
-      )
-    )
-  )
 }
 
 .cast_app_server <- function(case_dir, workflow, state = NULL) {
@@ -175,33 +114,39 @@
     point <- shiny::reactiveVal(NULL)
     status <- shiny::reactiveVal("\u6253\u5f00\u5df2\u5b8c\u6210\u6848\u4f8b\uff0c\u6216\u8fd0\u884c\u5df2\u914d\u7f6e\u7684\u5de5\u4f5c\u6d41\u3002")
     log_text <- shiny::reactiveVal("")
+    job_busy <- shiny::reactiveVal(FALSE)
+    status_kind <- shiny::reactiveVal("ready")
     job <- NULL; logfile <- NULL; pending <- NULL
     notify_error <- function(e) {
-      status(conditionMessage(e))
-      shiny::showNotification(conditionMessage(e), type = "error", duration = 12)
+      log_text(paste(log_text(), conditionMessage(e), sep = "\n"))
+      while (inherits(e$parent, "condition")) e <- e$parent
+      message <- substr(strsplit(conditionMessage(e), "\n", fixed = TRUE)[[1L]][1L], 1L, 180L)
+      status(message); status_kind("error")
+      shiny::showNotification(message, type = "error", duration = 10)
     }
     start <- function(request) {
-      if (!is.null(job) && job$is_alive()) {
+      if (!is.null(job)) {
         shiny::showNotification("\u5df2\u6709\u540e\u53f0\u4efb\u52a1\uff0c\u8bf7\u7b49\u5f85\u5b83\u5b8c\u6210\u3002", type = "message")
         return(invisible(FALSE))
       }
       logfile <<- tempfile("cast-app-", fileext = ".log")
       pending <<- request
       job <<- .cast_app_start(request, logfile)
-      status("\u540e\u53f0\u8ba1\u7b97\u4e2d\uff1b\u53ef\u4ee5\u7ee7\u7eed\u6d4f\u89c8\u5df2\u5b8c\u6210\u7ed3\u679c\u3002")
+      job_busy(TRUE); status_kind("busy")
+      status("\u8ba1\u7b97\u4e2d\u2026")
       invisible(TRUE)
     }
-    load_project <- function(view = TRUE) {
-      p <- .cast_explore_project(input$case_dir %||% case_dir)
+    load_project <- function(view = TRUE, directory = NULL) {
+      p <- .cast_explore_project(directory %||% input$case_dir %||% case_dir)
       project(p); active(NULL); point(NULL)
       scenarios <- names(p$comparison$results)
-      shiny::updateSelectInput(session, "scenario", choices = scenarios, selected = p$case$report_scenario)
+      shiny::updateSelectInput(session, "scenario", choices = stats::setNames(scenarios, .cast_app_scenario_label(scenarios)), selected = p$case$report_scenario)
       groups <- names(p$comparison$groups)
       choices <- c(stats::setNames(".all", "\u5168\u90e8\u60c5\u666f\u56e0\u5b50"),
         stats::setNames(paste0(".group:", groups), paste0("\u7ec4\uff1a", groups)),
-        stats::setNames(p$fit$env_vars, p$fit$env_vars))
+        stats::setNames(p$fit$env_vars, .cast_app_driver_label(p, p$fit$env_vars)))
       shiny::updateSelectInput(session, "variables", choices = choices)
-      shiny::updateSelectInput(session, "profile_driver", choices = p$fit$env_vars)
+      shiny::updateSelectInput(session, "profile_driver", choices = stats::setNames(p$fit$env_vars, .cast_app_driver_label(p, p$fit$env_vars)))
       files <- list.files(file.path(p$directory, "figures"), pattern = "\\.png$", full.names = FALSE)
       shiny::updateSelectInput(session, "figure", choices = files)
       status(paste("\u5df2\u6253\u5f00", p$case$species, "\uff1b\u8bfb\u53d6\u5df2\u6709\u6a21\u578b\u4e0e\u7ed3\u679c\u3002"))
@@ -235,7 +180,7 @@
       }), error = notify_error)
     }, once = TRUE)
     shiny::observeEvent(input$load_case, {
-      if (!is.null(job) && job$is_alive()) {
+      if (!is.null(job)) {
         shiny::showNotification("\u8bf7\u7b49\u5f85\u5f53\u524d\u4efb\u52a1\u5b8c\u6210\u540e\u518d\u5207\u6362\u6848\u4f8b\u3002", type = "message")
       } else tryCatch(load_project(), error = notify_error)
     })
@@ -243,6 +188,11 @@
       shiny::req(project(), input$scenario)
       tryCatch(start(list(operation = "view", case_dir = project()$directory,
         scenario = input$scenario)), error = notify_error)
+    })
+    shiny::observeEvent(input$cancel_job, {
+      if (!is.null(job) && job$is_alive()) job$kill_tree()
+      job <<- NULL; pending <<- NULL; job_busy(FALSE); status_kind("ready")
+      status("\u5df2\u505c\u6b62\uff0c\u5df2\u6709\u7ed3\u679c\u4fdd\u7559\u3002")
     })
     shiny::observeEvent(input$analyse, {
       shiny::req(project(), input$scenario, input$variables)
@@ -272,20 +222,37 @@
         maps = TRUE, focus = input$focus_driver,
         resources = list(cores = input$cores, workers = 1L, memory_mb = 2048))), error = notify_error)
     })
-    shiny::observeEvent(input$run_workflow, {
+    shiny::observeEvent(input$driver_pick, {
+      shiny::req(active()$evidence, input$driver_pick %in% active()$settings$variables)
+      shiny::updateSelectInput(session, "focus_driver", selected = input$driver_pick)
+    })
+    setup_result <- shiny::reactiveVal(NULL)
+    setup_request <- function(run) {
+      list(operation = "setup", path = input$setup_path, data_dir = input$setup_data,
+        occurrence_file = input$setup_occurrence, species = input$setup_species,
+        settings = list(domain = input$setup_domain, input_type = input$setup_input,
+          lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
+          resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
+    }
+    shiny::observeEvent(input$check_inputs, {
+      setup_result(NULL)
+      tryCatch(start(setup_request(FALSE)), error = notify_error)
+    })
+    shiny::observeEvent(input$start_analysis, {
+      setup_result(NULL)
       tryCatch({
-        if (is.null(workflow) || !file.exists(workflow)) stop("\u8bf7\u901a\u8fc7 05_SHINY.R \u6253\u5f00\uff0c\u6216\u5411 cast_app() \u63d0\u4f9b workflow \u8def\u5f84\u3002")
-        target <- normalizePath(input$case_dir %||% case_dir, winslash = "/", mustWork = FALSE)
-        p <- project()
-        environment <- c(CAST_SPECIES = if (!is.null(p)) p$case$species else basename(target),
-          CAST_RUN_ID = basename(dirname(target)), CAST_OUTPUT_ROOT = dirname(dirname(target)),
-          CAST_EXAMPLE_ROOT = dirname(workflow))
-        if (!is.null(p)) environment <- c(environment,
-          CAST_DATA_ROOT = p$case$cfg$nsdm_data_root,
-          CAST_OCCURRENCE_ROOT = dirname(p$case$cfg$occurrence_file))
-        start(list(operation = "workflow", workflow = workflow,
-          case_dir = target, environment = environment))
+        if (isTRUE(start(setup_request(TRUE)))) {
+          # A cancelled/failed rerun must not expose a stale in-memory case
+          # while its result files are being replaced by the workflow.
+          project(NULL); active(NULL); point(NULL); active_request(NULL)
+        }
       }, error = notify_error)
+    })
+    output$setup_summary <- shiny::renderUI({
+      x <- setup_result(); if (is.null(x)) return(NULL)
+      shiny::tags$p(class = "cast-setup-receipt", if (isTRUE(x$run)) "Analysis completed." else
+        "Input checks passed. No preparation, fitting or projection started.",
+        shiny::tags$br(), x$case_dir)
     })
     shiny::observe({
       shiny::invalidateLater(750, session)
@@ -293,25 +260,34 @@
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
       if (job$is_alive()) return()
-      finished <- job; job <<- NULL
+      finished <- job; job <<- NULL; job_busy(FALSE)
       tryCatch({
         value <- finished$get_result()
-        if (identical(pending$operation, "workflow")) {
-          load_project()
+        if (identical(pending$operation, "setup")) {
+          setup_result(value)
+          if (isTRUE(value$run)) {
+            shiny::updateTextInput(session, "case_dir", value = value$case_dir)
+            load_project(directory = value$case_dir)
+          } else {
+            status_kind("ready"); status("Input checks passed; ready to run.")
+          }
         } else {
           active(value); active_request(pending); point(NULL)
           if (!is.null(value$evidence)) shiny::updateSelectInput(session, "focus_driver",
-            choices = value$evidence$summary$driver, selected = value$settings$focus)
+            choices = stats::setNames(value$evidence$summary$driver,
+              .cast_app_driver_label(project(), value$evidence$summary$driver)), selected = value$settings$focus)
           shiny::updateTabsetPanel(session, "result_tab", selected =
             if (!is.null(value$evidence) && !isTRUE(pending$maps)) "drivers" else "map")
           layers <- c("total_change", "current", "future", "support_total", "total_sd")
           labels <- c("\u603b\u9002\u5b9c\u5ea6\u53d8\u5316", "\u6539\u53d8\u524d", "\u6539\u53d8\u540e",
             "\u603b\u53d8\u5316\u8303\u56f4\u652f\u6301", "\u603b\u53d8\u5316\u6a21\u578b\u5206\u6b67")
           focus <- value$settings$focus
+          if (!is.null(focus) && is.null(restore_state))
+            shiny::updateSelectInput(session, "profile_driver", selected = focus)
           if (!is.null(focus) && !is.null(value$raster_file)) {
             layers <- c(layers, paste0(c("effect_", "retained_", "context_direction_",
               "context_gap_", "effect_agreement_", "retained_agreement_"), focus))
-            labels <- c(labels, paste(focus, c("| \u6bd4\u8f83\u524d\u80cc\u666f\u54cd\u5e94", "| \u6bd4\u8f83\u540e\u80cc\u666f\u54cd\u5e94",
+            labels <- c(labels, paste(.cast_app_driver_label(project(), focus), c("| \u6bd4\u8f83\u524d\u80cc\u666f\u54cd\u5e94", "| \u6bd4\u8f83\u540e\u80cc\u666f\u54cd\u5e94",
               "| \u80cc\u666f\u65b9\u5411\u4e00\u81f4\u6027", "| \u4e24\u80cc\u666f\u54cd\u5e94\u5dee",
               "| \u6bd4\u8f83\u524d\u80cc\u666f\u6a21\u578b\u540c\u5411\u6bd4\u4f8b", "| \u6bd4\u8f83\u540e\u80cc\u666f\u6a21\u578b\u540c\u5411\u6bd4\u4f8b")))
           }
@@ -329,21 +305,46 @@
               restore_state$click$lng, restore_state$click$lat, restore_state$profile_driver))
             restore_state <<- NULL
           }
-          status("\u8ba1\u7b97\u5b8c\u6210\uff1b\u5f53\u524d\u663e\u793a\u7ed3\u679c\u5bf9\u5e94\u4e0b\u65b9\u5730\u56fe\u6807\u9898\u3002")
+          status_kind("ready"); status("\u8ba1\u7b97\u5b8c\u6210")
         }
       }, error = notify_error)
     })
     session$onSessionEnded(function() {
-      if (!is.null(job) && job$is_alive()) job$kill()
+      if (!is.null(job) && job$is_alive()) job$kill_tree()
     })
-    output$status <- shiny::renderUI(shiny::tags$span(status()))
+    shiny::observe({
+      x <- active(); p <- project()
+      figure <- input$figure
+      figure_available <- !is.null(p) && length(figure) == 1L &&
+        identical(basename(figure), figure) && file.exists(file.path(p$directory, "figures", figure))
+      session$sendCustomMessage("cast_ui", list(busy = job_busy(), case_available = !is.null(p),
+        map_available = !is.null(x$evidence), bundle_available = !is.null(x),
+        points_available = !is.null(x$points_file), figure_available = figure_available,
+        case_export_available = !is.null(p)))
+    })
+    output$status <- shiny::renderUI(shiny::tags$span(class = paste0("cast-status-", status_kind()), status()))
+    output$case_label <- shiny::renderUI({
+      p <- project()
+      label <- if (is.null(p)) "\u672a\u6253\u5f00\u6848\u4f8b" else if (identical(p$case$species, "Schizothoracinae"))
+        "\u88c2\u8179\u9c7c\u4e9a\u79d1" else gsub("_", " ", p$case$species)
+      shiny::tags$span(class = "cast-case-label", label)
+    })
     output$log <- shiny::renderUI(shiny::tags$pre(log_text()))
-    output$workflow_path <- shiny::renderUI(shiny::tags$pre(workflow %||% "No configured workflow."))
     output$map_caption <- shiny::renderUI({
-      x <- active(); if (is.null(x)) return(shiny::tags$span("\u5c1a\u65e0\u5df2\u663e\u793a\u7684\u65b9\u6848\u3002"))
+      x <- active(); if (is.null(x)) return(shiny::tags$h2("\u9009\u62e9\u60c5\u666f\uff0c\u67e5\u770b\u73af\u5883\u54cd\u5e94"))
       vars <- x$settings$variables
-      shiny::tags$span(paste(x$settings$scenario, "|", if (is.null(x$settings$shifts)) "\u60c5\u666f\u6bd4\u8f83" else "\u5047\u8bbe\u6307\u6807\u6539\u53d8",
-        "|", paste(vars, collapse = ", "), "|", x$settings$context))
+      selection <- if (length(vars) == length(project()$fit$env_vars)) "\u5168\u90e8\u5165\u6a21\u56e0\u5b50" else
+        paste(.cast_app_driver_label(project(), vars), collapse = "\u3001")
+      shiny::tagList(shiny::tags$h2(.cast_app_scenario_label(x$settings$scenario)),
+        shiny::tags$p(class = "cast-subtitle", paste(selection,
+          if (is.null(x$settings$shifts)) "\u5b9e\u9645\u60c5\u666f" else "\u5047\u8bbe\u6539\u53d8", sep = " \u00b7 ")))
+    })
+    output$map_hint <- shiny::renderUI({
+      x <- active()
+      if (!is.null(x$preview)) return(NULL)
+      shiny::div(class = "cast-map-hint", if (!is.null(x$evidence))
+        "\u6837\u70b9\u6982\u89c8\u5df2\u5b8c\u6210\u3002\u5728\u73af\u5883\u54cd\u5e94\u9875\u751f\u6210\u56e0\u5b50\u5730\u56fe\u540e\uff0c\u5373\u53ef\u67e5\u770b\u7a7a\u95f4\u53d8\u5316\u3002" else
+        "\u8bfb\u53d6\u5df2\u6709\u60c5\u666f\u5730\u56fe\u2026")
     })
     output$map <- leaflet::renderLeaflet({
       m <- leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE))
@@ -399,6 +400,7 @@
     }, ignoreInit = TRUE)
     shiny::observe({
       p <- point()
+      session$sendCustomMessage("cast_point", !is.null(p))
       proxy <- leaflet::clearGroup(leaflet::leafletProxy("map", session), "query")
       if (!is.null(p)) leaflet::addCircleMarkers(proxy, lng = p$longitude,
         lat = p$latitude, radius = 5, color = "#17252A", fillColor = "#FFFFFF",
@@ -411,6 +413,21 @@
         "Range support (1/0)", "Model disagreement", "Response group"),
         value = c(p$longitude, p$latitude, z, p$group))
     }, digits = 5)
+    output$point_summary <- shiny::renderUI({
+      p <- point()
+      if (is.null(p)) return(shiny::tags$p(class = "cast-note", "\u70b9\u51fb\u5730\u56fe\u4e2d\u7684\u5206\u6790\u4f4d\u7f6e\u3002"))
+      v <- .cast_app_point_contrast(p, input$layer, active()$settings$focus)
+      labels <- if (v$kind == "gap") c("\u6bd4\u8f83\u524d\u54cd\u5e94", "\u6bd4\u8f83\u540e\u54cd\u5e94", "\u54cd\u5e94\u5dee") else
+        c("\u6539\u53d8\u524d", "\u6539\u53d8\u540e", "\u53d8\u5316")
+      shiny::tagList(shiny::tags$p(class = "cast-point-meta", paste(sprintf("%.5f, %.5f", p$longitude, p$latitude),
+        if (length(v$selected)) paste("|", sprintf("%.4f", v$selected)) else "")),
+        shiny::div(class = "cast-point-summary",
+          .cast_app_metric(labels[1L], sprintf("%.3f", v$before)),
+          .cast_app_metric(labels[2L], sprintf("%.3f", v$after)),
+          .cast_app_metric(labels[3L], sprintf("%+.3f", v$change))),
+        shiny::tags$p(class = "cast-note", if (isTRUE(v$supported)) "\u8be5\u4f4d\u7f6e\u901a\u8fc7\u8303\u56f4\u68c0\u67e5\u3002" else
+          "\u8be5\u4f4d\u7f6e\u8d85\u51fa\u8bad\u7ec3\u8303\u56f4\uff0c\u4ec5\u4f9b\u67e5\u770b\u6a21\u578b\u8f93\u51fa\u3002"))
+    })
     output$environment <- shiny::renderTable({ shiny::req(point()); point()$environment }, digits = 5)
     output$metadata <- shiny::renderTable({ shiny::req(project()); project()$metadata })
     output$variable_definition <- shiny::renderUI({
@@ -423,10 +440,13 @@
     output$profile <- shiny::renderPlot({
       shiny::req(point())
       p <- point()
-      graphics::plot(p$curve$environment, p$curve$suitability, type = "l", col = "#176B87", lwd = 2,
-        xlab = p$driver, ylab = "Relative suitability", main = "Fixed-other-predictor profile")
+      shiny::validate(shiny::need(!is.null(p$curve), p$note %||% "No environmental profile available."))
+      old <- graphics::par(mar = c(3.8, 4, 1, 1), fg = "#74818A", col.axis = "#74818A", col.lab = "#74818A", cex = .85)
+      on.exit(graphics::par(old))
+      graphics::plot(p$curve$environment, p$curve$suitability, type = "l", col = "#206B61", lwd = 2,
+        xlab = p$driver, ylab = "Relative suitability", bty = "l")
       value <- p$environment$before[p$environment$variable == p$driver]
-      graphics::abline(v = value, lty = 2, col = "#B35806")
+      graphics::abline(v = value, lty = 3, col = "#A8B1B7")
     })
     output$group_note <- shiny::renderUI({
       shiny::req(active()); shiny::tags$span(active()$group_note %||% paste(
@@ -440,21 +460,39 @@
     output$evidence_note <- shiny::renderUI({
       shiny::req(active()$evidence)
       p <- active()$evidence$population
-      shiny::tags$p(paste("\u5171\u540c\u652f\u6301\u4f4d\u7f6e\uff1a", p$n_common, "/", p$n_input,
-        "\u3002\u6240\u6709\u56e0\u5b50\u4f7f\u7528\u540c\u4e00\u5206\u6bcd\u3002\u672a\u53d8\u5316\u6307\u6807\u4e0d\u53c2\u4e0e\u6392\u540d\uff1b\u4e0d\u8868\u793a\u8be5\u6307\u6807\u4e0d\u91cd\u8981\u3002",
-        "\u6a21\u578b\u540c\u5411\u5217\u8868\u793a\u5168\u90e8\u6a21\u578b\u540c\u5411\u7684\u4f4d\u7f6e\u6bd4\u4f8b\uff1b\u4e0d\u662f\u7f6e\u4fe1\u5ea6\u3002"))
+      shiny::tags$p(class = "cast-note", paste("\u5171\u540c\u652f\u6301\u6837\u70b9", p$n_common, "/", p$n_input,
+        "\u00b7 \u54cd\u5e94\u548c\u53cd\u53f7\u7387\u4f7f\u7528\u540c\u4e00\u6279\u4f4d\u7f6e\uff0c\u540c\u5411\u7387\u4ec5\u9488\u5bf9\u5b9e\u9645\u53d8\u5316\u6837\u70b9\u3002\u6bd4\u4f8b\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"))
     })
-    output$drivers <- shiny::renderTable({
-      d <- driver_summary()[, c("rank", "driver", "status", "n_changed_common", "mean_only", "mean_retained",
-        "context_reversal_fraction", "all_models_agree_only", "all_models_agree_retained")]
-      labels <- c(changed = "Changed", unchanged_scenario = "Unchanged",
-        unchanged_on_common_domain = "Unchanged here", no_common_support = "No support", zero_model_response = "Zero response",
-        missing_predictor_pairs = "Missing pairs", unchanged_known_pairs = "Unchanged where known")
-      d$status <- unname(labels[d$status])
-      names(d) <- c("Rank", "Driver", "Status", "Changed n", "Before mean", "After mean",
-        "Flip fraction", "All agree: before", "All agree: after")
-      d
-    }, digits = 5)
+    output$response_summary <- shiny::renderUI({
+      x <- active()
+      if (is.null(x$evidence)) return(shiny::div(class = "cast-empty", "\u70b9\u51fb\u5de6\u4fa7\u201c\u5206\u6790\u73af\u5883\u54cd\u5e94\u201d\uff0c\u4f7f\u7528\u5df2\u6709\u6a21\u578b\u751f\u6210\u6837\u70b9\u6982\u89c8\u3002"))
+      p <- x$evidence$population; loc <- x$evidence$locations
+      flip <- if (p$n_common) sum(loc$context_reversals > 0L, na.rm = TRUE) else NA_integer_
+      changed <- if (p$n_common) sum(loc$same_largest == 0L, na.rm = TRUE) else NA_integer_
+      # Exact ties and no-response cases stay unresolved, outside this fraction.
+      resolved <- sum(!is.na(loc$same_largest))
+      shiny::div(class = "cast-summary",
+        .cast_app_metric("\u652f\u6301\u6837\u70b9", p$n_common, paste0("/ ", p$n_input)),
+        .cast_app_metric("\u81f3\u5c11\u4e00\u4e2a\u56e0\u5b50\u53cd\u53f7", if (is.na(flip)) "\u2014" else flip, paste0("/ ", p$n_common)),
+        .cast_app_metric("\u6700\u5927\u54cd\u5e94\u56e0\u5b50\u6539\u53d8", if (is.na(changed)) "\u2014" else changed, paste0("/ ", resolved),
+          title = "\u4ec5\u6bd4\u8f83\u4e24\u79cd\u80cc\u666f\u4e0b\u5747\u80fd\u552f\u4e00\u5f52\u5c5e\u7684\u4f4d\u7f6e\uff1b\u5e76\u5217\u548c\u96f6\u54cd\u5e94\u4f4d\u7f6e\u4e0d\u8ba1\u5165\u6b64\u5206\u6bcd\u3002"))
+    })
+    output$drivers <- shiny::renderUI({
+      shiny::req(active()$evidence)
+      d <- driver_summary(); d <- d[!is.na(d$rank), , drop = FALSE]
+      if (!nrow(d)) return(shiny::tags$p(class = "cast-note", "\u672a\u5f97\u5230\u53ef\u6392\u5e8f\u7684\u53d8\u5316\u56e0\u5b50\uff0c\u8bf7\u67e5\u770b\u672a\u6392\u5e8f\u56e0\u5b50\u548c\u8303\u56f4\u652f\u6301\u3002"))
+      .cast_app_driver_table(project(), d)
+    })
+    output$drivers_inactive <- shiny::renderUI({
+      shiny::req(active()$evidence)
+      d <- driver_summary(); d <- d[is.na(d$rank), , drop = FALSE]
+      if (!nrow(d)) return(shiny::tags$p(class = "cast-note", "\u5168\u90e8\u56e0\u5b50\u5df2\u53c2\u4e0e\u6392\u5e8f\u3002"))
+      statuses <- c(unchanged_scenario = "\u672c\u6279\u6837\u70b9\u672a\u6539\u53d8", unchanged_on_common_domain = "\u5171\u540c\u4f4d\u7f6e\u672a\u6539\u53d8",
+        no_common_support = "\u7f3a\u4e4f\u5171\u540c\u652f\u6301", zero_model_response = "\u6a21\u578b\u54cd\u5e94\u4e3a\u96f6",
+        missing_predictor_pairs = "\u7f3a\u5c11\u73af\u5883\u5bf9", unchanged_known_pairs = "\u5df2\u77e5\u4f4d\u7f6e\u672a\u6539\u53d8")
+      shiny::div(class = "cast-inactive", lapply(seq_len(nrow(d)), function(i)
+        shiny::tags$span(title = paste(d$driver[i], statuses[d$status[i]]), .cast_app_driver_label(project(), d$driver[i]))))
+    })
     output$point_driver <- shiny::renderTable({
       shiny::req(point()$driver_response)
       data.frame(item = c("Before-background response", "After-background response", "Model agreement: before",
@@ -465,10 +503,10 @@
       d <- driver_summary()
       d <- d[!is.na(d$rank), , drop = FALSE]
       shiny::req(nrow(d), any(is.finite(d$mean_only)))
-      old <- graphics::par(mar = c(4, 17, 2, 1)); on.exit(graphics::par(old))
+      old <- graphics::par(mar = c(4, 17, 1, 1), cex = .85, col.axis = "#74818A", col.lab = "#74818A"); on.exit(graphics::par(old))
       graphics::barplot(rbind(rev(d$mean_only), rev(d$mean_retained)), names.arg = rev(d$driver), beside = TRUE,
         horiz = TRUE, las = 1, cex.names = .7,
-        col = c("#176B87", "#D17A22"), legend.text = c("Before comparison background", "After comparison background"),
+        border = NA, col = c("#B9C6CA", "#206B61"), legend.text = c("Before", "After"),
         args.legend = list(x = "bottomright", bty = "n", cex = .8),
         xlab = "Mean fitted response on the same supported saved locations")
       graphics::abline(v = 0, col = "grey60")
@@ -501,6 +539,14 @@
       content = function(file) {
         shiny::req(active()$points_file); file.copy(active()$points_file, file, overwrite = TRUE)
       })
+    output$download_case <- shiny::downloadHandler(filename = function() "castSDM_case.zip",
+      content = function(file) {
+        shiny::req(project()); directory <- project()$directory
+        check_suggested("zip", "for the downloadable case")
+        files <- list.files(directory, recursive = TRUE, full.names = FALSE)
+        files <- files[!grepl("(^|/)(interactive|stages|figure_data)/|[.]lock$", files)]
+        zip::zipr(file, files = file.path(directory, files), root = directory)
+      })
     output$download_figure <- shiny::downloadHandler(filename = function() input$figure,
       content = function(file) file.copy(publication(), file, overwrite = TRUE))
     output$download_bundle <- shiny::downloadHandler(filename = function() "castSDM_exploration.zip",
@@ -511,7 +557,7 @@
         check_suggested("zip", "for the downloadable analysis bundle")
         bundle <- tempfile("cast-view-export-"); dir.create(bundle)
         file.copy(file.path(directory, files), bundle, recursive = TRUE)
-        state <- list(schema = "cast_app_state/1", request = active_request(), layer = input$layer,
+        state <- list(schema = "cast_app_state/1", package_version = as.character(utils::packageVersion("castSDM")), request = active_request(), layer = input$layer,
           supported_only = input$supported_only, center = input$map_center, zoom = input$map_zoom,
           click = if (!is.null(point())) list(lng = point()$longitude, lat = point()$latitude),
           profile_driver = input$profile_driver)
@@ -531,7 +577,8 @@
 #' A configured workflow can be submitted manually to an isolated background
 #' R process. Opening the app never starts model fitting.
 #'
-#' @param case_dir Completed single-species workflow directory. It may be a
+#' @param case_dir Optional completed single-species workflow directory.
+#'   Omit it to start with the no-code setup form. It may be a
 #'   not-yet-created output directory when `workflow` is supplied.
 #' @param workflow Optional path to a configured `00_RUN_ALL.R` entry.
 #' @param run Run the application, default `TRUE`. `FALSE` returns a Shiny app
@@ -549,11 +596,12 @@
 #'   ecological causal effects, CATE, probability changes or sampling intervals.
 #'   Original publication figures remain available separately.
 #' @export
-cast_app <- function(case_dir, workflow = NULL, run = TRUE,
+cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       launch.browser = interactive(), host = "127.0.0.1", port = NULL,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra", "rpart"))
     check_suggested(pkg, "for the environmental response application")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast030_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)
@@ -563,7 +611,7 @@ cast_app <- function(case_dir, workflow = NULL, run = TRUE,
       !state$request$operation %in% c("view", "response") || length(state$layer) != 1L ||
       length(state$profile_driver) != 1L))
     cli::cli_abort("Supply a castSDM view/response state exported by the app.")
-  app <- shiny::shinyApp(.cast_app_ui(case_dir), .cast_app_server(case_dir, workflow, state))
+  app <- shiny::shinyApp(.cast_app_ui(case_dir, workflow), .cast_app_server(case_dir, workflow, state))
   if (!run) return(app)
   shiny::runApp(app, launch.browser = launch.browser, host = host, port = port)
 }

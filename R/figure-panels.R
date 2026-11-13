@@ -105,7 +105,7 @@
 }
 
 .cast_figure_scenario_colors <- function(groups) {
-  colors <- c(SSP126 = "#009E73", SSP245 = "#E69F00", SSP585 = "#CC79A7")
+  colors <- c(SSP126 = "#009E73", SSP245 = "#E69F00", SSP370 = "#D55E00", SSP585 = "#CC79A7")
   other <- setdiff(unique(as.character(groups)), names(colors))
   if (length(other)) colors <- c(colors, stats::setNames(grDevices::hcl.colors(length(other), "Dark 3"), other))
   colors
@@ -121,11 +121,12 @@
 .cast_figure_trend <- function(data, components = c("climate_main", "lulc_main", "joint_change"),
                                y = "pct_of_current", title = "Thresholded range change", domain = NULL,
                                group_labels = c("First group", "Second group")) {
+  components <- intersect(components, unique(data$component))
   d <- data[data$component %in% components, , drop = FALSE]
   if (!is.null(domain) && "domain" %in% names(d)) d <- d[d$domain %in% domain, , drop = FALSE]
   d <- .cast_figure_scenarios(d)
   labels <- c(climate_main = paste(group_labels[1L], "baseline effect"),
-    lulc_main = paste(group_labels[2L], "baseline effect"), joint_change = "Joint change", interaction = "Interaction",
+    lulc_main = paste(group_labels[2L], "baseline effect"), joint_change = "Future change", interaction = "Interaction",
     climate_conditional = paste(group_labels[1L], "conditional effect"),
     lulc_conditional = paste(group_labels[2L], "conditional effect"),
     climate_average = paste(group_labels[1L], "average effect"),
@@ -190,13 +191,15 @@
       value
     }
   })
-  effects <- .cast_factorial_names()
+  paired <- identical(cmp$design, "paired")
+  effects <- if (paired) "joint_change" else .cast_factorial_names()
   names_short <- c(current = "Current suitability", joint = "Joint future suitability",
     climate = paste(group_labels[1L], "only suitability"), lulc = paste(group_labels[2L], "only suitability"),
     climate_main = paste(group_labels[1L], "baseline effect"), lulc_main = paste(group_labels[2L], "baseline effect"),
     joint_change = "Joint suitability change", interaction = "Two-group interaction",
     climate_conditional = paste(group_labels[1L], "conditional effect"), lulc_conditional = paste(group_labels[2L], "conditional effect"),
     climate_average = paste(group_labels[1L], "average effect"), lulc_average = paste(group_labels[2L], "average effect"))
+  if (paired) names_short[c("joint", "joint_change")] <- c("Future suitability", "Future suitability change")
   registry <- list()
   add <- function(name, build, height, available = TRUE, reason = "Required saved product is unavailable.") {
     registry[[name]] <<- list(build = build, height_mm = height, available = available, reason = reason)
@@ -256,7 +259,7 @@
         "Where scenario interpretation needs caution",
         "Support is the marginal training-quantile envelope on raw inputs. SD is calculated after paired within-model changes; it is not a standard error or confidence interval. Uncoloured basemap areas are geographic context, not model predictions.")
   }, 115, !is.null(path))
-  add("05_factorial_attribution", function() {
+  if (!paired) add("05_factorial_attribution", function() {
     plots <- list(.cast_figure_trend(cmp$binary, c("climate_main", "lulc_main", "joint_change", "interaction"),
       title = "Factorial range contrasts", group_labels = group_labels), map("climate_main", kind = "signed", legend = "Suitability change"),
       map("lulc_main", kind = "signed", legend = "Suitability change"),
@@ -378,7 +381,7 @@
     for (layer in atlas_layers) local({
       v <- layer
       available <- data$displays[vapply(data$displays, function(p) v %in% names(terra::rast(p)), logical(1))]
-      kind <- if (startsWith(v, "range_class")) "range" else if (v %in% effects) "signed" else if (v %in% c("support", "common_support")) "support" else
+      kind <- if (startsWith(v, "range_class")) "range" else if (v %in% effects || startsWith(v, "change_")) "signed" else if (v %in% c("support", "common_support")) "support" else
         if (v == "sign_conflict_joint") "conflict" else "continuous"
       add(paste0("S_", v), function() {
         limits <- if (kind %in% c("continuous", "signed")) .cast_figure_bound(available, v, kind == "signed") else NULL

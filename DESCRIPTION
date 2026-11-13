@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Response Maps for Species Distribution Models
-Version: 0.29.1
+Version: 0.30.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -11,7 +11,8 @@ Authors@R: c(
     )
   )
 Description: Auditable model-conditional comparisons of environmental scenarios
-    using species distribution models. A paired 2 x 2 design separates two
+    using species distribution models. Paired projections compare one changing
+    predictor group; a 2 x 2 design additionally separates two
     predictor groups, their joint change and interaction with fixed model
     weights, finite-domain checks, training-support diagnostics and paired
     model disagreement. Tables and bounded-memory raster processing share one
@@ -40,6 +41,7 @@ Suggests:
     bslib (>= 0.5.0),
     callr (>= 3.7.0),
     car,
+    data.table,
     FNN,
     future,
     future.apply,

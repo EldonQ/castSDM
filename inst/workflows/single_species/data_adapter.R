@@ -318,7 +318,7 @@ wf_analysis_domain <- function(cfg, occ, raster_template, verbose = TRUE) {
 nsdm_build_scenario_stacks <- function(current_stack, selected_vars,
                                        scenario_table_csv, verbose = TRUE) {
   required <- c("scenario", "family", "climate_model", "ssp", "period",
-                "climate_year", "lulc_year", "layer", "path", "source")
+                "climate_year", "layer", "path", "source")
   tab <- utils::read.csv(scenario_table_csv, stringsAsFactors = FALSE)
   if (!all(required %in% names(tab))) {
     stop("scenario table is missing columns: ",
@@ -355,7 +355,7 @@ nsdm_build_scenario_stacks <- function(current_stack, selected_vars,
       stringsAsFactors = FALSE)
     rows <- tab[tab$scenario == scen, , drop = FALSE]
     meta_cols <- c("family", "climate_model", "ssp", "period",
-                   "climate_year", "lulc_year")
+                   "climate_year", "baseline_period")
     source_tab <- cbind(
       rows[rep(1L, nrow(source_tab)), meta_cols, drop = FALSE],
       source_tab)

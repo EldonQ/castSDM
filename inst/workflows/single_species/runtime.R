@@ -122,54 +122,6 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
   invisible(list(libraries = .libPaths(), dependencies = versions))
 }
 
-# Only reviewed maintenance versions can migrate an otherwise identical claim.
-case_runtime_resume_patch <- function(cfg) {
-  current_version <- as.character(getNamespaceVersion("castSDM"))
-  if (!identical(current_version, "0.29.1")) return(invisible(FALSE))
-  compatible <- c("0.28.0", "0.28.1", "0.28.2", "0.28.3", "0.29.0")
-  run_id <- Sys.getenv("CAST_RUN_ID", paste0("cast028_", cfg$scenario_lulc_product))
-  if (!grepl("^[A-Za-z0-9_-]+$", run_id)) return(invisible(FALSE))
-  out <- file.path(cfg$output_root, run_id, cfg$species_name)
-  claim_file <- file.path(out, "run_claim.rds")
-  if (!file.exists(claim_file)) return(invisible(FALSE))
-  lock <- filelock::lock(file.path(out, ".case.lock"), timeout = 0)
-  if (is.null(lock)) stop("Another process is writing this case: ", out, call. = FALSE)
-  on.exit(filelock::unlock(lock), add = TRUE)
-  previous <- readRDS(claim_file)
-  if (!identical(previous$schema, "cast_case_claim/1") ||
-      !previous$package %in% compatible) return(invisible(FALSE))
-  scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
-    "output_root", "cache_root", "preparation_root", "diagnostic_thresholds"))]
-  scientific_cfg$protocol$num_threads <- NULL
-  sources <- unname(tools::md5sum(file.path(cfg$example_root,
-    c("02_pipeline.R", "prepare_data.R", "data_adapter.R", "scenario_case.R"))))
-  if (!identical(previous$config, scientific_cfg) || !identical(previous$sources, sources))
-    return(invisible(FALSE))
-  fields <- c("schema", "config", "package", "sources")
-  if (!identical(previous$key, digest::digest(previous[fields], algo = "sha256")))
-    stop("The saved case claim failed its content check: ", claim_file, call. = FALSE)
-  updated <- previous[fields]
-  updated$package <- current_version
-  updated$key <- digest::digest(updated, algo = "sha256")
-  history_file <- file.path(out, "maintenance.rds")
-  history <- if (file.exists(history_file)) readRDS(history_file) else
-    list(schema = "cast_case_maintenance/1", entries = list())
-  if (!identical(history$schema, "cast_case_maintenance/1"))
-    stop("Unsupported case maintenance history: ", history_file, call. = FALSE)
-  recorded <- any(vapply(history$entries, function(x) identical(x$to$key, updated$key), logical(1)))
-  if (!recorded) history$entries[[length(history$entries)+1L]] <- list(
-    utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-    reason = paste(current_version, "adds optional response exploration; scientific inputs, source hashes and prediction contract unchanged."),
-    from = previous, to = updated)
-  # Reuse the package atomic publisher in this version-specific adapter.
-  publish <- utils::getFromNamespace(".cast_atomic_rds", "castSDM")
-  publish(history, history_file)
-  publish(updated, claim_file)
-  message("Resuming the unchanged ", previous$package, " analysis with ", current_version,
-    "; maintenance receipt recorded.")
-  invisible(TRUE)
-}
-
 # Validate physical inputs even in --dry-run mode, before preparation or fitting.
 case_runtime_preflight <- function(cfg) {
   tables <- lapply(c(cfg$nsdm_pool_csv, cfg$future_layers_csv), function(path) {
@@ -186,5 +138,13 @@ case_runtime_preflight <- function(cfg) {
     paste(utils::head(missing, 8L), collapse = "\n  "),
     "\nUpdate the inventory after moving data: source 00_INVENTORY.R. ",
     "Keep input files in place until the run finishes. No preparation or fitting started.", call. = FALSE)
+  columns <- names(data.table::fread(cfg$occurrence_file[1L], nrows = 0L, data.table = FALSE))
+  required <- if (cfg$input_type == "gbif") c("gbifID", "decimalLongitude", "decimalLatitude",
+    "countryCode", "occurrenceStatus", "hasGeospatialIssues", "coordinateUncertaintyInMeters", "basisOfRecord") else character()
+  if (any(!required %in% columns)) stop("Occurrence input lacks required fields: ",
+    paste(setdiff(required, columns), collapse = ", "), call. = FALSE)
+  if (cfg$input_type != "gbif" && (!any(grepl("^lon|^longitude$", columns, ignore.case = TRUE)) ||
+      !any(grepl("^lat", columns, ignore.case = TRUE))))
+    stop("Longitude/latitude fields not found in the occurrence input.", call. = FALSE)
   invisible(TRUE)
 }

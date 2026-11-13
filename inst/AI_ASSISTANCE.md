@@ -63,3 +63,12 @@ The real-case predictor dictionary records product-specific definitions and
 source references; missing definitions are not inferred from variable IDs.
 All scientific verification uses saved actual cases, observed raster values
 and tiny real-grid crops. It does not refit study models or run the full case.
+
+
+On 13 November 2026, Codex assisted the 0.30.0 CHELSA-only workflow, paired
+one-group projections, installed workflow entry, minimalist Shiny setup and
+export/cancellation controls. Environmental inputs were read only. Checks use
+real delivered file inventories and saved real-case numerical outputs; no
+synthetic field data or ecological truth were introduced. The full new study
+was not fitted or projected during maintenance. Numerical replay of stored
+scores does not validate new fitted engines or new CHELSA scientific results.

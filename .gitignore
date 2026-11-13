@@ -30,3 +30,5 @@ tests/testthat/_problems/
 tests/testthat/testthat-problems.rds
 Rplots.pdf
 benchmarks/output/
+
+.local-checks/

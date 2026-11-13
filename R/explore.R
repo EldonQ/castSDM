@@ -20,12 +20,12 @@
   selected <- pool[match(fit$env_vars, pool$layer), , drop = FALSE]
   if (anyNA(selected$path)) cli::cli_abort("The case inventory lacks fitted predictors.")
   metadata <- data.frame(layer = fit$env_vars, product = selected$product,
-    definition = NA_character_, units = NA_character_, source = NA_character_, notes = NA_character_)
+    definition = NA_character_, units = NA_character_, source = NA_character_, notes = NA_character_, label = fit$env_vars)
   dictionaries <- c(file.path(directory, "predictor_metadata.csv"),
     file.path(case$cfg$example_root, "config", "predictor_metadata.csv"))
   dictionaries <- dictionaries[file.exists(dictionaries)]
   if (length(dictionaries)) {
-    dictionary <- utils::read.csv(dictionaries[1L], stringsAsFactors = FALSE)
+    dictionary <- utils::read.csv(dictionaries[1L], stringsAsFactors = FALSE, encoding = "UTF-8")
     required <- c("layer", "product", "definition", "units", "source", "notes")
     if (!all(required %in% names(dictionary)) ||
         anyDuplicated(paste(dictionary$product, dictionary$layer)))
@@ -33,6 +33,10 @@
     matched <- match(paste(metadata$product, metadata$layer), paste(dictionary$product, dictionary$layer))
     found <- !is.na(matched)
     metadata[found, required] <- dictionary[matched[found], required]
+    if ("label" %in% names(dictionary)) {
+      labelled <- found & !is.na(dictionary$label[matched]) & nzchar(dictionary$label[matched])
+      metadata$label[labelled] <- dictionary$label[matched[labelled]]
+    }
   }
   scenarios <- utils::read.csv(file.path(directory, "scenario_table.csv"), stringsAsFactors = FALSE)
   comparison$results <- lapply(comparison$results, function(x) {
@@ -340,10 +344,9 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
 }
 
 .cast_app_task <- function(request) {
-  if (identical(request$operation, "workflow")) {
-    if (length(request$environment)) do.call(Sys.setenv, as.list(request$environment))
-    sys.source(request$workflow, envir = new.env(parent = globalenv()), keep.source = FALSE)
-    return(list(operation = "workflow", case_dir = request$case_dir))
+  if (identical(request$operation, "setup")) {
+    request$operation <- NULL
+    return(do.call(cast_workflow, request))
   }
   if (identical(request$operation, "view")) {
     lock <- .cast_lock(file.path(request$case_dir, ".case.lock"))

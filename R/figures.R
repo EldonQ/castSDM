@@ -187,6 +187,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
         "bilinear continuous; nearest categorical; native scientific rasters unchanged",
         response_grid, data$pdp_reference_n, data$response_reference_n)),
     unavailable_products = data$notes)
+  if (identical(comparison$design, "paired")) {
+    names(tables)[match(c("factorial_summary", "factorial_binary", "factorial_binary_supported"), names(tables))] <-
+      c("scenario_summary", "range_change", "range_change_supported")
+  }
   table_rows <- list()
   for (name in names(tables)) if (is.data.frame(tables[[name]])) {
     path <- file.path(table_dir, paste0(name, ".csv"))

@@ -16,13 +16,16 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.29.1")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.30.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
-  taxon <- Sys.getenv("CAST_SPECIES", "Schizothoracinae")
+  settings_file <- file.path(root, "workflow_settings.rds")
+  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
+  taxon <- Sys.getenv("CAST_SPECIES", settings$species %||% "Schizothoracinae")
   cfg <- castsdm_species_configs(root)[[taxon]]
   if (is.null(cfg)) stop("Unknown CAST_SPECIES: ", taxon)
+  case_inventory_ensure(root, cfg$nsdm_data_root)
   cfg$runtime <- runtime
   cfg$runtime$script_hashes <- tools::md5sum(list.files(root, pattern = "\\.R$", full.names = TRUE))
   for (path in c(cfg$occurrence_file, cfg$nsdm_pool_csv, cfg$future_layers_csv))
@@ -34,7 +37,6 @@ local({
     message("Preflight OK: ", taxon, "; no preparation, training or raster projection started.")
     invisible(cfg)
   } else {
-    case_runtime_resume_patch(cfg)
     out <- run_species(cfg)
     message("Interactive exploration: source(\"", file.path(root, "05_SHINY.R"), "\", encoding = \"UTF-8\")")
     invisible(out)

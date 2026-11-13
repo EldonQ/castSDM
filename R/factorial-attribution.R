@@ -10,11 +10,11 @@
   z
 }
 
-.cast_factorial_accumulator <- function() {
+.cast_factorial_accumulator <- function(components = .cast_factorial_names(), n_faces = 4L) {
   e <- new.env(parent = emptyenv())
-  e$moments <- matrix(0, 8L, 10L, dimnames = list(.cast_factorial_names(),
+  e$moments <- matrix(0, length(components), 10L, dimnames = list(components,
     c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd", "surface", "nsurface")))
-  e$binary <- e$binary_supported <- numeric(4L)
+  e$binary <- e$binary_supported <- numeric(n_faces)
   e$n_binary <- e$n_binary_supported <- 0
   e
 }
@@ -54,11 +54,25 @@
 }
 
 .cast_factorial_binary <- function(counts, n) {
+  if (length(counts) == 2L) return(data.frame(component = "joint_change", n_valid = n,
+    n_current_range = counts[1L], n_future_range = counts[2L], estimate = counts[2L]-counts[1L],
+    pct_of_current = if (counts[1L] > 0) 100*(counts[2L]-counts[1L])/counts[1L] else NA_real_))
   estimate <- as.numeric(.cast_factorial_values(matrix(counts, nrow = 1L)))
   data.frame(component = .cast_factorial_names(), n_valid = n, n_current_range = counts[1L],
     n_future_range = c(counts[3L], counts[4L], counts[2L], NA_real_, counts[2L], counts[2L], NA_real_, NA_real_),
     estimate = estimate, pct_of_current = if (counts[1L] > 0) 100*estimate/counts[1L] else NA_real_, row.names = NULL)
 }
+
+.cast_paired_contract <- function() data.frame(key = c("claim_level", "design", "joint", "joint_change",
+  "static", "support", "model_sd", "climate_ensemble", "not_identified"), value = c(
+  "model_conditional_scenario_projection", "paired: current and future; one changing group",
+  "Future suitability (joint is the saved layer alias shared with factorial comparisons)",
+  "future - current within each model, then frozen-weight average",
+  "All predictors outside the declared changing group retain their current values",
+  "Raw-input training marginal range; common supported subset across scenarios separately recorded",
+  "SD across active algorithms after paired changes; not GCM spread or a confidence interval",
+  "When climate inputs are a GCM mean, outputs are predictions at mean climate, not mean member predictions",
+  "Not identified: ecological causal effects, absolute occurrence probability, dispersal or realised occupancy"))
 
 .cast_factorial_contract <- function() {
   data.frame(key = c("claim_level", "design", .cast_factorial_names(), "support", "model_sd", "surface_sd", "not_identified"),

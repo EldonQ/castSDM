@@ -31,7 +31,7 @@ cast_compare(
 \method{plot}{cast_comparison}(
   x,
   scenario = names(x$results)[1L],
-  layers = c("climate_main", "lulc_main", "joint_change", "interaction"),
+  layers = NULL,
   basemap = c("world", "china", "none"),
   ...
 )
@@ -47,7 +47,7 @@ missing sources fail before hashing, prediction or output creation.}
 All grouped predictors are required. Omitted static layers inherit current;
 supplied static layers must remain equal to current.}
 
-\item{groups}{Named list of exactly two disjoint predictor groups. Other
+\item{groups}{Named list of one or two disjoint predictor groups. Other
 fitted predictors are explicitly recorded as static.}
 
 \item{cv}{Optional \link{cast_cv}. A \code{cast_result} supplies this automatically.}
@@ -67,7 +67,7 @@ threshold is inherited when available; no binary result is invented.}
 assessed on original inputs. Default \code{FALSE} unless inherited from a result.}
 
 \item{domain}{\code{"common"} uses the intersection across all requested futures;
-\code{"scenario"} uses a separate four-corner finite domain per future.}
+\code{"scenario"} uses a separate finite domain per future.}
 
 \item{output_dir}{Optional result directory; required for persistent rasters.
 A temporary directory is used when omitted for raster inputs.}
@@ -115,7 +115,8 @@ threshold source, artifact paths, stage events and provenance. Legacy
 \verb{*_main} are baseline simple effects; \verb{*_average} are averaged effects.
 }
 \description{
-Constructs current, first-group-only, second-group-only and joint scenarios
+One changing group gives a direct current/future comparison. Two groups
+additionally construct first-group-only and second-group-only scenarios
 without copying complete environmental raster stacks. Every contrast uses
 the same positive-weight models and common finite domain. Model SD is
 calculated after within-model paired contrasts, never from surface SDs.
@@ -132,14 +133,4 @@ tables use each scenario's own subset. Neither is multivariate AOA.
 model contrasts and mean majority-sign agreement (unweighted across
 active models, zeros neutral within 1e-12). One model is unassessed.
 These summaries and SDs describe model disagreement, not confidence.
-}
-\examples{
-reference <- data.frame(temperature = seq(-1, 1, length.out = 20), land = rep(0:1, 10))
-model <- list(intercept = -.3)
-fit <- cast_as_fit(list(example = model), reference, function(model, newdata)
-  stats::plogis(model$intercept + newdata$temperature - newdata$land))
-future <- reference; future$temperature <- future$temperature + .2
-comparison <- cast_compare(fit, reference, future,
-  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
-comparison$summary
 }

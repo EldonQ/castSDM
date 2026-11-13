@@ -1,9 +1,9 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 .cast_compare_inputs <- function(fit, current, future, groups, mask) {
   vars <- fit$env_vars
-  if (!is.list(groups) || length(groups) != 2L || is.null(names(groups)) ||
+  if (!is.list(groups) || !length(groups) %in% 1:2 || is.null(names(groups)) ||
       anyNA(names(groups)) || any(!nzchar(names(groups))) || anyDuplicated(names(groups)))
-    cli::cli_abort("groups must contain exactly two uniquely named predictor groups.")
+    cli::cli_abort("groups must contain one or two uniquely named predictor groups.")
   changed <- unlist(groups, use.names = FALSE)
   if (!is.character(changed) || anyNA(changed) || any(!lengths(groups)) ||
       anyDuplicated(changed) || !all(changed %in% vars))
@@ -37,7 +37,7 @@
     if (raster) {
       if (is.character(x)) x <- terra::rast(x)
       if (!inherits(x, "SpatRaster") || !all(changed %in% names(x)))
-        cli::cli_abort("Every future raster must contain both changing groups.")
+        cli::cli_abort("Every future raster must contain all changing predictors.")
       if (!isTRUE(terra::compareGeom(current, x, lyrs = FALSE, stopOnError = FALSE)))
         cli::cli_abort("Future geometry must match current; align inputs explicitly.")
       missing <- setdiff(vars, names(x))
@@ -45,7 +45,7 @@
       x[[vars]]
     } else {
       if (!is.data.frame(x) || !all(changed %in% names(x)))
-        cli::cli_abort("Every future frame must contain both changing groups.")
+        cli::cli_abort("Every future frame must contain all changing predictors.")
       if (all(c("lon", "lat") %in% names(current)) && all(c("lon", "lat") %in% names(x)))
         x <- .cast_align_future_env(current, x, "scenario comparison")
       if (nrow(x) != nrow(current)) cli::cli_abort("Future and current table row counts differ.")
@@ -55,6 +55,7 @@
     }
   })
   list(current = current, future = future, groups = groups, static = static,
+       design = if (length(groups) == 1L) "paired" else "factorial",
        mask = mask, raster = raster, vars = vars)
 }
 
@@ -143,6 +144,22 @@
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
   context <- .cast_prediction_context(fit, weights, a, b, clamp)
+  if (length(groups) == 1L) {
+    future <- context$predict(groups[[1L]])
+    if (any(!is.finite(base)) || any(!is.finite(future)))
+      cli::cli_abort("An active model returned non-finite paired predictions.")
+    change <- future-base
+    faces <- cbind(current = as.numeric(base %*% weights), joint = as.numeric(future %*% weights))
+    effects <- matrix(as.numeric(change %*% weights), ncol = 1L, dimnames = list(NULL, "joint_change"))
+    sd <- matrix(.ensemble_rowsd(change), ncol = 1L, dimnames = list(NULL, "joint_change"))
+    supported <- if (is.null(bounds)) rep(NA, nrow(a)) else
+      .cast_attribution_inside(a, bounds) & .cast_attribution_inside(b, bounds)
+    members <- cbind(base, future, change)
+    colnames(members) <- unlist(lapply(c("current_", "future_", "change_"), paste0, names(weights)))
+    return(list(faces = faces, effects = effects, sd = sd, support = supported,
+      sign = .cast_sign_values(lapply(seq_along(weights), function(j) matrix(change[, j], ncol = 1L))),
+      model_layers = members))
+  }
   changed <- lapply(groups, function(vars) Reduce(`|`, lapply(vars,
     function(v) context$current[[v]] != context$future[[v]])))
   both <- changed[[1L]] & changed[[2L]]
@@ -180,13 +197,16 @@
                               baseline, domain, block_size, filename = NULL,
                               common_support = NULL, thresholds = numeric()) {
   current <- plan$current; future <- plan$future[[scenario]]
-  layers <- c("current", "joint", "climate", "lulc", .cast_factorial_names(),
-              paste0("sd_", .cast_factorial_names()), "support", "common_support",
-              "sign_agreement_joint", "sign_conflict_joint")
-  acc <- .cast_factorial_accumulator()
-  common_acc <- .cast_factorial_accumulator()
-  cuts <- .cast_threshold_accumulator(unique(c(threshold, thresholds)))
-  sign_acc <- .cast_sign_accumulator(length(weights))
+  paired <- identical(plan$design, "paired")
+  components <- if (paired) "joint_change" else .cast_factorial_names()
+  faces <- if (paired) c("current", "joint") else c("current", "joint", "climate", "lulc")
+  layers <- c(faces, components, paste0("sd_", components), "support", "common_support",
+              "sign_agreement_joint", "sign_conflict_joint",
+              if (paired) unlist(lapply(c("current_", "future_", "change_"), paste0, names(weights))))
+  acc <- .cast_factorial_accumulator(components, length(faces))
+  common_acc <- .cast_factorial_accumulator(components, length(faces))
+  cuts <- .cast_threshold_accumulator(unique(c(threshold, thresholds)), length(faces))
+  sign_acc <- .cast_sign_accumulator(length(weights), components)
   seconds <- c(read_current = 0, read_future = 0, read_baseline = 0,
     predict = 0, write = 0)
   timed <- function(phase, expr) {
@@ -239,13 +259,13 @@
         .cast_sign_accumulate(sign_acc, p$sign, p$support, cs)
         z[keep, ] <- cbind(p$faces, p$effects, p$sd, as.numeric(p$support),
           if (is.null(cs)) rep(NA_real_, sum(keep)) else as.numeric(cs),
-          p$sign$agreement[, 3L], p$sign$conflict[, 3L])
+          p$sign$agreement[, if (paired) 1L else 3L], p$sign$conflict[, if (paired) 1L else 3L], p$model_layers)
       }
     }
     if (plan$raster) timed("write", .cast_writer_block(writer, z, first, count)) else data[idx, ] <- z
   }
   if (plan$raster) timed("write", .cast_writer_finish(writer))
-  list(summary = .cast_factorial_summary(acc, !is.null(bounds)),
+  list(design = plan$design, summary = .cast_factorial_summary(acc, !is.null(bounds)),
     binary = if (!is.null(threshold)) .cast_factorial_binary(acc$binary, acc$n_binary),
     binary_supported = if (!is.null(threshold) && !is.null(bounds))
       .cast_factorial_binary(acc$binary_supported, acc$n_binary_supported),
@@ -333,7 +353,8 @@
 
 #' Compare Grouped Environmental Scenarios with Frozen SDMs
 #'
-#' Constructs current, first-group-only, second-group-only and joint scenarios
+#' One changing group gives a direct current/future comparison. Two groups
+#' additionally construct first-group-only and second-group-only scenarios
 #' without copying complete environmental raster stacks. Every contrast uses
 #' the same positive-weight models and common finite domain. Model SD is
 #' calculated after within-model paired contrasts, never from surface SDs.
@@ -346,7 +367,7 @@
 #' @param future Future environment or uniquely named list of environments.
 #'   All grouped predictors are required. Omitted static layers inherit current;
 #'   supplied static layers must remain equal to current.
-#' @param groups Named list of exactly two disjoint predictor groups. Other
+#' @param groups Named list of one or two disjoint predictor groups. Other
 #'   fitted predictors are explicitly recorded as static.
 #' @param cv Optional [cast_cv]. A `cast_result` supplies this automatically.
 #' @param weights Optional finite named non-negative model weights. Without CV,
@@ -363,7 +384,7 @@
 #' @param clamp Apply the same training-range clamp to every model. Support is
 #'   assessed on original inputs. Default `FALSE` unless inherited from a result.
 #' @param domain `"common"` uses the intersection across all requested futures;
-#'   `"scenario"` uses a separate four-corner finite domain per future.
+#'   `"scenario"` uses a separate finite domain per future.
 #' @param output_dir Optional result directory; required for persistent rasters.
 #'   A temporary directory is used when omitted for raster inputs.
 #' @param resources Optional named list: total `cores` (default 1), `workers`
@@ -384,15 +405,6 @@
 #'   threshold source, artifact paths, stage events and provenance. Legacy
 #'   `climate_*` and `lulc_*` columns refer to the first and second named groups;
 #'   `*_main` are baseline simple effects; `*_average` are averaged effects.
-#' @examples
-#' reference <- data.frame(temperature = seq(-1, 1, length.out = 20), land = rep(0:1, 10))
-#' model <- list(intercept = -.3)
-#' fit <- cast_as_fit(list(example = model), reference, function(model, newdata)
-#'   stats::plogis(model$intercept + newdata$temperature - newdata$land))
-#' future <- reference; future$temperature <- future$temperature + .2
-#' comparison <- cast_compare(fit, reference, future,
-#'   groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
-#' comparison$summary
 #' @export
 cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL,
     threshold = NULL, mask = NULL, support_probs = c(.01, .99), clamp = FALSE,
@@ -583,11 +595,11 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       elapsed_s = c(worker_elapsed, identity_elapsed, dispatch_elapsed,
         as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
     common_support_file = if (plan$raster) common$support,
-    results = results, groups = plan$groups,
+    results = results, groups = plan$groups, design = plan$design,
     static = plan$static, weights = weights, threshold = threshold, threshold_source = threshold_source,
     domain = domain, support_probs = support_probs, support_assessed = !is.null(bounds),
     resources = budget, events = do.call(rbind, events),
-    contract = .cast_factorial_contract(), output_dir = output_dir,
+    contract = if (identical(plan$design, "paired")) .cast_paired_contract() else .cast_factorial_contract(), output_dir = output_dir,
     provenance = list(schema = "cast_comparison/2", model = fit_key, current = current_key,
       future = future_keys, mask = mask_key, session = utils::capture.output(utils::sessionInfo()))),
     class = "cast_comparison")
@@ -607,7 +619,8 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
 #' @export
 print.cast_comparison <- function(x, ...) {
   cli::cli_h1("castSDM paired scenario comparison")
-  cli::cli_inform("First group: {names(x$groups)[1]}; second: {names(x$groups)[2]}. *_main denotes baseline simple effects.")
+  if (identical(x$design, "paired")) cli::cli_inform("Changing group: {names(x$groups)[1]}; all other predictors are static.") else
+    cli::cli_inform("First group: {names(x$groups)[1]}; second: {names(x$groups)[2]}. *_main denotes baseline simple effects.")
   print(x$summary[, c("scenario", "component", "mean", "mean_supported", "mean_model_sd")], row.names = FALSE)
   invisible(x)
 }
@@ -658,9 +671,11 @@ summary.cast_comparison <- function(object, thresholds = NULL, ...) {
 #'   or `"none"`; China retains the established South China Sea inset.
 #' @export
 plot.cast_comparison <- function(x, scenario = names(x$results)[1L],
-                                 layers = c("climate_main", "lulc_main", "joint_change", "interaction"),
+                                 layers = NULL,
                                  basemap = c("world", "china", "none"), ...) {
   basemap <- match.arg(basemap)
+  layers <- layers %||% if (identical(x$design, "paired")) c("current", "joint", "joint_change") else
+    c("climate_main", "lulc_main", "joint_change", "interaction")
   if (!scenario %in% names(x$results)) cli::cli_abort("Unknown scenario.")
   y <- x$results[[scenario]]
   if (!is.null(y$raster_file)) {

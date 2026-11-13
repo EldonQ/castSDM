@@ -28,10 +28,11 @@
     v <- drivers[j]; a <- only[common, j]; b <- retained[common, j]
     varied <- changed[, j]
     direction <- .cast_response_direction(a, b)
-    agreement <- function(prefix) {
+    agreement <- function(prefix, changed_only = FALSE) {
       field <- paste0(prefix, v)
       if (!field %in% names(data)) return(NA_real_)
       z <- data[[field]][common]
+      if (changed_only) z <- z[varied[common]]
       if (any(!is.finite(z))) return(NA_real_)
       mean_or_na(z == 1)
     }
@@ -49,7 +50,9 @@
       context_reversal_fraction = mean_or_na(direction == 2L),
       one_background_zero_fraction = mean_or_na(direction == 3L),
       all_models_agree_only = agreement("effect_agreement_"),
-      all_models_agree_retained = agreement("retained_agreement_"))
+      all_models_agree_retained = agreement("retained_agreement_"),
+      all_models_agree_changed_only = agreement("effect_agreement_", TRUE),
+      all_models_agree_changed_retained = agreement("retained_agreement_", TRUE))
   })
   summary <- do.call(rbind, summaries)
   summary$rank <- NA_integer_
@@ -72,13 +75,16 @@
   same <- rep(NA_integer_, nrow(data))
   resolved <- !is.na(first) & !is.na(last) & first > 0L & last > 0L
   same[resolved] <- as.integer(first[resolved] == last[resolved])
+  reversals <- rowSums(sign(only) * sign(retained) < 0)
+  reversals[!common] <- NA_integer_
   list(summary = summary,
     locations = data.frame(common_support = as.integer(common),
-      largest_only = first, largest_retained = last, same_largest = same),
+      largest_only = first, largest_retained = last, same_largest = same, context_reversals = reversals),
     drivers = data.frame(id = seq_along(drivers), driver = drivers),
     population = data.frame(n_input = nrow(data), n_finite = sum(finite), n_common = n,
       common_fraction = n / nrow(data)),
     interpretation = paste("Shared range-supported saved locations; rankings concern the supplied scenario changes.",
-      "Background dependence and model sign agreement are descriptive, not causal identification or confidence.",
+      "Changed-location agreement excludes predictors unchanged at those saved locations; unqualified agreement includes all common rows.",
+      "Unchanged-scenario status refers to supplied locations, not the entire raster. Background dependence and model sign agreement are descriptive, not causal identification or confidence.",
       "Largest-response IDs: -1 exact tie, 0 no response, NA outside common support."))
 }

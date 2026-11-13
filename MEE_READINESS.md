@@ -10,12 +10,12 @@ Position castSDM as an **Applications software package** for interactive,
 auditable environmental response maps from frozen SDMs. `cast_app()` and
 `cast_explore()` connect explicit environmental changes, native-grid queries
 and descriptive environmental subgroups. `cast_compare()` supplies paired
-two-group comparisons; `cast_run()` supplies optional built-in fitting and
+one-group projections and optional two-group comparisons; `cast_run()` supplies optional built-in fitting and
 `cast_as_fit()` accepts external engines. `cast_diagnose()` joins validation to
 the interpretation of scenario comparisons.
 
 The contribution to demonstrate is the complete comparison contract: paired
-four-corner predictions, frozen positive weights, explicit finite and common
+current/future predictions, optional four-corner predictions, frozen positive weights, explicit finite and common
 support domains, paired model disagreement, consistent thresholds, bounded
 raster execution and content-verified reuse. A 2 x 2 contrast identity, spatial
 CV, RF/MaxEnt/GAM, marginal support and caching alone are not new methods.
@@ -132,3 +132,51 @@ ready for the author to run; saved metrics retain their original provenance.
 AI-assisted development scope and reporting limits are documented in
 [AI_ASSISTANCE.md](inst/AI_ASSISTANCE.md). See the local maintenance report for
 the actual check counts, benchmark observations and commit identifier.
+
+
+## 0.30.0 climate-only recipe and interface
+
+The package ships its single maintained workflow under `inst/workflows/`.
+The Start tab configures paths and a small scientific/resource settings list,
+checks the delivered CHELSA library, and explicitly submits the full analysis.
+Advanced controls are folded. Long computations run outside Shiny's main R
+process, with duplicate-action protection and process-tree cancellation; see
+[Posit nonblocking guidance](https://shiny.posit.co/r/articles/improve/nonblocking/)
+and [input validation](https://shiny.posit.co/r/articles/improve/validation/).
+
+The case uses CHELSA v2.1 baseline 1981–2010 and exactly the delivered
+SSP126/370/585 ensemble climates. The official [CHELSA catalogue](https://www.chelsa-climate.org/datasets/chelsa_bioclim)
+provides definitions; processed-library provenance is authoritative for decoded
+units. A CNClim BIO23 model cannot be treated as a CHELSA fit. All nonclimate
+predictors remain current; future land-use products are excluded.
+
+The scientific question remains: **where does the same environmental change
+produce different fitted suitability responses, and do those responses persist
+across environmental backgrounds and algorithms?** The interface makes this
+question accessible but is not itself methodological novelty. Claims require
+a completed new case, comparisons with existing tools, sensitivity to validation,
+background sampling and extrapolation, and useful conclusions attributable to
+the diagnostic contract. This engineering release alone does not establish MEE
+readiness or identify ecological causal effects from presence/background data.
+
+
+### 0.30.0 checks performed on 13 November 2026
+
+- Installed package and light `R CMD check`: 0 errors, 0 warnings, 0 notes.
+  Scope: `--no-manual --no-tests --no-examples --ignore-vignettes`; historical
+  simulated fixtures/examples were not executed.
+- Real-library preflight: 458 current layers, 447 passing coverage/geometry,
+  326 GLU or 320 HLU eligible predictors, 198 future climate layers; all nine
+  exact SSP/period mappings verified and nonclimate source paths unchanged.
+- Numerical regression replays the 256 saved real-case current/future scores,
+  plus an actual saved grid crop. It checks paired fields, threshold counts,
+  static-change rejection, multiblock reductions and installed PSOCK parity.
+  Replay adapters only return exact already-recorded scores; these checks do
+  not validate new CHELSA fitted engines or estimate ecological ground truth.
+- Headless Chrome: setup connection, input failure/recovery, duplicate-submit
+  protection, cancellation and subsequent real-input checks, desktop/mobile
+  overflow. Both deployed entry points pass dry-run checks.
+- No full study preparation, model fitting or national projection was run.
+  New CHELSA scientific results, full figure execution and post-fit result tabs
+  require the user's new completed case. `examples/validate_real_case.R` checks
+  a completed real case, including each engine's paired prediction exports.

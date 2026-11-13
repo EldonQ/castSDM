@@ -5,7 +5,7 @@
 \title{Open the Environmental Response Shiny Application}
 \usage{
 cast_app(
-  case_dir,
+  case_dir = NULL,
   workflow = NULL,
   run = TRUE,
   launch.browser = interactive(),
@@ -15,7 +15,8 @@ cast_app(
 )
 }
 \arguments{
-\item{case_dir}{Completed single-species workflow directory. It may be a
+\item{case_dir}{Optional completed single-species workflow directory.
+Omit it to start with the no-code setup form. It may be a
 not-yet-created output directory when \code{workflow} is supplied.}
 
 \item{workflow}{Optional path to a configured \verb{00_RUN_ALL.R} entry.}

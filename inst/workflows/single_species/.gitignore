@@ -1,7 +1,8 @@
 /config/*
-!/config/predictor_metadata.csv
 /output/
 /.library/
 *.log
 *.lock
 Rplots.pdf
+
+/workflow_settings.rds
