@@ -1,3 +1,26 @@
+# castSDM 0.32.0
+
+- Pass the actual coordinate CRS through hold-out, screening and outer spatial
+  CV. Use calibrated physical blocks for hold-out; preserve block geometry and
+  draw its boundaries. Stop on failed designs rather than changing the nested
+  validation strategy implicitly.
+- Use native engine scores by default. The previous weighted training-mean
+  shift remains explicit opt-in and is not described as probability calibration.
+- Add the mature threaded bam/discrete fREML GAM backend, with the previous gam
+  backend retained. Record per-engine fit time and backend. New fitting and
+  validation policies require a fresh cast032_chelsa_ensmean analysis.
+- Reuse additive GAM terms including ordinary numeric/binary linear terms;
+  evaluate only changed future terms. Dispatch scenarios one per worker task.
+- Export existing diagnostics/maps before expensive explanation products.
+  Figure presets compute only required products and retain the complete
+  cartography/export collection. Published iml ALE is the default response
+  curve; original PDP remains available explicitly.
+- Checkpoint actual attribution raster batches and resume without repeating
+  completed predictions. Show finite-cell counts and elapsed time. Use the
+  existing 1e-12 score tolerance consistently for response-direction diagnostics.
+- Validate on saved actual models, actual native-grid crops, actual spatial
+  rows and real-file preflight; no full research workflow is executed.
+
 # castSDM 0.31.0
 
 - Replace the capped selector with binomial elastic net on linear/quadratic

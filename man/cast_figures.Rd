@@ -21,7 +21,8 @@ cast_figures(
   dpi = 600,
   resources = list(),
   verbose = TRUE,
-  formats = c("png", "pdf")
+  formats = c("png", "pdf"),
+  response_method = c("ale", "pdp")
 )
 }
 \arguments{
@@ -46,7 +47,9 @@ models/weights and extrapolation policy.}
 
 \item{include}{\code{"all"} (default), exact figure names, or numbered prefixes
 such as \code{c("01", "02", "07")}. All available raster layers and all
-requested futures are included in the default supplementary atlases.}
+requested futures are included in the default supplementary atlases.
+Presets \code{basic}, \code{maps}, \code{responses}, \code{drivers}, and \code{novelty} compute only
+required products. \code{all} exports these phases progressively.}
 
 \item{render_only}{Require an existing matching numerical figure-data
 bundle. No fitting, diagnostic prediction or response calculation occurs.}
@@ -72,6 +75,8 @@ standard PDF/Helvetica. The selected backend/font is recorded.}
 \item{formats}{Export formats. Defaults to \code{c("png", "pdf")} to preserve the
 established collection. Optional \code{"svg"} (requires \code{svglite}) and \code{"tiff"}
 reuse the same layout; no duplicate diagnostic calculations are needed.}
+
+\item{response_method}{Published ALE (default, iml) or the original PDP.}
 }
 \value{
 A \code{cast_figures} list with \code{status}, \code{requested}, \code{tables}, \code{data_file}, output

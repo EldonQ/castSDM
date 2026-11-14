@@ -93,27 +93,33 @@
 
 .cast_figure_data <- function(object, comparison, scenario, directory,
     current = NULL, future = NULL, attribution = NULL, render_only = FALSE,
-    response_grid = 50L, display_resolution = .02, resources = list(), verbose = TRUE) {
+    response_grid = 50L, display_resolution = .02, resources = list(), verbose = TRUE,
+    products = c("maps", "responses", "attribution", "mess"), response_method = "ale") {
   fit <- object$fit_full %||% object$fit
   .cast_check_fit(fit)
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
   bundle_path <- file.path(directory, "figure_data.rds")
   provenance <- comparison$provenance
   provenance$session <- NULL
-  base_key <- .cast_digest(list(schema = "cast_figure_data/2", .cast_fit_identity(fit), provenance,
+  base_key <- .cast_digest(list(schema = "cast_figure_data/3", .cast_fit_identity(fit), provenance,
     object[c("screen", "cv", "eval")], object$protocol$clamp,
     comparison$weights, comparison$threshold, comparison$threshold_sensitivity,
-    scenario, response_grid, display_resolution,
+    scenario, response_grid, display_resolution, response_method,
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
     .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision)))
   old <- if (file.exists(bundle_path)) tryCatch(readRDS(bundle_path), error = function(e) NULL) else NULL
   valid_old <- !is.null(old) && identical(old$key, base_key) &&
     !is.null(.cast_cache_read(bundle_path, base_key))
-  if (valid_old && is.null(attribution)) {
+  verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
+    !is.null(current) && !is.null(future)
+  products <- union(products, if (valid_old) old$value$products)
+  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$value$products)) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
     return(old$value)
   }
+  if (valid_old && is.null(attribution) && !verify_raw && "attribution" %in% old$value$products)
+    attribution <- old$value$attribution
   if (render_only) cli::cli_abort("A matching figure-data cache is missing. Run once with render_only = FALSE to compute frozen-model diagnostic products.")
   budget <- .cast_resources(resources)
   previous <- options(castSDM.predict_threads = budget$cores)
@@ -158,14 +164,20 @@
     .cast_cache_write(value, path, key, artifact)
     value
   }
-  response_key <- .cast_digest(list(.cast_fit_identity(fit), response_grid,
-    object$protocol$clamp, .cast_code_identity(cast_response_curves)))
-  if (verbose) cli::cli_inform("Response products: fixed profiles and partial dependence for all {length(fit$env_vars)} predictors (cached separately from rendering).")
-  responses <- cached("responses", response_key, list(
-    fixed = cast_response_curves(fit, type = "fixed", grid_size = response_grid,
-      clamp = object$protocol$clamp %||% TRUE),
-    pdp = cast_response_curves(fit, type = "pdp", grid_size = response_grid,
-      clamp = object$protocol$clamp %||% TRUE)))
+  responses <- NULL
+  if ("responses" %in% products) {
+    response_key <- .cast_digest(list(.cast_fit_identity(fit), response_grid,
+      object$protocol$clamp, .cast_code_identity(cast_response_curves)))
+    response_key <- .cast_digest(list(response_key, response_method))
+    if (verbose) cli::cli_inform("Response curves: fixed profiles and {toupper(response_method)}; checking verified cache.")
+    responses <- cached(paste0("responses_", response_method), response_key, {
+      value <- list(fixed = cast_response_curves(fit, type = "fixed", grid_size = response_grid,
+        clamp = object$protocol$clamp %||% TRUE))
+      value[[response_method]] <- cast_response_curves(fit, type = response_method,
+        grid_size = response_grid, clamp = object$protocol$clamp %||% TRUE)
+      value
+    })
+  }
   outputs <- character(); displays <- list(); classes <- list(); notes <- list()
   note <- function(product, reason) notes[[length(notes)+1L]] <<-
     data.frame(product = product, reason = reason)
@@ -180,7 +192,7 @@
     future <- future[[fit$env_vars]]
   }
   report <- comparison$results[[scenario]]
-  if (is.null(attribution) && !is.null(current) && !is.null(future)) {
+  if ("attribution" %in% products && is.null(attribution) && !is.null(current) && !is.null(future)) {
     if (verbose) cli::cli_inform("Preparing reporting-scenario driver maps; reuse requires matching models, inputs, mask and settings.")
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
@@ -194,7 +206,7 @@
   }
   if (is.null(attribution)) note("03_environmental_driver", "Current/future predictor inputs or an existing cast_attribution object are required.")
   mess <- NULL
-  if (!is.null(current) && !is.null(future) && !is.null(report$raster_file)) {
+  if ("mess" %in% products && !is.null(current) && !is.null(future) && !is.null(report$raster_file)) {
     path <- file.path(directory, "mess_native.tif")
     memo <- new.env(parent = emptyenv())
     key <- .cast_digest(list(.cast_fit_identity(fit), .cast_data_identity(current, memo),
@@ -202,7 +214,7 @@
     mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path), path)
     outputs <- c(outputs, mess)
   } else note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
-  for (s in names(comparison$results)) {
+  for (s in if ("maps" %in% products) names(comparison$results) else character()) {
     result <- comparison$results[[s]]
     if (is.null(result$raster_file)) next
     if (verbose) cli::cli_inform("Preparing display grid: {s} (original scientific raster unchanged).")
@@ -214,7 +226,6 @@
         .cast_figure_classes(result, comparison$threshold, path), path)
       outputs <- c(outputs, classes[[s]]); input <- c(input, classes[[s]])
     }
-    if (s == scenario && !is.null(mess)) input <- c(input, mess)
     path <- file.path(directory, paste0("display_", s, ".tif"))
     key <- .cast_digest(list(unname(tools::md5sum(input)),
       display_resolution, .cast_code_identity(.cast_figure_display)))
@@ -222,6 +233,15 @@
       .cast_figure_display(input, path, display_resolution), path)
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
+  }
+  mess_display <- NULL
+  if (!is.null(mess)) {
+    path <- file.path(directory, "display_mess.tif")
+    key <- .cast_digest(list(unname(tools::md5sum(mess)), display_resolution,
+      .cast_code_identity(.cast_figure_display)))
+    mess_display <- cached("display_mess", key,
+      .cast_figure_display(mess, path, display_resolution), path)
+    outputs <- c(outputs, mess_display)
   }
   attribution_display <- NULL
   if (!is.null(attribution$raster_file)) {
@@ -237,7 +257,7 @@
   if (is.null(info) && !is.null(split$train) && length(object$cv$folds) == nrow(split$train))
     info <- data.frame(fold = object$cv$folds, lon = split$train$lon, lat = split$train$lat,
       obs = split$train$presence)
-  crs <- if (!is.null(report$raster_file)) terra::crs(terra::rast(report$raster_file)) else NULL
+  crs <- object$protocol$coords_crs %||% if (!is.null(report$raster_file)) terra::crs(terra::rast(report$raster_file)) else NULL
   if (!is.null(info) && any(abs(info$lon) > 180 | abs(info$lat) > 90)) {
     if (is.null(crs) || !nzchar(crs)) cli::cli_abort("Projected fold coordinates require a raster CRS for geographic maps.")
     p <- sf::st_as_sf(info, coords = c("lon", "lat"), crs = crs)
@@ -246,11 +266,15 @@
   thresholds <- summary(comparison, thresholds = unique(c(comparison$threshold, .3, .5, .7)))
   origin_path <- file.path(object$output_dir %||% "", "manifest.rds")
   origin <- if (file.exists(origin_path)) readRDS(origin_path) else NULL
-  data <- list(schema = "cast_figure_data/2", screen = object$screen, cv = object$cv,
+  completed <- products
+  if (is.null(attribution)) completed <- setdiff(completed, "attribution")
+  if (is.null(mess)) completed <- setdiff(completed, "mess")
+  if (!length(displays)) completed <- setdiff(completed, "maps")
+  data <- list(schema = "cast_figure_data/3", analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,
-    displays = displays, range_files = classes, thresholds = thresholds,
+    displays = displays, mess_display = mess_display, range_files = classes, thresholds = thresholds,
     scenario = scenario, variables = fit$env_vars, model_names = names(fit$models),
     response_reference_n = nrow(fit$scaling$reference), pdp_reference_n = min(2000L, nrow(fit$scaling$reference)),
     notes = if (length(notes)) do.call(rbind, notes), display_resolution = display_resolution,
@@ -260,4 +284,34 @@
   sibling <- outputs[file.exists(outputs) & dirname(outputs) == directory]
   .cast_cache_write(data, bundle_path, base_key, unique(sibling))
   data
+}
+
+# Public presets and individual names share the same dependency resolver.
+.cast_figure_choose <- function(include, inventory) {
+  if (!is.character(include) || !length(include) || anyNA(include))
+    cli::cli_abort("include must name figure presets or individual figures.")
+  unique(unlist(lapply(include, function(x) {
+    if (x == "all") return(inventory)
+    pattern <- switch(x,
+      basic = "^(01_|07_|11_|12_|13_|15_|S_selection_)",
+      maps = "^(02_|04_|05_|08_|10_|S_(?!selection_))",
+      responses = "^(06_|14_)", drivers = "^(03_|D_)", novelty = "^09_", NULL)
+    if (!is.null(pattern)) return(grep(pattern, inventory, value = TRUE, perl = TRUE))
+    inventory[inventory == x | startsWith(inventory, paste0(x, "_"))]
+  }), use.names = FALSE))
+}
+
+.cast_figure_products <- function(include) {
+  if (!is.character(include) || !length(include) || anyNA(include))
+    cli::cli_abort("include must name figure presets or individual figures.")
+  if ("all" %in% include) return(c("maps", "responses", "attribution", "mess"))
+  out <- character()
+  for (x in include) {
+    if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
+        (startsWith(x, "S_") && !startsWith(x, "S_selection")) || x == "S") out <- c(out, "maps")
+    if (x == "responses" || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
+    if (x == "drivers" || grepl("^03(_|$)|^D_", x)) out <- c(out, "attribution")
+    if (x == "novelty" || grepl("^09(_|$)", x)) out <- c(out, "mess")
+  }
+  unique(out)
 }

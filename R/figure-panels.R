@@ -269,14 +269,14 @@
       "Baseline effects compare each partial scenario with current. Interaction = joint - first-only - second-only + current. Model-conditional contrasts, not identified ecological causation. Inspect average and conditional effects in the supplementary atlases.")
   }, 150, !is.null(path) && !is.null(cmp$binary))
   add("06_response_curves", function() {
-    p <- plot(data$responses$pdp, ensemble = FALSE) +
+    p <- plot(data$responses$ale %||% data$responses$pdp, ensemble = FALSE) +
       ggplot2::facet_wrap(~variable, scales = "free", ncol = 3,
         labeller = ggplot2::as_labeller(.cast_figure_variable_labels)) +
-      ggplot2::labs(title = "Partial-dependence response curves",
+      ggplot2::labs(title = if (!is.null(data$responses$ale)) "Accumulated local effects" else "Partial-dependence response curves",
         subtitle = sprintf("All %d fitted predictors; deterministic %d-row training reference", length(data$variables), data$pdp_reference_n),
-        caption = .cast_figure_wrap("Individual engine curves are unweighted. Correlated predictors can create unsupported combinations. Model-implied profiles are not causal effects."))
+        caption = .cast_figure_wrap(if (!is.null(data$responses$ale)) "Published ALE (iml): observed local changes are accumulated and centred. Curves describe fitted score responses, not causal effects." else "Individual engine curves are unweighted. Correlated predictors can create unsupported combinations. Model-implied profiles are not causal effects."))
     p + .cast_figure_theme()
-  }, max(110, ceiling(length(data$variables)/3)*39), !is.null(data$responses$pdp))
+  }, max(110, ceiling(length(data$variables)/3)*39), !is.null(data$responses$ale %||% data$responses$pdp))
   add("07_model_performance", function() .cast_figure_performance(data), 100,
     !is.null(data$curves) && !is.null(data$reliability))
   add("08_range_change_class", function() {
@@ -290,11 +290,11 @@
       sprintf("Classification uses native-grid current/future scores >= %.6g before any display reprojection. Supported-domain panels exclude unsupported cells; the full domain retains them.", cmp$threshold))
   }, 105, !is.null(path) && "range_class" %in% names(terra::rast(path)))
   add("09_extrapolation_mess", function() {
-    patchwork::wrap_plots(map("novel_current", "Current environmental novelty", "novelty", legend = "MESS < 0"),
-      map("novel_future", "Future environmental novelty", "novelty", legend = "MESS < 0"), ncol = 2) +
+    patchwork::wrap_plots(map("novel_current", "Current environmental novelty", "novelty", legend = "MESS < 0", source = data$mess_display),
+      map("novel_future", "Future environmental novelty", "novelty", legend = "MESS < 0", source = data$mess_display), ncol = 2) +
       .cast_figure_annotation("Environmental novelty beyond the training envelope",
         "MESS is calculated on original native-grid predictors. MESS < 0 indicates at least one out-of-range predictor. This is distinct from marginal quantile support and multivariate AOA.")
-  }, 110, !is.null(path) && "novel_current" %in% names(terra::rast(path)),
+  }, 110, !is.null(data$mess_display),
     "Raw predictor stacks or a saved MESS diagnostic product are required.")
   add("10_future_suitability", function() {
     plots <- lapply(names(data$displays), function(s) map("joint", .cast_figure_scenario_label(s),

@@ -16,3 +16,9 @@ The input data must be obtained lawfully. This is opt-in: CI has no authorised
 copy of the author's environmental/occurrence library. A passing engineering
 check is not an independent ecological validation or a completed case study.
 Legacy simulated unit fixtures in other test files are not run for this release.
+
+
+`maintenance.R <actual-case> <QA-directory>` verifies a real native-grid crop,
+frozen GAM shortcut parity, controlled cancellation/resume, prediction-free
+basic plots and published ALE. Keep the QA directory outside the input case.
+No study-wide fitting or national scenario projection is executed.

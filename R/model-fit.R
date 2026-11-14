@@ -40,7 +40,10 @@
 #'   The shift makes the weighted mean training score equal to the target;
 #'   it does not calibrate ecological occurrence probabilities. Native and
 #'   shifted OOF diagnostics are retained by [cast_cv()] and [cast_diagnose()].
-#' @param num_threads Integer. Threads for the Random Forest learner. Default
+#' @param gam_backend `"bam"` (default: mgcv discrete fREML) or
+#'   `"gam"` (previous REML fit). The faster backend is a distinct, recorded
+#'   fitting policy; it is not asserted to reproduce an existing fit exactly.
+#' @param num_threads Integer. Threads for RF and the fast GAM backend. Default
 #'   `1` (safe under fold-parallel cross-validation; raise for a single fit).
 #' @param seed Integer or `NULL`. Base random seed.
 #' @param verbose Logical. Default `TRUE`.
@@ -56,7 +59,7 @@
 #'   clamps predictions internally; clamping to the training range is a
 #'   package-level decision (see [cast_predict()] and
 #'   [cast_ensemble_raster()], argument `clamp`).
-#' - **GAM**: [mgcv::gam()] with thin-plate splines.
+#' - **GAM**: [mgcv::bam()] (default) or [mgcv::gam()] with thin-plate splines.
 #'
 #' ## Hyperparameter grids (`tune = TRUE`)
 #' Small default grids, informed by the reference SDM toolkits (biomod2,
@@ -96,7 +99,8 @@ cast_fit <- function(data,
                      prevalence_target = NULL,
                      num_threads  = 1L,
                      seed         = NULL,
-                     verbose      = TRUE) {
+                     verbose      = TRUE, gam_backend = c("bam", "gam")) {
+  gam_backend <- match.arg(gam_backend)
   # Without this guard a matrix/tibble/NULL input reached `data[[response]]`
   # and produced an opaque low-level error -- or, for NULL, passed the
   # response check silently and fit on nothing.
@@ -206,6 +210,7 @@ cast_fit <- function(data,
   fitted_models <- list()
   for (mdl in models) {
     if (verbose) cli::cli_inform("Training {.val {mdl}}...")
+    engine_started <- proc.time()[["elapsed"]]
 
     # Per-engine hyperparameters; explicit overrides win, tuning replaces
     # whichever dimensions were not pinned down.
@@ -242,7 +247,7 @@ cast_fit <- function(data,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
                       rf_mtry = p_rf_mtry,
-                      case_weights = case_weights),
+                      case_weights = case_weights, gam_backend = gam_backend),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -251,6 +256,8 @@ cast_fit <- function(data,
         ))
       }
     )
+    fitted_models[[mdl]]$fit_elapsed_s <- unname(proc.time()[["elapsed"]] - engine_started)
+    if (verbose) cli::cli_inform("{mdl}: fitted in {round(fitted_models[[mdl]]$fit_elapsed_s, 1)} s.")
     if (isTRUE(tune) && mdl %in% c("rf", "maxent") &&
         !is.null(tune_info)) {
       fitted_models[[mdl]]$tune <- tune_info
@@ -375,7 +382,7 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
                              maxent_classes = NULL,
                              maxent_regmult = NULL,
                              rf_mtry = NULL,
-                             case_weights = NULL) {
+                             case_weights = NULL, gam_backend = "bam") {
   switch(name,
     "rf" = {
       check_suggested("ranger", "for Random Forest")
@@ -414,29 +421,23 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
       # by an optional weighted training-score shift. The shift changes the
       # score origin; it is not equivalent to a weighted GAM fit or evidence
       # of probability calibration. RF's weighted sampling is a separate rule.
-      fallback_reason <- NULL
-      m <- tryCatch(
-        mgcv::gam(f, data = df, family = stats::binomial(),
-                  method = "REML", select = TRUE,
-                  control = mgcv::gam.control(maxit = 100L)),
-        error = function(e) {
-          fallback_reason <<- conditionMessage(e)
-          cli::cli_warn("GAM smooth fit failed ({e$message}); fitting a linear-only fallback. Inspect the fitted formula before interpreting responses.")
-          flin <- stats::as.formula(
-            paste("presence ~",
-                  paste(vapply(colnames(X), qname, character(1)),
-                        collapse = " + "))
-          )
-          mgcv::gam(flin, data = df, family = stats::binomial(),
-                    method = "REML", select = TRUE,
-                    control = mgcv::gam.control(maxit = 100L))
-        }
-      )
+      backend <- if (gam_backend == "bam") mgcv::bam else mgcv::gam
+      fit_gam <- function(formula) {
+        args <- list(formula = formula, data = df, family = stats::binomial(),
+          method = if (gam_backend == "bam") "fREML" else "REML", select = TRUE)
+        if (gam_backend == "bam") {
+          args$discrete <- any(grepl("^s\\(", attr(stats::terms(formula), "term.labels")))
+          args$nthreads <- as.integer(num_threads)
+        } else args$control <- mgcv::gam.control(maxit = 100L)
+        do.call(backend, args)
+      }
+      m <- fit_gam(f)
       if (!isTRUE(m$converged)) cli::cli_abort("GAM did not converge; no unconverged fit is accepted.")
       list(type = "traditional", model = m, name = "gam",
-        fit_policy = "unweighted binomial REML with optional later score shift",
-        fitted_formula = paste(deparse(stats::formula(m)), collapse = " "),
-        fallback_reason = fallback_reason)
+        fit_policy = paste("unweighted binomial", gam_backend,
+          if (gam_backend == "bam") "discrete fREML" else "REML"),
+        backend = gam_backend, fitted_formula = paste(deparse(f), collapse = " "),
+        num_threads = if (gam_backend == "bam") as.integer(num_threads) else 1L)
     }
   )
 }

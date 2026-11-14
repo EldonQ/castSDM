@@ -601,7 +601,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra", "rpart"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast031_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast032_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

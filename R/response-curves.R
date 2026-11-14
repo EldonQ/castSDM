@@ -14,7 +14,8 @@
 #'   marginalization. Default `NULL`: the training data stored in the fit.
 #'   Only the fitted predictors are used; missing values are imputed with
 #'   the training medians.
-#' @param type Character. `"fixed"` (default): all other predictors held at
+#' @param type Character. `"ale"` uses the published [iml::FeatureEffect]
+#'   implementation of centred accumulated local effects. `"fixed"` (default): all other predictors held at
 #'   their training median. `"pdp"`: predictions averaged over the training
 #'   background of the other predictors (partial dependence; more expensive).
 #' @param grid_size Integer >= 2. Points per variable curve. Default `50`.
@@ -50,7 +51,7 @@
 cast_response_curves <- function(fit,
                                  variables = NULL,
                                  data = NULL,
-                                 type = c("fixed", "pdp"),
+                                 type = c("fixed", "ale", "pdp"),
                                  grid_size = 50L,
                                  pair = NULL,
                                  pair_size = 25L,
@@ -99,7 +100,7 @@ cast_response_curves <- function(fit,
   # Deterministic cap on the pdp marginalization sample: equidistant rows
   # keep the average reproducible without a seed.
   pdp_cap <- 2000L
-  if (type == "pdp" && nrow(bg) > pdp_cap) {
+  if (type %in% c("ale", "pdp") && nrow(bg) > pdp_cap) {
     idx <- unique(floor(seq(1, nrow(bg), length.out = pdp_cap)))
     bg <- bg[idx, , drop = FALSE]
   }
@@ -124,7 +125,24 @@ cast_response_curves <- function(fit,
     )
   }
 
-  if (!is.null(pair)) {
+  if (type == "ale" && !is.null(pair)) cli::cli_abort("ALE currently supports one-variable curves; pair grids use fixed profiles.")
+  if (type == "ale") {
+    check_suggested("iml", "for the published accumulated local effects implementation")
+    predictors <- lapply(models, function(m) iml::Predictor$new(
+      model = fit$models[[m]], data = bg,
+      predict.function = function(model, newdata) predict_single_model(model, newdata, clamp = isTRUE(clamp))))
+    names(predictors) <- models
+    out_list <- lapply(variables, function(v) {
+      do.call(rbind, lapply(models, function(m) {
+        if (!.cast_is_varying(bg[[v]])) return(data.frame(variable = v,
+          value = bg[[v]][1L], model = m, prediction = NA_real_))
+        effect <- iml::FeatureEffect$new(predictors[[m]], feature = v,
+          method = "ale", grid.size = grid_size)$results
+        data.frame(variable = v, value = effect[[v]], model = m,
+          prediction = effect$.value, stringsAsFactors = FALSE)
+      }))
+    })
+  } else if (!is.null(pair)) {
     g1 <- seq(min(bg[[pair[1]]], na.rm = TRUE),
               max(bg[[pair[1]]], na.rm = TRUE), length.out = pair_size)
     g2 <- seq(min(bg[[pair[2]]], na.rm = TRUE),
@@ -183,6 +201,7 @@ cast_response_curves <- function(fit,
   out <- do.call(rbind, out_list)
   rownames(out) <- NULL
   class(out) <- c("cast_response", "data.frame")
+  attr(out, "response_type") <- type
   out
 }
 
@@ -199,6 +218,8 @@ cast_response_curves <- function(fit,
 #' @export
 plot.cast_response <- function(x, ..., ensemble = FALSE) {
   check_suggested("ggplot2", "for plotting")
+  ale <- identical(attr(x, "response_type"), "ale")
+  y_label <- if (ale) "Accumulated local effect (centred score)" else "Predicted suitability"
   if ("variable" %in% names(x)) {
     if (ensemble) {
       d <- do.call(rbind, lapply(split(x, x$variable), function(z) {
@@ -215,7 +236,7 @@ plot.cast_response <- function(x, ..., ensemble = FALSE) {
         ggplot2::geom_line(colour = "#256E92", linewidth = .5) +
         ggplot2::facet_wrap(~ .data$variable, scales = "free_x", ncol = 2,
           labeller = ggplot2::as_labeller(.cast_var_label)) +
-        ggplot2::labs(x = "Predictor value", y = "Predicted suitability", title = "Model response curves",
+        ggplot2::labs(x = "Predictor value", y = y_label, title = if (ale) "Accumulated local effects" else "Model response curves",
           caption = "Equal-weight model mean; band = model range, not a confidence interval. No smoothing.") +
         theme_cast(base_size = 8))
     }
@@ -227,8 +248,8 @@ plot.cast_response <- function(x, ..., ensemble = FALSE) {
       ggplot2::geom_line(linewidth = 0.8) +
       ggplot2::facet_wrap(~ .data$variable, scales = "free") +
       ggplot2::labs(
-        x = NULL, y = "Predicted suitability",
-        color = "Model", title = "Response curves"
+        x = NULL, y = y_label,
+        color = "Model", title = if (ale) "Accumulated local effects" else "Response curves"
       ) +
       ggplot2::scale_colour_manual(values = .cast_engine_colors(unique(x$model))) +
       theme_cast(base_size = 8)

@@ -14,7 +14,7 @@ connects independent ensemble evaluation to the scenario diagnostics.
 ```r
 install.packages("remotes")
 remotes::install_github("EldonQ/castSDM")
-install.packages(c("ranger", "maxnet", "mgcv", "glmnet", "pROC", "blockCV", "FNN", "sf", "terra"))
+install.packages(c("ranger", "maxnet", "mgcv", "glmnet", "iml", "pROC", "blockCV", "FNN", "sf", "terra"))
 ```
 
 ## Run from the interface
@@ -104,7 +104,7 @@ identification. Complex responses/interactions may be missed; correlated
 variables may substitute. Qualification, the full spatial risk curve and fold
 losses are saved. A null result is reported without forcing predictors.
 Version 0.31 requires a fresh analysis directory; old scientific fits cannot
-be resumed under the new selection rule.
+be resumed under a changed scientific protocol.
 OOF thresholds are fitted training-side settings: fold TSS/SEDI/kappa at that
 pooled threshold are descriptive, since the fold labels participate in choosing
 it. Assess the frozen threshold on the separate hold-out.
@@ -262,3 +262,18 @@ The [AI-assisted maintenance record](inst/AI_ASSISTANCE.md) identifies its scope
 ## License
 
 GPL (>= 3).
+
+
+Version 0.32 keeps the elastic-net selector and uses the source raster CRS for
+physical spatial blocks. Failed designs stop rather than changing strategy
+inside a fold. Native scores are the default; the previous weighted-mean shift
+is opt-in. GAM uses threaded mgcv::bam discrete fREML by default; gam_backend =
+"gam" retains the previous fit. These policies require a fresh analysis.
+
+Figure export is progressive: basic diagnostics, saved maps, response curves,
+driver maps, then novelty checks. `cast_figures(..., include = "basic")` never
+predicts; `include = "maps"` uses completed projections. `include = "responses"`
+uses published ALE from iml by default; response_method = "pdp" retains the
+original PDP. Full driver maps are optional via include = "drivers" and resume
+completed native-grid batches after interruption. All established map layouts
+and complete exports remain available via include = "all".

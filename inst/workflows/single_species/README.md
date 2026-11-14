@@ -22,7 +22,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast031_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast032_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。
@@ -58,7 +58,7 @@ Sys.unsetenv("CAST_DRY_RUN")
 筛选采用弹性网一次项、二次项，空间交叉验证按 1-SE 规则确定惩罚强度；不指定保留数量，不设置气候配额。
 编号、未编码的类别或方向编码先排除；统计筛选在训练侧及各外层 CV 折内重新执行。
 若未选中气候变量，保留训练结果并停止气候投影，明确说明模型不支持本次气候变化分析；不会强塞气候变量。
-0.31 更换了筛选规则及候选资格，必须重新运行；保留旧结果，不复用为新分析。
+0.32 修复了真实 CRS 和空间划分，并采用原生分数、快速 BAM 拟合，必须重新运行；保留旧结果，不复用为新分析。
 
 五个源 GCM 为 GFDL-ESM4、IPSL-CM6A-LR、MPI-ESM1-2-HR、MRI-ESM2-0、UKESM1-0-LL。
 交付数据按像元可用成员取均值，未提供逐像元成员数及模式方差。
@@ -80,3 +80,12 @@ Sys.unsetenv("CAST_DRY_RUN")
 
 已有完整结果可用 `04_REPLOT.R <case-directory>` 重新渲染；首次完整图集需要计算缓存的诊断数据。
 仅重绘使用既有图件数据，不重拟合。Shiny 打开本身不会执行完整分析。
+
+
+出图会依次完成基础诊断、已有地图、响应曲线、因子地图和 MESS；前面已完成的图可以先查看。
+总体响应默认用成熟的 ALE（iml），原有 PDP 可在配置中设 figure_response_method = "pdp"。
+原有中国底图、南海插图、PNG/PDF 布局和全部图集仍保留。
+单独重绘可设置 CAST_FIGURES 为 basic、maps、responses、drivers 或 novelty；默认 all。
+因子地图的栅格批次有可核验检查点，中断后使用同一输入和输出路径可复用已完成批次。
+空间分块从真实栅格自动传递 CRS，估计失败会明确停止；不再混用另一种分块。
+0.32 的新科学配置不接续旧训练；已有 0.31 冻结模型仍可用 04_REPLOT.R 出图，不必为出图重训。

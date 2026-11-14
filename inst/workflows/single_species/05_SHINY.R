@@ -15,7 +15,7 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, packages = c("castSDM", "terra", "ranger", "maxnet", "mgcv",
-    "shiny", "bslib", "leaflet", "callr", "rpart", "zip"), minimum_cast = "0.31.0")
+    "shiny", "bslib", "leaflet", "callr", "rpart", "zip"), minimum_cast = "0.32.0")
   sys.source(file.path(root, "01_config.R"), envir = environment())
   sys.source(file.path(root, "inventory.R"), envir = environment())
   configs <- castsdm_species_configs(root)
@@ -27,7 +27,7 @@ local({
   args <- commandArgs(TRUE)
   positional <- args[!startsWith(args, "--")]
   directory <- Sys.getenv("CAST_CASE_DIR", if (length(positional)) positional[1L] else
-    file.path(cfg$output_root, Sys.getenv("CAST_RUN_ID", "cast031_chelsa_ensmean"), taxon))
+    file.path(cfg$output_root, Sys.getenv("CAST_RUN_ID", "cast032_chelsa_ensmean"), taxon))
   dry <- identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% args
   app <- castSDM::cast_app(directory, workflow = file.path(root, "00_RUN_ALL.R"), run = !dry)
   if (dry) message("Shiny entry ready; no server, training or scenario computation started.")

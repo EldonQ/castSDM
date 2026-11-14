@@ -17,7 +17,8 @@ cast_select(
   inner_k = 5L,
   block_method = c("blockcv", "grid"),
   block_size = NULL,
-  fold_ids = NULL
+  fold_ids = NULL,
+  coords_crs = NULL
 )
 }
 \arguments{
@@ -49,6 +50,8 @@ Multiple scales of a construct are not forcibly reduced to one variable.}
 \item{block_size}{Optional spatial block size in metres.}
 
 \item{fold_ids}{Optional externally supplied spatial fold assignments.}
+
+\item{coords_crs}{Coordinate CRS, required for projected coordinates.}
 }
 \value{
 A \code{cast_select} with selected variables, qualification/reason table,

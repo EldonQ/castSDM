@@ -15,15 +15,10 @@
 #' cross-validation design, threshold and ensemble policy, extrapolation
 #' handling and reproducibility settings. Pass it to [cast_run()].
 #'
-#' Defaults are deliberate protocol choices, not recommendations for every
-#' data set: in particular `prevalence_target = 0.5` shifts every engine
-#' (including MaxEnt, whose fit accepts no row weights, via a stored
-#' logit-scale offset) to a common weighted training mean before ensembling.
-#' This does not establish probability calibration or improve every engine.
-#' Native and shifted OOF diagnostics support training-side assessment, and
-#' `clamp = TRUE` caps predictors to their training range at prediction
-#' time, so all engines extrapolate under the same rule. MESS and AOA
-#' diagnostics are reported alongside either way.
+#' Native engine scores are the default. An explicit `prevalence_target`
+#' requests a weighted training-mean score shift; it is not probability
+#' calibration. `clamp = TRUE` caps predictors to their training range.
+#' MESS, support and AOA remain distinct diagnostics.
 #'
 #' @param models Engines to fit: any of `"rf"`, `"maxent"`, `"gam"`.
 #'   Default all three.
@@ -32,7 +27,8 @@
 #' @param select_method `"screen"` (spatial elastic-net screen) or
 #'   `"full"` (keep every varying predictor). Default `"screen"`.
 #' @param select_inner_k Number of inner spatial folds for elastic-net penalty selection.
-#' @param holdout_blocks Number of blocks in the independent spatial hold-out.
+#' @param holdout_blocks Number of groups for explicit grid/environmental
+#'   hold-out. blockCV hold-out uses calibrated physical blocks.
 #' @param rf_ntree RF trees. Default `500`.
 #' @param rf_mtry RF `mtry` (`NULL` keeps the ranger default `sqrt(p)`).
 #' @param maxent_classes,maxent_regmult MaxEnt feature classes and
@@ -43,12 +39,12 @@
 #'   fold. Default `FALSE`.
 #' @param tune_folds Inner folds for the grid search. Default `3`.
 #' @param prevalence_target Numeric in (0, 1), or `NULL` for native engine
-#'   scores. Default `0.5`. See [cast_fit()] for weighting and score semantics.
+#'   scores (default). See [cast_fit()] for weighting and score semantics.
 #' @param cv_k Number of outer spatial folds. Default `5`.
 #' @param n_repeat Number of independent spatial-blocking repeats. Default `1`.
 #' @param block_method `"blockcv"` (default; blockCV spatial blocks with
-#'   attempted autocorrelation-range sizing; actual extent-grid fallback
-#'   recorded when unavailable), `"grid"` or `"env"` (see [cast_cv()]).
+#'   autocorrelation-range sizing), `"grid"` or `"env"` (see [cast_cv()]).
+#'   Missing CRS or failed designs stop instead of silently changing strategy.
 #' @param block_size Optional block edge length in metres for `"blockcv"`.
 #' @param buffer,buffer_unit Fold-boundary exclusion band for training rows
 #'   (see [cast_cv()]). Default `0`.
@@ -59,7 +55,11 @@
 #' @param clamp Clamp predictors to the training range at prediction time.
 #'   Default `TRUE` (applied uniformly to every engine; MESS/AOA flags are
 #'   computed on the unclamped input).
-#' @param num_threads Threads for the learners. Default `1`.
+#' @param num_threads Threads for RF and the fast GAM backend. Default `1`.
+#' @param coords_crs Coordinate reference system accepted by [sf::st_crs()].
+#'   Required for projected coordinates; geographic lon/lat default to EPSG:4326.
+#' @param gam_backend `"bam"` (default: discrete fREML, threaded) or
+#'   `"gam"` (the previous REML fit). These are distinct fitting policies.
 #' @param seed Base seed; every stage applies it locally without touching
 #'   the caller's RNG state.
 #'
@@ -79,7 +79,7 @@ cast_protocol <- function(
   threshold_method = "max_tss",
   tune = FALSE,
   tune_folds = 3L,
-  prevalence_target = 0.5,
+  prevalence_target = NULL,
   cv_k = 5L,
   n_repeat = 1L,
   block_method = c("blockcv", "grid", "env"),
@@ -95,7 +95,9 @@ cast_protocol <- function(
   clamp = TRUE,
   num_threads = 1L,
   seed = NULL,
-  holdout_blocks = 20L
+  holdout_blocks = 20L,
+  coords_crs = NULL,
+  gam_backend = c("bam", "gam")
 ) {
   # Multi-value defaults document the allowed choices; the first element is
   # the effective default (match.arg semantics).
@@ -106,6 +108,8 @@ cast_protocol <- function(
     select_method = first(select_method),
     select_inner_k = select_inner_k,
     holdout_blocks = holdout_blocks,
+    coords_crs = coords_crs,
+    gam_backend = first(gam_backend),
     rf_ntree = rf_ntree,
     rf_mtry = rf_mtry,
     maxent_classes = maxent_classes,
@@ -148,8 +152,10 @@ cast_protocol <- function(
   if (!is.list(p)) {
     cli::cli_abort("{.arg protocol} must be a {.cls cast_protocol} object from {.fun cast_protocol}.")
   }
-  # Older serialized protocols inherit the previous hold-out default.
+  # Preserve declared settings of serialized protocols; never change old fits.
   p$holdout_blocks <- p$holdout_blocks %||% 20L
+  if (!"coords_crs" %in% names(p)) p["coords_crs"] <- list(NULL)
+  p$gam_backend <- p$gam_backend %||% "gam"
   removed <- intersect(names(p), c("select_keep", "select_corcut", "select_ncov", "select_maxncov", "select_ensure_n"))
   if (length(removed)) cli::cli_abort("This protocol uses retired count/constrained screening settings: {.val {removed}}. Create a new cast_protocol(); old scientific results cannot be resumed as a new selection analysis.")
   required <- c(
@@ -184,6 +190,8 @@ cast_protocol <- function(
     }
     value
   }
+  p$gam_backend <- enum_value(p$gam_backend, "gam_backend", c("bam", "gam"))
+  .cast_check_coords_crs(p$coords_crs)
   p$select_method <- enum_value(p$select_method, "select_method",
                                 c("screen", "full"))
   p$select_inner_k <- .cast_check_scalar(p$select_inner_k,
@@ -265,7 +273,7 @@ print.cast_protocol <- function(x, ...) {
     "Engines: {fmt(x$models)}",
     "Split: train_fraction = {x$train_fraction}",
     "Selection: {x$select_method} (inner spatial folds = {x$select_inner_k}; no predictor-count target)",
-    "Engine settings: rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
+    "Engine settings: gam_backend = {x$gam_backend}; rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
     "Tuning: tune = {x$tune} (tune_folds = {x$tune_folds})",
     "Threshold: {x$threshold_method}; prevalence_target = {fmt(x$prevalence_target)}",
     "Spatial CV: k = {x$cv_k}; repeats = {x$n_repeat}; blocks = {x$block_method}; block_size = {fmt(x$block_size)}; buffer = {x$buffer} {x$buffer_unit}; aoa = {x$aoa}",

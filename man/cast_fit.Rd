@@ -18,7 +18,8 @@ cast_fit(
   prevalence_target = NULL,
   num_threads = 1L,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  gam_backend = c("bam", "gam")
 )
 }
 \arguments{
@@ -65,12 +66,16 @@ The shift makes the weighted mean training score equal to the target;
 it does not calibrate ecological occurrence probabilities. Native and
 shifted OOF diagnostics are retained by \code{\link[=cast_cv]{cast_cv()}} and \code{\link[=cast_diagnose]{cast_diagnose()}}.}
 
-\item{num_threads}{Integer. Threads for the Random Forest learner. Default
+\item{num_threads}{Integer. Threads for RF and the fast GAM backend. Default
 \code{1} (safe under fold-parallel cross-validation; raise for a single fit).}
 
 \item{seed}{Integer or \code{NULL}. Base random seed.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
+
+\item{gam_backend}{\code{"bam"} (default: mgcv discrete fREML) or
+\code{"gam"} (previous REML fit). The faster backend is a distinct, recorded
+fitting policy; it is not asserted to reproduce an existing fit exactly.}
 }
 \value{
 A \code{cast_fit} object containing fitted models and metadata. Each
@@ -92,7 +97,7 @@ detected in \code{data} are used.
 clamps predictions internally; clamping to the training range is a
 package-level decision (see \code{\link[=cast_predict]{cast_predict()}} and
 \code{\link[=cast_ensemble_raster]{cast_ensemble_raster()}}, argument \code{clamp}).
-\item \strong{GAM}: \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
+\item \strong{GAM}: \code{\link[mgcv:bam]{mgcv::bam()}} (default) or \code{\link[mgcv:gam]{mgcv::gam()}} with thin-plate splines.
 }
 }
 

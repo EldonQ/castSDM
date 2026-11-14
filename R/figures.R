@@ -75,8 +75,11 @@
 #' @param include `"all"` (default), exact figure names, or numbered prefixes
 #'   such as `c("01", "02", "07")`. All available raster layers and all
 #'   requested futures are included in the default supplementary atlases.
+#' Presets `basic`, `maps`, `responses`, `drivers`, and `novelty` compute only
+#' required products. `all` exports these phases progressively.
 #' @param render_only Require an existing matching numerical figure-data
 #'   bundle. No fitting, diagnostic prediction or response calculation occurs.
+#' @param response_method Published ALE (default, iml) or the original PDP.
 #' @param response_grid Response-curve grid size, default `50`. Partial
 #'   dependence uses [cast_response_curves()]' declared deterministic reference
 #'   cap of 2,000 rows; every fitted predictor and engine is retained.
@@ -113,7 +116,11 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     future = NULL, attribution = NULL, basemap = c("world", "china", "none"),
     include = "all", render_only = FALSE, response_grid = 50L,
     display_resolution = .02, width_mm = 183, dpi = 600,
-    resources = list(), verbose = TRUE, formats = c("png", "pdf")) {
+    resources = list(), verbose = TRUE, formats = c("png", "pdf"),
+    response_method = c("ale", "pdp")) {
+  response_method <- match.arg(response_method)
+
+  products <- .cast_figure_products(include)
   if (!inherits(object, "cast_result") || !inherits(comparison, "cast_comparison"))
     cli::cli_abort("Supply a cast_result and its cast_comparison.")
   if (!is.character(scenario) || length(scenario) != 1L || !scenario %in% names(comparison$results))
@@ -141,8 +148,35 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   if (!is.null(attribution) && (!inherits(attribution, "cast_attribution") ||
       !identical(attribution$weights, comparison$weights)))
     cli::cli_abort("attribution must be a cast_attribution with the comparison's frozen model weights.")
+  requested_drivers <- include[startsWith(include, "D_")]
+  known_drivers <- paste0("D_", attribution$drivers %||% unlist(comparison$groups, use.names = FALSE))
+  if (length(setdiff(requested_drivers, known_drivers)))
+    cli::cli_abort("Unknown driver figure: {.val {setdiff(requested_drivers, known_drivers)}}. Choose a fitted scenario driver or include = 'drivers'.")
   if (is.null(output_dir)) output_dir <- if (!is.null(object$output_dir))
     file.path(dirname(object$output_dir), "figures") else tempfile("cast-figures-")
+  if (identical(include, "all") && !render_only) {
+    phase_errors <- character()
+    for (phase in c("basic", "maps", "responses", "drivers", "novelty")) {
+      if (verbose) cli::cli_inform("Figure phase: {phase}; earlier exports remain available.")
+      value <- tryCatch(cast_figures(object, comparison, output_dir, scenario, current, future,
+        attribution, basemap, include = phase, render_only = FALSE,
+        response_grid = response_grid, display_resolution = display_resolution,
+        width_mm = width_mm, dpi = dpi, resources = resources, verbose = verbose,
+        formats = formats, response_method = response_method), error = identity)
+      if (inherits(value, "error")) {
+        phase_errors <- c(phase_errors, paste0(phase, ": ", conditionMessage(value)))
+        if (verbose) cli::cli_inform("Figure phase {phase} failed; other available products will still be exported.")
+      } else result <- value
+    }
+    if (length(phase_errors)) cli::cli_abort(c(
+      "Figure phases failed: {paste(phase_errors, collapse = '; ')}",
+      i = "Successful exports and numerical checkpoints are retained."))
+    result$requested <- result$inventory$figure
+    lock <- .cast_lock(file.path(result$output_dir, ".figures.lock"))
+    tryCatch(.cast_atomic_rds(result, file.path(result$output_dir, "figure_manifest.rds")),
+      finally = filelock::unlock(lock))
+    return(invisible(result))
+  }
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
   lock <- .cast_lock(file.path(output_dir, ".figures.lock"))
@@ -155,13 +189,11 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   data_dir <- file.path(output_dir, ".data")
   data <- .cast_figure_data(object, comparison, scenario, data_dir,
     current, future, attribution, render_only, response_grid,
-    display_resolution, resources, verbose)
+    display_resolution, resources, verbose, products = products, response_method = response_method)
   registry <- .cast_figure_registry(data, basemap)
   if (!is.character(include) || !length(include) || anyNA(include))
     cli::cli_abort("include must be 'all', figure names or numbered prefixes.")
-  selected <- if (identical(include, "all")) names(registry) else names(registry)[
-    vapply(names(registry), function(name) any(vapply(include, function(i)
-      identical(i, name) || startsWith(name, paste0(i, "_")), logical(1))), logical(1))]
+  selected <- .cast_figure_choose(include, names(registry))
   if (!length(selected)) cli::cli_abort("No requested figure names match the inventory.")
   table_dir <- file.path(output_dir, "source_data")
   dir.create(table_dir, showWarnings = FALSE)
@@ -170,7 +202,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     holdout_metrics = data$diagnostics$holdout, oof_score_views = data$diagnostics$score_views_oof,
     metric_definitions = data$diagnostics$metric_definitions, diagnostic_notes = data$diagnostics$notes,
     roc_pr_curves = data$curves, reliability = data$reliability,
-    response_curves = as.data.frame(data$responses$pdp),
+    response_curves = as.data.frame(data$responses$ale %||% data$responses$pdp),
     fixed_profiles = as.data.frame(data$responses$fixed),
     factorial_summary = comparison$summary, factorial_binary = comparison$binary,
     factorial_binary_supported = comparison$binary_supported,
@@ -181,11 +213,11 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     model_weights = data.frame(model = names(comparison$weights), weight = as.numeric(comparison$weights)),
     figure_provenance = data.frame(key = c("training_software_version", "figure_software_version",
       "report_scenario", "native_binary_threshold", "display_resolution_degrees", "display_resampling",
-      "response_grid_size", "pdp_reference_rows", "full_training_reference_rows"),
+      "response_grid_size", "response_reference_rows", "full_training_reference_rows", "response_method"),
       value = c(data$training_version, data$source_version, scenario,
         comparison$threshold %||% NA_real_, display_resolution,
         "bilinear continuous; nearest categorical; native scientific rasters unchanged",
-        response_grid, data$pdp_reference_n, data$response_reference_n)),
+        response_grid, data$pdp_reference_n, data$response_reference_n, response_method)),
     unavailable_products = data$notes)
   if (identical(comparison$design, "paired")) {
     names(tables)[match(c("factorial_summary", "factorial_binary", "factorial_binary_supported"), names(tables))] <-
@@ -204,7 +236,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   data_md5 <- unname(tools::md5sum(file.path(data_dir, "figure_data.rds")))
   code_file <- file.path(getNamespaceInfo(asNamespace("castSDM"), "path"), "R", "castSDM.rdb")
   # Installed code is immutable for a run. Development namespaces always draw.
-  render_seed <- .cast_digest(list(data_md5, basemap, width_mm, dpi, font_family, pdf_device, as.character(getRversion()),
+  render_seed <- .cast_digest(list(data$analysis_key, basemap, width_mm, dpi, font_family, pdf_device, as.character(getRversion()),
     as.character(utils::packageVersion("castSDM")),
     if (file.exists(code_file)) unname(tools::md5sum(code_file)),
     vapply(c("ggplot2", "patchwork", "sf", "terra", "ragg", "svglite"), function(p)
@@ -222,7 +254,8 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       next
     }
     keys <- vapply(paths, function(path) .cast_digest(list(render_seed, name, spec$height_mm,
-      tools::file_ext(path))), character(1))
+      tools::file_ext(path), if (name == "03_environmental_driver" || startsWith(name, "D_")) .cast_digest(data$attribution),
+      if (name == "09_extrapolation_mess") unname(tools::md5sum(data$mess_display)))), character(1))
     reusable <- rep(FALSE, length(paths))
     previous_rows <- rep(NA_integer_, length(paths))
     if (file.exists(code_file) && is.data.frame(previous_status) &&
@@ -277,7 +310,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   status <- do.call(rbind, status); rownames(status) <- NULL
   # A subset re-render must not erase the export record for the other figures.
   # Restrict retained rows to the same numerical bundle and current inventory.
-  if (identical(previous_manifest$data_md5, data_md5) &&
+  if (identical(previous_manifest$analysis_key, data$analysis_key) &&
       is.data.frame(previous_manifest$status) &&
       identical(names(previous_manifest$status), names(status))) {
     retained <- previous_manifest$status[!previous_manifest$status$path %in% status$path &
@@ -291,6 +324,11 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     rownames(status) <- NULL
   }
   table_manifest <- if (length(table_rows)) do.call(rbind, table_rows) else data.frame()
+  if (identical(previous_manifest$analysis_key, data$analysis_key) &&
+      is.data.frame(previous_manifest$tables) && nrow(previous_manifest$tables)) {
+    retained <- previous_manifest$tables[!previous_manifest$tables$path %in% table_manifest$path, , drop = FALSE]
+    table_manifest <- rbind(retained, table_manifest)
+  }
   utils::write.csv(status, file.path(output_dir, "figure_status.csv"), row.names = FALSE)
   utils::write.csv(table_manifest, file.path(output_dir, "table_manifest.csv"), row.names = FALSE)
   inventory <- do.call(rbind, lapply(names(registry), function(name) data.frame(
@@ -298,10 +336,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   utils::write.csv(inventory, file.path(output_dir, "figure_inventory.csv"), row.names = FALSE)
   result <- structure(list(status = status, requested = selected, tables = table_manifest, inventory = inventory,
     output_dir = output_dir, data_file = file.path(data_dir, "figure_data.rds"),
-    data_md5 = data_md5,
+    data_md5 = data_md5, analysis_key = data$analysis_key,
     scenario = scenario, basemap = basemap, dpi = dpi, width_mm = width_mm, formats = formats,
     font_family = font_family, pdf_device = pdf_device,
-    display_resolution = display_resolution, render_only = render_only,
+    display_resolution = display_resolution, render_only = render_only, response_method = response_method,
     interpretation = "Frozen-model diagnostics; source scientific rasters are unchanged.",
     visual_QA = "not performed automatically"), class = "cast_figures")
   .cast_atomic_rds(result, manifest_path)

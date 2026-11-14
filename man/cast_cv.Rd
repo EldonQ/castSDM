@@ -31,7 +31,9 @@ cast_cv(
   maxent_regmult = NULL,
   num_threads = 1L,
   fold_ids = NULL,
-  clamp = FALSE
+  clamp = FALSE,
+  coords_crs = NULL,
+  gam_backend = c("bam", "gam")
 )
 }
 \arguments{
@@ -59,11 +61,9 @@ Cannot override \code{data}, \code{response}, or \code{method}.}
 (\code{\link[blockCV:cv_spatial]{blockCV::cv_spatial()}}) with square blocks. The block size follows
 the range of spatial autocorrelation estimated by
 \code{\link[blockCV:cv_spatial_autocor]{blockCV::cv_spatial_autocor()}} (Roberts et al. 2017), or the
-user-supplied \code{block_size}. If range estimation is unavailable, the
-blockCV extent-grid default is used with a warning and recorded as
-\code{blockcv_extent_grid}; no calibrated physical length is claimed.
-Falls back to \code{"grid"} with a warning when
-\pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
+user-supplied \code{block_size}. Projected coordinates require their real
+\code{coords_crs}. An unavailable range/design stops explicitly: no different
+blocking strategy is substituted within nested folds.
 \item \code{"grid"}: grid cells grouped into spatially contiguous folds via
 k-means on cell centroids (dependency-free fallback).
 \item \code{"env"}: k-means on the scaled predictor matrix, so every fold is
@@ -156,6 +156,10 @@ blocking; supplied assignments are returned unchanged.}
 \item{clamp}{Clamp each fold's test predictors to that fold's training
 range for all engines. Default \code{FALSE}; \code{\link[=cast_run]{cast_run()}} supplies its protocol.
 AOA continues to use original predictors.}
+
+\item{coords_crs}{Coordinate CRS, required for projected coordinates.}
+
+\item{gam_backend}{GAM fitting backend; see \code{\link[=cast_fit]{cast_fit()}}.}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.

@@ -16,7 +16,7 @@ cast_protocol(
   threshold_method = "max_tss",
   tune = FALSE,
   tune_folds = 3L,
-  prevalence_target = 0.5,
+  prevalence_target = NULL,
   cv_k = 5L,
   n_repeat = 1L,
   block_method = c("blockcv", "grid", "env"),
@@ -32,7 +32,9 @@ cast_protocol(
   clamp = TRUE,
   num_threads = 1L,
   seed = NULL,
-  holdout_blocks = 20L
+  holdout_blocks = 20L,
+  coords_crs = NULL,
+  gam_backend = c("bam", "gam")
 )
 }
 \arguments{
@@ -63,15 +65,15 @@ fold. Default \code{FALSE}.}
 \item{tune_folds}{Inner folds for the grid search. Default \code{3}.}
 
 \item{prevalence_target}{Numeric in (0, 1), or \code{NULL} for native engine
-scores. Default \code{0.5}. See \code{\link[=cast_fit]{cast_fit()}} for weighting and score semantics.}
+scores (default). See \code{\link[=cast_fit]{cast_fit()}} for weighting and score semantics.}
 
 \item{cv_k}{Number of outer spatial folds. Default \code{5}.}
 
 \item{n_repeat}{Number of independent spatial-blocking repeats. Default \code{1}.}
 
 \item{block_method}{\code{"blockcv"} (default; blockCV spatial blocks with
-attempted autocorrelation-range sizing; actual extent-grid fallback
-recorded when unavailable), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).}
+autocorrelation-range sizing), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).
+Missing CRS or failed designs stop instead of silently changing strategy.}
 
 \item{block_size}{Optional block edge length in metres for \code{"blockcv"}.}
 
@@ -87,12 +89,19 @@ recorded when unavailable), \code{"grid"} or \code{"env"} (see \code{\link[=cast
 Default \code{TRUE} (applied uniformly to every engine; MESS/AOA flags are
 computed on the unclamped input).}
 
-\item{num_threads}{Threads for the learners. Default \code{1}.}
+\item{num_threads}{Threads for RF and the fast GAM backend. Default \code{1}.}
 
 \item{seed}{Base seed; every stage applies it locally without touching
 the caller's RNG state.}
 
-\item{holdout_blocks}{Number of blocks in the independent spatial hold-out.}
+\item{holdout_blocks}{Number of groups for explicit grid/environmental
+hold-out. blockCV hold-out uses calibrated physical blocks.}
+
+\item{coords_crs}{Coordinate reference system accepted by \code{\link[sf:st_crs]{sf::st_crs()}}.
+Required for projected coordinates; geographic lon/lat default to EPSG:4326.}
+
+\item{gam_backend}{\code{"bam"} (default: discrete fREML, threaded) or
+\code{"gam"} (the previous REML fit). These are distinct fitting policies.}
 }
 \value{
 A \code{cast_protocol} object (a validated list). Use \code{print()} to see
@@ -105,15 +114,10 @@ cross-validation design, threshold and ensemble policy, extrapolation
 handling and reproducibility settings. Pass it to \code{\link[=cast_run]{cast_run()}}.
 }
 \details{
-Defaults are deliberate protocol choices, not recommendations for every
-data set: in particular \code{prevalence_target = 0.5} shifts every engine
-(including MaxEnt, whose fit accepts no row weights, via a stored
-logit-scale offset) to a common weighted training mean before ensembling.
-This does not establish probability calibration or improve every engine.
-Native and shifted OOF diagnostics support training-side assessment, and
-\code{clamp = TRUE} caps predictors to their training range at prediction
-time, so all engines extrapolate under the same rule. MESS and AOA
-diagnostics are reported alongside either way.
+Native engine scores are the default. An explicit \code{prevalence_target}
+requests a weighted training-mean score shift; it is not probability
+calibration. \code{clamp = TRUE} caps predictors to their training range.
+MESS, support and AOA remain distinct diagnostics.
 }
 \seealso{
 \code{\link[=cast_run]{cast_run()}}

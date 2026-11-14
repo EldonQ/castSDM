@@ -26,6 +26,7 @@
 #' @param block_method Spatial fold builder, `"blockcv"` or `"grid"`.
 #' @param block_size Optional spatial block size in metres.
 #' @param fold_ids Optional externally supplied spatial fold assignments.
+#' @param coords_crs Coordinate CRS, required for projected coordinates.
 #' @return A `cast_select` with selected variables, qualification/reason table,
 #'   spatial risk curve, fold losses and provenance. An empty selected set is
 #'   a valid intercept-only result; no variable is forced into the model.
@@ -52,7 +53,8 @@
 cast_select <- function(data, response = "presence", method = c("screen", "full"),
     seed = NULL, verbose = TRUE, env_vars = NULL, roles = NULL,
     var_id = NULL, category = NULL, inner_k = 5L,
-    block_method = c("blockcv", "grid"), block_size = NULL, fold_ids = NULL) {
+    block_method = c("blockcv", "grid"), block_size = NULL, fold_ids = NULL,
+    coords_crs = NULL) {
   if (missing(method)) method <- "screen"
   if (!is.character(method) || length(method) != 1L || is.na(method) ||
       !method %in% c("screen", "full")) cli::cli_abort("method must be screen or full.")
@@ -90,7 +92,7 @@ cast_select <- function(data, response = "presence", method = c("screen", "full"
   }
   check_suggested("glmnet", "for spatial elastic-net variable selection")
   inner_k <- .cast_check_scalar(inner_k, "inner_k", lower = 2, integer = TRUE)
-  folds <- .cast_selection_folds(data, response, fold_ids, inner_k, block_method, block_size, seed)
+  folds <- .cast_selection_folds(data, response, fold_ids, inner_k, block_method, block_size, seed, coords_crs)
   y <- as.integer(data[[response]])
   full_basis <- .cast_selection_basis(x)
   # glmnet's documented path floors depend on rows versus design columns.
@@ -181,12 +183,12 @@ cast_select <- function(data, response = "presence", method = c("screen", "full"
   fit
 }
 
-.cast_selection_folds <- function(data, response, ids, k, method, size, seed) {
+.cast_selection_folds <- function(data, response, ids, k, method, size, seed, coords_crs = NULL) {
   if (is.null(ids)) {
     if (!all(c("lon", "lat") %in% names(data)))
       cli::cli_abort("Automatic selection requires spatial coordinates or externally supplied spatial fold_ids.")
     ids <- make_spatial_folds(data$lon, data$lat, k = k, method = method,
-      seed = seed, y = data[[response]], block_size = size)
+      seed = seed, y = data[[response]], block_size = size, coords_crs = coords_crs)
   }
   if (!is.numeric(ids) || length(ids) != nrow(data) || any(!is.finite(ids)) ||
       any(ids != as.integer(ids)) || length(unique(ids)) < 2L)

@@ -234,3 +234,23 @@ Remaining issues need evidence rather than extra screening machinery:
   needs matched comparisons showing whether background/support/model
   diagnostics change a useful SDM interpretation, plus real usability and
   reproducibility evidence. A clean package check does not establish MEE fit.
+
+
+## 0.32.0 engineering changes
+
+The package now carries the actual raster CRS into physical blockCV designs
+and preserves boundaries. Failed nested designs stop rather than changing the
+validation strategy. Native engine scores are the default; threaded discrete
+bam/fREML is a recorded alternative fitting policy, with the old gam backend
+retained. A fresh analysis is required; saved 0.31 metrics retain their original
+validation and scoring limitations.
+
+Frozen-model optimisation is verified separately: additive GAM reuse supports
+ordinary numeric/binary linear terms, while discrete bam retains its native
+prediction path. Scenario tasks are dispatched individually. Figure products
+are dependency-aware and exported progressively; published iml ALE is the
+default curve, and the original PDP remains optional. Interrupted response-map
+batches are verified and resumed. Actual saved models, spatial rows and native
+grid crops support engineering checks, not a new ecological validation or a
+claim of causal identification. Matched software comparisons and full real-case
+assessment of the new protocol remain author-run publication work.

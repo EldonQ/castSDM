@@ -8,7 +8,7 @@ cast_response_curves(
   fit,
   variables = NULL,
   data = NULL,
-  type = c("fixed", "pdp"),
+  type = c("fixed", "ale", "pdp"),
   grid_size = 50L,
   pair = NULL,
   pair_size = 25L,
@@ -28,7 +28,8 @@ marginalization. Default \code{NULL}: the training data stored in the fit.
 Only the fitted predictors are used; missing values are imputed with
 the training medians.}
 
-\item{type}{Character. \code{"fixed"} (default): all other predictors held at
+\item{type}{Character. \code{"ale"} uses the published \link[iml:FeatureEffect]{iml::FeatureEffect}
+implementation of centred accumulated local effects. \code{"fixed"} (default): all other predictors held at
 their training median. \code{"pdp"}: predictions averaged over the training
 background of the other predictors (partial dependence; more expensive).}
 

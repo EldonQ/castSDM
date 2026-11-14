@@ -12,7 +12,9 @@ cast_prepare(
   split = c("spatial", "stratified", "random"),
   block_method = c("blockcv", "grid", "env"),
   n_blocks = 20L,
-  verbose = TRUE
+  verbose = TRUE,
+  coords_crs = NULL,
+  block_size = NULL
 )
 }
 \arguments{
@@ -39,11 +41,15 @@ auto-detection picks up metadata columns (e.g., occurrence indicators).}
 in environmental space; Roberts et al. 2017-style environmental
 blocking). See \code{\link[=cast_cv]{cast_cv()}}.}
 
-\item{n_blocks}{Integer. Number of spatial blocks to form before assigning
-whole blocks to the test set. Default \code{20}.}
+\item{n_blocks}{Number of groups for explicit grid/environmental blocking,
+default \code{20}. blockCV hold-out uses its calibrated physical blocks.}
 
 \item{verbose}{Logical. Print detected variables and excluded columns.
 Default \code{TRUE}.}
+
+\item{coords_crs}{Coordinate CRS, required for projected coordinates.}
+
+\item{block_size}{Optional physical block size in metres.}
 }
 \value{
 A list with components:

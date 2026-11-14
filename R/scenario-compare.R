@@ -334,7 +334,7 @@
     error = function(e) stop("Scenario ", job$scenario, ": ", conditionMessage(e), call. = FALSE))
   task <- utils::removeSource(task)
   environment(task) <- baseenv()
-  parallel::parLapplyLB(cl, jobs, task)
+  parallel::parLapplyLB(cl, jobs, task, chunk.size = 1L)
 }
 
 # No synthetic threshold or per-pixel weight renormalisation in comparisons.

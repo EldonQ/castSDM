@@ -1,8 +1,14 @@
 # AI-assisted development (2026-11-13); see inst/AI_ASSISTANCE.md.
 # Compare actual scenario responses on the same supported locations.
 
+.cast_response_sign <- function(x) {
+  out <- sign(x)
+  out[is.finite(x) & abs(x) <= 1e-12] <- 0
+  out
+}
+
 .cast_response_direction <- function(only, retained) {
-  a <- sign(only); b <- sign(retained)
+  a <- .cast_response_sign(only); b <- .cast_response_sign(retained)
   out <- rep(NA_integer_, length(a))
   ok <- is.finite(a) & is.finite(b)
   out[ok & a == 0 & b == 0] <- 0L

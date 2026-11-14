@@ -188,8 +188,10 @@ cast_vif <- function(data,
 #'   `"env"` (k-means on the scaled predictor matrix, so blocks are contiguous
 #'   in environmental space; Roberts et al. 2017-style environmental
 #'   blocking). See [cast_cv()].
-#' @param n_blocks Integer. Number of spatial blocks to form before assigning
-#'   whole blocks to the test set. Default `20`.
+#' @param n_blocks Number of groups for explicit grid/environmental blocking,
+#'   default `20`. blockCV hold-out uses its calibrated physical blocks.
+#' @param coords_crs Coordinate CRS, required for projected coordinates.
+#' @param block_size Optional physical block size in metres.
 #' @param verbose Logical. Print detected variables and excluded columns.
 #'   Default `TRUE`.
 #'
@@ -211,7 +213,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          env_vars = NULL,
                          split = c("spatial", "stratified", "random"),
                          block_method = c("blockcv", "grid", "env"),
-                         n_blocks = 20L, verbose = TRUE) {
+                         n_blocks = 20L, verbose = TRUE, coords_crs = NULL, block_size = NULL) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
   # Documented as a fraction; unenforced, 0 built an empty training set and 1
@@ -298,7 +300,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   n <- nrow(data)
   sp <- .cast_with_seed(seed,
     .cast_holdout_split(data, train_fraction, split, block_method,
-                        as.integer(n_blocks), "presence", verbose))
+                        as.integer(n_blocks), "presence", verbose, coords_crs, block_size))
   train_idx <- sp$train
   if (verbose) {
     cli::cli_inform(
@@ -356,7 +358,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
 #' @keywords internal
 #' @noRd
 .cast_holdout_split <- function(data, train_fraction, split, block_method,
-                                n_blocks, response, verbose) {
+                                n_blocks, response, verbose, coords_crs = NULL, block_size = NULL) {
   n <- nrow(data)
   has_coords <- all(c("lon", "lat") %in% names(data)) &&
     is.numeric(data$lon) && is.numeric(data$lat)
@@ -391,19 +393,21 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     cand <- cand[vapply(data[cand], is.numeric, logical(1))]
     as.matrix(data[, cand, drop = FALSE])
   } else NULL
-  blocks <- tryCatch(
-    make_spatial_folds(data$lon, data$lat, k = n_blocks, method = block_method,
-                       env = env_block, y = y),
-    error = function(e) NULL
-  )
+  blocks <- make_spatial_folds(data$lon, data$lat, k = if (block_method == "blockcv") 2L else n_blocks,
+                       method = block_method, env = env_block, y = y,
+                       block_size = block_size, coords_crs = coords_crs)
   if (is.null(blocks) || length(unique(blocks)) < 2L) {
     cli::cli_abort("Spatial blocking failed; no random/stratified hold-out is substituted. Review coordinates and the spatial design.")
   }
+  design <- attr(blocks, "design")
+  # Hold out physical blocks, not arbitrary groups formed only to reach k.
+  # blockCV's two-fold assignment is used only to construct its block geometry.
+  if (block_method == "blockcv") blocks <- design$block_ids
   ub <- sample(unique(blocks))
   target_test <- round((1 - train_fraction) * n)
   # Greedy block pick minimising |test size - target|: a block is added only
-  # when it brings the running total closer to the target, so the final
-  # hold-out fraction does not overshoot the requested one.
+  # when it brings the running total closer to the target. Whole blocks can
+  # make the achieved fraction differ from the requested one.
   test_blocks <- integer(0)
   cur_test <- 0L
   for (b in ub) {
@@ -421,9 +425,13 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   if (!length(train_idx) || !length(test_idx) || !ok_classes) {
     cli::cli_abort("The spatial hold-out cannot preserve both response classes. Review the spatial design; no random split is substituted.")
   }
+  if (inherits(design$blocks, "sf")) {
+    design$blocks$folds <- NULL
+    design$blocks$split <- ifelse(seq_len(nrow(design$blocks)) %in% test_blocks, "holdout", "training")
+  }
   list(train = sort(train_idx),
        method = sprintf("%s block (%s)",
                         if (identical(block_method, "env")) "environmental" else "spatial",
-                        (attr(blocks, "design")$effective %||% block_method)),
-       design = attr(blocks, "design"), type = "spatial")
+                        (design$effective %||% block_method)),
+       design = c(design, list(test_blocks = test_blocks)), type = "spatial")
 }

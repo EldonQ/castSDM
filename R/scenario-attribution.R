@@ -98,7 +98,7 @@
       # Existing per-model predictions suffice: no extra fitted-model calls.
       oe <- average(effect); re <- average(retained)
       agree <- function(p, mean) {
-        value <- rowMeans(sign(p) == sign(mean))
+        value <- rowMeans(.cast_response_sign(p) == .cast_response_sign(mean))
         value[rowSums(!is.finite(p)) > 0L] <- NA_real_
         value
       }
@@ -236,6 +236,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   if (raster != inherits(future, "SpatRaster")) {
     cli::cli_abort("{.arg current} and {.arg future} must have the same input type.")
   }
+  checkpoint_dir <- NULL
   if (raster) {
     check_suggested("terra", "for raster attribution")
     old_temp <- terra::terraOptions(print = FALSE)$tempdir
@@ -258,6 +259,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (!is.null(shifts)) signature$shifts <- shifts
     if (diagnostics) {
       signature$diagnostics <- TRUE
+      signature$sign_tolerance <- 1e-12
       signature$direction <- .cast_code_identity(.cast_response_direction)
     }
     key <- .cast_digest(signature)
@@ -268,6 +270,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       return(cached)
     }
     if (file.exists(filename) && !overwrite) cli::cli_abort("{.arg filename} already exists.")
+    checkpoint_dir <- file.path(dirname(filename), paste0(".", basename(filename), ".blocks_", substr(key, 1L, 12L)))
+    dir.create(checkpoint_dir, recursive = TRUE, showWarnings = FALSE)
     writer <- .cast_raster_writer(current, filename, layer_names,
       datatype = "FLT8S", overwrite = overwrite)
     on.exit(.cast_writer_abort(writer), add = TRUE)
@@ -310,6 +314,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
         sum(d[s]), sum(abs(d[s])), sum(ds[ks]), sum(ks))
     }
   }
+  started <- proc.time()[["elapsed"]]
+  if (verbose) cli::cli_inform("Environmental response maps: {length(drivers)} predictors, up to {2L + 2L*length(drivers)} environmental combinations; completed raster batches can resume.")
   for (i in seq_along(starts)) {
     first <- starts[i]
     if (raster) {
@@ -317,6 +323,16 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       active <- .cast_mask_rows(mask, first, count, count * terra::ncol(current))
       if (!any(active)) {
         .cast_writer_block(writer, matrix(NA_real_, length(active), length(layer_names)), first, count)
+        next
+      }
+      checkpoint <- file.path(checkpoint_dir, paste0("block_", first, "_", count, ".rds"))
+      checkpoint_key <- .cast_digest(list(key, first, count, layer_names))
+      saved <- if (resume) .cast_cache_read(checkpoint, checkpoint_key) else NULL
+      if (!is.null(saved)) {
+        z <- matrix(NA_real_, length(active), length(layer_names), dimnames = list(NULL, layer_names))
+        z[saved$indices, ] <- saved$values
+        accumulate(z); .cast_writer_block(writer, z, first, count)
+        if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)} reused ({length(saved$indices)} finite cells).")
         next
       }
       a <- .cast_raster_block(current, first, count)
@@ -332,9 +348,11 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (any(keep)) z[keep, ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
       b[keep, , drop = FALSE], drivers, weights, bounds,
       reference = reference, clamp = clamp, diagnostics = diagnostics)
+    if (raster) .cast_cache_write(list(indices = which(keep), values = z[keep, , drop = FALSE]),
+      checkpoint, checkpoint_key)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
-    if (verbose) cli::cli_inform("Scenario attribution: block {i}/{length(starts)}")
+    if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)}; {sum(keep)} finite cells; elapsed {round(proc.time()[['elapsed']] - started)} s.")
   }
   divide <- function(x, n) ifelse(n > 0, x / n, NA_real_)
   n_driver_rows <- 1L + 2L * length(drivers)
@@ -362,10 +380,20 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   result <- structure(list(summary = summary, data = data,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
-    shifts = shifts, diagnostics = diagnostics,
+    shifts = shifts, diagnostics = diagnostics, sign_tolerance = if (diagnostics) 1e-12 else NULL,
     interpretation = "Fitted-model environmental scenario comparisons on the suitability scale"),
     class = c("cast_attribution", "list"))
-  if (raster) .cast_cache_write(result, receipt, key, filename)
+  if (raster) {
+    .cast_cache_write(result, receipt, key, filename)
+    # Remove only owned numerical checkpoints after successful publication.
+    parent <- normalizePath(dirname(filename), winslash = "/", mustWork = TRUE)
+    expected <- file.path(parent, paste0(".", basename(filename), ".blocks_", substr(key, 1L, 12L)))
+    resolved <- normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE)
+    if (identical(resolved, expected)) {
+      unlink(list.files(resolved, pattern = "^block_[0-9]+_[0-9]+[.]rds$", full.names = TRUE))
+      if (!length(list.files(resolved, all.files = TRUE, no.. = TRUE))) unlink(resolved, recursive = TRUE)
+    }
+  }
   result
 }
 

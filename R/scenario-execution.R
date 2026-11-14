@@ -84,6 +84,7 @@
   # semantics. Later releases invalidate conservatively unless reviewed here.
   if (package %in% c("0.28.1", "0.28.2", "0.28.3", "0.29.0", "0.29.1", "0.29.2")) package <- "0.28.0"
   models <- lapply(fit$models, function(m) {
+    m$fit_elapsed_s <- NULL
     if (is.function(m$predict_function)) m$predict_function <- .cast_callback_identity(m$predict_function)
     m
   })
@@ -123,15 +124,29 @@
   if (!identical(info$name, "gam") || identical(info$type, "external")) return(NULL)
   if (!requireNamespace("mgcv", quietly = TRUE)) return(NULL)
   model <- info$model
+  # Discrete BAM owns its prediction approximation and threading. Keep that
+  # engine path intact rather than mixing term predictions with discrete scores.
+  if (inherits(model, "bam")) return(NULL)
   if (!inherits(model, "gam") || !identical(model$family$link, "logit") ||
-      length(attr(model$pterms, "term.labels")) || length(attr(model$terms, "offset")) ||
+      length(attr(model$terms, "offset")) ||
       !is.null(model$call$offset) || !length(model$smooth)) return(NULL)
   good <- vapply(model$smooth, function(s) length(s$term) == 1L &&
     identical(s$by, "NA") && !inherits(s, "tensor.smooth"), logical(1))
   if (!all(good)) return(NULL)
   vars <- vapply(model$smooth, function(s) s$term, character(1))
+  labels <- vapply(model$smooth, function(s) s$label, character(1))
+  # Ordinary numeric/binary linear terms are additive too. Reject factors,
+  # transformations and interactions rather than applying an invalid shortcut.
+  linear <- attr(model$pterms, "term.labels")
+  if (length(linear)) {
+    parsed <- lapply(linear, function(x) tryCatch(str2lang(x), error = function(e) NULL))
+    if (any(!vapply(parsed, is.symbol, logical(1)))) return(NULL)
+    linear_vars <- vapply(parsed, as.character, character(1))
+    if (any(!vapply(model$model[linear_vars], is.numeric, logical(1)))) return(NULL)
+    vars <- c(vars, linear_vars); labels <- c(labels, linear)
+  }
   if (anyDuplicated(vars)) return(NULL)
-  stats::setNames(vapply(model$smooth, function(s) s$label, character(1)), vars)
+  stats::setNames(labels, vars)
 }
 
 .cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE) {
@@ -146,8 +161,13 @@
     if (is.null(terms[[m]])) return(NULL)
     info <- fit$models[[m]]
     a <- stats::predict(info$model, current, type = "terms", newdata.guaranteed = TRUE)
-    b <- stats::predict(info$model, future, type = "terms", newdata.guaranteed = TRUE)
-    list(eta = rowSums(a) + attr(a, "constant"), delta = b - a)
+    changed <- names(current)[!vapply(names(current), function(v) identical(current[[v]], future[[v]]), logical(1))]
+    cols <- unname(terms[[m]][intersect(changed, names(terms[[m]]))])
+    delta <- if (length(cols)) {
+      b <- stats::predict(info$model, future, type = "terms", terms = cols, newdata.guaranteed = TRUE)
+      b - a[, colnames(b), drop = FALSE]
+    } else matrix(numeric(), nrow(current), 0L)
+    list(eta = rowSums(a) + attr(a, "constant"), delta = delta)
   })
   names(prepared) <- active
   predict <- function(switched = character(), base = NULL, changed_rows = NULL) {
@@ -160,7 +180,7 @@
       info <- fit$models[[m]]
       if (!any(idx)) next
       if (!is.null(prepared[[m]])) {
-        p <- prepared[[m]]; cols <- unname(terms[[m]][intersect(switched, names(terms[[m]]))])
+        p <- prepared[[m]]; cols <- intersect(unname(terms[[m]][intersect(switched, names(terms[[m]]))]), colnames(p$delta))
         eta <- p$eta[idx] + if (length(cols)) rowSums(p$delta[idx, cols, drop = FALSE]) else 0
         out[idx, m] <- .cast_apply_offset(info$model$family$linkinv(eta), info$offset)
       } else {

@@ -84,3 +84,16 @@ rows and spatial folds. These are engineering checks, not a newly completed
 study or independent validation of the revised scientific policy. The full
 research workflow is left for the author to rerun. Legacy synthetic unit
 fixtures for other components remain excluded from the lightweight R check.
+
+
+On 14 November 2026, Codex assisted 0.32.0: actual-CRS spatial design,
+progressive dependency-aware figure export, published iml ALE, GAM term reuse,
+scenario scheduling, resumable raster explanation and recorded fast bam fits.
+Verification uses actual saved models/rows and native raster crops. Controlled
+cancellation tests verify checkpoint recovery without generating artificial
+measurements or labels. Bounded fitting checks are engineering checks, not a
+rerun of the study or new validation of ecological effects. bam/fREML and
+native-score defaults are new fitting policies, not asserted numerically
+equivalent to the previous GAM/score policy. Frozen-model optimisations are
+verified separately against generic predictions. Existing 0.31 processes and
+installed libraries are preserved.

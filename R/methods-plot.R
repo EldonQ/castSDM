@@ -412,6 +412,12 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     grDevices::colorRampPalette(fold_colors)(x$k)
   }
 
+  design <- x$fold_design[[1L]]
+  if (inherits(design$blocks, "sf")) {
+    boundaries <- sf::st_transform(design$blocks, 4326)
+    p_map <- p_map + ggplot2::geom_sf(data = boundaries, fill = NA,
+      colour = "grey55", linewidth = .25)
+  }
   p_map <- p_map +
     ggplot2::geom_point(
       data = map_df,
@@ -421,7 +427,9 @@ plot.cast_cv <- function(x, lon = NULL, lat = NULL,
     ggplot2::scale_color_manual(values = fold_pal, name = "Fold") +
     ggplot2::labs(
       title = "Spatial block folds",
-      subtitle = sprintf("Fold assignment: %s", x$block_method)
+      subtitle = sprintf("Fold assignment: %s; block length: %s",
+        design$effective %||% x$block_method,
+        if (is.finite(design$block_size_m %||% NA_real_)) paste0(round(design$block_size_m/1000), " km") else "not recorded")
     ) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(

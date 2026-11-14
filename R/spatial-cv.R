@@ -21,11 +21,9 @@
 #'     ([blockCV::cv_spatial()]) with square blocks. The block size follows
 #'     the range of spatial autocorrelation estimated by
 #'     [blockCV::cv_spatial_autocor()] (Roberts et al. 2017), or the
-#'     user-supplied `block_size`. If range estimation is unavailable, the
-#'     blockCV extent-grid default is used with a warning and recorded as
-#'     `blockcv_extent_grid`; no calibrated physical length is claimed.
-#'     Falls back to `"grid"` with a warning when
-#'     \pkg{blockCV}/\pkg{sf} are unavailable or the design cannot be built.
+#'     user-supplied `block_size`. Projected coordinates require their real
+#'     `coords_crs`. An unavailable range/design stops explicitly: no different
+#'     blocking strategy is substituted within nested folds.
 #'   - `"grid"`: grid cells grouped into spatially contiguous folds via
 #'     k-means on cell centroids (dependency-free fallback).
 #'   - `"env"`: k-means on the scaled predictor matrix, so every fold is
@@ -116,6 +114,8 @@
 #'   Use `n_repeat = 1` for a fixed external design. This allows physical block
 #'   sizes or basin groups to be chosen independently of castSDM's automatic
 #'   blocking; supplied assignments are returned unchanged.
+#' @param coords_crs Coordinate CRS, required for projected coordinates.
+#' @param gam_backend GAM fitting backend; see [cast_fit()].
 #' @param clamp Clamp each fold's test predictors to that fold's training
 #'   range for all engines. Default `FALSE`; [cast_run()] supplies its protocol.
 #'   AOA continues to use original predictors.
@@ -142,7 +142,8 @@ cast_cv <- function(data,
                     verbose = TRUE,
                     rf_mtry = NULL,
                     maxent_classes = NULL, maxent_regmult = NULL,
-                    num_threads = 1L, fold_ids = NULL, clamp = FALSE) {
+                    num_threads = 1L, fold_ids = NULL, clamp = FALSE, coords_crs = NULL,
+                    gam_backend = c("bam", "gam")) {
   block_method <- match.arg(block_method)
   if (!is.logical(clamp) || length(clamp) != 1L || is.na(clamp))
     cli::cli_abort("clamp must be TRUE or FALSE.")
@@ -159,6 +160,7 @@ cast_cv <- function(data,
   if (any(c("data", "response", "method") %in% names(select_args))) {
     cli::cli_abort("{.arg select_args} cannot override data, response, or method; selection must use the outer training fold.")
   }
+  gam_backend <- match.arg(gam_backend)
   check_suggested("pROC", "for fold evaluation metrics")
   k <- .cast_check_scalar(k, "k", lower = 2, integer = TRUE)
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
@@ -234,7 +236,7 @@ cast_cv <- function(data,
     fold_screen <- if (!is.null(select_method)) {
       args <- utils::modifyList(
         list(
-          data = train, response = response, method = select_method,
+          data = train, response = response, method = select_method, coords_crs = coords_crs,
           seed = if (is.null(seed)) NULL else seed + fold_i,
           verbose = FALSE
         ),
@@ -256,7 +258,7 @@ cast_cv <- function(data,
     fit <- tryCatch(
       cast_fit(
         train, screen = fold_screen, models = models, response = response,
-        rf_ntree = rf_ntree, rf_mtry = rf_mtry,
+        rf_ntree = rf_ntree, rf_mtry = rf_mtry, gam_backend = gam_backend,
         maxent_classes = maxent_classes, maxent_regmult = maxent_regmult,
         num_threads = num_threads,
         tune = tune, tune_folds = tune_folds,
@@ -354,7 +356,7 @@ cast_cv <- function(data,
     folds <- if (is.null(fold_ids)) {
       make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed,
                          env = env_block, y = data[[response]],
-                         block_size = block_size)
+                         block_size = block_size, coords_crs = coords_crs)
     } else fold_ids
     if (verbose && n_repeat > 1L) {
       cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
@@ -719,18 +721,15 @@ cast_cv <- function(data,
 make_spatial_folds <- function(lon, lat, k,
                                method = c("blockcv", "grid", "env"),
                                seed = NULL, env = NULL,
-                               y = NULL, block_size = NULL) {
+                               y = NULL, block_size = NULL, coords_crs = NULL) {
   method <- match.arg(method)
   n <- length(lon)
   k_use <- min(k, n)
   if (k_use < 2L) return(.cast_fold_design(rep(1L, n), method, "insufficient_rows"))
   if (method == "blockcv") {
-    folds <- .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size)
+    folds <- .cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size, coords_crs))
     if (!is.null(folds)) return(folds)
-    cli::cli_warn(c(
-      "blockCV blocking is unavailable or could not be built for this data set;",
-      i = "falling back to grid blocking."
-    ))
+    cli::cli_abort("The declared blockCV design could not be built. Review CRS/block size or explicitly choose grid blocking; no different design is substituted inside a fold.")
   }
   if (method == "env") {
     if (is.null(env) || nrow(env) != n) {
@@ -779,16 +778,15 @@ make_spatial_folds <- function(lon, lat, k,
 #' Builds square spatial blocks with [blockCV::cv_spatial()] over an sf point
 #' layer. Block size: `block_size` when supplied, else the range of spatial
 #' autocorrelation estimated by [blockCV::cv_spatial_autocor()] (Roberts et
-#' al. 2017); when the autocorrelation range is unavailable the blockCV
-#' default sizing is used. Geographic coordinates (lon/lat within their
-#' bounds) are tagged with CRS 4326 so blockCV converts metres to degrees;
-#' projected coordinates are passed through unchanged (metres assumed).
+#' al. 2017). Unavailable ranges/designs stop explicitly. Geographic
+#' coordinates default to EPSG:4326; projected coordinates require the actual
+#' source CRS. Block boundaries and point membership are recorded.
 #'
 #' @return Integer fold ids, or `NULL` when blockCV/sf are unavailable or the
-#'   design cannot be built (caller falls back to grid blocking).
+#'   design cannot be built (the caller reports an explicit design error).
 #' @keywords internal
 #' @noRd
-.cast_blockcv_folds <- function(lon, lat, k, seed, y, block_size) {
+.cast_blockcv_folds <- function(lon, lat, k, seed, y, block_size, coords_crs = NULL) {
   if (!requireNamespace("blockCV", quietly = TRUE) ||
       !requireNamespace("sf", quietly = TRUE)) {
     return(NULL)
@@ -797,11 +795,15 @@ make_spatial_folds <- function(lon, lat, k,
   if (sum(ok) < 2L * k) return(NULL)
   geographic <- all(lon[ok] >= -180 & lon[ok] <= 180) &&
     all(lat[ok] >= -90 & lat[ok] <= 90)
+  .cast_check_coords_crs(coords_crs)
+  if (is.null(coords_crs) && !geographic)
+    cli::cli_abort("Projected coordinates require coords_crs from the actual source raster; no CRS is guessed.")
+  crs <- coords_crs %||% "EPSG:4326"
   df <- data.frame(.lon = lon, .lat = lat)
   if (!is.null(y)) df$.response <- as.integer(y)
   pts <- tryCatch(
     sf::st_as_sf(df, coords = c(".lon", ".lat"),
-                 crs = if (geographic) 4326L else NA),
+                 crs = crs),
     error = function(e) NULL
   )
   if (is.null(pts) || any(sf::st_is_empty(pts))) return(NULL)
@@ -822,12 +824,13 @@ make_spatial_folds <- function(lon, lat, k,
       }
     }, error = function(e) { range_error <<- conditionMessage(e); NULL })
   }
+  if (is.null(size)) cli::cli_abort("Spatial range estimation failed: {range_error}. Supply a justified block_size or explicitly choose grid blocking.")
   blk <- tryCatch(
-    suppressWarnings(blockCV::cv_spatial(
+    blockCV::cv_spatial(
       x = pts, column = column, k = k, size = size,
       hexagon = FALSE, selection = "random", iteration = 100L,
-      seed = seed, progress = FALSE, report = FALSE, plot = FALSE
-    )),
+      seed = seed, progress = FALSE, report = FALSE, plot = FALSE, extend = 0.5
+    ),
     error = function(e) NULL
   )
   if (is.null(blk)) return(NULL)
@@ -835,15 +838,16 @@ make_spatial_folds <- function(lon, lat, k,
   if (length(ids) != length(lon) || anyNA(ids)) return(NULL)
   # blockCV may return fewer than k non-empty folds on degenerate extents.
   if (!all(seq_len(k) %in% unique(ids))) return(NULL)
-  out <- .cast_fold_design(ids, "blockcv",
-    if (is.null(size)) "blockcv_extent_grid" else "blockcv", size)
-  attr(out, "design")$size_source <- if (!is.null(block_size)) "caller" else
-    if (!is.null(size)) "response_autocorrelation_range" else "blockCV default extent grid; no calibrated range"
-  attr(out, "design")$range_error <- range_error
-  if (is.null(size)) {
-    attr(out, "design")$rows_cols <- eval(formals(blockCV::cv_spatial)$rows_cols)
-    cli::cli_warn("Spatial autocorrelation range unavailable; blockCV used its documented extent grid, not a calibrated physical block length. The effective design and reason are recorded.")
-  }
+  # Keep physical block boundaries and point membership for honest maps and
+  # a block-level hold-out. IDs refer to these polygons, never row-random folds.
+  membership <- sf::st_intersects(pts, blk$blocks)
+  if (any(lengths(membership) == 0L)) return(NULL)
+  block_ids <- vapply(membership, `[`, integer(1), 1L)
+  out <- .cast_fold_design(ids, "blockcv", "blockcv", size)
+  attr(out, "design")$size_source <- if (!is.null(block_size)) "caller" else "response_autocorrelation_range"
+  attr(out, "design")$coords_crs <- sf::st_crs(pts)$wkt
+  attr(out, "design")$blocks <- blk$blocks
+  attr(out, "design")$block_ids <- block_ids
   out
 }
 
@@ -908,4 +912,12 @@ make_spatial_folds <- function(lon, lat, k,
   b <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
   b[is.na(b)] <- 1L
   b
+}
+
+.cast_check_coords_crs <- function(crs) {
+  text <- is.character(crs) && length(crs) == 1L && !is.na(crs) && nzchar(crs)
+  epsg <- is.numeric(crs) && length(crs) == 1L && is.finite(crs) && crs > 0 && crs == as.integer(crs)
+  if (!is.null(crs) && !text && !epsg)
+    cli::cli_abort("coords_crs must be a CRS string or EPSG integer from the coordinate source, or NULL for geographic lon/lat.")
+  invisible(crs)
 }

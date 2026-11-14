@@ -171,30 +171,32 @@ cast_run <- function(species_data,
   if (verbose) cli::cli_h2("Prep: spatial hold-out split")
   stage_started <- Sys.time()
   split <- stage("01_prepare", list(species_data, protocol$train_fraction,
-    protocol$block_method, protocol$holdout_blocks, protocol$seed, prepared), if (is.null(prepared)) cast_prepare(
+    protocol$block_method, protocol$holdout_blocks, protocol$coords_crs, protocol$block_size, protocol$seed, prepared), if (is.null(prepared)) cast_prepare(
     species_data, train_fraction = protocol$train_fraction,
     seed = protocol$seed, split = "spatial",
-    block_method = protocol$block_method, n_blocks = protocol$holdout_blocks, verbose = verbose
+    block_method = protocol$block_method, n_blocks = protocol$holdout_blocks, verbose = verbose,
+    coords_crs = protocol$coords_crs, block_size = protocol$block_size
   ) else .cast_verify_prepared(species_data, prepared))
   if (verbose) {
     cli::cli_inform("Train: {nrow(split$train)} | Hold-out: {nrow(split$test)} | Predictors: {length(split$env_vars)}")
   }
   add_receipt("01_prepare",
     .cast_digest(list(species_data, protocol$train_fraction,
-                      protocol$block_method, protocol$seed)),
+                      protocol$block_method, protocol$holdout_blocks,
+                      protocol$coords_crs, protocol$block_size, protocol$seed)),
     split)
 
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
   stage_started <- Sys.time()
   selection_inputs <- list(split$train, protocol$select_method, protocol$select_inner_k,
-    select_var_id, select_category, select_roles, protocol$block_method, protocol$block_size, protocol$seed)
+    select_var_id, select_category, select_roles, protocol$block_method, protocol$block_size, protocol$coords_crs, protocol$seed)
   screen <- stage("02_select", selection_inputs, cast_select(
     split$train,
     method = protocol$select_method,
     inner_k = protocol$select_inner_k,
     block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
-    block_size = protocol$block_size,
+    block_size = protocol$block_size, coords_crs = protocol$coords_crs,
     var_id = select_var_id,
     category = select_category,
     roles = select_roles,
@@ -220,11 +222,11 @@ cast_run <- function(species_data,
   if (verbose) cli::cli_h2("Fit: engines on the training split")
   stage_started <- Sys.time()
   fit_inputs <- list(split$train, screen$selected, protocol$models,
-    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
     protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed)
   fit <- stage("03_fit", fit_inputs, cast_fit(
     split$train, screen = screen, models = protocol$models,
-    rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry,
+    rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry, gam_backend = protocol$gam_backend,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
     tune = protocol$tune, tune_folds = protocol$tune_folds,
@@ -235,10 +237,15 @@ cast_run <- function(species_data,
     .cast_digest(list(split$train, screen$selected, protocol$models,
                       protocol$rf_ntree, protocol$rf_mtry,
                       protocol$maxent_classes,
-                      protocol$maxent_regmult, protocol$tune,
+                      protocol$maxent_regmult, protocol$gam_backend, protocol$tune,
                       protocol$tune_folds, protocol$prevalence_target,
                       protocol$seed)),
-    fit)
+    fit, tables = list(engine_fits = do.call(rbind, lapply(names(fit$models), function(m) {
+      z <- fit$models[[m]]
+      data.frame(model = m, backend = z$backend %||% m,
+        fit_elapsed_s = z$fit_elapsed_s %||% NA_real_,
+        num_threads = z$num_threads %||% if (m == "rf") protocol$num_threads else 1L)
+    }))))
 
   # ---- 4. Nested spatial cross-validation (training split only) -----------
   if (verbose) cli::cli_h2("CV: nested spatial cross-validation (k = {protocol$cv_k})")
@@ -246,25 +253,25 @@ cast_run <- function(species_data,
   select_args <- list(
     inner_k = protocol$select_inner_k,
     block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
-    block_size = protocol$block_size, roles = select_roles,
+    block_size = protocol$block_size, coords_crs = protocol$coords_crs, roles = select_roles,
     var_id = select_var_id, category = select_category)
   cv_inputs <- list(split$train, select_args, protocol$models, protocol$cv_k,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
-    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
     protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed,
     protocol$clamp)
   cv <- stage("04_cv", cv_inputs, cast_cv(
     split$train, screen = screen,
     select_method = protocol$select_method, select_args = select_args,
     k = protocol$cv_k, models = protocol$models,
-    block_method = protocol$block_method, block_size = protocol$block_size,
+    block_method = protocol$block_method, block_size = protocol$block_size, coords_crs = protocol$coords_crs,
     buffer = protocol$buffer, buffer_unit = protocol$buffer_unit,
     n_repeat = protocol$n_repeat, tune = protocol$tune,
     tune_folds = protocol$tune_folds,
     threshold_method = protocol$threshold_method,
     aoa = protocol$aoa, prevalence_target = protocol$prevalence_target,
-    rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry,
+    rf_ntree = protocol$rf_ntree, rf_mtry = protocol$rf_mtry, gam_backend = protocol$gam_backend,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose,
@@ -290,8 +297,13 @@ cast_run <- function(species_data,
                       protocol$block_size, protocol$buffer, protocol$buffer_unit,
                       protocol$tune, protocol$tune_folds,
                       protocol$threshold_method, protocol$aoa,
-                      protocol$prevalence_target, protocol$seed, protocol$clamp)),
+                      protocol$prevalence_target, protocol$gam_backend,
+                      protocol$seed, protocol$clamp)),
     cv, tables = cv_tables)
+
+  if (any(cv$repeat_status$status != "evaluated") ||
+      any(!is.finite(as.matrix(cv$oof[, paste0("HSS_", protocol$models), drop = FALSE]))))
+    cli::cli_abort("Spatial CV is incomplete. Fold diagnostics were saved; repair the declared design/model failures before hold-out evaluation or projection. No synthetic threshold or replacement fold is used.")
 
   # ---- 5. One-shot hold-out evaluation (out-of-fold thresholds) -----------
   if (verbose) cli::cli_h2("Evaluate: hold-out split, out-of-fold thresholds")
@@ -313,10 +325,10 @@ cast_run <- function(species_data,
   stage_started <- Sys.time()
   tuned <- .cast_tuned_args(fit)
   fit_full <- stage("06_refit", list(species_data, screen$selected, tuned, protocol$models,
-    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult,
+    protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
     protocol$prevalence_target, protocol$seed), cast_fit(
     species_data, screen = screen, models = protocol$models,
-    rf_ntree = protocol$rf_ntree,
+    rf_ntree = protocol$rf_ntree, gam_backend = protocol$gam_backend,
     rf_mtry = tuned$rf_mtry %||% protocol$rf_mtry,
     maxent_classes = tuned$maxent_classes %||% protocol$maxent_classes,
     maxent_regmult = tuned$maxent_regmult %||% protocol$maxent_regmult,
@@ -325,7 +337,7 @@ cast_run <- function(species_data,
   ))
   add_receipt("06_refit",
     .cast_digest(list(species_data, screen$selected, tuned, protocol$models,
-                      protocol$prevalence_target, protocol$seed)),
+                      protocol$prevalence_target, protocol$gam_backend, protocol$seed)),
     fit_full)
 
   # ---- 7. Prediction and ensemble (df) / projection (raster) --------------

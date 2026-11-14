@@ -28,7 +28,9 @@ case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NUL
     case_file <- file.path(out_dir, "case.rds")
     cfg <- if (file.exists(case_file)) readRDS(case_file)$cfg else list()
   }
-  if (!render_only && (is.null(current) || is.null(future))) {
+  products <- utils::getFromNamespace(".cast_figure_products", "castSDM")(include)
+  if (!render_only && any(products %in% c("attribution", "mess")) &&
+      (is.null(current) || is.null(future))) {
     stacks <- case_figure_stacks(out_dir, result, scenario)
     current <- stacks$current; future <- stacks$future
   }
@@ -36,6 +38,7 @@ case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NUL
     output_dir = file.path(out_dir, "figures"), scenario = scenario,
     current = current, future = future, attribution = attribution,
     basemap = "china", include = include, render_only = render_only,
+    response_method = cfg$figure_response_method %||% "ale",
     response_grid = cfg$figure_response_grid %||% 50L,
     display_resolution = cfg$figure_display_resolution %||% .02,
     width_mm = 183, dpi = 600,

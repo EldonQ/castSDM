@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Response Maps for Species Distribution Models
-Version: 0.31.0
+Version: 0.32.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -46,6 +46,7 @@ Suggests:
     future.apply,
     ggplot2 (>= 3.4.0),
     glmnet,
+    iml,
     knitr,
     leaflet (>= 2.2.0),
     maxnet,

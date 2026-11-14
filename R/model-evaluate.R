@@ -228,8 +228,9 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
     as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic",
                               clamp = isTRUE(clamp)))
   } else if (nm == "gam") {
-    as.numeric(stats::predict(mdl_info$model, newdata = X_raw,
-                              type = "response"))
+    args <- list(object = mdl_info$model, newdata = X_raw, type = "response")
+    if (inherits(mdl_info$model, "bam")) args$n.threads <- getOption("castSDM.predict_threads", 1L)
+    as.numeric(do.call(stats::predict, args))
   } else {
     rep(NA_real_, nrow(X_raw))
   }

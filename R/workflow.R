@@ -23,7 +23,7 @@
 cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothoracinae",
                           settings = list(), run = FALSE) {
   for (p in c("terra", "data.table", "sf", "blockCV", "ranger", "maxnet", "mgcv",
-              "glmnet", "pROC", "FNN", "ggplot2", "patchwork", "scales", "ragg"))
+              "glmnet", "iml", "pROC", "FNN", "ggplot2", "patchwork", "scales", "ragg"))
     check_suggested(p, "for the CHELSA workflow")
   paths <- list(path = path, data_dir = data_dir, occurrence_file = occurrence_file)
   if (any(!vapply(paths, function(x) is.character(x) && length(x) == 1L &&
@@ -69,10 +69,10 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   on.exit({ Sys.unsetenv(variables); present <- !is.na(old)
     if (any(present)) do.call(Sys.setenv, as.list(stats::setNames(old[present], variables[present]))) }, add = TRUE)
   Sys.setenv(CAST_EXAMPLE_ROOT = path, CAST_DATA_ROOT = data_dir, CAST_SPECIES = species,
-    CAST_RUN_ID = "cast031_chelsa_ensmean", CAST_OUTPUT_ROOT = file.path(path, "output"),
+    CAST_RUN_ID = "cast032_chelsa_ensmean", CAST_OUTPUT_ROOT = file.path(path, "output"),
     CAST_DRY_RUN = if (isTRUE(run)) "0" else "1")
   entry <- file.path(path, "00_RUN_ALL.R")
   sys.source(entry, envir = new.env(parent = globalenv()), keep.source = FALSE)
-  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", "cast031_chelsa_ensmean", species),
+  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", "cast032_chelsa_ensmean", species),
     checked = TRUE, run = isTRUE(run), settings = settings))
 }

@@ -35,7 +35,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast031_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast032_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -44,7 +44,8 @@ run_species <- function(cfg) {
   on.exit(filelock::unlock(lock), add = TRUE)
   claim_file <- file.path(out, "run_claim.rds")
   scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
-    "output_root", "cache_root", "preparation_root", "diagnostic_thresholds"))]
+    "output_root", "cache_root", "preparation_root", "diagnostic_thresholds",
+    "figure_response_method", "figure_response_grid", "figure_display_resolution"))]
   scientific_cfg$protocol$num_threads <- NULL
   claim <- list(schema = "cast_case_claim/1", config = scientific_cfg,
     package = as.character(utils::packageVersion("castSDM")),
@@ -78,7 +79,8 @@ run_species <- function(cfg) {
     paste0(cfg$species_name, "_model_data.csv")), data.table = FALSE)
   p <- cfg$protocol
   split <- castSDM::cast_prepare(data, train_fraction = p$train_fraction,
-    n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed)
+    n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed,
+    coords_crs = p$coords_crs, block_size = p$block_size)
   meta <- case_pool_metadata(cfg, split$env_vars)
   year <- case_training_year(preparation, split)
   if (is.null(year)) message("Training occurrence years unavailable: temporal matching skipped.")
