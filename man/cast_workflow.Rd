@@ -24,7 +24,7 @@ cast_workflow(
 
 \item{settings}{Named list: \code{domain} (\code{national} or \code{freshwater_river}),
 \code{input_type} (\code{gbif} or \code{nsdm_occ}), \code{lulc_product} (\code{glu} or \code{hlu}),
-\code{models}, \code{cv_k}, \code{background_points}, and \code{resources} (cores, workers, memory_mb).}
+\code{models}, \code{cv_k}, \code{background_points}, \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).}
 
 \item{run}{Execute preparation, fitting, projections and figures after checks.
 Default \code{FALSE} only indexes and checks physical inputs.}

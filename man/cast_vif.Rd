@@ -17,7 +17,7 @@ cast_vif(
 only). Rows are sites, columns are variables.}
 
 \item{threshold}{Numeric. VIF threshold above which variables are removed.
-Default \code{10} (Zuur et al. 2010).}
+Default \code{10}, a conventional collinearity diagnostic cutoff.}
 
 \item{exclude}{Character vector of column names to exclude from screening
 (e.g., coordinates, presence). Default \code{NULL}.}
@@ -34,6 +34,8 @@ A list with components:
 \item{\code{removed}}{Character vector of removed variable names (in order).}
 \item{\code{vif_log}}{A \code{data.frame} with iteration-by-iteration VIF values;
 \code{removed} is \code{NA} on the converged final iteration (nothing removed).}
+\item{\code{initial_vif}, \code{final_vif}}{Named predictor VIF vectors; removed predictors have no final VIF.}
+\item{\code{n_complete}}{Number of complete rows defining the calculation.}
 \item{\code{data}}{Filtered \code{data.frame} with only retained variables.}
 }
 }

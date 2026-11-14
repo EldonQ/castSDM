@@ -11,7 +11,7 @@
 #'   selection into the CV metrics (a warning is issued); treat those metrics
 #'   as optimistic.
 #' @param select_method Selection method passed to [cast_select()]. Default
-#'   `"screen"`. Set to `NULL` only to evaluate a fixed supplied screen.
+#'   `"vif"`. Set to `NULL` only to evaluate a fixed supplied screen.
 #' @param select_args Named list of additional [cast_select()] arguments.
 #'   Cannot override `data`, `response`, or `method`.
 #' @param k Number of outer spatial folds.
@@ -96,8 +96,8 @@
 #'   training-side operating point; they are not an independent assessment of
 #'   threshold choice. Use a separate hold-out with the frozen threshold for
 #'   that assessment. Threshold-free discrimination scores have no such
-#'   threshold-selection step. Fold dependence also limits interpretation of
-#'   a one-SE screening rule as statistical uncertainty.
+#'   threshold-selection step. Fold inclusion frequencies describe
+#'   screening stability, not statistical uncertainty or causal importance.
 #'
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
 #'   Metrics include `auc_n_folds`, `tss_n_folds`, and `cbi_n_folds` counting
@@ -121,7 +121,7 @@
 #'   AOA continues to use original predictors.
 cast_cv <- function(data,
                     screen = NULL,
-                    select_method = "screen",
+                    select_method = "vif",
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
@@ -237,7 +237,7 @@ cast_cv <- function(data,
     fold_screen <- if (!is.null(select_method)) {
       args <- utils::modifyList(
         list(
-          data = train, response = response, method = select_method, coords_crs = coords_crs,
+          data = train, response = response, method = select_method,
           seed = if (is.null(seed)) NULL else seed + fold_i,
           verbose = FALSE
         ),
@@ -360,7 +360,11 @@ cast_cv <- function(data,
       notes <<- unique(c(notes, conditionMessage(w))); invokeRestart("muffleWarning")
     })
     engines <- value$engine_fits
-    if (!is.null(engines)) notes <- unique(c(notes, paste0(engines$model[nzchar(engines$warnings)], ": ", engines$warnings[nzchar(engines$warnings)])))
+    if (!is.null(engines)) {
+      warned <- which(!is.na(engines$warnings) & nzchar(trimws(engines$warnings)))
+      if (length(warned)) notes <- unique(c(notes, paste0(engines$model[warned], ": ", engines$warnings[warned])))
+    }
+    notes <- notes[!is.na(notes) & nzchar(trimws(notes))]
     elapsed <- proc.time()[["elapsed"]] - started
     value$timing <- data.frame(fold = i, status = value$status %||% "single_class",
       n_train = value$n_train %||% NA_integer_,
@@ -531,7 +535,7 @@ cast_cv <- function(data,
 
   if (verbose) {
     cli::cli_inform(
-      "Nested spatial CV: {k} fold{?s} x {n_repeat} repeat{?s}; selector={select_method %||% 'fixed'}."
+      "Spatial CV (training-fold screening): {k} fold{?s} x {n_repeat} repeat{?s}; selector={select_method %||% 'fixed'}."
     )
   }
   reps <- lapply(seq_len(n_repeat), run_once)

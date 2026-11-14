@@ -141,7 +141,7 @@
       project(p); active(NULL); point(NULL)
       scenarios <- names(p$comparison$results)
       shiny::updateSelectInput(session, "scenario", choices = stats::setNames(scenarios, .cast_app_scenario_label(scenarios)), selected = p$case$report_scenario)
-      groups <- names(p$comparison$groups)
+      groups <- names(p$comparison$groups)[lengths(p$comparison$groups) > 0L]
       choices <- c(stats::setNames(".all", "\u5168\u90e8\u60c5\u666f\u56e0\u5b50"),
         stats::setNames(paste0(".group:", groups), paste0("\u7ec4\uff1a", groups)),
         stats::setNames(p$fit$env_vars, .cast_app_driver_label(p, p$fit$env_vars)))
@@ -208,6 +208,8 @@
             stop("\u8bf7\u8f93\u5165\u6709\u9650\u3001\u975e\u96f6\u7684\u539f\u59cb\u5355\u4f4d\u6539\u53d8\u5e45\u5ea6\u3002")
           shifts <- stats::setNames(input$shift, choice)
         }
+        if (is.null(shifts) && !length(unlist(p$comparison$groups, use.names = FALSE)))
+          stop("\u6a21\u578b\u6ca1\u6709\u4f7f\u7528\u672c\u7ec4\u60c5\u666f\u4e2d\u53d1\u751f\u53d8\u5316\u7684\u56e0\u5b50\uff0c\u65e0\u6cd5\u8bc4\u4f30\u6c14\u5019\u54cd\u5e94\u3002\u53ef\u9009\u62e9\u4e00\u4e2a\u5165\u6a21\u6307\u6807\uff0c\u663e\u5f0f\u8bbe\u7f6e\u5047\u8bbe\u6539\u53d8\u6765\u67e5\u770b\u6a21\u578b\u654f\u611f\u6027\u3002")
         start(list(operation = "response", case_dir = p$directory, scenario = input$scenario,
           variables = variables, shifts = shifts, context = input$context,
           sample_n = input$sample_n, maxdepth = input$maxdepth, maps = input$maps, grouping = isTRUE(input$grouping),
@@ -233,7 +235,8 @@
         occurrence_file = input$setup_occurrence, species = input$setup_species,
         settings = list(domain = input$setup_domain, input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
-          background_points = input$setup_background,
+          background_points = input$setup_background, vif_threshold = input$setup_vif %||% 10,
+          predictor_missing = input$setup_missing %||% "drop_predictors",
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
     }
     shiny::observeEvent(input$check_inputs, {
@@ -332,8 +335,20 @@
       shiny::tags$span(class = "cast-case-label", label)
     })
     output$log <- shiny::renderUI(shiny::tags$pre(log_text()))
+    output$shift_reference <- shiny::renderUI({
+      p <- project(); v <- input$variables
+      if (is.null(p) || length(v) != 1L || !v %in% p$fit$env_vars) return(NULL)
+      x <- p$fit$scaling$reference[[v]]; x <- x[is.finite(x)]
+      if (!length(x)) return(NULL)
+      units <- p$metadata$units[match(v, p$metadata$layer)]
+      shiny::tags$p(class = "cast-note", sprintf("\u8bad\u7ec3\u89c2\u6d4b\u8303\u56f4\uff1a%s \u81f3 %s\uff1b\u4e2d\u4f4d\u6570 %s\uff1b\u5355\u4f4d %s\u3002\u4e0b\u65b9\u8f93\u5165\u7edf\u4e00\u589e\u51cf\u91cf\uff0c\u6bcf\u4e2a\u4f4d\u7f6e\u53e6\u505a\u8303\u56f4\u652f\u6301\u68c0\u67e5\u3002",
+        signif(min(x), 5), signif(max(x), 5), signif(stats::median(x), 5), units %||% "\u89c1\u6307\u6807\u5b9a\u4e49"))
+    })
     output$map_caption <- shiny::renderUI({
       x <- active(); if (is.null(x)) return(shiny::tags$h2("\u9009\u62e9\u60c5\u666f\uff0c\u67e5\u770b\u73af\u5883\u54cd\u5e94"))
+      if (is.null(x$settings$shifts) && !length(unlist(project()$comparison$groups, use.names = FALSE)))
+        return(shiny::tagList(shiny::tags$h2("\u6a21\u578b\u65e0\u6cd5\u8bc4\u4f30\u8fd9\u7ec4\u6c14\u5019\u53d8\u5316"),
+          shiny::tags$p(class = "cast-subtitle", "\u5165\u6a21\u53d8\u91cf\u6ca1\u6709\u968f\u60c5\u666f\u6539\u53d8\uff1b\u76f8\u540c\u9884\u6d4b\u4e0d\u8868\u793a\u6c14\u5019\u6ca1\u6709\u751f\u6001\u5f71\u54cd\u3002\u5f53\u524d\u9002\u5b9c\u6027\u5730\u56fe\u4ecd\u53ef\u67e5\u770b\u3002")))
       vars <- x$settings$variables
       selection <- if (length(vars) == length(project()$fit$env_vars)) "\u5168\u90e8\u5165\u6a21\u56e0\u5b50" else
         paste(.cast_app_driver_label(project(), vars), collapse = "\u3001")
@@ -603,7 +618,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast033_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast034_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

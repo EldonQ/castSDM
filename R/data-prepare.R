@@ -7,7 +7,7 @@
 #' @param data A `data.frame` of environmental variables (numeric columns
 #'   only). Rows are sites, columns are variables.
 #' @param threshold Numeric. VIF threshold above which variables are removed.
-#'   Default `10` (Zuur et al. 2010).
+#'   Default `10`, a conventional collinearity diagnostic cutoff.
 #' @param exclude Character vector of column names to exclude from screening
 #'   (e.g., coordinates, presence). Default `NULL`.
 #' @param expert_filter Character vector of variable names to remove before
@@ -24,6 +24,8 @@
 #'   \item{`removed`}{Character vector of removed variable names (in order).}
 #'   \item{`vif_log`}{A `data.frame` with iteration-by-iteration VIF values;
 #'   `removed` is `NA` on the converged final iteration (nothing removed).}
+#'   \item{`initial_vif`, `final_vif`}{Named predictor VIF vectors; removed predictors have no final VIF.}
+#'   \item{`n_complete`}{Number of complete rows defining the calculation.}
 #'   \item{`data`}{Filtered `data.frame` with only retained variables.}
 #' }
 #'
@@ -62,8 +64,8 @@ cast_vif <- function(data,
     num_cols <- setdiff(num_cols, hit)
   }
 
-  # Complete cases for lm
-  dat_clean <- stats::na.omit(data[, num_cols, drop = FALSE])
+  # The same complete training rows define every auxiliary regression.
+  dat_clean <- data[stats::complete.cases(data[, num_cols, drop = FALSE]), num_cols, drop = FALSE]
   if (nrow(dat_clean) < 10) {
     cli::cli_abort("Fewer than 10 complete cases after NA removal.")
   }
@@ -77,30 +79,26 @@ cast_vif <- function(data,
     ))
   }
 
-  # Stage 2: Iterative VIF elimination
-  current_vars <- num_cols
+  varying <- vapply(dat_clean, .cast_is_varying, logical(1))
+  removed <- c(removed, num_cols[!varying])
+  current_vars <- num_cols[varying]
   vif_log <- list()
   iteration <- 0L
+  initial_vif <- final_vif <- stats::setNames(rep(NA_real_, length(num_cols)), num_cols)
+  if (length(current_vars) == 1L) initial_vif[current_vars] <- 1
+  correlation <- if (length(current_vars) > 1L) stats::cor(dat_clean[, current_vars, drop = FALSE]) else NULL
 
   repeat {
     iteration <- iteration + 1L
-    if (length(current_vars) < 2) break
-
-    # Standard VIF: regress each observed predictor on the other predictors.
-    # No manufactured response, row-index regression or absolute-unit cutoff.
-    tmp <- scale(as.matrix(dat_clean[, current_vars, drop = FALSE]))
-    varying <- vapply(dat_clean[, current_vars, drop = FALSE], .cast_is_varying, logical(1))
-    if (any(!varying)) {
-      removed <- c(removed, current_vars[!varying])
-      current_vars <- current_vars[varying]
-      next
+    if (length(current_vars) < 2) {
+      if (length(current_vars)) final_vif[current_vars] <- 1
+      break
     }
-    vif_vals <- vapply(seq_along(current_vars), function(j) {
-      residual <- stats::lm.fit(cbind(1, tmp[, -j, drop = FALSE]), tmp[, j])$residuals
-      rss <- sum(residual^2); tss <- sum(tmp[, j]^2)
-      if (rss <= .Machine$double.eps*tss) Inf else tss/rss
-    }, numeric(1))
+    # diag(inverse(correlation)) equals 1/(1-R^2). Reuse the matrix instead
+    # of refitting p regressions over every observed row at each iteration.
+    vif_vals <- .cast_vif_values(correlation)
     names(vif_vals) <- current_vars
+    if (iteration == 1L) initial_vif[current_vars] <- vif_vals
 
     max_vif <- max(vif_vals)
     max_var <- names(which.max(vif_vals))
@@ -109,13 +107,14 @@ cast_vif <- function(data,
     vif_log[[iteration]] <- data.frame(
       iteration = iteration,
       n_vars = length(current_vars),
-      max_vif = round(max_vif, 2),
+      max_vif = max_vif,
       # NA on the converged final iteration: nothing was removed there.
       removed = if (converged) NA_character_ else max_var,
       stringsAsFactors = FALSE
     )
 
     if (converged) {
+      final_vif[current_vars] <- vif_vals
       if (verbose) {
         n_remain <- length(current_vars)
         cli::cli_inform(
@@ -132,6 +131,7 @@ cast_vif <- function(data,
     }
     removed <- c(removed, max_var)
     current_vars <- setdiff(current_vars, max_var)
+    correlation <- correlation[current_vars, current_vars, drop = FALSE]
 
   }
 
@@ -148,8 +148,26 @@ cast_vif <- function(data,
     selected = current_vars,
     removed = removed,
     vif_log = log_df,
+    initial_vif = initial_vif,
+    final_vif = final_vif,
+    n_complete = nrow(dat_clean),
     data = data[, current_vars, drop = FALSE]
   )
+}
+
+.cast_vif_values <- function(correlation) {
+  decomposition <- eigen(correlation, symmetric = TRUE)
+  tolerance <- max(abs(decomposition$values)) * ncol(correlation) * .Machine$double.eps
+  independent <- decomposition$values > tolerance
+  values <- rowSums(sweep(decomposition$vectors[, independent, drop = FALSE]^2,
+    2L, decomposition$values[independent], "/"))
+  if (any(!independent)) {
+    # Any variable participating in a null-space relation has infinite VIF.
+    dependent <- rowSums(decomposition$vectors[, !independent, drop = FALSE]^2) >
+      ncol(correlation) * .Machine$double.eps
+    values[dependent] <- Inf
+  }
+  pmax(values, 1)
 }
 
 

@@ -1,3 +1,25 @@
+# castSDM 0.34.0
+
+- Replace the default elastic-net selector with iterative training-fold VIF;
+  retire the penalty-search implementation and its inner-fold settings. No
+  predictor-count target or protected climate slot is introduced. Reuse the
+  correlation matrix for conventional VIF computation and record elimination.
+- Add per-indicator missingness audit and an explicit strict option retaining
+  sampled sites while excluding incomplete predictors before splitting. Keep
+  complete-case QC as the default; neither policy imputes measurements.
+  Record per-predictor missing counts and the conditional validation scope.
+- Use standard linear/quadratic MaxEnt features in the case workflow to avoid
+  automatic product/hinge expansion across the larger VIF-retained set.
+- Reuse proven identical file/band layers in raster attribution rather than
+  reading static predictors twice; verify against full-reading real outputs.
+- Skip per-factor raster attribution when no fitted scenario driver changes;
+  label that condition in maps and Shiny instead of implying ecological stability.
+- Fix empty CV warnings and stale unavailable-product tables. Paginate full
+  selection and fold-inclusion catalogues while keeping the overview readable.
+- Expose VIF and missingness policies in Shiny, with observed training ranges
+  beside explicit hypothetical shifts. Keep climate-only CHELSA scenarios,
+  original map layouts and complete PNG/PDF export capability.
+
 # castSDM 0.33.0
 
 - Focus the explanation interface on environmental response maps with explicit

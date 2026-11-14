@@ -40,7 +40,7 @@ cast_consensus <- function(cv, threshold = 0.5) {
     if (!length(sets)) {
       cli::cli_abort(c(
         "The CV object holds no fold selections.",
-        i = "Run {.code cast_cv(..., select_method = \"screen\")} first."
+        i = "Run {.code cast_cv(..., select_method = \"vif\")} first."
       ))
     }
     all_vars <- unique(unlist(sets))

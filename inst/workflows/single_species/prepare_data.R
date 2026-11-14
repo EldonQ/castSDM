@@ -222,7 +222,7 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
                    "domain_mode", "freshwater_river_distance_raster",
                    "freshwater_river_buffer_m", "freshwater_occurrence_buffer_km",
                    "analysis_domain_mask_file", "domain_min_presence_coverage",
-                   "bg_n", "predictor_min_coverage",
+                   "bg_n", "predictor_min_coverage", "predictor_missing",
                    "bg_strategy", "bg_bin_k", "bg_sre_quantile",
                    "bg_target_group", "bg_target_group_file", "seed")],
     source = case_preparation_source(cfg)
@@ -275,7 +275,7 @@ prepare_species <- function(cfg) {
   old <- if (file.exists(manifest_file)) tryCatch(readRDS(manifest_file), error = function(e) NULL) else NULL
   artifacts <- c(data_file, domain_file, file.path(out_dir,
     c("occurrence_qc.csv", "occurrence_qc_counts.csv", "analysis_domain_summary.csv",
-      "predictor_qualification.csv", "background_summary.csv")))
+      "predictor_qualification.csv", "predictor_missing_qc.csv", "background_summary.csv")))
   if (!is.null(old) && identical(old$fingerprint, prep_fp) && all(file.exists(artifacts)) &&
       identical(unname(tools::md5sum(artifacts)), old$artifacts)) {
     message("Verified preparation cache: ", cfg$species_name)
@@ -415,9 +415,11 @@ prepare_species <- function(cfg) {
     occ, domain_area, current, strategy = cfg$bg_strategy,
     bin_k = cfg$bg_bin_k, sre_quantile = cfg$bg_sre_quantile,
     user_table = tg_table,
-    n_bg = cfg$bg_n,
+    n_bg = cfg$bg_n, missing = cfg$predictor_missing %||% "complete_cases",
     cell_thin = TRUE, exclude_presence = TRUE, seed = cfg$seed, verbose = TRUE
   )
+  data.table::fwrite(attr(model_data, "missing_qc"), file.path(out_dir, "predictor_missing_qc.csv"))
+  current <- current[[intersect(names(current), names(model_data))]]
   data.table::fwrite(data.frame(requested_background = cfg$bg_n,
     actual_background = sum(model_data$presence == 0L),
     actual_presence = sum(model_data$presence == 1L),

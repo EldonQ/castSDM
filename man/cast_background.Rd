@@ -24,7 +24,8 @@ cast_background(
   exclude_presence = TRUE,
   n_rep = 1L,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  missing = c("complete_cases", "drop_predictors")
 )
 }
 \arguments{
@@ -120,6 +121,13 @@ replicate to propagate PA-selection uncertainty). With \code{n_rep = 1}
 \item{seed}{Integer or \code{NULL}. Random seed for reproducibility.}
 
 \item{verbose}{Logical. Print informational messages. Default \code{TRUE}.}
+
+\item{missing}{\code{"complete_cases"} (default) filters incomplete rows. With
+\code{"drop_predictors"}, random/distance-based sampling retains the sampled
+locations and excludes any indicator missing there, before model splitting.
+The \code{missing_qc} attribute records counts and exclusions. This declared
+study-input QC uses covariate availability, never response ranking; no
+measurements are filled in. Validation is conditional on this input QC.}
 }
 \value{
 A \code{data.frame} with columns:

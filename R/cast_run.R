@@ -189,14 +189,12 @@ cast_run <- function(species_data,
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
   stage_started <- Sys.time()
-  selection_inputs <- list(split$train, protocol$select_method, protocol$select_inner_k,
+  selection_inputs <- list(split$train, protocol$select_method, protocol$select_vif_threshold,
     select_var_id, select_category, select_roles, protocol$block_method, protocol$block_size, protocol$coords_crs, protocol$seed)
   screen <- stage("02_select", selection_inputs, cast_select(
     split$train,
     method = protocol$select_method,
-    inner_k = protocol$select_inner_k,
-    block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
-    block_size = protocol$block_size, coords_crs = protocol$coords_crs,
+    vif_threshold = protocol$select_vif_threshold,
     var_id = select_var_id,
     category = select_category,
     roles = select_roles,
@@ -207,7 +205,7 @@ cast_run <- function(species_data,
     screen, tables = list(selection_scores = screen$scores))
 
   if (!is.null(output_dir)) {
-    for (name in c("risk_curve", "fold_details", "fold_losses")) {
+    for (name in "vif_log") {
       value <- screen$diagnostics[[name]]
       if (is.matrix(value)) value <- data.frame(fold = seq_len(nrow(value)), as.data.frame(value))
       if (is.data.frame(value)) utils::write.csv(value,
@@ -243,14 +241,13 @@ cast_run <- function(species_data,
     fit, tables = list(engine_fits = .cast_fit_table(fit)))
 
   # ---- 4. Nested spatial cross-validation (training split only) -----------
-  if (verbose) cli::cli_h2("CV: nested spatial cross-validation (k = {protocol$cv_k})")
+  if (verbose) cli::cli_h2("CV: spatial cross-validation with fold-local screening (k = {protocol$cv_k})")
   stage_started <- Sys.time()
   select_args <- list(
-    inner_k = protocol$select_inner_k,
-    block_method = if (protocol$block_method == "env") "grid" else protocol$block_method,
-    block_size = protocol$block_size, coords_crs = protocol$coords_crs, roles = select_roles,
+    vif_threshold = protocol$select_vif_threshold,
+    roles = select_roles,
     var_id = select_var_id, category = select_category)
-  cv_inputs <- list(split$train, select_args, protocol$models, protocol$cv_k,
+  cv_inputs <- list(split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
     protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,

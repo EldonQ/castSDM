@@ -11,8 +11,8 @@ test_that("cast_cv stores fold selection frequency and cast_consensus aggregates
     x2 = rnorm(n), x3 = rnorm(n), x4 = rnorm(n), x5 = rnorm(n)
   )
   cv <- cast_cv(
-    dat, select_method = "screen",
-    select_args = list(corcut = 0.7),
+    dat, select_method = "vif",
+    select_args = list(vif_threshold = 10),
     k = 3, models = "rf", rf_ntree = 40, seed = 81, verbose = FALSE
   )
   expect_true(all(c("variable", "freq") %in% names(cv$selection_freq)))

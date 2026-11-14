@@ -63,7 +63,9 @@ cast_report_odmap <- function(object, path = "odmap_report.md",
   } else {
     "[report] (no spatial prediction recorded in this object)"
   }
-  selection_line <- if (identical(screen_method, "screen") && identical(diag$algorithm, "elastic_net")) {
+  selection_line <- if (identical(screen_method, "vif")) {
+    sprintf("training-fold VIF <= %s: %d retained; no count target or inner parameter search", diag$vif_threshold, length(sel_vars))
+  } else if (identical(screen_method, "screen") && identical(diag$algorithm, "elastic_net")) {
     sprintf("spatial elastic-net screen: %d retained; inner spatial folds=%s, rule=%s; no predictor-count target",
       length(sel_vars), diag$inner_k %||% NA_integer_,
       diag$rule %||% "not recorded")

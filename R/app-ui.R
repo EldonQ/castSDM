@@ -99,6 +99,7 @@
             shiny::selectInput("variables", "\u53c2\u4e0e\u6bd4\u8f83\u7684\u56e0\u5b50", choices = character(), width = "100%"),
             shiny::uiOutput("variable_definition"),
             shiny::conditionalPanel("input.mode == 'shift'",
+              shiny::uiOutput("shift_reference"),
               shiny::numericInput("shift", "\u6539\u53d8\u5e45\u5ea6 \u00b7 \u539f\u59cb\u5355\u4f4d", value = NA_real_),
               shiny::tags$p(class = "cast-note", "\u6d3e\u751f\u6307\u6807\u6539\u53d8\u5c5e\u4e8e\u6a21\u578b\u654f\u611f\u6027\u5206\u6790\u3002\u571f\u5730\u5229\u7528\u6539\u53d8\u4f18\u5148\u4f7f\u7528\u4e00\u81f4\u7684\u60c5\u666f\u56fe\u5c42\u3002")),
             shiny::conditionalPanel("input.mode == 'shift'", shiny::selectInput("context", "\u5176\u4f59\u56e0\u5b50\u7684\u73af\u5883", choices = stats::setNames(c("current", "future"), c("\u4fdd\u6301\u5f53\u524d\u503c", "\u4f7f\u7528\u672a\u6765\u60c5\u666f\u503c")))),

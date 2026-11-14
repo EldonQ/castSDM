@@ -7,7 +7,7 @@
 cast_cv(
   data,
   screen = NULL,
-  select_method = "screen",
+  select_method = "vif",
   select_args = list(),
   k = 5L,
   models = c("rf"),
@@ -46,7 +46,7 @@ selection into the CV metrics (a warning is issued); treat those metrics
 as optimistic.}
 
 \item{select_method}{Selection method passed to \code{\link[=cast_select]{cast_select()}}. Default
-\code{"screen"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
+\code{"vif"}. Set to \code{NULL} only to evaluate a fixed supplied screen.}
 
 \item{select_args}{Named list of additional \code{\link[=cast_select]{cast_select()}} arguments.
 Cannot override \code{data}, \code{response}, or \code{method}.}
@@ -182,6 +182,6 @@ pooled OOF labels, including that fold's labels. They describe the chosen
 training-side operating point; they are not an independent assessment of
 threshold choice. Use a separate hold-out with the frozen threshold for
 that assessment. Threshold-free discrimination scores have no such
-threshold-selection step. Fold dependence also limits interpretation of
-a one-SE screening rule as statistical uncertainty.
+threshold-selection step. Fold inclusion frequencies describe
+screening stability, not statistical uncertainty or causal importance.
 }

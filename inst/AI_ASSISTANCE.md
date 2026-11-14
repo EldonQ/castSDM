@@ -107,3 +107,23 @@ and native raster crops; no synthetic ecological observations or validation
 labels are generated. Bounded component fitting is recorded separately from
 a full new study, which remains author-run. No theoretical novelty, causal
 identification, external validation or journal acceptance is asserted.
+
+
+On 15 November 2026, Codex assisted 0.34.0: replaced the default penalty-search
+selector with conventional fold-local VIF and matrix-based auxiliary-regression
+equivalence, exposed scientific settings, recorded indicator missingness, skipped
+zero-driver raster attribution, fixed empty warnings and stale product states,
+and paginated readable selection/inclusion catalogues. Proven identical static
+file/band layers are read once in raster attribution and checked against full
+reading at tolerance 1e-12. Real-data checks use the
+saved 0.33 case: 8,135 training rows for screening, a 2,500-row bounded fit and
+RF-only five-fold engineering check, actual occurrence/background extraction,
+and native crops with real CHELSA future values. A supported QA crop is explicitly
+chosen from observed supported locations; it is not representative ecological
+validation. Strict missing-indicator deletion excluded many indicators in the
+real-data check and remains opt-in; complete-case QC remains the default. No
+observations, labels, intervention magnitudes or environmental measurements are
+manufactured. Runnable synthetic vignette/adapter examples were replaced with
+real-case instructions. Legacy synthetic test fixtures are not executed by this
+lightweight check. The full 0.34 study remains author-run; no causal identification,
+predictive superiority, methodological priority or journal readiness is claimed.

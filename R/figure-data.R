@@ -101,7 +101,7 @@
   bundle_path <- file.path(directory, "figure_data.rds")
   provenance <- comparison$provenance
   provenance$session <- NULL
-  base_key <- .cast_digest(list(schema = "cast_figure_data/3", .cast_fit_identity(fit), provenance,
+  base_key <- .cast_digest(list(schema = "cast_figure_data/4", .cast_fit_identity(fit), provenance,
     object[c("screen", "cv", "eval")], object$protocol$clamp,
     comparison$weights, comparison$threshold, comparison$threshold_sensitivity,
     scenario, response_grid, display_resolution, response_method,
@@ -195,7 +195,8 @@
     future <- future[[fit$env_vars]]
   }
   report <- comparison$results[[scenario]]
-  if ("attribution" %in% products && is.null(attribution) && !is.null(current) && !is.null(future)) {
+  if ("attribution" %in% products && length(unlist(comparison$groups, use.names = FALSE)) &&
+      is.null(attribution) && !is.null(current) && !is.null(future)) {
     if (verbose) cli::cli_inform("Preparing reporting-scenario driver maps; reuse requires matching models, inputs, mask and settings.")
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
@@ -207,7 +208,9 @@
       overwrite = TRUE, diagnostics = TRUE,
       filename = if (!is.null(domain)) file.path(directory, "driver_attribution.tif"))
   }
-  if (is.null(attribution)) note("03_environmental_driver", "Current/future predictor inputs or an existing cast_attribution object are required.")
+  if ("attribution" %in% products && is.null(attribution)) note("03_environmental_driver",
+    if (!length(unlist(comparison$groups, use.names = FALSE))) "No fitted predictor changes; scenario driver maps are inapplicable." else
+      "Current/future predictor inputs or an existing cast_attribution object are required.")
   mess <- NULL
   if ("mess" %in% products && !is.null(current) && !is.null(future) && !is.null(report$raster_file)) {
     path <- file.path(directory, "mess_native.tif")
@@ -216,7 +219,7 @@
       .cast_data_identity(future, memo), provenance, scenario, .cast_code_identity(.cast_figure_mess)))
     mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path), path)
     outputs <- c(outputs, mess)
-  } else note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
+  } else if ("mess" %in% products) note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
   for (s in if ("maps" %in% products) names(comparison$results) else character()) {
     result <- comparison$results[[s]]
     artifact_id <- result$alias_of %||% s
@@ -274,7 +277,7 @@
   if (is.null(attribution)) completed <- setdiff(completed, "attribution")
   if (is.null(mess)) completed <- setdiff(completed, "mess")
   if (!length(displays)) completed <- setdiff(completed, "maps")
-  data <- list(schema = "cast_figure_data/3", analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
+  data <- list(schema = "cast_figure_data/4", analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,
@@ -297,8 +300,8 @@
   unique(unlist(lapply(include, function(x) {
     if (x == "all") return(inventory)
     pattern <- switch(x,
-      basic = "^(01_|07_|11_|12_|13_|15_|S_selection_)",
-      maps = "^(02_|04_|05_|08_|10_|S_(?!selection_))",
+      basic = "^(01_|07_|11_|12_|13_|15_|S_selection_|S_stability_)",
+      maps = "^(02_|04_|05_|08_|10_|S_(?!selection_|stability_))",
       responses = "^(06_|14_)", drivers = "^(03_|D_|E_)", novelty = "^09_", NULL)
     if (!is.null(pattern)) return(grep(pattern, inventory, value = TRUE, perl = TRUE))
     inventory[inventory == x | startsWith(inventory, paste0(x, "_"))]
@@ -312,7 +315,7 @@
   out <- character()
   for (x in include) {
     if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
-        (startsWith(x, "S_") && !startsWith(x, "S_selection")) || x == "S") out <- c(out, "maps")
+        (startsWith(x, "S_") && !grepl("^S_(selection|stability)", x)) || x == "S") out <- c(out, "maps")
     if (x == "responses" || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
     if (x == "drivers" || grepl("^03(_|$)|^[DE]_", x)) out <- c(out, "attribution")
     if (x == "novelty" || grepl("^09(_|$)", x)) out <- c(out, "mess")

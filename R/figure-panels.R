@@ -239,7 +239,7 @@
       map("joint_change", kind = "signed", legend = "Future - current"),
       .cast_figure_trend(cmp$binary, group_labels = group_labels))
     patchwork::wrap_plots(plots, ncol = 2) + .cast_figure_annotation(
-      "Predicted environmental suitability change",
+      if (!length(unlist(cmp$groups, use.names = FALSE))) "No changing predictor in the fitted model" else "Predicted environmental suitability change",
       paste("Reporting scenario:", report, ". Shared suitability scale. Range trends use the frozen training OOF threshold; continuous maps retain sub-threshold values. Maps are display-only reprojections."))
   }, 155, !is.null(path) && !is.null(cmp$binary))
   add("03_environmental_driver", function() {
@@ -268,7 +268,7 @@
       "Environmental explanation under frozen fitted models",
       "Driver-only and retained-driver contrasts are non-additive predictive explanations. Static predictors remain fixed. These contrasts do not identify ecological causal effects.")
   }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display),
-    if (!is.null(att) && !length(att$drivers)) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
+    if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
       "Driver attribution needs raw scenario predictors or a supplied saved cast_attribution result.")
   add("04_support_and_disagreement", function() {
     patchwork::wrap_plots(map("support", "Training marginal support", "support", legend = "Training range"),
@@ -318,21 +318,26 @@
     plots <- lapply(names(data$displays), function(s) map("joint", .cast_figure_scenario_label(s),
       limits = suitability_limits(), source = data$displays[[s]]))
     patchwork::wrap_plots(plots, ncol = min(3L, length(plots))) +
-      .cast_figure_annotation("Future suitability across every requested scenario",
+      .cast_figure_annotation(if (!length(unlist(cmp$groups, use.names = FALSE))) "Model cannot evaluate the supplied climate changes" else "Future suitability across every requested scenario",
         "All panels use the same colour limits and frozen model weights. Uncoloured basemap areas provide geographic context. Source scenario inputs and time matching are recorded by the workflow.")
   }, max(90, ceiling(length(data$displays)/3)*65), length(data$displays) > 0)
   add("11_variable_selection", function() {
-    a <- plot(data$screen, top = 30L) + .cast_figure_theme() +
-      ggplot2::scale_y_discrete(labels = .cast_figure_variable_labels)
-    a <- a + ggplot2::labs(subtitle = paste(strwrap(a$labels$subtitle, 40), collapse = "\n"), caption = NULL)
-    freq <- data$cv$selection_freq
+    counts <- data.frame(status = c("Eligible", "Retained", "Excluded"),
+      n = c(sum(data$screen$scores$eligible %||% rep(TRUE, nrow(data$screen$scores))),
+        length(data$screen$selected), nrow(data$screen$scores)-length(data$screen$selected)))
+    a <- ggplot2::ggplot(counts, ggplot2::aes(.data$status, .data$n)) +
+      ggplot2::geom_col(fill = "#4FA3BE", width = .65) +
+      ggplot2::geom_text(ggplot2::aes(label = .data$n), vjust = -.3, size = 3) +
+      ggplot2::labs(title = "Screening summary", x = NULL, y = "Predictors",
+        subtitle = paste("Method:", data$screen$method)) + .cast_figure_theme()
+    freq <- utils::head(data$cv$selection_freq, 15L)
     b <- ggplot2::ggplot(freq, ggplot2::aes(.data$freq,
       stats::reorder(.data$variable, .data$freq))) + ggplot2::geom_col(fill = "#256E92", width = .72) +
       ggplot2::labs(title = "Spatial-fold selection stability", x = "Selection frequency", y = NULL) +
       ggplot2::scale_y_discrete(labels = .cast_figure_variable_labels) +
       .cast_figure_theme()
     patchwork::wrap_plots(a, b, ncol = 2) + .cast_figure_annotation(
-      "Variable screening and selection stability", "Overview: the top 30 ranks plus every retained predictor, and all fold-selected predictors. All scored predictors appear in the paginated S_selection catalogue; unscored exclusions remain in the source table. Screening rank is not causal importance.")
+      "Variable screening and selection stability", "Overview shows screening counts and up to 15 fold frequencies. Every predictor and every fold-selected variable remains in the paginated S_selection and S_stability catalogues and source tables. VIF and inclusion frequency are not ecological importance.")
   }, 190,
     !is.null(data$screen) && !is.null(data$cv$selection_freq))
   add("12_threshold_sensitivity", function() {
@@ -378,7 +383,7 @@
   }, 95, !is.null(data$cv$aoa) && is.finite(data$cv$aoa$threshold %||% NA_real_))
   if (!is.null(data$screen) && is.data.frame(data$screen$scores)) {
     scored <- plot(data$screen, top = NULL)$data
-    pages <- split(seq_len(nrow(scored)), ceiling(seq_len(nrow(scored))/45L))
+    pages <- split(seq_len(nrow(scored)), ceiling(seq_len(nrow(scored))/25L))
     for (page in seq_along(pages)) local({
       number <- page; rows <- pages[[number]]
       add(sprintf("S_selection_%02d", number), function() {
@@ -389,7 +394,21 @@
           ggplot2::labs(title = sprintf("Complete screening ranks: page %d of %d", number, length(pages)),
             subtitle = sprintf("Ranks %d-%d of %d scored predictors", min(rows), max(rows), nrow(scored)),
             caption = .cast_figure_wrap("Every scored predictor is retained across these pages. Scores describe fitted selector components (historical screens retain their original score definitions); original values and qualification exclusions remain in screening.csv. Display ordering does not determine the selected set or identify causal importance."))
-      }, max(100, length(rows)*3.5+45))
+      }, max(100, length(rows)*7+45))
+    })
+  }
+  if (is.data.frame(data$cv$selection_freq) && nrow(data$cv$selection_freq)) {
+    freq <- data$cv$selection_freq
+    pages <- split(seq_len(nrow(freq)), ceiling(seq_len(nrow(freq))/25L))
+    for (page in seq_along(pages)) local({
+      number <- page; d <- freq[pages[[number]], , drop = FALSE]
+      add(sprintf("S_stability_%02d", number), function()
+        ggplot2::ggplot(d, ggplot2::aes(.data$freq, stats::reorder(.data$variable, .data$freq))) +
+          ggplot2::geom_col(fill = "#256E92", width = .72) +
+          ggplot2::scale_y_discrete(labels = .cast_figure_variable_labels) +
+          ggplot2::labs(title = sprintf("Complete fold inclusion: page %d of %d", number, length(pages)),
+            x = "Selection frequency", y = NULL) + .cast_figure_theme(),
+        max(100, nrow(d)*7+35))
     })
   }
   if (length(data$displays)) {

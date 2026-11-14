@@ -8,132 +8,68 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(eval = FALSE, collapse = TRUE, comment = "#>")
+```
+
+## Reuse verified real products
+
+These examples read a completed real case. They never generate raster values or
+response labels. Set `CAST_REAL_CASE` explicitly before running them.
+
+```{r case}
 library(castSDM)
+case_dir <- Sys.getenv("CAST_REAL_CASE")
+run <- readRDS(file.path(case_dir, "training", "result.rds"))
+comparison <- readRDS(file.path(case_dir, "comparison", "comparison.rds"))
+comparison$contract
+comparison$runtime
+run$cv$timings
+run$cv$engine_fits
 ```
 
-## Paired model disagreement
+## Sampling and missingness
 
-Model SD is calculated after within-model paired contrasts. It is the sample
-SD among active models, without weighting by ensemble weight. With one model
-it is unassessed (`NA`), not zero. It is neither a sampling confidence interval
-nor an ensemble-surface SD.
+The case default declares 10,000 background points. The background count is an
+input policy, not a universal SDM optimum. Occurrence and background records are
+subject to the declared study domain and environmental coverage.
 
-```{r paired}
-current <- data.frame(temperature = seq(-1, 1, length.out = 12),
-                      land = rep(c(.2, .8), 6), elevation = 100)
-fit <- cast_as_fit(list(a = c(.8, -.3), b = c(1.2, -.1)), current,
-  function(model, newdata) plogis(model[1]*newdata$temperature + model[2]*newdata$land))
-future <- transform(current, temperature = temperature + .4, land = land + .1)
-comparison <- cast_compare(fit, current, future,
-  groups = list(climate = "temperature", land_use = "land"),
-  weights = c(a = .4, b = .6), threshold = .5, verbose = FALSE)
-summary(comparison)[, c("component", "mean", "mean_model_sd")]
+The default complete-case policy preserves eligible indicators and reports record
+loss. Strict `drop_predictors` instead preserves sampled sites and drops any
+incomplete indicator before splitting. A few missing cells can exclude many
+indicators, so this policy is opt-in. Neither policy fills in measurements.
+`predictor_missing_qc.csv` records per-indicator missingness; validation is
+conditional on study-input QC and the occurrence-informed domain.
+
+## Environmental responses
+
+A driver-only contrast changes that fitted factor against current background.
+A retained contrast restores it against the actual future background. Sign
+reversal diagnoses background dependence; it does not identify a causal effect.
+Individual contrasts need not add to the complete scenario change.
+
+Marginal training-quantile support, MESS and multivariate AOA are different
+checks. Marginal support does not establish joint support. Engine disagreement
+is not a sampling confidence interval. Maps keep unsupported locations explicit.
+
+## Frozen scientific policies
+
+Out-of-fold predictions determine thresholds and ensemble weights. Hold-out
+labels evaluate that fixed policy; do not tune it on those labels. Fold metrics
+using the pooled OOF threshold describe a training-side operating point.
+Predictive scores concern sampled presence/background labels, not verified
+absence data or calibrated occupancy probabilities.
+
+`cast_run(cache_dir=...)` verifies stage identities; changed predictor selection,
+model policy or inputs require a new scientific analysis. Outputs from old
+versions are never relabelled as a new analysis. Raster batches can resume when
+models, inputs, mask and settings match; source input files remain read only.
+
+## Interface and exports
+
+```{r app}
+cast_app(case_dir)
 ```
 
-Each cell uses the same positive-weight models in all corners. A changed
-supplied static layer causes an error; an omitted static layer inherits
-current values. `domain = "common"` intersects finite inputs across all
-requested futures and the mask. `domain = "scenario"` uses separate domains.
-Every active model must predict finite values on the eligible domain.
-
-## A small raster calculation
-
-Grids and CRS must already match. Outputs contain four predictions, eight
-contrasts, eight paired SD layers, scenario and common support flags, and
-joint sign-agreement/conflict layers (24 layers total). Empty masked blocks are
-skipped and current model predictions are reused across futures.
-
-```{r raster, eval=requireNamespace("terra", quietly=TRUE)}
-current_raster <- terra::rast(nrows = 3, ncols = 4, nlyrs = 3,
-  xmin = 0, xmax = 4000, ymin = 0, ymax = 3000, crs = "EPSG:3857")
-terra::values(current_raster) <- as.matrix(current)
-names(current_raster) <- names(current)
-future_raster <- terra::rast(current_raster)
-terra::values(future_raster) <- as.matrix(future)
-output <- tempfile("cast-vignette-")
-raster_comparison <- cast_compare(fit, current_raster, future_raster,
-  groups = list(climate = "temperature", land_use = "land"),
-  weights = c(a = .4, b = .6), threshold = .5,
-  output_dir = output, verbose = FALSE)
-all.equal(raster_comparison$summary, comparison$summary)
-resumed <- cast_compare(fit, current_raster, future_raster,
-  groups = list(climate = "temperature", land_use = "land"),
-  weights = c(a = .4, b = .6), threshold = .5,
-  output_dir = output, verbose = FALSE)
-resumed$events[, c("stage", "cache_hit")]
-unlink(output, recursive = TRUE)
-```
-
-Binary counts use `>=` and the continuous summaries' finite domain. Counts
-denote cells; area interpretation needs an equal-area grid or explicit weighting.
-
-## Already-created surfaces and individual drivers
-
-`cast_factorial_attribution()` computes the same eight contrasts from four
-ensemble surfaces. It cannot recover paired model SD. Optional `sd_*` inputs
-produce `surface_sd_*` diagnostics under an independence approximation that
-ignores covariance between predictions.
-
-```{r surfaces}
-corners <- comparison$results$future$data
-factorial <- cast_factorial_attribution(corners$current, corners$joint,
-  corners$climate, corners$lulc, threshold = .5, verbose = FALSE)
-factorial$contract
-```
-
-`cast_attribution()` optionally evaluates driver-only and retained-driver
-contrasts. Driver-only changes one predictor. Retained-driver compares the
-full future with a future retaining that predictor's current value. Individual
-effects need not add to total change.
-
-```{r drivers}
-drivers <- cast_attribution(fit, current, future,
-  drivers = c("temperature", "land"), weights = c(a = .4, b = .6), verbose = FALSE)
-drivers$summary
-```
-
-Support checks marginal training quantiles on original inputs even when
-predictions are clamped. It cannot establish multivariate support or ecological
-transportability. Contrasts remain model-conditional.
-
-## Compare the same supported subset across futures
-
-```{r common-support}
-hotter <- transform(current, temperature = temperature + .8)
-multiple <- cast_compare(fit, current, list(warm = future, hot = hotter),
-  groups = list(climate = "temperature", land_use = "land"),
-  weights = c(a = .4, b = .6), thresholds = c(.3, .5, .7), verbose = FALSE)
-multiple$summary_common_support[, c("scenario", "component", "n_valid", "support_share", "mean")]
-multiple$agreement[, c("scenario", "component", "domain", "mixed_sign_share")]
-summary(multiple, thresholds = .5)
-```
-
-Common support intersects finite inputs and training marginal bounds over
-current and every requested future; it has identical counts across scenarios.
-The original supported summaries still use each scenario's own subset.
-Sign agreement is the largest fraction of active models in the positive,
-negative or neutral category (tolerance 1e-12), without model weights. Conflict
-requires both positive and negative contrasts; one model is unassessed.
-These statistics describe model disagreement, not confidence or significance.
-Requested thresholds are counted inside prediction blocks and cached;
-additional thresholds read saved predictions without calling an engine.
-
-## Resources and caches
-
-`resources = list(cores = 8, workers = 2, memory_mb = 4096)` declares one total
-budget: two scenario processes, at most four RF threads per process and blocks
-derived from the memory allowance. `scratch_dir` must be an existing writable
-directory. Workers require an installed matching package. Additive univariate
-logit GAMs reuse exact terms; other structures use ordinary prediction.
-
-`cast_run(cache_dir = ...)` caches preparation, selection, fit, CV, evaluation
-and refit separately. Keys include data, scientific settings and relevant code;
-future scenarios and output paths do not trigger fitting. A split supplied as
-`prepared = cast_prepare(...)` is checked against input row indices and values.
-
-Comparison receipts verify model/input content and output hashes. Changed or
-damaged artifacts are not silently reused. Choose a new output directory or
-`overwrite = TRUE` to replace stale outputs. OS locks prevent simultaneous
-writes and release on process termination. Hardware budgets do not change
-scientific cache keys or contrast definitions.
+Shiny opens existing products without refitting. Complete native rasters, PNG/PDF
+figures, settings, source tables and a reproducible view bundle remain available.
+Interactive previews are display grids; clicked values come from native grids.

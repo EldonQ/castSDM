@@ -7,8 +7,8 @@
 cast_protocol(
   models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
-  select_method = c("screen", "full"),
-  select_inner_k = 5L,
+  select_method = c("vif", "full"),
+  select_vif_threshold = 10,
   rf_ntree = 500L,
   rf_mtry = NULL,
   maxent_classes = NULL,
@@ -44,10 +44,10 @@ Default all three.}
 \item{train_fraction}{Hold-out fraction rule: fraction of rows assigned
 to the training split (spatial block split). Default \code{0.7}.}
 
-\item{select_method}{\code{"screen"} (spatial elastic-net screen) or
-\code{"full"} (keep every varying predictor). Default \code{"screen"}.}
+\item{select_method}{\code{"vif"} (default, iterative VIF screening) or
+\code{"full"} (keep every varying predictor).}
 
-\item{select_inner_k}{Number of inner spatial folds for elastic-net penalty selection.}
+\item{select_vif_threshold}{Maximum retained VIF, default \code{10}.}
 
 \item{rf_ntree}{RF trees. Default \code{500}.}
 

@@ -33,15 +33,16 @@ castsdm_species_configs <- function(root) {
     bg_target_group = FALSE,
     bg_target_group_file = NULL,
     bg_n = 10000L, predictor_min_coverage = .95,
+    predictor_missing = "complete_cases",
     bg_strategy = "random", bg_bin_k = 20L, bg_sre_quantile = .025,
     select_temporal_match = "npts", seed = seed,
     protocol = castSDM::cast_protocol(
-      models = c("rf", "maxent", "gam"), select_method = "screen",
-      select_inner_k = 5L,
+      models = c("rf", "maxent", "gam"), select_method = "vif",
+      select_vif_threshold = 10,
       train_fraction = .7, holdout_blocks = 20L, block_method = "blockcv",
       cv_k = 5L, rf_ntree = 500L, tune = FALSE, aoa = TRUE,
       ensemble_method = "weighted", ensemble_min_score = 0,
-      prevalence_target = NULL, gam_backend = "bam",
+      prevalence_target = NULL, gam_backend = "bam", maxent_classes = "lq",
       coords_crs = terra::crs(terra::rast(file.path(data_root, "mask_china.tif"))), clamp = TRUE, num_threads = resources$cores, seed = seed),
     # One total budget: 3 scenario processes, at most 4 RF threads each.
     resources = resources,
@@ -79,6 +80,8 @@ castsdm_species_configs <- function(root) {
   base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
   base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
   base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates/reg/dist/h90m/stream-dist-proximity/reg_dist_h90m_stream-dist-proximity_min.tif")
+  base$predictor_missing <- settings$predictor_missing %||% base$predictor_missing
+  base$protocol$select_vif_threshold <- settings$vif_threshold %||% base$protocol$select_vif_threshold
   base$bg_n <- settings$background_points %||% base$bg_n
   base$resources <- settings$resources %||% base$resources
   base$protocol$models <- settings$models %||% base$protocol$models

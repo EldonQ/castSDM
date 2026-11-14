@@ -24,9 +24,9 @@
 #'   Default all three.
 #' @param train_fraction Hold-out fraction rule: fraction of rows assigned
 #'   to the training split (spatial block split). Default `0.7`.
-#' @param select_method `"screen"` (spatial elastic-net screen) or
-#'   `"full"` (keep every varying predictor). Default `"screen"`.
-#' @param select_inner_k Number of inner spatial folds for elastic-net penalty selection.
+#' @param select_method `"vif"` (default, iterative VIF screening) or
+#'   `"full"` (keep every varying predictor).
+#' @param select_vif_threshold Maximum retained VIF, default `10`.
 #' @param holdout_blocks Number of groups for explicit grid/environmental
 #'   hold-out. blockCV hold-out uses calibrated physical blocks.
 #' @param rf_ntree RF trees. Default `500`.
@@ -70,8 +70,8 @@
 cast_protocol <- function(
   models = c("rf", "maxent", "gam"),
   train_fraction = 0.7,
-  select_method = c("screen", "full"),
-  select_inner_k = 5L,
+  select_method = c("vif", "full"),
+  select_vif_threshold = 10,
   rf_ntree = 500L,
   rf_mtry = NULL,
   maxent_classes = NULL,
@@ -106,7 +106,7 @@ cast_protocol <- function(
     models = models,
     train_fraction = train_fraction,
     select_method = first(select_method),
-    select_inner_k = select_inner_k,
+    select_vif_threshold = select_vif_threshold,
     holdout_blocks = holdout_blocks,
     coords_crs = coords_crs,
     gam_backend = first(gam_backend),
@@ -159,7 +159,7 @@ cast_protocol <- function(
   removed <- intersect(names(p), c("select_keep", "select_corcut", "select_ncov", "select_maxncov", "select_ensure_n"))
   if (length(removed)) cli::cli_abort("This protocol uses retired count/constrained screening settings: {.val {removed}}. Create a new cast_protocol(); old scientific results cannot be resumed as a new selection analysis.")
   required <- c(
-    "models", "train_fraction", "select_method", "select_inner_k",
+    "models", "train_fraction", "select_method", "select_vif_threshold",
     "rf_ntree", "rf_mtry",
     "maxent_classes", "maxent_regmult", "threshold_method", "tune",
     "tune_folds", "prevalence_target", "cv_k", "n_repeat", "block_method",
@@ -193,9 +193,9 @@ cast_protocol <- function(
   p$gam_backend <- enum_value(p$gam_backend, "gam_backend", c("bam", "gam"))
   .cast_check_coords_crs(p$coords_crs)
   p$select_method <- enum_value(p$select_method, "select_method",
-                                c("screen", "full"))
-  p$select_inner_k <- .cast_check_scalar(p$select_inner_k,
-    "protocol$select_inner_k", lower = 2, integer = TRUE)
+                                c("vif", "full"))
+  p$select_vif_threshold <- .cast_check_scalar(p$select_vif_threshold,
+    "protocol$select_vif_threshold", lower = 1)
   p$holdout_blocks <- .cast_check_scalar(p$holdout_blocks,
     "protocol$holdout_blocks", lower = 2, integer = TRUE)
   p$rf_ntree <- .cast_check_scalar(p$rf_ntree, "protocol$rf_ntree",
@@ -272,7 +272,7 @@ print.cast_protocol <- function(x, ...) {
   cli::cli_ul(c(
     "Engines: {fmt(x$models)}",
     "Split: train_fraction = {x$train_fraction}",
-    "Selection: {x$select_method} (inner spatial folds = {x$select_inner_k}; no predictor-count target)",
+    "Selection: {x$select_method} (VIF threshold = {x$select_vif_threshold}; no predictor-count target)",
     "Engine settings: gam_backend = {x$gam_backend}; rf_ntree = {x$rf_ntree}; rf_mtry = {fmt(x$rf_mtry)}; maxent_classes = {fmt(x$maxent_classes)}; maxent_regmult = {fmt(x$maxent_regmult)}",
     "Tuning: tune = {x$tune} (tune_folds = {x$tune_folds})",
     "Threshold: {x$threshold_method}; prevalence_target = {fmt(x$prevalence_target)}",

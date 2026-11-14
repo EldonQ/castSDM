@@ -110,6 +110,12 @@
 #'
 #' @seealso [cast_study_area()], [cast_prepare()]
 #'
+#' @param missing `"complete_cases"` (default) filters incomplete rows. With
+#'   `"drop_predictors"`, random/distance-based sampling retains the sampled
+#'   locations and excludes any indicator missing there, before model splitting.
+#'   The `missing_qc` attribute records counts and exclusions. This declared
+#'   study-input QC uses covariate availability, never response ranking; no
+#'   measurements are filled in. Validation is conditional on this input QC.
 #' @export
 cast_background <- function(occurrences,
                             study_area = NULL,
@@ -130,9 +136,13 @@ cast_background <- function(occurrences,
                             exclude_presence = TRUE,
                             n_rep = 1L,
                             seed = NULL,
-                            verbose = TRUE) {
+                            verbose = TRUE,
+                            missing = c("complete_cases", "drop_predictors")) {
   check_suggested("terra", "for raster extraction")
   strategy <- match.arg(strategy)
+  missing <- match.arg(missing)
+  if (missing == "drop_predictors" && !strategy %in% c("random", "disk"))
+    cli::cli_abort("drop_predictors requires random or distance-based sampling; environmental/SRE sampling requires complete predictor values.")
   bin_method <- match.arg(bin_method)
   if (!is.numeric(bin_k) || length(bin_k) != 1L || !is.finite(bin_k) ||
       bin_k < 2L) {
@@ -338,7 +348,7 @@ cast_background <- function(occurrences,
     # Get all valid cell indices: inside the mask AND non-NA in every layer
     # (per-cell anyNA across layers, not just the first).
     lazy_random <- strategy == "random" && !use_bias
-    valid_r <- if (lazy_random) !is.na(ref_mask) else {
+    valid_r <- if (lazy_random || missing == "drop_predictors") !is.na(ref_mask) else {
       n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
       !is.na(ref_mask) & (n_na_layers == 0)
     }
@@ -408,7 +418,7 @@ cast_background <- function(occurrences,
                          replace = sample_replace)
     } else if (strategy == "random" || strategy == "sre" || strategy == "disk") {
       # sre / disk pools are already restricted; the draw is uniform within.
-      bg_cells <- if (lazy_random) {
+      bg_cells <- if (lazy_random && missing == "complete_cases") {
         .cast_random_complete_cells(raster_stack, valid_cells, n_bg, verbose)
       } else sample(valid_cells, size = n_bg, replace = sample_replace)
 
@@ -438,12 +448,28 @@ cast_background <- function(occurrences,
   )
   out_df <- cbind(out_df, env_df)
 
+  # Study-input QC, declared before splitting. Values and row labels are
+  # untouched; incomplete indicators are excluded rather than filled in.
+  missing_qc <- data.frame(variable = names(env_df),
+    n_missing = vapply(env_df, function(v) sum(!is.finite(v)), integer(1)),
+    n_presence_missing = vapply(env_df, function(v) sum(!is.finite(v[seq_len(n_pres)])), integer(1)),
+    n_background_missing = vapply(env_df, function(v) sum(!is.finite(v[-seq_len(n_pres)])), integer(1)),
+    stringsAsFactors = FALSE)
+  missing_qc$policy <- missing
+  missing_qc$excluded <- missing == "drop_predictors" & missing_qc$n_missing > 0L
+  if (missing == "drop_predictors") {
+    dropped <- missing_qc$variable[missing_qc$excluded]
+    out_df[dropped] <- NULL
+    if (length(dropped) && verbose) cli::cli_inform("Missing-value QC: {length(dropped)} incomplete predictors excluded before splitting; all sampled locations retained; no imputation.")
+    if (all(missing_qc$excluded)) cli::cli_abort("No complete predictor remains at the declared sampling locations. Inspect the input coverage; no values were imputed.")
+  }
+
   # Remove rows with NA in any environmental variable, then top the
   # background set back up to the requested size. `used_cells` accumulates
   # every background cell ever sampled so no cell is topped up twice.
   used_cells <- bg_cells
   topup_rounds <- 0L
-  while (topup_rounds < 5L) {
+  while (missing == "complete_cases" && topup_rounds < 5L) {
     complete <- stats::complete.cases(out_df)
     n_bg_ok <- sum(complete & out_df$presence == 0)
     if (n_bg_ok >= n_bg) break
@@ -508,7 +534,7 @@ cast_background <- function(occurrences,
         c("!" = "{n_removed} rows removed due to NA environmental values.")
     ))
   }
-
+  attr(out_df, "missing_qc") <- missing_qc
     out_df
   }
 

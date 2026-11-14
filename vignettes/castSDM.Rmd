@@ -8,99 +8,66 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_chunk$set(eval = FALSE, collapse = TRUE, comment = "#>")
+```
+
+## Use a real case
+
+Examples require a completed real-data case. Set `CAST_REAL_CASE` to its directory.
+The vignette build does not create measurements, labels or artificial scenarios.
+
+```{r case}
 library(castSDM)
+case_dir <- Sys.getenv("CAST_REAL_CASE")
+run <- readRDS(file.path(case_dir, "training", "result.rds"))
+split <- readRDS(file.path(case_dir, "training", "stages", "01_prepare.rds"))
+comparison <- readRDS(file.path(case_dir, "comparison", "comparison.rds"))
 ```
 
-## Fit a small response
+## Screen and fit
 
-The central workflow compares two predictor groups under one fitted response.
-This complete example supplies a GLM through the external-model adapter.
-The random data illustrate the interface and carry no ecological evidence.
+The default uses conventional VIF <= 10 inside each training fold, with no
+predictor-count target. VIF is a redundancy diagnostic, not importance or causality.
+The case workflow uses RF, standard linear/quadratic MaxEnt, and GAM with BAM.
 
-```{r model}
-set.seed(42)
-current <- data.frame(temperature = rnorm(120), land = runif(120))
-data <- transform(current, presence = rbinom(120, 1, plogis(temperature-land)))
-model <- glm(presence ~ temperature + land, data, family = binomial())
-fit <- cast_as_fit(list(glm = model), current,
-  function(model, newdata) predict(model, newdata, type = "response"))
-future <- transform(current, temperature = temperature + .5, land = land + .1)
+```{r selection}
+selection <- cast_select(split$train, method = "vif", vif_threshold = 10)
+selection$diagnostics$vif_log
+fit <- cast_fit(split$train, screen = selection,
+  models = c("rf", "maxent", "gam"), maxent_classes = "lq", gam_backend = "bam")
 ```
 
-## Compare grouped scenarios
+For a new full analysis, initialise the workflow with actual source paths through
+`cast_workflow()`, or open the no-code setup form with `cast_app()`. Review its
+input checks before clicking Run. Future scenarios use real CHELSA ensemble-mean
+climate; nonclimate predictors are held current. Scenario mean climate does not
+represent between-GCM uncertainty.
 
-`cast_compare()` creates both partial scenarios without requiring separate
-copies of environmental stacks. It freezes weights and records predictors
-outside the groups as static.
+## Explain and inspect
 
-```{r comparison}
-comparison <- cast_compare(fit, current, future,
-  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE,
-  thresholds = c(.3, .5, .7))
-summary(comparison)[, c("component", "mean", "mean_supported", "n_valid")]
+```{r inspect}
+cast_app(case_dir)
+cast_diagnose(run, comparison)
 ```
 
-`climate_main` and `lulc_main` retain historical names for the first and second
-groups. They are baseline simple effects. `climate_average` and `lulc_average`
-average the effect over both levels of the other group. Interaction is joint
-minus the two partial predictions plus current.
+Select an imported scenario, inspect environment-response summaries, and request
+one factor map. Explicit hypothetical shifts are in original units and show the
+observed training range. No intervention magnitude is generated automatically.
+The interface displays driver-only and retained responses, marginal support,
+and agreement between engines. These are fitted suitability responses, not
+identified ecological causal effects or occurrence probabilities.
 
-```{r plot, fig.width=7, fig.height=4}
-plot(comparison, las = 2)
+If no fitted predictor changes, the program reports that the model cannot
+assess the supplied changes. Identical predictions do not prove ecological
+stability. Current predictions and observed response profiles remain available.
+
+## Complete publication outputs
+
+```{r figures}
+cast_figures(run, comparison, output_dir = file.path(case_dir, "figures"),
+  include = "all")
 ```
 
-These model-conditional contrasts do not identify real-world causal effects.
-Presence/background predictions remain relative suitability unless an
-appropriate calibration is established.
-
-## Threshold sensitivity without new predictions
-
-An external fit has no automatic evaluation score or threshold. For declared
-threshold sensitivity, reuse the saved four-corner predictions:
-
-```{r thresholds}
-sensitivity <- summary(comparison, thresholds = c(.3, .5, .7))
-sensitivity[sensitivity$component == "joint_change" & sensitivity$domain == "full", ]
-```
-
-The rule is `suitability >= threshold`. These summaries count rows or cells;
-they are not area-weighted estimates. Supported counts use training marginal
-quantiles, which cannot detect all novel environmental combinations.
-
-## Built-in training workflow
-
-For data with `lon`, `lat`, `presence` and numeric predictors, `cast_run()` uses
-one protocol for screening, nested spatial CV, hold-out evaluation and refitting.
-This small run uses grid blocks; design spatial validation for the actual study.
-
-```{r training, eval=requireNamespace("ranger", quietly=TRUE) && requireNamespace("pROC", quietly=TRUE)}
-species_data <- transform(data, lon = runif(120, 70, 130), lat = runif(120, 20, 50))
-protocol <- cast_protocol(models = "rf", select_method = "full", rf_ntree = 30,
-  cv_k = 2, block_method = "grid", aoa = FALSE, seed = 42)
-run <- cast_run(species_data, protocol = protocol, verbose = FALSE)
-summary(run)
-run$diagnostics$holdout
-run$diagnostics$folds
-run$diagnostics$score_views_oof
-comparison_run <- cast_compare(run, current, future,
-  groups = list(climate = "temperature", land_use = "land"), verbose = FALSE)
-comparison_run$threshold_source
-```
-
-Selection and tuning repeat inside CV folds. Independent hold-out data do not
-choose weights. A usable pooled out-of-fold surface supplies the comparison
-threshold; otherwise comparison returns continuous results only.
-
-The automatic diagnostics include the frozen ensemble on the independent
-hold-out, even without a prediction map. Training OOF native/shifted score
-views preserve the same fitted engines and weights; they are descriptive,
-not a new policy selected from hold-out labels. A weighted mean training-score
-shift is not ecological probability calibration. Brier scores and reliability
-bins concern the sampled response; background points are not known absences.
-The protocol's clamp is used consistently in CV, evaluation and prediction;
-AOA assesses original inputs. Historical results before 0.27.0 did not apply
-the protocol clamp in CV or hold-out evaluation and should not be relabelled.
-
-For aligned rasters, use the same call with `SpatRaster` objects, a mask and
-`output_dir`. The advanced vignette demonstrates a small raster comparison.
+Keep actual predictor stacks available for per-factor maps and native-grid MESS,
+or reuse their verified saved products. Complete selection/inclusion catalogues
+are paginated; overview plots are not an alternative to the full source tables.

@@ -15,8 +15,8 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
-    "digest", "filelock", "ranger", "maxnet", "mgcv", "glmnet", "iml", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.33.0")
+    "digest", "filelock", "ranger", "maxnet", "mgcv", "iml", "pROC", "blockCV", "FNN",
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.34.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)

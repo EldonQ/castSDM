@@ -97,18 +97,21 @@ evaluation and full-data refitting. Scientific settings live in one
 `cast_protocol()`. Screening and tuning repeat inside outer CV folds; hold-out
 data do not determine ensemble weights or thresholds.
 
-The screen uses one mature method: binomial elastic net with linear/quadratic
-terms and inner spatial one-SE penalty selection. Binary inputs use linear
-terms only. There is no fixed variable count, top-coefficient truncation,
-minimum climate quota, univariate p-value ranking or automatic correlated-pair
-delete. Semantic qualification excludes identifiers and unencoded category/
-direction codes. Transformations are rebuilt within each training fold.
-This is transparent preprocessing, not a new selection algorithm or causal
-identification. Complex responses/interactions may be missed; correlated
-variables may substitute. Qualification, the full spatial risk curve and fold
-losses are saved. A null result is reported without forcing predictors.
-Version 0.31 requires a fresh analysis directory; old scientific fits cannot
-be resumed under a changed scientific protocol.
+The default screen is conventional iterative VIF (threshold 10), recomputed
+inside every spatial training fold. There is no variable-count target, protected
+category or inner penalty search. VIF diagnoses linear redundancy, not variable
+importance or causal effects. Full elimination logs and inclusion frequencies
+are saved. The previous elastic-net selector has been retired; 0.34 requires a
+new analysis directory and never relabels old scientific fits.
+The case workflow keeps an explicitly declared complete-case policy and records
+missing counts for every indicator. A strict `drop_predictors` option instead
+retains sampled locations and excludes any incomplete indicator before splitting;
+it can remove many indicators because of a few missing cells, so it is opt-in.
+Neither policy fills in environmental values. Validation is conditional on this
+input QC. MaxEnt uses the standard
+linear/quadratic feature classes in this workflow; the standalone engine retains
+maxnet's feature-policy default. Interpret validation results for the declared
+policy rather than assuming a simpler model must perform better.
 OOF thresholds are fitted training-side settings: fold TSS/SEDI/kappa at that
 pooled threshold are descriptive, since the fold labels participate in choosing
 it. Assess the frozen threshold on the separate hold-out.

@@ -198,7 +198,7 @@ test_that("CV passes buffered training rows to the selector and keeps statuses",
     evaluate_model_full = function(...) c(auc = .7, tss = .4, cbi = .3)
   )
   expect_warning(cv <- cast_cv(dat, k = 3, models = "gam", buffer = 1.5,
-    select_method = "screen", verbose = FALSE), "test backend failure")
+    select_method = "vif", verbose = FALSE), "test backend failure")
   for (i in 1:3) {
     idx <- .cast_buffer_train_idx(dat$lon, dat$lat, which(folds == i), 1.5)
     expect_identical(seen[[i]], dat[idx, , drop = FALSE])

@@ -1,3 +1,10 @@
+0.34 默认流程：输入质控 → 训练折内 VIF≤10 → RF/MaxEnt/GAM → 空间验证 → CHELSA 气候情景 → 环境响应地图。
+不规定变量数量；MaxEnt 使用标准 lq 特征，GAM 使用 bam。
+默认 `predictor_missing="complete_cases"` 保留合格指标并使用完整样本，逐项记录缺失造成的记录损失。可选 `"drop_predictors"` 在分割前按实际采样位置剔除不完整指标、保留位置；该严格选项可能因少数缺值删除很多指标，不作为默认。两者都不插补；内部验证以输入质控为条件，不是独立外部验证。
+`predictor_missing="complete_cases"` 可选择保留指标并使用完整样本。详情写入准备目录的 `predictor_missing_qc.csv`。
+界面高级设置可修改 VIF 阈值和缺失策略；假设改变处显示实际训练范围，不自动生成干预幅度。
+新运行使用 `cast034_chelsa_ensmean`；旧结果保留。模型没有变化因子时保留当前预测并明确标注，跳过无效因子归因。
+
 # CHELSA 裂腹鱼亚科工作流
 
 唯一维护的源码位于 `cast/inst/workflows/single_species`。本目录是部署副本。

@@ -248,6 +248,10 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     }
     terra::compareGeom(current, future, lyrs = FALSE, stopOnError = TRUE)
     current <- current[[vars]]; future <- future[[vars]]
+    shared <- vars[vapply(vars, function(v)
+      .cast_shared_raster_layers(current, future, v), logical(1))]
+    future_read <- setdiff(vars, shared)
+    if (verbose && length(shared)) cli::cli_inform("Environmental raster inputs: reuse {length(shared)} unchanged file/band layers; read {length(future_read)} future layers per active batch.")
     mask <- .cast_raster_mask(mask, current)
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
     lock <- .cast_lock(paste0(filename, ".lock"))
@@ -256,7 +260,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       current = .cast_data_identity(current), future = .cast_data_identity(future),
       mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
       support_probs = support_probs, clamp = clamp,
-      core = .cast_code_identity(.cast_attribution_block))
+      core = .cast_code_identity(.cast_attribution_block),
+      raster_reader = .cast_code_identity(.cast_shared_raster_layers))
     if (!is.null(shifts)) signature$shifts <- shifts
     if (diagnostics) {
       signature$diagnostics <- TRUE
@@ -348,7 +353,9 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
         next
       }
       a <- .cast_raster_block(current, first, count)
-      b <- .cast_raster_block(future, first, count)
+      b <- a
+      if (length(future_read)) b[future_read] <-
+        .cast_raster_block(future[[future_read]], first, count)
     } else {
       idx <- seq.int(first, min(n, first + block_size - 1L))
       a <- current[idx, vars, drop = FALSE]; b <- future[idx, vars, drop = FALSE]

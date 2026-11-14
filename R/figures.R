@@ -222,7 +222,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
         comparison$threshold %||% NA_real_, display_resolution,
         "bilinear continuous; nearest categorical; native scientific rasters unchanged",
         response_grid, data$pdp_reference_n, data$response_reference_n, response_method)),
-    unavailable_products = data$notes)
+    unavailable_products = data$notes %||% data.frame(product = character(), reason = character()))
   if (identical(comparison$design, "paired")) {
     names(tables)[match(c("factorial_summary", "factorial_binary", "factorial_binary_supported"), names(tables))] <-
       c("scenario_summary", "range_change", "range_change_supported")

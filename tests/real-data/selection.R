@@ -13,28 +13,25 @@ rows <- seq_len(nrow(p$train))
 if (length(args) > 1L) rows <- unique(as.integer(round(seq(1, nrow(p$train),
   length.out = min(nrow(p$train), as.integer(args[2L]))))))
 x <- p$train[rows, , drop = FALSE]
-folds <- r$cv$fold_info$fold[rows]
-timing <- system.time(s <- cast_select(x, fold_ids = folds, seed = 42))
-stopifnot(identical(s$diagnostics$algorithm, "elastic_net"),
+timing <- system.time(s <- cast_select(x, seed = 42))
+stopifnot(identical(s$diagnostics$algorithm, "vif"),
   all(s$selected %in% s$scores$variable[s$scores$eligible]),
   !any(s$scores$role[s$scores$selected] %in% c("identifier", "nominal", "cyclic")),
-  all(is.finite(s$diagnostics$fold_losses)),
-  sum(s$diagnostics$risk_curve$selected) == 1L)
+  all(s$scores$final_vif[s$scores$selected] <= 10))
 # Re-express actual BIO04 from degC x100 to millidegC x100 in memory.
 # Only the unit representation changes; membership and risk must be stable.
 if ("bio04" %in% names(x)) {
   converted <- x
   converted$bio04 <- converted$bio04 * 1000
-  u <- cast_select(converted, fold_ids = folds, seed = 42, verbose = FALSE)
+  u <- cast_select(converted, seed = 42, verbose = FALSE)
   stopifnot(identical(s$selected, u$selected),
-    isTRUE(all.equal(s$diagnostics$risk_curve$mean_logloss,
-      u$diagnostics$risk_curve$mean_logloss, tolerance = 1e-6)))
+    isTRUE(all.equal(s$scores$final_vif, u$scores$final_vif, tolerance = 1e-6)))
 }
 # Independent actual validation rows are used to check engine/prediction
 # contracts only, not to select a policy or claim predictive superiority.
 if (length(s$selected)) {
   fit <- cast_fit(x, screen = s, models = c("rf", "maxent", "gam"), seed = 42,
-    num_threads = 1L, verbose = FALSE)
+    num_threads = 1L, maxent_classes = "lq", verbose = FALSE)
   hold <- p$test[seq_len(min(500L, nrow(p$test))), , drop = FALSE]
   pred <- cast_predict(fit, hold, clamp = TRUE, extrapolation = FALSE)
   stopifnot(inherits(pred, "cast_predict"),

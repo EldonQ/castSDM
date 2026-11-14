@@ -9,7 +9,9 @@ print.cast_select <- function(x, ...) {
     "Selected variables: {n_selected}"
   ))
   d <- x$diagnostics
-  if (identical(d$algorithm, "elastic_net")) {
+  if (identical(d$algorithm, "vif")) {
+    cli::cli_text("Training-fold VIF <= {d$vif_threshold}; no prescribed predictor count.")
+  } else if (identical(d$algorithm, "elastic_net")) {
     cli::cli_text("Spatial elastic net; {d$status}. No prescribed predictor count.")
   } else if (!is.null(d$engine)) {
     cli::cli_text("{d$engine}")

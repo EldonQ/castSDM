@@ -2,23 +2,19 @@
 % Please edit documentation in R/var-select.R
 \name{cast_select}
 \alias{cast_select}
-\title{Select Environmental Variables by Spatially Validated Elastic Net}
+\title{Select Environmental Variables by VIF}
 \usage{
 cast_select(
   data,
   response = "presence",
-  method = c("screen", "full"),
+  method = c("vif", "full"),
   seed = NULL,
   verbose = TRUE,
   env_vars = NULL,
   roles = NULL,
   var_id = NULL,
   category = NULL,
-  inner_k = 5L,
-  block_method = c("blockcv", "grid"),
-  block_size = NULL,
-  fold_ids = NULL,
-  coords_crs = NULL
+  vif_threshold = 10
 )
 }
 \arguments{
@@ -26,67 +22,35 @@ cast_select(
 
 \item{response}{Binary response name, default \code{"presence"}.}
 
-\item{method}{\code{"screen"} (spatial elastic net) or \code{"full"} (all eligible
-varying numeric predictors without statistical screening).}
+\item{method}{\code{"vif"} (default) or \code{"full"} (all eligible predictors).}
 
-\item{seed}{Random seed for spatial folds.}
+\item{seed}{Optional seed for interface consistency; VIF is deterministic.}
 
-\item{verbose}{Print progress and the resulting variable count.}
+\item{verbose}{Print the screening result.}
 
-\item{env_vars}{Optional explicit predictor names. Coordinates and response
-are never predictors.}
+\item{env_vars}{Optional predictor names, excluding coordinates and response.}
 
-\item{roles}{Optional named predictor-role vector: \code{numeric}, \code{binary},
-\code{ordinal}, \code{identifier}, \code{nominal}, or \code{cyclic}. Identifiers are excluded;
-nominal/cyclic codes require a declared numeric encoding before use.}
+\item{roles}{Optional named role metadata: numeric, binary, ordinal,
+identifier, nominal or cyclic. Identifiers and unencoded codes are excluded.}
 
-\item{var_id, category}{Optional aligned character metadata, recorded only.
-Multiple scales of a construct are not forcibly reduced to one variable.}
+\item{var_id, category}{Optional aligned character metadata, recorded only.}
 
-\item{inner_k}{Number of inner spatial folds, default \code{5}.}
-
-\item{block_method}{Spatial fold builder, \code{"blockcv"} or \code{"grid"}.}
-
-\item{block_size}{Optional spatial block size in metres.}
-
-\item{fold_ids}{Optional externally supplied spatial fold assignments.}
-
-\item{coords_crs}{Coordinate CRS, required for projected coordinates.}
+\item{vif_threshold}{Maximum retained VIF, default \code{10}.}
 }
 \value{
-A \code{cast_select} with selected variables, qualification/reason table,
-spatial risk curve, fold losses and provenance. An empty selected set is
-a valid intercept-only result; no variable is forced into the model.
+A \code{cast_select} with qualification reasons, initial/final VIF and
+the elimination log. No measurements are imputed.
 }
 \description{
-Fits a binomial elastic net (equal L1/L2 mixing) to linear and quadratic
-environmental terms. Spatial validation selects the strongest penalty
-within one fold standard error of the minimum mean log loss. An original
-variable is retained when either of its terms has a nonzero coefficient.
-There is no predictor-count target, coefficient ranking or category quota.
+Iteratively removes the highest-VIF predictor until all retained VIFs
+meet the declared threshold. Repeated within each spatial training fold.
+No response ranking, predictor-count target or category quota is used.
 }
 \details{
-Linear and quadratic terms accommodate monotonic and simple
-unimodal responses without spline knots or a separate complexity search.
-Binary variables use one linear term. Centering/scaling and term creation
-are rebuilt using only the training rows of each inner fold. Elastic-net
-mixing is fixed at 0.5; the regularisation strength is spatially validated.
-Fold paths are aligned by their penalty/max-penalty ratio. The null model
-is evaluated explicitly. A minimum at the weak-penalty boundary extends
-the search. Failed fits/folds are reported, never silently dropped.
-The one-SE rule is a parsimony heuristic, not a confidence interval.
-Predictors must be complete and finite; no measurements or response labels
-are generated or imputed. Loss concerns sampled presence/background
-labels, not ecological occurrence probabilities. This simple additive
-screen can miss complex responses and pure interactions; correlated
-variables can substitute. Inspect outer-fold selection frequencies.
-Selection does not identify causal drivers.
-}
-\references{
-Friedman J, Hastie T, Tibshirani R (2010). Regularization paths
-for generalized linear models via coordinate descent. Journal of
-Statistical Software 33(1):1-22. doi:10.18637/jss.v033.i01.
+VIF measures linear redundancy, not ecological importance or
+causality. Variables may substitute; inspect spatial-fold inclusion and
+fitted responses. The threshold is not a prescribed predictor count.
 }
 \seealso{
-\code{\link[=cast_cv]{cast_cv()}}, \code{\link[=cast_importance]{cast_importance()}}
+\code{\link[=cast_vif]{cast_vif()}}, \code{\link[=cast_cv]{cast_cv()}}
 }

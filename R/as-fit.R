@@ -24,15 +24,14 @@
 #'   labels or validation scores are inferred. Supply externally validated
 #'   named `weights` or use equal weights in [cast_attribution()].
 #' @examples
-#' set.seed(1)
-#' reference <- data.frame(temperature = rnorm(100), rain = runif(100))
-#' response <- rbinom(100, 1, plogis(reference$temperature - reference$rain))
-#' model <- stats::glm(response ~ ., reference, family = stats::binomial())
-#' fit <- cast_as_fit(list(glm = model), reference,
+#' \dontrun{
+#' case_dir <- Sys.getenv("CAST_REAL_CASE")
+#' run <- readRDS(file.path(case_dir, "training", "result.rds"))
+#' fitted <- run$fit_full
+#' fit <- cast_as_fit(list(gam = fitted$models$gam$model),
+#'   fitted$scaling$reference,
 #'   function(model, newdata) stats::predict(model, newdata, type = "response"))
-#' future <- reference
-#' future$temperature <- future$temperature + 0.2
-#' attribution <- cast_attribution(fit, reference, future, verbose = FALSE)
+#' }
 #' @export
 cast_as_fit <- function(models, reference, predict_function) {
   if (!is.list(models) || !length(models) || is.null(names(models)) ||

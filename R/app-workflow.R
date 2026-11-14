@@ -9,7 +9,8 @@
     if (!is.null(cfg)) settings <- list(data_dir = cfg$nsdm_data_root,
       occurrence_file = cfg$occurrence_file, species = cfg$species_name,
       domain = cfg$domain_mode, input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
-      models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, resources = cfg$resources)
+      models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, vif_threshold = cfg$protocol$select_vif_threshold,
+      predictor_missing = cfg$predictor_missing, resources = cfg$resources)
   }
   settings <- settings %||% list()
   utils::modifyList(list(path = root, data_dir = Sys.getenv("CAST_DATA_ROOT", ""),
@@ -33,6 +34,8 @@
         shiny::checkboxGroupInput("setup_models", "\u6a21\u578b", choices = stats::setNames(c("rf", "maxent", "gam"), c("Random forest", "MaxEnt", "GAM")), selected = defaults$models, inline = TRUE),
         shiny::div(class = "cast-setup-grid",
           shiny::numericInput("setup_background", "\u80cc\u666f\u70b9\u6570\u91cf", defaults$background_points %||% 10000L, min = 1L, step = 1000L),
+          shiny::numericInput("setup_vif", "VIF \u9608\u503c", defaults$vif_threshold %||% 10, min = 1, step = 1),
+          shiny::selectInput("setup_missing", "\u7f3a\u5931\u73af\u5883\u6307\u6807", stats::setNames(c("complete_cases", "drop_predictors"), c("\u4fdd\u7559\u6307\u6807\uff0c\u53ea\u7528\u5b8c\u6574\u6837\u672c", "\u4e25\u683c\u5254\u9664\u7f3a\u5931\u6307\u6807\uff0c\u4fdd\u7559\u4f4d\u7f6e")), defaults$predictor_missing %||% "complete_cases"),
           shiny::numericInput("setup_cv", "\u7a7a\u95f4\u4ea4\u53c9\u9a8c\u8bc1\u6298\u6570", defaults$cv_k, min = 3L, step = 1L),
           shiny::numericInput("setup_cores", "\u603b\u8ba1\u7b97\u7ebf\u7a0b", defaults$resources$cores, min = 1L, step = 1L),
           shiny::numericInput("setup_workers", "\u5e76\u884c\u60c5\u666f\u6570", defaults$resources$workers, min = 1L, step = 1L),
