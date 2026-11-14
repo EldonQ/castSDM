@@ -7,7 +7,7 @@
 .cast_predictor_roles <- function(vars, roles = NULL) {
   out <- stats::setNames(rep("numeric", length(vars)), vars)
   # Known library identifiers must never be interpreted as environmental axes.
-  out[grepl("(^|_)(basin|segment|sub_catchment|id)$", vars)] <- "identifier"
+  out[grepl("(^|_)id$|^(hydro_h90m_)?(basin|segment|sub_catchment)$", vars)] <- "identifier"
   out[grepl("(^|_)(direction|aspect)$", vars)] <- "cyclic"
   out[grepl("(^|_)(dry_hue|wet_hue)(_|$)", vars)] <- "nominal"
   out[grepl("(^|_)order_(hack|horton|shreve|strahler|topo)$", vars)] <- "ordinal"

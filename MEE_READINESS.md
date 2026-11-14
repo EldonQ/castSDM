@@ -254,3 +254,19 @@ batches are verified and resumed. Actual saved models, spatial rows and native
 grid crops support engineering checks, not a new ecological validation or a
 claim of causal identification. Matched software comparisons and full real-case
 assessment of the new protocol remain author-run publication work.
+
+
+## 0.33.0 scope
+
+The single explanation contribution is paired environmental response mapping
+with explicit background consistency and engine/support diagnostics. It does
+not claim a new causal estimator. Optional response trees are off by default.
+Actual-data checks cover roles, real-mask coverage, fixed-budget learner
+sensitivity, numerical reuse, genuine no-response cases, maps and Shiny entry.
+The revised freshwater/locality intersection changes the study domain; future
+projections are conditional on that scope and fixed observed nonclimate inputs.
+A training-side screen may legitimately retain no climate predictor; the
+software reports climate-insensitive fitted predictions without forcing a
+variable or interpreting the result as ecological climate insensitivity.
+Independent ecological validation and matched software/user comparisons are
+still required for the manuscript; component checks are not that evidence.

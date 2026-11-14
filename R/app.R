@@ -173,6 +173,7 @@
           shiny::updateSelectInput(session, "profile_driver", selected = restore_state$profile_driver)
           shiny::updateCheckboxInput(session, "supported_only", value = isTRUE(restore_state$supported_only))
           if (!is.null(request$sample_n)) shiny::updateNumericInput(session, "sample_n", value = request$sample_n)
+          if (!is.null(request$grouping)) shiny::updateCheckboxInput(session, "grouping", value = request$grouping)
           if (!is.null(request$maxdepth)) shiny::updateNumericInput(session, "maxdepth", value = request$maxdepth)
           if (!is.null(request$maps)) shiny::updateCheckboxInput(session, "maps", value = request$maps)
           start(request)
@@ -209,7 +210,7 @@
         }
         start(list(operation = "response", case_dir = p$directory, scenario = input$scenario,
           variables = variables, shifts = shifts, context = input$context,
-          sample_n = input$sample_n, maxdepth = input$maxdepth, maps = input$maps,
+          sample_n = input$sample_n, maxdepth = input$maxdepth, maps = input$maps, grouping = isTRUE(input$grouping),
           resources = list(cores = input$cores, workers = 1L, memory_mb = 2048)))
       }, error = notify_error)
     })
@@ -219,7 +220,7 @@
       tryCatch(start(list(operation = "response", case_dir = active()$case_dir,
         scenario = s$scenario, variables = s$variables, shifts = s$shifts,
         context = s$context, sample_n = s$sample_n, maxdepth = s$maxdepth,
-        maps = TRUE, focus = input$focus_driver,
+        maps = TRUE, focus = input$focus_driver, grouping = s$grouping %||% FALSE,
         resources = list(cores = input$cores, workers = 1L, memory_mb = 2048))), error = notify_error)
     })
     shiny::observeEvent(input$driver_pick, {
@@ -232,6 +233,7 @@
         occurrence_file = input$setup_occurrence, species = input$setup_species,
         settings = list(domain = input$setup_domain, input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
+          background_points = input$setup_background,
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
     }
     shiny::observeEvent(input$check_inputs, {
@@ -599,9 +601,9 @@
 cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       launch.browser = interactive(), host = "127.0.0.1", port = NULL,
                       state = NULL) {
-  for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra", "rpart"))
+  for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast032_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast033_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

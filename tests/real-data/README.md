@@ -22,3 +22,10 @@ Legacy simulated unit fixtures in other test files are not run for this release.
 frozen GAM shortcut parity, controlled cancellation/resume, prediction-free
 basic plots and published ALE. Keep the QA directory outside the input case.
 No study-wide fitting or national scenario projection is executed.
+
+`background.R <actual-case> <QA-directory>` compares 10,000 and the saved
+background budget with fixed original training-CV folds and evaluation rows.
+It refits learners on actual rows with the saved predictors: this is conditional
+sensitivity, not a new variable-selection validation or a test of a new domain.
+It writes discrimination/loss and finite-location response-sign comparisons;
+the latter are not common-support confidence estimates.

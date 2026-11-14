@@ -31,8 +31,8 @@ castsdm_species_configs <- function(root) {
       "LITERATURE", "OCCURRENCE"),
     preprocessing_scope = "all_records",
     bg_target_group = FALSE,
-    bg_target_group_file = file.path(data_root, "species/glo/gbif_china_alltaxa_geom.psv"),
-    bg_ratio = 10, bg_min = 10000L, bg_max = 20000L,
+    bg_target_group_file = NULL,
+    bg_n = 10000L, predictor_min_coverage = .95,
     bg_strategy = "random", bg_bin_k = 20L, bg_sre_quantile = .025,
     select_temporal_match = "npts", seed = seed,
     protocol = castSDM::cast_protocol(
@@ -61,7 +61,7 @@ castsdm_species_configs <- function(root) {
       current_lulc_product = "glu", domain_mode = "freshwater_river",
       freshwater_river_distance_raster = file.path(data_root,
         "covariates", scope, "dist/h90m/stream-dist-proximity",
-        paste0(scope, "_dist_h90m_stream-dist-proximity.tif")))),
+        paste0(scope, "_dist_h90m_stream-dist-proximity_min.tif")))),
     Callosciurus_erythraeus = utils::modifyList(common, list(
       species_name = "Callosciurus_erythraeus", taxon_level = "species-level GBIF records",
       input_type = "nsdm_occ",
@@ -78,7 +78,8 @@ castsdm_species_configs <- function(root) {
   base$input_type <- settings$input_type %||% base$input_type
   base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
   base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
-  base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates/reg/dist/h90m/stream-dist-proximity/reg_dist_h90m_stream-dist-proximity.tif")
+  base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates/reg/dist/h90m/stream-dist-proximity/reg_dist_h90m_stream-dist-proximity_min.tif")
+  base$bg_n <- settings$background_points %||% base$bg_n
   base$resources <- settings$resources %||% base$resources
   base$protocol$models <- settings$models %||% base$protocol$models
   base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k

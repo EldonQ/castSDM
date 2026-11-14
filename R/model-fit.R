@@ -242,12 +242,17 @@ cast_fit <- function(data,
       }
     }
 
+    engine_warnings <- character()
     fitted_models[[mdl]] <- tryCatch(
-      fit_traditional(mdl, X_raw, Y, rf_ntree, seed, num_threads,
+      withCallingHandlers(fit_traditional(mdl, X_raw, Y, rf_ntree, seed, num_threads,
                       maxent_classes = p_me_classes,
                       maxent_regmult = p_me_regmult,
                       rf_mtry = p_rf_mtry,
                       case_weights = case_weights, gam_backend = gam_backend),
+        warning = function(w) {
+          engine_warnings <<- unique(c(engine_warnings, conditionMessage(w)))
+          invokeRestart("muffleWarning")
+        }),
       error = function(e) {
         cli::cli_abort(c(
           "Model {.val {mdl}} failed to fit.",
@@ -256,6 +261,8 @@ cast_fit <- function(data,
         ))
       }
     )
+    fitted_models[[mdl]]$warnings <- engine_warnings
+    if (verbose && length(engine_warnings)) cli::cli_warn("{mdl} fit: {paste(engine_warnings, collapse = '; ')}")
     fitted_models[[mdl]]$fit_elapsed_s <- unname(proc.time()[["elapsed"]] - engine_started)
     if (verbose) cli::cli_inform("{mdl}: fitted in {round(fitted_models[[mdl]]$fit_elapsed_s, 1)} s.")
     if (isTRUE(tune) && mdl %in% c("rf", "maxent") &&
@@ -395,11 +402,12 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
         case.weights = case_weights,  # NULL -> unweighted
         num.threads = as.integer(num_threads), verbose = FALSE
       )
-      list(type = "traditional", model = m, name = "rf")
+      list(type = "traditional", model = m, name = "rf", num_threads = as.integer(num_threads))
     },
     "maxent" = {
       m <- .fit_maxent(X, Y, classes = maxent_classes, regmult = maxent_regmult)
-      list(type = "traditional", model = m, name = "maxent")
+      list(type = "traditional", model = m, name = "maxent",
+        n_features = length(m$penalty.factor), n_active_features = length(m$betas), num_threads = 1L)
     },
     "gam" = {
       check_suggested("mgcv", "for GAM")
@@ -629,4 +637,20 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
       NA_real_
     }
   }, numeric(1))
+}
+
+# One engine record used by training receipts and fold diagnostics.
+.cast_fit_table <- function(fit) {
+  do.call(rbind, lapply(names(fit$models), function(name) {
+    info <- fit$models[[name]]
+    data.frame(model = name, backend = info$backend %||% name,
+      fit_elapsed_s = info$fit_elapsed_s %||% NA_real_,
+      num_threads = info$num_threads %||% NA_integer_,
+      n_predictors = length(fit$env_vars),
+      n_features = info$n_features %||% NA_integer_,
+      n_coefficients = if (name == "gam") length(stats::coef(info$model)) else NA_integer_,
+      converged = if (name == "gam") isTRUE(info$model$converged) else NA,
+      n_active_features = info$n_active_features %||% NA_integer_,
+      warnings = paste(info$warnings, collapse = "; "), stringsAsFactors = FALSE)
+  }))
 }

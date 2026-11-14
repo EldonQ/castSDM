@@ -95,7 +95,7 @@ cast_run <- function(species_data,
     )
   }
   if (is.null(env_data) && is.null(env_raster)) {
-    cli::cli_inform("{.arg env_data}/{.arg env_raster} not supplied: no spatial prediction stage will run.")
+    cli::cli_inform("{.arg env_data}/{.arg env_raster} not supplied: this cast_run stage returns training/validation results; a separate cast_compare call can project scenarios.")
   }
   if (!is.null(future_rasters) && is.null(env_raster)) {
     cli::cli_abort("{.arg future_rasters} requires {.arg env_raster}.")
@@ -240,12 +240,7 @@ cast_run <- function(species_data,
                       protocol$maxent_regmult, protocol$gam_backend, protocol$tune,
                       protocol$tune_folds, protocol$prevalence_target,
                       protocol$seed)),
-    fit, tables = list(engine_fits = do.call(rbind, lapply(names(fit$models), function(m) {
-      z <- fit$models[[m]]
-      data.frame(model = m, backend = z$backend %||% m,
-        fit_elapsed_s = z$fit_elapsed_s %||% NA_real_,
-        num_threads = z$num_threads %||% if (m == "rf") protocol$num_threads else 1L)
-    }))))
+    fit, tables = list(engine_fits = .cast_fit_table(fit)))
 
   # ---- 4. Nested spatial cross-validation (training split only) -----------
   if (verbose) cli::cli_h2("CV: nested spatial cross-validation (k = {protocol$cv_k})")
@@ -278,7 +273,7 @@ cast_run <- function(species_data,
     clamp = protocol$clamp
   ))
   cv_tables <- list(
-    cv_metrics = cv$metrics,
+    cv_metrics = cv$metrics, cv_fold_timings = cv$timings, cv_engine_fits = cv$engine_fits,
     cv_fold_metrics = cv$fold_metrics,
     cv_selection_frequency = cv$selection_freq,
     cv_oof_predictions = cv$oof,
@@ -474,7 +469,7 @@ cast_run <- function(species_data,
                      row.names = FALSE)
     if (verbose) cli::cli_inform("Artifacts and manifest under {.path {output_dir}}.")
   }
-  if (verbose) cli::cli_h1("castSDM run complete")
+  if (verbose) cli::cli_h1("cast_run training/validation complete")
   if (!is.null(output_dir)) .cast_atomic_rds(result, file.path(output_dir, "result.rds"))
   result
 }

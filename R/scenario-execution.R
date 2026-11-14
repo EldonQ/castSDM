@@ -85,6 +85,7 @@
   if (package %in% c("0.28.1", "0.28.2", "0.28.3", "0.29.0", "0.29.1", "0.29.2")) package <- "0.28.0"
   models <- lapply(fit$models, function(m) {
     m$fit_elapsed_s <- NULL
+    m$warnings <- NULL
     if (is.function(m$predict_function)) m$predict_function <- .cast_callback_identity(m$predict_function)
     m
   })
@@ -170,11 +171,23 @@
     list(eta = rowSums(a) + attr(a, "constant"), delta = delta)
   })
   names(prepared) <- active
+  # Cache only the same environmental combination AND requested row subset.
+  # Keeping the row subset avoids changing discrete bam's prediction batches.
+  changed <- names(current)[!vapply(names(current), function(v)
+    identical(current[[v]], future[[v]]), logical(1))]
+  predictions <- new.env(parent = emptyenv())
   predict <- function(switched = character(), base = NULL, changed_rows = NULL) {
+    switched <- intersect(names(current), intersect(switched, changed))
+    idx <- changed_rows %||% rep(TRUE, nrow(current))
+    key <- .cast_digest(list(switched, idx))
+    if (exists(key, predictions, inherits = FALSE)) {
+      cached <- get(key, predictions, inherits = FALSE)
+      if (is.null(base)) cached[!idx, ] <- NA_real_ else cached[!idx, ] <- base[!idx, , drop = FALSE]
+      return(cached)
+    }
     X <- current
     X[switched] <- future[switched]
     out <- matrix(NA_real_, nrow(current), length(active), dimnames = list(NULL, active))
-    idx <- changed_rows %||% rep(TRUE, nrow(X))
     if (!is.null(base)) out[,] <- base
     for (m in active) {
       info <- fit$models[[m]]
@@ -192,6 +205,7 @@
         }
       }
     }
+    assign(key, out, predictions)
     out
   }
   list(predict = predict, current = current, future = future,

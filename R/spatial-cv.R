@@ -230,9 +230,10 @@ cast_cv <- function(data,
     test <- data[test_idx, , drop = FALSE]
     if (length(unique(train[[response]])) < 2L ||
         length(unique(test[[response]])) < 2L) {
-      return(list(skipped_single_class = TRUE))
+      return(list(skipped_single_class = TRUE, n_train = nrow(train)))
     }
 
+    selection_started <- proc.time()[["elapsed"]]
     fold_screen <- if (!is.null(select_method)) {
       args <- utils::modifyList(
         list(
@@ -249,6 +250,7 @@ cast_cv <- function(data,
     } else {
       screen
     }
+    selection_elapsed <- proc.time()[["elapsed"]] - selection_started
     if (is.null(fold_screen)) return(list(status = "selection_error"))
     if (!length(fold_screen$selected)) {
       return(list(status = fold_screen$diagnostics$status %||% "empty_selection",
@@ -343,10 +345,33 @@ cast_cv <- function(data,
       updates[[mdl]] <- list(idx = test_idx, pred = pred,
                             native = pair$native, offset = info$offset %||% 0)
     }
-    list(updates = updates, selected = fold_screen$selected,
+    list(updates = updates, selected = fold_screen$selected, n_train = nrow(train),
+         selection_elapsed_s = selection_elapsed, engine_fits = .cast_fit_table(fit),
          screen = fold_screen, di = di_fold, di_train = di_fold_train,
          pred_ok = pred_ok,
          status = if (any(unlist(pred_ok))) "evaluated" else "no_predictions")
+  }
+
+  run_fold <- function(folds, i) {
+    started <- proc.time()[["elapsed"]]
+    if (verbose) cli::cli_inform("Spatial CV fold {i}/{k}: selection and fitting started.")
+    notes <- character()
+    value <- withCallingHandlers(cv_one(folds, i), warning = function(w) {
+      notes <<- unique(c(notes, conditionMessage(w))); invokeRestart("muffleWarning")
+    })
+    engines <- value$engine_fits
+    if (!is.null(engines)) notes <- unique(c(notes, paste0(engines$model[nzchar(engines$warnings)], ": ", engines$warnings[nzchar(engines$warnings)])))
+    elapsed <- proc.time()[["elapsed"]] - started
+    value$timing <- data.frame(fold = i, status = value$status %||% "single_class",
+      n_train = value$n_train %||% NA_integer_,
+      n_test = sum(folds == i), n_selected = length(value$selected),
+      selection_elapsed_s = value$selection_elapsed_s %||% NA_real_, elapsed_s = elapsed,
+      warnings = paste(notes, collapse = "; "))
+    if (verbose) {
+      cli::cli_inform("Spatial CV fold {i}/{k}: {value$timing$status}; {length(value$selected)} predictors; {round(elapsed, 1)} s.")
+      if (length(notes)) cli::cli_warn("Spatial CV fold {i}: {paste(notes, collapse = '; ')}")
+    }
+    value
   }
 
   run_once <- function(rep_i) {
@@ -370,10 +395,10 @@ cast_cv <- function(data,
         ))
       }
       results <- future.apply::future_lapply(
-        seq_len(k), function(i) cv_one(folds, i), future.seed = TRUE
+        seq_len(k), function(i) run_fold(folds, i), future.seed = TRUE
       )
     } else {
-      results <- lapply(seq_len(k), function(i) cv_one(folds, i))
+      results <- lapply(seq_len(k), function(i) run_fold(folds, i))
     }
 
     oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
@@ -491,7 +516,12 @@ cast_cv <- function(data,
     }
     fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
 
-    list(folds = folds, fold_design = attr(folds, "design"), fold_df = fold_df, oof_df = oof_df, native_oof = native_df,
+    list(timings = do.call(rbind, lapply(results, `[[`, "timing")),
+         engine_fits = do.call(rbind, lapply(seq_along(results), function(i) {
+           x <- results[[i]]$engine_fits
+           if (!is.null(x)) cbind(fold = i, x)
+         })),
+         folds = folds, fold_design = attr(folds, "design"), fold_df = fold_df, oof_df = oof_df, native_oof = native_df,
          offsets = if (length(offsets)) do.call(rbind, offsets) else NULL,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
@@ -623,6 +653,10 @@ cast_cv <- function(data,
   )
   result$fold_design <- lapply(reps, `[[`, "fold_design")
   result$clamp <- clamp
+  for (field in c("timings", "engine_fits")) result[[field]] <- do.call(rbind, lapply(seq_along(reps), function(i) {
+    x <- reps[[i]][[field]]
+    if (!is.null(x)) cbind(replicate = i, x)
+  }))
   result$repeat_status <- do.call(rbind, lapply(seq_along(reps), function(i) {
     rp <- reps[[i]]
     data.frame(replicate = i, fold = seq_len(k), status = rp$fold_status,

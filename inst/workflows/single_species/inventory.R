@@ -1,6 +1,6 @@
 # CHELSA v2.1 current climate and ensemble-mean future climate inventory.
 # Land use, soil, topography and hydrology remain current in every projection.
-# Other dynamic products are inventoried but excluded from the projection pool.
+# Nonclimate observations are held current under an explicit projection assumption.
 # Definitions and units come from the delivered library; no rescaling is done.
 
 if (!exists("%||%")) {
@@ -91,7 +91,7 @@ case_current_meta_one <- function(path, rel, data_root) {
   } else if (group %in% c("soil", "topo", "hydro", "dist")) {
     "static"
   } else {
-    "current_only"
+    "static"
   }
   data.frame(
     group = group, dataset = dataset, product = product,
@@ -206,13 +206,12 @@ case_coverage <- function(paths, mask, verbose = TRUE) {
 #' @param root Workflow root containing `config/`.
 #' @param data_root Project data root containing `covariates/reg` and
 #'   `mask_china.tif`.
-#' @param coverage_min Minimum finite share on the land mask for a current layer.
 #' @param coverage_csv Optional CSV with `path`/`cover` columns to reuse; when
 #'   missing, coverage is computed from the rasters.
 #' @param check_geom Compare every current raster to the land mask.
 #' @param verbose Print progress.
 #' @return A list of output paths and summary counts.
-case_inventory_build <- function(root, data_root, coverage_min = 0.95,
+case_inventory_build <- function(root, data_root,
                                 coverage_csv = NULL, check_geom = TRUE,
                                 verbose = TRUE) {
   if (!requireNamespace("terra", quietly = TRUE)) {
@@ -269,12 +268,14 @@ case_inventory_build <- function(root, data_root, coverage_min = 0.95,
       case_coverage(current$path[missing_coverage], mask, verbose = verbose)
   }
   current$status <- ifelse(current$geom_ok & is.finite(current$cover) &
-                             current$cover >= coverage_min, "kept", "excluded")
+                             current$cover > 0, "kept", "excluded")
 
   metadata <- case_inventory_metadata(root, data_root, current)
   current$role <- metadata$role[match(current$layer, metadata$layer)]
   numeric_role <- current$role %in% c("numeric", "binary", "ordinal")
-  current$qualification <- ifelse(numeric_role, "eligible_numeric_role", "excluded_semantic_role")
+  current$qualification <- ifelse(!current$geom_ok, "geometry_mismatch",
+    ifelse(!is.finite(current$cover) | current$cover <= 0, "no_finite_source_data",
+      ifelse(numeric_role, "eligible_numeric_role", "excluded_semantic_role")))
   current$eligible_glu <- current$status == "kept" & numeric_role &
     current$future_policy %in% c("climate", "static") &
     !(current$group == "lulc" & current$product != "glu1km")
@@ -325,7 +326,7 @@ case_inventory_build <- function(root, data_root, coverage_min = 0.95,
     n_eligible_glu = sum(current$eligible_glu),
     n_eligible_hlu = sum(current$eligible_hlu),
     n_future = nrow(future),
-    coverage_min = coverage_min,
+    coverage_policy = "finite source availability; actual analysis-mask coverage checked during preparation",
     coverage_source = if (!is.null(coverage_csv) && file.exists(coverage_csv))
       normalizePath(coverage_csv, winslash = "/") else "delivered variable dictionary; raster fallback for missing entries",
     current_md5 = unname(tools::md5sum(files$current_all)),

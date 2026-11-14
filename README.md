@@ -1,6 +1,6 @@
 # castSDM
 
-**Environmental response maps and auditable scenario comparisons for SDMs.**
+**Environmental response maps with explicit background consistency diagnostics for SDMs.**
 
 `cast_compare()` directly compares current and future environments with one
 changing predictor group. Two groups additionally enable factorial contrasts. Fixed positive model weights and an
@@ -52,7 +52,7 @@ cast_app(case_dir)
 
 # Real saved locations only; no full-grid prediction or model refitting:
 response <- cast_explore(case_dir, maps = FALSE)
-response$groups$summary
+response$evidence$summary
 ```
 
 Long jobs run in an isolated R process. The app preserves the complete existing
@@ -60,10 +60,14 @@ publication figures and puts new analysis artifacts in `interactive/`. Exports
 include settings, source data, spatial tuning losses, native rasters and an R
 replay script. Display rasters are explicitly separate from the analysis grid.
 
-`cast_response_groups()` summarises finite model responses with a small tree,
-using supplied spatial folds and one-standard-error pruning. The method follows
-[published FME/cAME explanations](https://doi.org/10.32614/RJ-2024-024);
-environmental groups are descriptive and need not be geographically contiguous.
+The central explanation compares the same factor in the current and future
+backgrounds: where does fitted suitability increase, decrease or reverse sign?
+Native response maps retain support flags and engine disagreement. The
+publication collection includes `E_<driver>` consistency panels and source
+counts. These are model-conditional diagnostics, not a new causal estimator.
+The optional descriptive tree (`grouping = TRUE`) remains available separately;
+it is off by default.
+
 The default driver overview now compares the same range-supported locations
 for every factor. It shows responses in both backgrounds of the configured
 comparison pair, their sign reversals and active-model sign agreement.
@@ -277,3 +281,14 @@ uses published ALE from iml by default; response_method = "pdp" retains the
 original PDP. Full driver maps are optional via include = "drivers" and resume
 completed native-grid batches after interruption. All established map layouts
 and complete exports remain available via include = "all".
+
+Version 0.33 checks predictor coverage on the actual analysis mask and corrects
+continuous basin-distance/elevation roles. The freshwater preset intersects
+river-containing grid cells (native minimum-distance aggregation) with the
+observed-locality scope. It never relocates coordinates or expands habitat to
+retain a record. This scope limits the projection; grid area is not wetted river
+area, and all-record domain construction does not provide external validation.
+The explicit case budget defaults to 10,000 background cells; it is configurable
+in Shiny. `tests/real-data/background.R` compares actual saved budgets without
+changing evaluation locations/folds, conditional on a frozen predictor set.
+Scientific changes require a fresh `cast033_chelsa_ensmean` run.

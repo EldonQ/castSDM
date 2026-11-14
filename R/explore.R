@@ -120,6 +120,8 @@
 
 .cast_explore_pair <- function(project, scenario, variables, shifts, context) {
   stacks <- .cast_explore_stacks(project, scenario)
+  # Choosing a factor changes the explanation, not the imported joint scenario.
+  if (is.null(shifts)) return(stacks)
   a <- b <- if (context == "current") stacks$current else stacks$future
   for (v in variables) {
     a[[v]] <- stacks$current[[v]]
@@ -137,17 +139,20 @@
 #' @param case_dir Directory containing the completed workflow's `case.rds`,
 #'   training result, current inventory and scenario table.
 #' @param scenario Saved scenario identifier. Default the case reporting scenario.
-#' @param variables Fitted predictors to change. `NULL` uses all predictors.
+#' @param variables Fitted predictors to explain. Scenario mode preserves the
+#'   complete imported current/future pair; selecting one factor does not
+#'   freeze the other scenario changes. `NULL` uses all predictors.
 #'   Related derived predictors should be changed together using a consistent
 #'   scenario. A single derived-variable change is a sensitivity analysis.
 #' @param shifts Optional named numeric vector of raw-unit predictor shifts.
 #'   When supplied, replaces the imported future change for those variables
 #'   with these hypothetical changes. All other selected variables must be
 #'   omitted: `variables` is inferred from `names(shifts)`.
-#' @param context `"current"` keeps other predictors current. `"future"` keeps
+#' @param context For hypothetical shifts only, `"current"` keeps other predictors current. `"future"` keeps
 #'   other predictors at the selected future values in both members of the pair.
 #' @param sample_n Maximum number of saved CV locations used for descriptive
 #'   grouping. Default 5000, selected deterministically from real saved rows.
+#' @param grouping Optional descriptive tree grouping, default `FALSE`.
 #' @param maxdepth Maximum response tree depth. See [cast_response_groups()].
 #' @param maps Compute native-grid response/group rasters. `FALSE` only computes
 #'   the real-location response table and grouping; it never predicts a full grid.
@@ -166,9 +171,10 @@
 cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = NULL,
                          context = c("current", "future"), sample_n = 5000L,
                          maxdepth = 3L, maps = TRUE, output_dir = NULL,
-                         resources = list(), resume = TRUE, focus = NULL) {
+                         resources = list(), resume = TRUE, focus = NULL, grouping = FALSE) {
   check_suggested("terra", "for saved-case exploration")
-  check_suggested("rpart", "for descriptive response grouping")
+  if (!is.logical(grouping) || length(grouping) != 1L || is.na(grouping)) cli::cli_abort("grouping must be TRUE or FALSE.")
+  if (grouping) check_suggested("rpart", "for descriptive response grouping")
   if (!is.logical(maps) || length(maps) != 1L || is.na(maps))
     cli::cli_abort("{.arg maps} must be TRUE or FALSE.")
   if (maps) check_suggested("leaflet", "for interactive display rasters")
@@ -201,7 +207,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   memo <- new.env(parent = emptyenv())
   invisible(.cast_resources(resources))
   settings <- list(scenario = scenario, variables = variables, shifts = shifts,
-    context = context, sample_n = sample_n, maxdepth = maxdepth, maps = maps, focus = focus,
+    context = context, sample_n = sample_n, maxdepth = maxdepth, maps = maps, focus = focus, grouping = grouping,
     weights = project$comparison$weights,
     clamp = project$run$protocol$clamp %||% FALSE,
     support_probs = project$comparison$support_probs,
@@ -251,12 +257,15 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   ranked <- evidence$summary$driver[!is.na(evidence$summary$rank) & evidence$summary$rank == 1L]
   if (is.null(focus) && length(ranked) == 1L) focus <- ranked
   settings$focus <- focus
-  cli::cli_inform("Selecting descriptive response groups using saved spatial folds.")
-  supported <- response$data$support_total == 1
-  groups <- tryCatch(cast_response_groups(sample$current, response$data$total_change,
-    sample$fold, supported = supported, maxdepth = maxdepth), error = function(e) e)
-  group_note <- if (inherits(groups, "error")) conditionMessage(groups) else NULL
-  if (!is.null(group_note)) groups <- NULL
+  groups <- NULL; group_note <- "Optional descriptive grouping was not requested."
+  if (grouping) {
+    cli::cli_inform("Selecting optional descriptive response groups using saved spatial folds.")
+    supported <- response$data$support_total == 1
+    groups <- tryCatch(cast_response_groups(sample$current, response$data$total_change,
+      sample$fold, supported = supported, maxdepth = maxdepth), error = function(e) e)
+    group_note <- if (inherits(groups, "error")) conditionMessage(groups) else NULL
+    if (!is.null(group_note)) groups <- NULL
+  }
   points <- data.frame(source_cv_row = sample$row, x = sample$xy[, 1L], y = sample$xy[, 2L],
     fold = sample$fold, response$data, evidence$locations,
     group = if (is.null(groups)) NA_integer_ else groups$group)
@@ -298,7 +307,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   replay <- c("# Uses the original real case; hypothetical shifts remain explicitly recorded.",
     "library(castSDM)", "args <- ", utils::capture.output(dput(list(case_dir = project$directory,
       scenario = scenario, variables = variables, shifts = shifts, context = context,
-      sample_n = sample_n, maxdepth = maxdepth, maps = maps, output_dir = root,
+      sample_n = sample_n, maxdepth = maxdepth, maps = maps, output_dir = root, grouping = grouping,
       resources = resources, focus = requested_focus))), "result <- do.call(cast_explore, args)")
   writeLines(replay, file.path(directory, "reproduce.R"))
   files <- list.files(directory, full.names = TRUE)

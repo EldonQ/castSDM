@@ -1,3 +1,31 @@
+# castSDM 0.33.0
+
+- Focus the explanation interface on environmental response maps with explicit
+  current/future-background consistency, support and engine disagreement.
+  Export per-driver consistency maps and counts; preserve the existing figures.
+  Scenario factor selection now selects explanations of the complete imported
+  scenario, rather than silently freezing the remaining scenario changes.
+  Optional descriptive grouping is off by default.
+- Correct semantic qualification of continuous distances/elevations ending in
+  basin. Index available numeric layers separately from study-mask coverage.
+  Check coverage on the actual analysis mask, retaining missing values.
+  Observed nonclimate predictors have a declared fixed-current projection policy.
+- Use native minimum-distance river grid cells intersected with the locality
+  scope. Observation coordinates are never relocated. Grid counts/area do not
+  represent the wetted area of rivers. New scientific settings use a fresh
+  cast033_chelsa_ensmean analysis directory.
+- Set an explicit case background budget (10,000 by default), exposed in Shiny;
+  report ratio limits only when requested. Add an opt-in actual-data background
+  sensitivity check with fixed predictors, evaluation rows and spatial folds.
+- Reuse verified shared static raster bands and repeated environmental prediction
+  combinations; preserve exact prediction row subsets for discrete BAM.
+  Reuse shared atlas panels with bounded in-memory caching and print cache hits.
+- Retain empty changing groups as explicit fitted-model non-response; no
+  predictor is forced into selection. Identical fitted scenario inputs share
+  verified artifacts and are not predicted repeatedly.
+- Record fold/engine times, generated MaxEnt feature counts and attributed
+  fitting warnings. Preserve elastic-net screening and published ALE.
+
 # castSDM 0.32.0
 
 - Pass the actual coordinate CRS through hold-out, screening and outer spatial

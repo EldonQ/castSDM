@@ -161,6 +161,7 @@
 #'   including when `overwrite = TRUE`. Set `FALSE` to force recomputation.
 #'
 #' @return A `cast_attribution` list with `summary`, frozen `weights`,
+#'   optional `consistency` counts/fractions on both-background supported cells,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
 #'   `effect_<driver>` is driver-only future minus current; `retained_<driver>`
 #'   is full future minus future with that driver held current. `remainder`
@@ -251,7 +252,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
     lock <- .cast_lock(paste0(filename, ".lock"))
     on.exit(filelock::unlock(lock), add = TRUE)
-    signature <- list(fit = .cast_fit_identity(fit), weights = weights,
+    signature <- list(schema = "cast_attribution/2", fit = .cast_fit_identity(fit), weights = weights,
       current = .cast_data_identity(current), future = .cast_data_identity(future),
       mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
       support_probs = support_probs, clamp = clamp,
@@ -299,6 +300,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   # Online moments avoid retaining national effect surfaces in RAM.
   sums <- matrix(0, 2 + 2 * length(drivers), 8,
     dimnames = list(NULL, c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd")))
+  consistency <- matrix(0, length(drivers), 7L, dimnames = list(drivers,
+    c("n_finite", "n_supported", "negative", "zero", "positive", "reversal", "one_zero")))
   accumulate <- function(z) {
     cols <- c("total_change", if (length(drivers)) paste0("effect_", drivers),
       if (length(drivers)) paste0("retained_", drivers), "remainder")
@@ -312,6 +315,15 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       ds <- z[, dc]; ks <- k & is.finite(ds)
       sums[j, ] <<- sums[j, ] + c(sum(k), sum(s), sum(d[k]), sum(abs(d[k])),
         sum(d[s]), sum(abs(d[s])), sum(ds[ks]), sum(ks))
+    }
+    if (diagnostics) for (v in drivers) {
+      direction <- z[, paste0("context_direction_", v)]
+      finite <- is.finite(direction)
+      ok <- finite & z[, paste0("support_effect_", v)] == 1 &
+        z[, paste0("support_retained_", v)] == 1
+      ok[is.na(ok)] <- FALSE
+      consistency[v, ] <<- consistency[v, ] + c(sum(finite), sum(ok),
+        vapply(c(-1, 0, 1, 2, 3), function(value) sum(direction[ok] == value), numeric(1)))
     }
   }
   started <- proc.time()[["elapsed"]]
@@ -377,7 +389,12 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     xy <- intersect(c("lon", "lat"), names(current))
     data <- cbind(current[, xy, drop = FALSE], as.data.frame(out))
   }
-  result <- structure(list(summary = summary, data = data,
+  evidence <- if (diagnostics && length(drivers)) data.frame(driver = drivers, consistency,
+    row.names = NULL) else NULL
+  if (!is.null(evidence)) for (name in c("negative", "zero", "positive", "reversal", "one_zero"))
+    evidence[[paste0(name, "_fraction")]] <- ifelse(evidence$n_supported > 0,
+      evidence[[name]]/evidence$n_supported, NA_real_)
+  result <- structure(list(summary = summary, data = data, consistency = evidence,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
     shifts = shifts, diagnostics = diagnostics, sign_tolerance = if (diagnostics) 1e-12 else NULL,

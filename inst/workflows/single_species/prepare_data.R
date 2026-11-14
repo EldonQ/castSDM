@@ -222,7 +222,7 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
                    "domain_mode", "freshwater_river_distance_raster",
                    "freshwater_river_buffer_m", "freshwater_occurrence_buffer_km",
                    "analysis_domain_mask_file", "domain_min_presence_coverage",
-                   "bg_ratio", "bg_min", "bg_max",
+                   "bg_n", "predictor_min_coverage",
                    "bg_strategy", "bg_bin_k", "bg_sre_quantile",
                    "bg_target_group", "bg_target_group_file", "seed")],
     source = case_preparation_source(cfg)
@@ -233,7 +233,7 @@ analysis_domain_label <- function(mode) {
   switch(
     mode,
     national = "national China land mask",
-    freshwater_river = "river-network buffer with occurrence locality envelope",
+    freshwater_river = "river-containing grid cells within observed-locality scope",
     custom_mask = "custom analysis-domain mask",
     stop("Unknown domain_mode: ", mode))
 }
@@ -274,7 +274,8 @@ prepare_species <- function(cfg) {
   manifest_file <- file.path(out_dir, "preparation_manifest.rds")
   old <- if (file.exists(manifest_file)) tryCatch(readRDS(manifest_file), error = function(e) NULL) else NULL
   artifacts <- c(data_file, domain_file, file.path(out_dir,
-    c("occurrence_qc.csv", "occurrence_qc_counts.csv", "analysis_domain_summary.csv")))
+    c("occurrence_qc.csv", "occurrence_qc_counts.csv", "analysis_domain_summary.csv",
+      "predictor_qualification.csv", "background_summary.csv")))
   if (!is.null(old) && identical(old$fingerprint, prep_fp) && all(file.exists(artifacts)) &&
       identical(unname(tools::md5sum(artifacts)), old$artifacts)) {
     message("Verified preparation cache: ", cfg$species_name)
@@ -359,17 +360,17 @@ prepare_species <- function(cfg) {
   if (nrow(occ) < 10L) {
     stop("Fewer than 10 occurrence cells remain inside the analysis domain.")
   }
+  qualification <- case_domain_qualification(current, domain, cfg$predictor_min_coverage %||% .95)
+  data.table::fwrite(qualification, file.path(out_dir, "predictor_qualification.csv"))
+  kept <- qualification$layer[qualification$eligible]
+  if (!length(kept)) stop("No predictor meets declared coverage on the actual analysis mask.")
+  current <- current[[kept]]
+  message("Actual-domain coverage: ", n_layers, " candidates -> ", length(kept),
+    "; excluded: ", paste(qualification$layer[!qualification$eligible], collapse = ", "))
   domain_area <- nsdm_domain_study_area(domain, occ, method = domain_info$mode)
   domain_cells_value <- as.integer(domain_area$n_cells)
-  # --- Target-group background (Phillips et al. 2009) ---------------------------
-  # Uniform-random background assumes uniform survey effort, which literature
-  # records violate (roads, towns, accessible valleys). Sampling the
-  # background from a BROADER taxon group's pooled occurrences (here: all
-  # GBIF records in China) makes the background inherit the same spatial
-  # bias as the presence data. The 555 MB source is reduced once -- snap to
-  # the 1 km grid, keep cells inside the national mask, drop duplicate cells
-  # -- and cached; cast_background() then draws n_bg from it with its own
-  # filters (presence-cell exclusion, NA environments).
+  # Optional target-group locations must be supplied for a comparable survey
+  # group; no all-taxa source is treated automatically as fish survey effort.
   tg_table <- NULL
   if (isTRUE(cfg$bg_target_group) && length(cfg$bg_target_group_file) &&
       file.exists(cfg$bg_target_group_file)) {
@@ -411,18 +412,22 @@ prepare_species <- function(cfg) {
             nrow(tg_table), " candidate cells.")
   }
   model_data <- castSDM::cast_background(
-    occ, domain_area, current, ratio = cfg$bg_ratio,
-    min_bg = cfg$bg_min, max_bg = cfg$bg_max, strategy = cfg$bg_strategy,
+    occ, domain_area, current, strategy = cfg$bg_strategy,
     bin_k = cfg$bg_bin_k, sre_quantile = cfg$bg_sre_quantile,
     user_table = tg_table,
-    n_bg = if (!is.null(tg_table)) cfg$bg_max else NULL,
+    n_bg = cfg$bg_n,
     cell_thin = TRUE, exclude_presence = TRUE, seed = cfg$seed, verbose = TRUE
   )
+  data.table::fwrite(data.frame(requested_background = cfg$bg_n,
+    actual_background = sum(model_data$presence == 0L),
+    actual_presence = sum(model_data$presence == 1L),
+    ratio = sum(model_data$presence == 0L)/sum(model_data$presence == 1L),
+    strategy = cfg$bg_strategy), file.path(out_dir, "background_summary.csv"))
   vars <- castSDM::get_env_vars(model_data)
   dropped <- setdiff(setdiff(names(model_data), c("lon", "lat", "presence")), vars)
   if (length(dropped)) {
     warning(sprintf(
-      "%d/%d pool layers carry no training-sample signal (zero variance or all NA) and were dropped; first few: %s",
+      "%d/%d pool layers are constant in the complete prepared sample (zero variance or all NA) and were dropped; first few: %s",
       length(dropped), n_layers, paste(utils::head(dropped, 15), collapse = ", ")),
       call. = FALSE)
     data.table::fwrite(data.frame(layer = dropped),
@@ -500,4 +505,26 @@ prepare_species <- function(cfg) {
   saveRDS(list(fingerprint = prep_fp, inputs = prep_inputs,
     artifacts = unname(tools::md5sum(artifacts))), manifest_file)
   invisible(out_dir)
+}
+
+# Exact coverage on the actual analysis mask; no national-coverage proxy or imputation.
+case_domain_qualification <- function(current, domain, minimum) {
+  if (length(minimum) != 1L || !is.finite(minimum) || minimum <= 0 || minimum > 1)
+    stop("predictor_min_coverage must be in (0, 1].")
+  cells <- which(is.finite(terra::values(domain, mat = FALSE)))
+  if (!length(cells)) stop("The analysis mask has no finite cells.")
+  counts <- vapply(seq_len(terra::nlyr(current)), function(i) {
+    n <- 0L
+    for (first in seq.int(1L, length(cells), by = 100000L)) {
+      at <- cells[first:min(length(cells), first + 99999L)]
+      n <- n + sum(is.finite(as.matrix(current[[i]][at])))
+    }
+    if (i %% 25L == 0L || i == terra::nlyr(current))
+      message("Analysis-mask coverage: ", i, "/", terra::nlyr(current), " layers checked.")
+    n
+  }, numeric(1))
+  coverage <- counts/length(cells)
+  data.frame(layer = names(current), n_domain = length(cells), n_finite = counts,
+    coverage = coverage, minimum = minimum, eligible = coverage >= minimum,
+    reason = ifelse(coverage >= minimum, "eligible", "insufficient_actual_domain_coverage"))
 }

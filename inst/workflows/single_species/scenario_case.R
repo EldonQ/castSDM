@@ -8,22 +8,27 @@ case_pool_metadata <- function(cfg, vars) {
 case_scenarios <- function(cfg, selected, current, out_dir) {
   meta <- case_pool_metadata(cfg, selected)
   groups <- list(climate = selected[meta$future_policy == "climate"])
-  if (!length(groups$climate)) stop("Spatial selection retained no climate predictor. Training results are saved, but this fitted configuration cannot support climate-response projections. No climate variable is forced into the model.", call. = FALSE)
+  mapping <- meta[meta$future_policy == "climate", , drop = FALSE]
+  if (!nrow(mapping)) {
+    message("No climate predictor retained: report climate-insensitive fitted predictions; no climate variable is forced into the model.")
+    pool <- nsdm_pool_layers(cfg$nsdm_pool_csv)
+    mapping <- pool[pool$future_policy == "climate", , drop = FALSE]
+  }
   if (any(!meta$future_policy %in% c("climate", "static")))
     stop("Every nonclimate predictor must have a declared static future policy.")
   future <- case_inventory_read_future(cfg)
   rows <- list()
   for (ssp in cfg$scenario_ssps) for (period in cfg$scenario_periods) {
     scenario <- paste("climate", "ensmean", ssp, period, sep = "_")
-    for (i in which(meta$future_policy == "climate")) {
-      m <- meta[i, ]
+    for (i in seq_len(nrow(mapping))) {
+      m <- mapping[i, ]
       hit <- future$construct_id == m$construct_id & future$ssp == ssp &
         future$period == period & future$product == "chelsa21-ensmean"
       matched <- future[which(hit %in% TRUE), , drop = FALSE]
       if (nrow(matched) != 1L) stop("Expected one CHELSA ensemble layer: ", m$layer, " / ", scenario)
       rows[[length(rows) + 1L]] <- data.frame(scenario = scenario, family = "climate",
         climate_model = "ensmean", ssp = ssp, period = period, baseline_period = "1981_2010",
-        climate_year = matched$year, layer = m$layer, path = matched$path, source = "future_climate")
+        climate_year = matched$year, layer = m$layer, path = matched$path, source = "future_climate", used_by_model = m$layer %in% selected)
     }
   }
   table <- do.call(rbind, rows)
@@ -31,7 +36,7 @@ case_scenarios <- function(cfg, selected, current, out_dir) {
   utils::write.csv(table, path, row.names = FALSE)
   utils::write.csv(data.frame(layer = selected, policy = meta$future_policy,
     current_path = meta$path, baseline_period = "1981_2010",
-    future_assumption = ifelse(meta$future_policy == "climate", "CHELSA ensemble-mean climate", "held at current value")),
+    future_assumption = ifelse(meta$future_policy == "climate", "CHELSA ensemble-mean climate", "held at observed current value; future ecological changes in this predictor are unmodelled")),
     file.path(out_dir, "projection_assumptions.csv"), row.names = FALSE)
   utils::write.csv(data.frame(
     members = "GFDL-ESM4; IPSL-CM6A-LR; MPI-ESM1-2-HR; MRI-ESM2-0; UKESM1-0-LL",

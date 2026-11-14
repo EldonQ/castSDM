@@ -16,7 +16,8 @@ cast_explore(
   output_dir = NULL,
   resources = list(),
   resume = TRUE,
-  focus = NULL
+  focus = NULL,
+  grouping = FALSE
 )
 }
 \arguments{
@@ -25,7 +26,9 @@ training result, current inventory and scenario table.}
 
 \item{scenario}{Saved scenario identifier. Default the case reporting scenario.}
 
-\item{variables}{Fitted predictors to change. \code{NULL} uses all predictors.
+\item{variables}{Fitted predictors to explain. Scenario mode preserves the
+complete imported current/future pair; selecting one factor does not
+freeze the other scenario changes. \code{NULL} uses all predictors.
 Related derived predictors should be changed together using a consistent
 scenario. A single derived-variable change is a sensitivity analysis.}
 
@@ -34,7 +37,7 @@ When supplied, replaces the imported future change for those variables
 with these hypothetical changes. All other selected variables must be
 omitted: \code{variables} is inferred from \code{names(shifts)}.}
 
-\item{context}{\code{"current"} keeps other predictors current. \code{"future"} keeps
+\item{context}{For hypothetical shifts only, \code{"current"} keeps other predictors current. \code{"future"} keeps
 other predictors at the selected future values in both members of the pair.}
 
 \item{sample_n}{Maximum number of saved CV locations used for descriptive
@@ -56,6 +59,8 @@ the real-location response table and grouping; it never predicts a full grid.}
 uses the largest mean absolute driver-only response on the shared support
 domain. Only this driver's two background responses, model sign agreement
 and background diagnostics are mapped, avoiding full maps for every driver.}
+
+\item{grouping}{Optional descriptive tree grouping, default \code{FALSE}.}
 }
 \value{
 A list of artifact paths, frozen settings, groups and interpretation.

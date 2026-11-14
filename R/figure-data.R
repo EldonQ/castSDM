@@ -78,7 +78,7 @@
 
 .cast_figure_display <- function(paths, output, resolution = .02) {
   stack <- do.call(c, lapply(paths, terra::rast))
-  discrete <- grepl("^support|common_support|^range_class|^novel_|^sign_", names(stack))
+  discrete <- grepl("^support|common_support|^range_class|^novel_|^sign_|^context_direction_", names(stack))
   # The saved model rasters are never resampled or overwritten. These files
   # are a declared display-only grid, shared by the PNG/PDF panels.
   template <- terra::project(stack[[1L]], "EPSG:4326", res = resolution, method = "bilinear")
@@ -159,7 +159,10 @@
   cached <- function(name, key, compute, artifact = character()) {
     path <- file.path(directory, paste0(name, ".rds"))
     value <- .cast_cache_read(path, key)
-    if (!is.null(value)) return(value)
+    if (!is.null(value)) {
+      if (verbose) cli::cli_inform("Verified numerical cache: {name}.")
+      return(value)
+    }
     value <- force(compute)
     .cast_cache_write(value, path, key, artifact)
     value
@@ -197,11 +200,11 @@
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
     attribution <- cast_attribution(fit, current, future,
-      drivers = unlist(comparison$groups, use.names = FALSE),
+      drivers = as.character(unlist(comparison$groups, use.names = FALSE)),
       weights = comparison$weights, mask = domain,
       clamp = object$protocol$clamp %||% FALSE, support_probs = comparison$support_probs %||% c(.01, .99),
       resources = resources, block_size = 250000L,
-      overwrite = TRUE,
+      overwrite = TRUE, diagnostics = TRUE,
       filename = if (!is.null(domain)) file.path(directory, "driver_attribution.tif"))
   }
   if (is.null(attribution)) note("03_environmental_driver", "Current/future predictor inputs or an existing cast_attribution object are required.")
@@ -216,20 +219,21 @@
   } else note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
   for (s in if ("maps" %in% products) names(comparison$results) else character()) {
     result <- comparison$results[[s]]
+    artifact_id <- result$alias_of %||% s
     if (is.null(result$raster_file)) next
-    if (verbose) cli::cli_inform("Preparing display grid: {s} (original scientific raster unchanged).")
+    if (verbose) cli::cli_inform("Display grid {s}: checking cache (scientific raster unchanged).")
     input <- result$raster_file
     if (!is.null(comparison$threshold)) {
-      path <- file.path(directory, paste0("range_", s, ".tif"))
+      path <- file.path(directory, paste0("range_", artifact_id, ".tif"))
       key <- .cast_digest(list(unname(tools::md5sum(input)), comparison$threshold, .cast_code_identity(.cast_figure_classes)))
-      classes[[s]] <- cached(paste0("range_", s), key,
+      classes[[s]] <- cached(paste0("range_", artifact_id), key,
         .cast_figure_classes(result, comparison$threshold, path), path)
       outputs <- c(outputs, classes[[s]]); input <- c(input, classes[[s]])
     }
-    path <- file.path(directory, paste0("display_", s, ".tif"))
+    path <- file.path(directory, paste0("display_", artifact_id, ".tif"))
     key <- .cast_digest(list(unname(tools::md5sum(input)),
       display_resolution, .cast_code_identity(.cast_figure_display)))
-    displays[[s]] <- cached(paste0("display_", s), key,
+    displays[[s]] <- cached(paste0("display_", artifact_id), key,
       .cast_figure_display(input, path, display_resolution), path)
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
@@ -295,7 +299,7 @@
     pattern <- switch(x,
       basic = "^(01_|07_|11_|12_|13_|15_|S_selection_)",
       maps = "^(02_|04_|05_|08_|10_|S_(?!selection_))",
-      responses = "^(06_|14_)", drivers = "^(03_|D_)", novelty = "^09_", NULL)
+      responses = "^(06_|14_)", drivers = "^(03_|D_|E_)", novelty = "^09_", NULL)
     if (!is.null(pattern)) return(grep(pattern, inventory, value = TRUE, perl = TRUE))
     inventory[inventory == x | startsWith(inventory, paste0(x, "_"))]
   }), use.names = FALSE))
@@ -310,7 +314,7 @@
     if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
         (startsWith(x, "S_") && !startsWith(x, "S_selection")) || x == "S") out <- c(out, "maps")
     if (x == "responses" || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
-    if (x == "drivers" || grepl("^03(_|$)|^D_", x)) out <- c(out, "attribution")
+    if (x == "drivers" || grepl("^03(_|$)|^[DE]_", x)) out <- c(out, "attribution")
     if (x == "novelty" || grepl("^09(_|$)", x)) out <- c(out, "mess")
   }
   unique(out)

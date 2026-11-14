@@ -124,6 +124,10 @@ Every active model must return finite predictions on eligible inputs;
 otherwise the comparison fails instead of changing weights or domains.
 }
 \details{
+A single empty predictor group explicitly records model non-response:
+no fitted variable changes. Identical fitted-input scenarios share verified
+raster artifacts; aliases are recorded without duplicate worker timings.
+
 Marginal support is assessed before clamping. \code{summary_common_support}
 and \code{binary_common_support} use the intersection of finite inputs and
 training quantile bounds over current and all requested futures; their

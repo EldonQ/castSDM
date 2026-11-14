@@ -321,14 +321,10 @@ cast_background <- function(occurrences,
   } else {
     # ---- Determine number of background points ----------------------------------
     if (is.null(n_bg)) {
-      n_bg <- as.integer(round(ratio * n_pres))
-      n_bg <- max(min_bg, min(max_bg, n_bg))
-      if (verbose) {
-        cli::cli_inform(
-          "Adaptive background: {ratio} x {n_pres} = {n_bg} points (clamped to [{min_bg}, {max_bg}])."
-        )
-      }
-    }
+      requested <- as.integer(round(ratio * n_pres))
+      n_bg <- max(min_bg, min(max_bg, requested))
+      if (verbose) cli::cli_inform("Background budget: ratio {ratio} x {n_pres} = {requested}; selected {n_bg}; limits [{min_bg}, {max_bg}] {if (n_bg == requested) 'not applied' else 'applied'}.")
+    } else if (verbose) cli::cli_inform("Background budget: explicit n_bg = {n_bg}; no ratio or count limits applied.")
 
     # ---- Identify valid sampling cells -------------------------------------------
     if (!is.null(study_area)) {
@@ -503,6 +499,7 @@ cast_background <- function(occurrences,
   if (verbose) {
     strategy_label <- if (use_user) "user_table" else
       if (use_bias) "bias-weighted random" else strategy
+    if (n_pres_final < n_pres) cli::cli_warn("Environmental extraction removed {n_pres - n_pres_final}/{n_pres} occurrence records; inspect missing predictor values.")
     cli::cli_inform(c(
       "v" = "Background sampling complete:",
       " " = "Strategy: {.val {strategy_label}}",

@@ -9,7 +9,7 @@
 #' @param species Taxon identifier. The Schizothoracinae preset is a pooled subfamily.
 #' @param settings Named list: `domain` (`national` or `freshwater_river`),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
-#'   `models`, `cv_k`, and `resources` (cores, workers, memory_mb).
+#'   `models`, `cv_k`, `background_points`, and `resources` (cores, workers, memory_mb).
 #' @param run Execute preparation, fitting, projections and figures after checks.
 #'   Default `FALSE` only indexes and checks physical inputs.
 #' @return Workspace, entry, case directory and checked settings, invisibly.
@@ -35,13 +35,13 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
     cli::cli_abort("Keep the workspace outside the environmental data library.")
   if (length(species) != 1L || is.na(species) || !grepl("^[A-Za-z][A-Za-z0-9_-]*$", species))
     cli::cli_abort("Use a taxon identifier with letters, digits, underscores or hyphens.")
-  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "resources")
+  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "background_points", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
   defaults <- list(domain = if (species == "Schizothoracinae") "freshwater_river" else "national",
     input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
-    cv_k = 5L, resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
+    cv_k = 5L, background_points = 10000L, resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
   for (n in c("domain", "input_type", "lulc_product")) {
     choices <- switch(n, domain = c("national", "freshwater_river"),
@@ -51,6 +51,7 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   # Reuse package validation rather than maintain a second numerical contract.
   cast_protocol(models = settings$models, cv_k = settings$cv_k,
     num_threads = settings$resources$cores)
+  settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
   .cast_resources(settings$resources)
   settings <- c(list(species = species, data_dir = data_dir, occurrence_file = occurrence_file), settings)
   template <- system.file("workflows", "single_species", package = "castSDM", mustWork = TRUE)
@@ -69,10 +70,10 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   on.exit({ Sys.unsetenv(variables); present <- !is.na(old)
     if (any(present)) do.call(Sys.setenv, as.list(stats::setNames(old[present], variables[present]))) }, add = TRUE)
   Sys.setenv(CAST_EXAMPLE_ROOT = path, CAST_DATA_ROOT = data_dir, CAST_SPECIES = species,
-    CAST_RUN_ID = "cast032_chelsa_ensmean", CAST_OUTPUT_ROOT = file.path(path, "output"),
+    CAST_RUN_ID = "cast033_chelsa_ensmean", CAST_OUTPUT_ROOT = file.path(path, "output"),
     CAST_DRY_RUN = if (isTRUE(run)) "0" else "1")
   entry <- file.path(path, "00_RUN_ALL.R")
   sys.source(entry, envir = new.env(parent = globalenv()), keep.source = FALSE)
-  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", "cast032_chelsa_ensmean", species),
+  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", "cast033_chelsa_ensmean", species),
     checked = TRUE, run = isTRUE(run), settings = settings))
 }

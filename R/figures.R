@@ -148,12 +148,16 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   if (!is.null(attribution) && (!inherits(attribution, "cast_attribution") ||
       !identical(attribution$weights, comparison$weights)))
     cli::cli_abort("attribution must be a cast_attribution with the comparison's frozen model weights.")
-  requested_drivers <- include[startsWith(include, "D_")]
-  known_drivers <- paste0("D_", attribution$drivers %||% unlist(comparison$groups, use.names = FALSE))
+  requested_drivers <- include[grepl("^[DE]_", include)]
+  known_drivers <- as.vector(outer(c("D_", "E_"), attribution$drivers %||% unlist(comparison$groups, use.names = FALSE), paste0))
   if (length(setdiff(requested_drivers, known_drivers)))
     cli::cli_abort("Unknown driver figure: {.val {setdiff(requested_drivers, known_drivers)}}. Choose a fitted scenario driver or include = 'drivers'.")
   if (is.null(output_dir)) output_dir <- if (!is.null(object$output_dir))
     file.path(dirname(object$output_dir), "figures") else tempfile("cast-figures-")
+  if (is.null(getOption("castSDM.figure_map_cache"))) {
+    old_cache <- options(castSDM.figure_map_cache = new.env(parent = emptyenv()))
+    on.exit(options(old_cache), add = TRUE)
+  }
   if (identical(include, "all") && !render_only) {
     phase_errors <- character()
     for (phase in c("basic", "maps", "responses", "drivers", "novelty")) {
@@ -209,7 +213,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     common_support_summary = comparison$summary_common_support,
     common_support_binary = comparison$binary_common_support,
     model_agreement = comparison$agreement, threshold_sensitivity = data$thresholds,
-    environmental_driver = data$attribution$summary,
+    environmental_driver = data$attribution$summary, response_consistency = data$attribution$consistency,
     model_weights = data.frame(model = names(comparison$weights), weight = as.numeric(comparison$weights)),
     figure_provenance = data.frame(key = c("training_software_version", "figure_software_version",
       "report_scenario", "native_binary_threshold", "display_resolution_degrees", "display_resampling",
@@ -254,7 +258,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       next
     }
     keys <- vapply(paths, function(path) .cast_digest(list(render_seed, name, spec$height_mm,
-      tools::file_ext(path), if (name == "03_environmental_driver" || startsWith(name, "D_")) .cast_digest(data$attribution),
+      tools::file_ext(path), if (name == "03_environmental_driver" || grepl("^[DE]_", name)) .cast_digest(data$attribution),
       if (name == "09_extrapolation_mess") unname(tools::md5sum(data$mess_display)))), character(1))
     reusable <- rep(FALSE, length(paths))
     previous_rows <- rep(NA_integer_, length(paths))

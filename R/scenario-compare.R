@@ -4,10 +4,10 @@
   if (!is.list(groups) || !length(groups) %in% 1:2 || is.null(names(groups)) ||
       anyNA(names(groups)) || any(!nzchar(names(groups))) || anyDuplicated(names(groups)))
     cli::cli_abort("groups must contain one or two uniquely named predictor groups.")
-  changed <- unlist(groups, use.names = FALSE)
-  if (!is.character(changed) || anyNA(changed) || any(!lengths(groups)) ||
+  changed <- as.character(unlist(groups, use.names = FALSE))
+  if (!is.character(changed) || anyNA(changed) || (length(groups) > 1L && any(!lengths(groups))) ||
       anyDuplicated(changed) || !all(changed %in% vars))
-    cli::cli_abort("groups must name disjoint, nonempty subsets of fitted predictors.")
+    cli::cli_abort("groups must name disjoint fitted predictor subsets; only a single group may be empty (no fitted predictor changes).")
   safe <- vapply(names(groups), .cast_safe_name, character(1), arg = "groups")
   if (anyDuplicated(safe)) cli::cli_abort("Group names collide after filename normalization.")
   names(groups) <- safe
@@ -59,6 +59,14 @@
        mask = mask, raster = raster, vars = vars)
 }
 
+.cast_shared_raster_layers <- function(current, future, variables) {
+  if (!length(variables)) return(TRUE)
+  a <- terra::sources(current[[variables]], bands = TRUE)
+  b <- terra::sources(future[[variables]], bands = TRUE)
+  is.data.frame(a) && is.data.frame(b) && all(nzchar(a$source)) &&
+    identical(a, b)
+}
+
 .cast_compare_common_mask <- function(plan, block_size, path = NULL,
                                       bounds = NULL, support_path = NULL) {
   if (!plan$raster) {
@@ -72,6 +80,14 @@
     return(list(domain = ok, support = if (!is.null(bounds)) ok & supported))
   }
   r <- plan$current
+  # Shared file/band references prove that static measurements are unchanged.
+  # General inputs without that proof retain the complete verification path.
+  future <- lapply(plan$future, function(x) {
+    vars <- if (.cast_shared_raster_layers(r, x, plan$static))
+      setdiff(plan$vars, plan$static) else plan$vars
+    if (length(vars)) x[[vars]] else NULL
+  })
+  future <- Filter(Negate(is.null), future)
   writer <- .cast_raster_writer(r, path, "common_domain", datatype = "INT1U", overwrite = TRUE)
   on.exit(.cast_writer_abort(writer), add = TRUE)
   support_writer <- if (!is.null(bounds)) .cast_raster_writer(r, support_path,
@@ -86,10 +102,10 @@
       a <- .cast_raster_block(r, row, count)
       ok <- ok & .cast_finite_rows(a)
       if (!is.null(bounds)) supported <- .cast_attribution_inside(a, bounds)
-      for (x in plan$future) {
+      for (x in future) {
         b <- .cast_raster_block(x, row, count)
         ok <- ok & .cast_finite_rows(b)
-        if (!is.null(bounds)) supported <- supported & .cast_attribution_inside(b, bounds)
+        if (!is.null(bounds)) supported <- supported & .cast_attribution_inside(b, bounds[names(b)])
       }
     }
     .cast_writer_block(writer, as.integer(ok), row, count)
@@ -143,9 +159,9 @@
   if (length(static)) for (v in static) {
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
-  context <- .cast_prediction_context(fit, weights, a, b, clamp)
+  context <- if (length(groups) == 1L && !length(groups[[1L]])) NULL else .cast_prediction_context(fit, weights, a, b, clamp)
   if (length(groups) == 1L) {
-    future <- context$predict(groups[[1L]])
+    future <- if (length(groups[[1L]])) context$predict(groups[[1L]]) else base
     if (any(!is.finite(base)) || any(!is.finite(future)))
       cli::cli_abort("An active model returned non-finite paired predictions.")
     change <- future-base
@@ -197,6 +213,8 @@
                               baseline, domain, block_size, filename = NULL,
                               common_support = NULL, thresholds = numeric()) {
   current <- plan$current; future <- plan$future[[scenario]]
+  shared_static <- plan$raster && .cast_shared_raster_layers(current, future, plan$static)
+  changing <- setdiff(plan$vars, plan$static)
   paired <- identical(plan$design, "paired")
   components <- if (paired) "joint_change" else .cast_factorial_names()
   faces <- if (paired) c("current", "joint") else c("current", "joint", "climate", "lulc")
@@ -241,7 +259,11 @@
     z <- matrix(NA_real_, n, length(layers), dimnames = list(NULL, layers))
     if (any(keep)) {
       a <- timed("read_current", if (plan$raster) .cast_raster_block(current, first, count) else current[idx, plan$vars, drop = FALSE])
-      b <- timed("read_future", if (plan$raster) .cast_raster_block(future, first, count) else future[idx, , drop = FALSE])
+      b <- timed("read_future", if (shared_static) {
+        value <- a
+        if (length(changing)) value[changing] <- .cast_raster_block(future[[changing]], first, count)
+        value
+      } else if (plan$raster) .cast_raster_block(future, first, count) else future[idx, , drop = FALSE])
       base <- timed("read_baseline", if (plan$raster) as.matrix(.cast_raster_block(base_r, first, count)) else baseline[idx, , drop = FALSE])
       keep <- keep & .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {
@@ -405,6 +427,9 @@
 #'   threshold source, artifact paths, stage events and provenance. Legacy
 #'   `climate_*` and `lulc_*` columns refer to the first and second named groups;
 #'   `*_main` are baseline simple effects; `*_average` are averaged effects.
+#' @details A single empty predictor group explicitly records model non-response:
+#'   no fitted variable changes. Identical fitted-input scenarios share verified
+#'   raster artifacts; aliases are recorded without duplicate worker timings.
 #' @export
 cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL,
     threshold = NULL, mask = NULL, support_probs = c(.01, .99), clamp = FALSE,
@@ -472,6 +497,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   }
   block_size <- max(1L, as.integer(min(1000000, budget$worker_memory_mb*1e6/
     (8 * (4*length(plan$vars) + 16*length(weights) + 32) * 4))))
+  if (!length(unlist(plan$groups))) cli::cli_inform("No fitted predictor changes in these scenarios: paired predictions will be identical. This is model non-response, not evidence of no ecological effect.")
   if (verbose) cli::cli_inform("Compare {length(plan$future)} future{?s}; groups {.val {names(groups)}}; {length(weights)} active models; {length(plan$static)} static predictors; {domain} domain.")
   cluster <- NULL
   worker_start <- Sys.time()
@@ -510,7 +536,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   event("current_prediction", start, reused)
   start <- Sys.time()
   common_key <- .cast_digest(list(current_key, future_keys, mask_key, bounds,
-    .cast_code_identity(.cast_compare_common_mask)))
+    .cast_code_identity(.cast_compare_common_mask), .cast_code_identity(.cast_shared_raster_layers)))
   common_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "domain.rds")
   needs_common <- domain == "common" || !is.null(bounds)
   common <- if (needs_common && resume) .cast_cache_read(common_receipt, common_key) else NULL
@@ -525,8 +551,10 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   }
   event("common_domain", start, reused)
   results <- list()
-  jobs <- list()
+  jobs <- list(); aliases <- list()
   for (scenario in names(plan$future)) {
+    first <- names(plan$future)[match(future_keys[[scenario]], future_keys)]
+    if (first != scenario) { aliases[[scenario]] <- first; next }
     start <- Sys.time()
     key <- .cast_digest(list(fit_key, current_key, future_keys[[scenario]], mask_key,
       if (needs_common) common_key, plan$groups, weights, threshold, support_probs, clamp,
@@ -575,6 +603,15 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       started = computed[[scenario]]$started, finished = computed[[scenario]]$finished)
     if (verbose) cli::cli_inform("{scenario}: computed")
   }
+  for (scenario in names(aliases)) {
+    first <- aliases[[scenario]]
+    start <- Sys.time()
+    x <- results[[first]]; x$scenario <- scenario; x$alias_of <- first
+    x$timings <- NULL
+    results[[scenario]] <- x
+    event("scenario_alias", start, TRUE, scenario)
+    if (verbose) cli::cli_inform("{scenario}: identical fitted inputs; reusing {first}.")
+  }
   results <- results[names(plan$future)]
   combine <- function(field) {
     rows <- lapply(names(results), function(s) {
@@ -596,6 +633,8 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
         as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
     common_support_file = if (plan$raster) common$support,
     results = results, groups = plan$groups, design = plan$design,
+    changing_predictors = unlist(plan$groups, use.names = FALSE),
+    scenario_aliases = aliases,
     static = plan$static, weights = weights, threshold = threshold, threshold_source = threshold_source,
     domain = domain, support_probs = support_probs, support_assessed = !is.null(bounds),
     resources = budget, events = do.call(rbind, events),

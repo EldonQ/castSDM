@@ -8,7 +8,7 @@
 #     eligible current-pool variable, named by the pool `layer` id, with the
 #     layer table attached as attr(., "nsdm_layers").
 #   * nsdm_build_scenario_stacks(): one SpatRaster per resolved scenario, with
-#     layers ordered and named exactly as `selected_vars`; climate/LULC layers
+#     layers ordered and named exactly as `selected_vars`; climate layers
 #     come from the scenario table, static layers are reused from the current
 #     stack.
 #   * wf_analysis_domain(): one binary analysis domain (national land mask,
@@ -120,8 +120,8 @@ nsdm_check_geom <- function(paths, reference, label = "layer") {
 
 # Load the current environmental pool as one SpatRaster (named by
 # pool `layer`). Mirrors checo26_load_current_stack(mode = "all_modeling",
-# include_lulc = TRUE): the pool already contains its 5 static lulc
-# proportions, so there is no separate LULC merge.
+# include_lulc = TRUE): the pool contains one selected land-cover product;
+# there is no separate LULC merge.
 nsdm_load_current_stack <- function(varnames = NULL,
                                     pool_csv = nsdm_default_pool_csv(),
                                     data_root = nsdm_default_data_root(),
@@ -212,18 +212,17 @@ nsdm_freshwater_river_domain <- function(occ, river_distance_raster, template,
     stop("Freshwater river-distance raster is not aligned with the current raster grid: ",
          river_distance_raster)
   }
-  # River-network skeleton: cells within the stream-distance buffer.
-  river <- d <= river_buffer_m
-  # Coarse literature coordinates often miss the 1 km stream cell. A local
-  # occurrence envelope keeps those records in the domain without reverting to
-  # a whole catchment. The river buffer remains the freshwater core.
+  # Native minimum-distance aggregation identifies 1 km cells containing a
+  # river subcell. This is a grid-cell domain, not an aquatic-area estimate.
+  # The observation envelope is a separate scope mask; coordinates are never moved.
+  river <- is.finite(d) & d <= river_buffer_m
   pts <- terra::vect(as.matrix(occ[, c("lon", "lat"), drop = FALSE]),
                      type = "points", crs = terra::crs(template))
   local <- terra::rasterize(
     terra::buffer(pts, width = occurrence_buffer_km * 1000),
     template, field = 1L, background = NA)
   local <- terra::ifel(!is.na(local), 1L, NA)
-  m <- terra::ifel(river | !is.na(local), 1L, NA)
+  m <- terra::ifel(river & !is.na(local), 1L, NA)
   if (!is.null(national_mask_file) && file.exists(national_mask_file)) {
     land <- terra::rast(national_mask_file)
     if (terra::nlyr(land) > 1L) land <- land[[1L]]
@@ -240,9 +239,9 @@ nsdm_freshwater_river_domain <- function(occ, river_distance_raster, template,
          " cells; minimum is ", min_cells, ".")
   }
   if (verbose) {
-    message("Analysis domain: freshwater river-network buffer (",
-            format(river_buffer_m, big.mark = ","), " m) + ",
-            occurrence_buffer_km, " km occurrence locality envelope; ",
+    message("Analysis domain: river-containing grid cells (minimum distance <= ",
+            format(river_buffer_m, big.mark = ","), " m) intersected with ",
+            occurrence_buffer_km, " km observed-locality scope; ",
             format(n_cells, big.mark = ","), " cells")
   }
   m
@@ -330,7 +329,8 @@ nsdm_build_scenario_stacks <- function(current_stack, selected_vars,
          paste(missing_sel, collapse = ", "))
   }
   bad_layers <- setdiff(unique(tab$layer), selected_vars)
-  if (length(bad_layers)) {
+  if (length(bad_layers) && (!"used_by_model" %in% names(tab) ||
+      !all(tab$used_by_model[tab$layer %in% bad_layers] %in% FALSE))) {
     stop("Scenario table maps layers outside the selected model set: ",
          paste(bad_layers, collapse = ", "))
   }
@@ -359,6 +359,7 @@ nsdm_build_scenario_stacks <- function(current_stack, selected_vars,
     source_tab <- cbind(
       rows[rep(1L, nrow(source_tab)), meta_cols, drop = FALSE],
       source_tab)
+    rows <- rows[rows$layer %in% selected_vars, , drop = FALSE]
     for (i in seq_len(nrow(rows))) {
       v <- rows$layer[[i]]
       r <- terra::rast(rows$path[[i]])

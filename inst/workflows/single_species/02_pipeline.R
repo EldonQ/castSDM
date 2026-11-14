@@ -35,7 +35,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast032_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast033_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)

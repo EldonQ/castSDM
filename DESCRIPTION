@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Response Maps for Species Distribution Models
-Version: 0.32.0
+Version: 0.33.0
 Authors@R: c(
     person(
             "Liqiang", "Q",

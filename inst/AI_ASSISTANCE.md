@@ -97,3 +97,13 @@ native-score defaults are new fitting policies, not asserted numerically
 equivalent to the previous GAM/score policy. Frozen-model optimisations are
 verified separately against generic predictions. Existing 0.31 processes and
 installed libraries are preserved.
+
+On 14 November 2026, Codex assisted 0.33.0: corrected predictor roles,
+actual-mask coverage, an explicit background budget, river-grid/locality
+intersection, static-raster and environmental-combination reuse, fold warnings
+and timings, and background-consistency exports. Optional grouping no longer
+runs by default. Checks use actual saved records, backgrounds, fitted models
+and native raster crops; no synthetic ecological observations or validation
+labels are generated. Bounded component fitting is recorded separately from
+a full new study, which remains author-run. No theoretical novelty, causal
+identification, external validation or journal acceptance is asserted.

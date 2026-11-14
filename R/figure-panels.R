@@ -41,7 +41,7 @@
 }
 
 .cast_figure_bound <- function(paths, layers, signed = FALSE) {
-  values <- unlist(lapply(paths, function(path) {
+  values <- unlist(lapply(unique(paths), function(path) {
     r <- terra::rast(path); present <- intersect(layers, names(r))
     if (!length(present)) return(numeric())
     x <- terra::values(r[[present]], mat = FALSE); x[is.finite(x)]
@@ -54,25 +54,38 @@
 .cast_figure_map <- function(path, layer, title, basemap, kind = "continuous",
                              limits = NULL, legend = NULL, resolution = .02) {
   title <- paste(strwrap(title, width = 32), collapse = "\n")
-  r <- terra::rast(path)[[layer]]
+  cache <- getOption("castSDM.figure_map_cache")
+  info <- file.info(path)
+  key <- .cast_digest(list(path, info$size, as.numeric(info$mtime), layer, basemap,
+    kind, limits, legend, resolution, getOption("castSDM.font_family")))
+  if (is.environment(cache) && identical(cache$key, key))
+    return(cache$plot + ggplot2::labs(title = title))
+  stack <- terra::rast(path)
+  r <- stack[[layer]]
+  if (grepl("^context_|^(effect|retained)_agreement_", layer)) {
+    variable <- sub("^context_(direction|gap)_|^(effect|retained)_agreement_", "", layer)
+    flags <- paste0(c("support_effect_", "support_retained_"), variable)
+    if (all(flags %in% names(stack)))
+      r <- terra::mask(r, terra::ifel(stack[[flags[1L]]] == 1 & stack[[flags[2L]]] == 1, 1, NA))
+  }
   d <- terra::as.data.frame(r, xy = TRUE, na.rm = TRUE)
   names(d) <- c("lon", "lat", "value")
   if (!nrow(d)) return(ggplot2::ggplot() + ggplot2::annotate("text", x = 0, y = 0,
     label = "Unassessed: no finite eligible cells", size = 2.5) +
     ggplot2::labs(title = title) + ggplot2::theme_void())
-  categorical <- kind %in% c("range", "support", "novelty", "conflict")
+  categorical <- kind %in% c("range", "support", "novelty", "conflict", "context")
   subtitle <- NULL
   if (categorical) {
-    levels <- if (kind == "range") c(-1, 0, 1, 2) else c(0, 1)
-    labels <- switch(kind, range = c("Loss", "Stable absent", "Gain", "Stable present"),
+    levels <- if (kind == "range") c(-1, 0, 1, 2) else if (kind == "context") c(-1, 0, 1, 2, 3) else c(0, 1)
+    labels <- switch(kind, context = c("Consistent decrease", "No response", "Consistent increase", "Opposite signs", "One background zero"), range = c("Loss", "Stable absent", "Gain", "Stable present"),
       support = c("Outside support", "Inside support"), novelty = c("Within envelope", "Novel (MESS < 0)"),
       conflict = c("No opposite signs", "Positive/negative conflict"))
-    colors <- switch(kind, range = c("#CB4335", "#F2F2F2", "#2E9E5B", "#2E86C1"),
+    colors <- switch(kind, context = c("#B35806", "#EDF2F4", "#2166AC", "#7B3294", "#999999"), range = c("#CB4335", "#F2F2F2", "#2E9E5B", "#2E86C1"),
       support = c("#F4A582", "#0B3D5C"), novelty = c("#EDF2F4", "#0B3D5C"),
       conflict = c("#EDF2F4", "#B35806"))
     d$value <- factor(d$value, levels = levels, labels = labels)
     scale <- function(guide) ggplot2::scale_fill_manual(values = stats::setNames(colors, labels),
-      drop = FALSE, na.value = NA, name = legend,
+      drop = FALSE, na.translate = FALSE, na.value = NA, name = legend,
       guide = if (guide == "none") "none" else "legend")
   } else {
     signed <- identical(kind, "signed")
@@ -93,7 +106,11 @@
   if (!is.null(subtitle)) subtitle <- paste(strwrap(subtitle, width = 34), collapse = "\n")
   p <- .cast_map_surface(d, "value", scale, title, subtitle = subtitle,
     legend_name = legend, cell_size = resolution, basemap = basemap, raster = TRUE)
-  .cast_figure_compact(p, categorical)
+  p <- .cast_figure_compact(p, categorical)
+  # Keep a single panel in memory: shared current/common-support atlases reuse
+  # its raster, basemap and inset, while each panel keeps its own title.
+  if (is.environment(cache)) { cache$key <- key; cache$plot <- p }
+  p
 }
 
 .cast_figure_scenarios <- function(d) {
@@ -250,8 +267,9 @@
     patchwork::wrap_plots(plots, ncol = 1, heights = c(1, 1, 1.15)) + .cast_figure_annotation(
       "Environmental explanation under frozen fitted models",
       "Driver-only and retained-driver contrasts are non-additive predictive explanations. Static predictors remain fixed. These contrasts do not identify ecological causal effects.")
-  }, 220, !is.null(att) && !is.null(data$attribution_display),
-    "Driver attribution needs raw scenario predictors or a supplied saved cast_attribution result.")
+  }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display),
+    if (!is.null(att) && !length(att$drivers)) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
+      "Driver attribution needs raw scenario predictors or a supplied saved cast_attribution result.")
   add("04_support_and_disagreement", function() {
     patchwork::wrap_plots(map("support", "Training marginal support", "support", legend = "Training range"),
       map("sd_joint_change", "Paired cross-model disagreement", limits = .cast_figure_bound(path, "sd_joint_change"),
@@ -381,6 +399,8 @@
     for (layer in atlas_layers) local({
       v <- layer
       available <- data$displays[vapply(data$displays, function(p) v %in% names(terra::rast(p)), logical(1))]
+      if (identical(cmp$domain, "common") && (startsWith(v, "current_") || v == "common_support"))
+        available[] <- available[1L]
       kind <- if (startsWith(v, "range_class")) "range" else if (v %in% effects || startsWith(v, "change_")) "signed" else if (v %in% c("support", "common_support")) "support" else
         if (v == "sign_conflict_joint") "conflict" else "continuous"
       add(paste0("S_", v), function() {
@@ -406,6 +426,23 @@
       patchwork::wrap_plots(plots, ncol = 2) + .cast_figure_annotation(.cast_var_label(v),
         "Frozen-model single-driver scenario contrasts. No refit or probability recalibration; static inputs remain current.")
     }, 105)
+    needed <- paste0(c("context_direction_", "context_gap_", "effect_agreement_", "retained_agreement_"), v)
+    add(paste0("E_", v), function() {
+      gap <- .cast_figure_bound(data$attribution_display, needed[2L], TRUE)
+      plots <- list(
+        map(needed[1L], "Response direction in both backgrounds", "context",
+          source = data$attribution_display, legend = "Background consistency"),
+        map(needed[2L], "Difference between background responses", "signed", gap,
+          source = data$attribution_display, legend = "Response difference"),
+        map(needed[3L], "Engine agreement: current background", limits = c(0, 1),
+          source = data$attribution_display, legend = "Agreement fraction"),
+        map(needed[4L], "Engine agreement: future background", limits = c(0, 1),
+          source = data$attribution_display, legend = "Agreement fraction"))
+      patchwork::wrap_plots(plots, ncol = 2) + .cast_figure_annotation(
+        paste("Environmental response consistency:", .cast_var_label(v)),
+        "The same factor is compared in current and future backgrounds. Both-background range support is required for display. Sign reversals indicate background dependence; engine agreement is descriptive, not confidence or causal identification. Counts and denominators are in response_consistency.csv.")
+    }, 165, all(needed %in% names(terra::rast(data$attribution_display))),
+      "Background consistency requires attribution diagnostics = TRUE.")
   })
   registry
 }

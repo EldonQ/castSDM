@@ -99,6 +99,7 @@ predictions already calculated, without further fitted-model calls.}
 }
 \value{
 A \code{cast_attribution} list with \code{summary}, frozen \code{weights},
+optional \code{consistency} counts/fractions on both-background supported cells,
 \code{drivers}, \code{data} (tables) or \code{raster_file} (rasters), and \code{layers}.
 \verb{effect_<driver>} is driver-only future minus current; \verb{retained_<driver>}
 is full future minus future with that driver held current. \code{remainder}
