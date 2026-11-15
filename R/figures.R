@@ -87,7 +87,8 @@
 #'   cap of 2,000 rows; every fitted predictor and engine is retained.
 #' @param display_resolution WGS84 display grid resolution in degrees, default
 #'   `0.02`. Original scientific rasters and native-grid range counts are
-#'   unchanged. Discrete layers use nearest-neighbour display resampling.
+#'   unchanged. Display rasters use overlapping valid-cell averages, categorical modes,
+#'   minimum support flags and maximum novelty flags; native rasters are unchanged.
 #' @param width_mm,dpi Export width and PNG resolution, defaults `183` and
 #'   `600`; matching PDF exports retain vector boundaries/text and embed dense
 #'   gridded data as rasters. Display colour clipping is reported on maps.
@@ -225,8 +226,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     common_support_binary = comparison$binary_common_support,
     model_agreement = comparison$agreement, threshold_sensitivity = data$thresholds,
     environmental_driver = data$attribution$summary,
+    environmental_driver_common = data$attribution$common_summary,
     environmental_driver_by_model = data$attribution$model_summary,
     response_consistency = data$attribution$consistency,
+    display_coverage = data$display_coverage,
     support_scope = comparison$support_scope,
     gam_concurvity = data$diagnostics$gam_concurvity,
     model_weights = data.frame(model = names(comparison$weights), weight = as.numeric(comparison$weights)),
@@ -235,7 +238,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       "response_grid_size", "response_reference_rows", "full_training_reference_rows", "response_method"),
       value = c(data$training_version, data$source_version, scenario,
         comparison$threshold %||% NA_real_, display_resolution,
-        "bilinear continuous; nearest categorical; native scientific rasters unchanged",
+        "continuous area-weighted average; categorical mode; support minimum; novelty maximum; native scientific rasters unchanged",
         response_grid, data$pdp_reference_n, data$response_reference_n, response_method)),
     unavailable_products = data$notes %||% data.frame(product = character(), reason = character()))
   if (identical(comparison$design, "paired")) {

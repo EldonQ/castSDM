@@ -164,3 +164,10 @@ Verification uses saved real-case models, observed records and native-grid
 crops, plus a lightweight package check. Full national workflow timing and
 scientific results must be obtained by the author in a fresh run; no causal
 identification or journal acceptance is claimed.
+
+On 15 November 2026, Codex assisted 0.38.0 sparse-footprint display auditing,
+common supported-domain response summaries and original SchiSOFT metadata
+matching. The user retained the existing river/locality domain. The official
+source CSV was retrieved from figshare v1 and its published MD5 was verified;
+no coordinates, measurements or sampling dates were manufactured. Verification
+uses saved real models, records and raster windows, not a full case rerun.

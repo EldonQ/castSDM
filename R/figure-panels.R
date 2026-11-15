@@ -62,16 +62,17 @@
 }
 
 .cast_figure_map <- function(path, layer, title, basemap, kind = "continuous",
-                             limits = NULL, legend = NULL, resolution = .02) {
+                             limits = NULL, legend = NULL, resolution = .02, support_layer = NULL) {
   title <- paste(strwrap(title, width = 32), collapse = "\n")
   cache <- getOption("castSDM.figure_map_cache")
   info <- file.info(path)
   key <- .cast_digest(list(path, info$size, as.numeric(info$mtime), layer, basemap,
-    kind, limits, legend, resolution, getOption("castSDM.font_family")))
+    kind, limits, legend, resolution, support_layer, getOption("castSDM.font_family")))
   if (is.environment(cache) && identical(cache$key, key))
     return(cache$plot + ggplot2::labs(title = title))
   stack <- terra::rast(path)
   r <- stack[[layer]]
+  if (!is.null(support_layer)) r <- terra::mask(r, terra::ifel(stack[[support_layer]] == 1, 1, NA))
   if (grepl("^context_|^(effect|retained)_agreement_", layer)) {
     variable <- sub("^context_(direction|gap)_|^(effect|retained)_agreement_", "", layer)
     flags <- paste0(c("support_effect_", "support_retained_"), variable)
@@ -232,8 +233,8 @@
     registry[[name]] <<- list(build = build, height_mm = height, available = available, reason = reason)
   }
   map <- function(layer, title = unname(names_short[layer]), kind = "continuous", limits = NULL,
-                  source = path, legend = "Suitability") .cast_figure_map(source, layer,
-    title, basemap, kind, limits, legend, data$display_resolution)
+                  source = path, legend = "Suitability", support_layer = NULL) .cast_figure_map(source, layer,
+    title, basemap, kind, limits, legend, data$display_resolution, support_layer)
   add("01_model_validation", function() {
     info <- data$folds
     cv <- data$cv
@@ -253,15 +254,18 @@
       paste("Reporting scenario:", report, ". Shared suitability scale. Range trends use the frozen training OOF threshold; continuous maps retain sub-threshold values. Maps are display-only reprojections."))
   }, 155, !is.null(path) && !is.null(cmp$binary))
   add("03_environmental_driver", function() {
-    only <- att$summary[att$summary$contrast == "only", ]
+    common <- !is.null(att$common_summary)
+    scope_summary <- if (common) att$common_summary else att$summary
+    only <- scope_summary[scope_summary$contrast == "only", ]
     changing <- only$driver[is.finite(only$mean_abs) & only$mean_abs > 0]
     top <- if (length(changing)) changing[which.max(only$mean_abs[match(changing, only$driver)])] else att$drivers[1L]
     limits <- .cast_figure_bound(data$attribution_display,
       paste0(c("effect_", "retained_"), top), signed = TRUE)
     bars <- function(contrast) {
-      hi <- max(.01, ceiling(max(abs(att$summary$mean_signed[
-        att$summary$contrast %in% c("only", "retained")]), na.rm = TRUE)*100)/100)
-      plot(att, contrast = contrast) + .cast_figure_theme() +
+      values <- scope_summary$mean_signed[scope_summary$contrast %in% c("only", "retained")]
+      values <- values[is.finite(values)]
+      hi <- if (length(values)) max(.01, ceiling(max(abs(values))*100)/100) else .01
+      plot(att, contrast = contrast, supported_only = common) + .cast_figure_theme() +
         ggplot2::labs(title = if (contrast == "only") "Driver-only future effects" else "Retained-driver contributions",
           caption = NULL) +
         ggplot2::scale_x_continuous(limits = c(-hi, hi), breaks = pretty(c(-hi, hi), 3),
@@ -270,16 +274,19 @@
           paste(strwrap(label, 27), collapse = "\n"), character(1)))
     }
     maps <- list(map(paste0("effect_", top), paste("Driver-only:", .cast_var_label(top)),
-      "signed", limits, source = data$attribution_display, legend = "Suitability change"),
+      "signed", limits, source = data$attribution_display, legend = "Suitability change", support_layer = if (common) "support_total"),
       map(paste0("retained_", top), paste("Retained-driver:", .cast_var_label(top)),
-        "signed", limits, source = data$attribution_display, legend = "Suitability change"))
+        "signed", limits, source = data$attribution_display, legend = "Suitability change", support_layer = if (common) "support_total"))
     plots <- c(maps, list(patchwork::wrap_plots(bars("only"), bars("retained"), ncol = 2)))
     patchwork::wrap_plots(plots, ncol = 1, heights = c(1, 1, 1.15)) + .cast_figure_annotation(
       "Environmental explanation under frozen fitted models",
-      "Driver-only and retained-driver contrasts are non-additive predictive explanations. Static predictors remain fixed. These contrasts do not identify ecological causal effects.")
-  }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display),
+      paste(if (common) "Maps and means use the same all-predictor paired support across drivers; full-domain maps remain in D_ atlases." else
+        "Full-domain legacy responses; common-support summaries require recomputation.",
+        "Non-additive predictive explanations; static predictors remain fixed. These contrasts do not identify ecological causal effects."))
+  }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&
+      (is.null(att$common_summary) || any(att$common_summary$n > 0)),
     if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
-      "Driver attribution needs raw scenario predictors or a supplied saved cast_attribution result.")
+      "Driver attribution requires raw scenario predictors and at least one common supported cell; full-domain D_ maps remain available.")
   add("04_support_and_disagreement", function() {
     patchwork::wrap_plots(map("support", "Training marginal support", "support", legend = "Training range"),
       map("sd_joint_change", "Paired cross-model disagreement", limits = .cast_figure_bound(path, "sd_joint_change"),

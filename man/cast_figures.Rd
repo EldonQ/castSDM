@@ -60,7 +60,8 @@ cap of 2,000 rows; every fitted predictor and engine is retained.}
 
 \item{display_resolution}{WGS84 display grid resolution in degrees, default
 \code{0.02}. Original scientific rasters and native-grid range counts are
-unchanged. Discrete layers use nearest-neighbour display resampling.}
+unchanged. Display rasters use overlapping valid-cell averages, categorical modes,
+minimum support flags and maximum novelty flags; native rasters are unchanged.}
 
 \item{width_mm, dpi}{Export width and PNG resolution, defaults \code{183} and
 \code{600}; matching PDF exports retain vector boundaries/text and embed dense

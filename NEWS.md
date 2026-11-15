@@ -1,3 +1,23 @@
+# castSDM 0.38.0
+
+- Preserve the declared river/locality analysis domain. Report native prediction
+  coverage against both that domain and the national mask; blank map context is
+  unpredicted, and grid-cell coverage is not aquatic surface area.
+- Coarsen display-only rasters with overlapping valid-cell averages, categorical
+  modes, conservative minimum support flags and maximum novelty flags. Replace
+  sparse-footprint bilinear/nearest displays. Record native-centre representation
+  in display_coverage.csv without changing native predictions or thresholds.
+- Restore original SchiSOFT metadata when supplied alongside converted records.
+  Match source IDs, species names and coordinates before joining; restore source
+  genus/rank and retain the dataset subfamily separately. Retain original
+  dates, intervals and substitute-date remarks; use only unambiguous reported sampling
+  years for a training-side temporal reference (single dates or within-year intervals). Record possible coarse-coordinate
+  flags without treating them as proven uncertainty or moving/deleting points.
+- Add common_summary with the same marginal paired support across all driver
+  contrasts. Use it in the main environmental-response panel; preserve full-domain
+  summaries and every D_ atlas. Clarify cache reuse and river-locality scope in
+  logs and Shiny. Keep VIF, engines and the regular-GAM prediction policy.
+
 # castSDM 0.37.0
 
 - Qualify the documented N-SDM GLU global-anchor patch approximations out of

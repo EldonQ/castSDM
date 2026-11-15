@@ -170,7 +170,8 @@
 #' @param resume Reuse a verified result receipt for an existing filename,
 #'   including when `overwrite = TRUE`. Set `FALSE` to force recomputation.
 #'
-#' @return A `cast_attribution` list with `summary`, `model_summary`, frozen `weights`,
+#' @return A `cast_attribution` list with `summary`, `common_summary`,
+#'   `model_summary`, frozen `weights`,
 #'   optional `consistency` counts/fractions on both-background supported cells,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
 #'   `effect_<driver>` is driver-only future minus current; `retained_<driver>`
@@ -195,6 +196,8 @@
 #'   realized occupancy, colonisation, or dispersal. Presence/background scores
 #'   remain relative suitability. `model_summary` gives unweighted member responses
 #'   on the paired domain, supported-domain means and frozen ensemble weights.
+#'   `common_summary` uses the same all-predictor paired marginal support and
+#'   finite responses across all drivers, within this scenario (not across futures).
 #'   All summary means weight rows/cells equally;
 #'   use an equal-area grid when interpreting raster summaries spatially.
 #'   Built-in GAM/BAM predictions are independent of processing batch size.
@@ -309,6 +312,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     cached <- if (resume) .cast_cache_read(receipt, key) else NULL
     if (!is.null(cached)) {
       cached$raster_file <- normalizePath(filename, winslash = "/")
+      if (verbose) cli::cli_inform("Environmental response maps: verified result cache; no numerical recomputation.")
       return(cached)
     }
     if (file.exists(filename) && !overwrite) cli::cli_abort("{.arg filename} already exists.")
@@ -344,12 +348,15 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   # Online moments avoid retaining national effect surfaces in RAM.
   sums <- matrix(0, 2 + 2 * length(drivers), 8,
     dimnames = list(NULL, c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd")))
+  common_sums <- sums
   consistency <- matrix(0, length(drivers), 7L, dimnames = list(drivers,
     c("n_finite", "n_supported", "negative", "zero", "positive", "reversal", "one_zero")))
   model_sums <- NULL
   accumulate <- function(z) {
     cols <- c("total_change", if (length(drivers)) paste0("effect_", drivers),
       if (length(drivers)) paste0("retained_", drivers), "remainder")
+    common <- !is.na(z[, "support_total"]) & z[, "support_total"] == 1 &
+      .cast_finite_rows(z[, cols, drop = FALSE])
     for (j in seq_along(cols)) {
       col <- cols[j]; d <- z[, col]
       sc <- if (col %in% c("total_change", "remainder")) "support_total" else
@@ -360,6 +367,9 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       ds <- z[, dc]; ks <- k & is.finite(ds)
       sums[j, ] <<- sums[j, ] + c(sum(k), sum(s), sum(d[k]), sum(abs(d[k])),
         sum(d[s]), sum(abs(d[s])), sum(ds[ks]), sum(ks))
+      kc <- common & is.finite(ds)
+      common_sums[j, ] <<- common_sums[j, ] + c(sum(common), sum(common), sum(d[common]),
+        sum(abs(d[common])), sum(d[common]), sum(abs(d[common])), sum(ds[kc]), sum(kc))
     }
     if (diagnostics) for (v in drivers) {
       direction <- z[, paste0("context_direction_", v)]
@@ -427,21 +437,10 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
     if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)}; {sum(keep)} finite cells; elapsed {round(proc.time()[['elapsed']] - started)} s.")
   }
-  divide <- function(x, n) ifelse(n > 0, x / n, NA_real_)
-  n_driver_rows <- 1L + 2L * length(drivers)
-  summary <- data.frame(
-    driver = c(NA_character_, drivers, drivers, NA_character_),
-    contrast = c("total", rep("only", length(drivers)),
-      rep("retained", length(drivers)), "remainder"),
-    n = sums[, "n"], n_supported = sums[, "ns"],
-    support = divide(sums[, "ns"], sums[, "n"]),
-    mean_signed = divide(sums[, "sum"], sums[, "n"]),
-    mean_abs = divide(sums[, "abs"], sums[, "n"]),
-    mean_signed_supported = divide(sums[, "sums"], sums[, "ns"]),
-    mean_abs_supported = divide(sums[, "abss"], sums[, "ns"]),
-    mean_model_sd = c(divide(sums[seq_len(n_driver_rows), "sd"],
-      sums[seq_len(n_driver_rows), "nsd"]), NA_real_),
-    row.names = NULL)
+  summary <- .cast_response_summary(sums, drivers)
+  common_summary <- .cast_response_summary(common_sums, drivers)
+  common_summary$full_domain_n <- summary$n
+  common_summary$domain_share <- ifelse(summary$n > 0, common_summary$n/summary$n, NA_real_)
   data <- NULL
   if (raster) {
     .cast_writer_finish(writer)
@@ -455,7 +454,8 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   if (!is.null(evidence)) for (name in c("negative", "zero", "positive", "reversal", "one_zero"))
     evidence[[paste0(name, "_fraction")]] <- ifelse(evidence$n_supported > 0,
       evidence[[name]]/evidence$n_supported, NA_real_)
-  result <- structure(list(summary = summary, model_summary = .cast_model_response_summary(model_sums, weights), data = data, consistency = evidence,
+  result <- structure(list(summary = summary, common_summary = common_summary,
+    model_summary = .cast_model_response_summary(model_sums, weights), data = data, consistency = evidence,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
     shifts = shifts, diagnostics = diagnostics, sign_tolerance = if (diagnostics) 1e-12 else NULL,

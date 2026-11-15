@@ -98,3 +98,24 @@ for (j in seq_len(nrow(response$summary))) {
     sum(m$mean_signed*m$ensemble_weight)-d$mean_signed) < 1e-12)
 }
 cat("Unweighted member summaries match native change rasters and reconstruct frozen ensemble means.\n")
+
+# Every common-support contrast must use one identical set of real native cells.
+cols <- c("total_change", paste0("effect_", changing), paste0("retained_", changing), "remainder")
+ok <- response_values[, "support_total"] == 1 &
+  rowSums(!is.finite(response_values[, cols, drop = FALSE])) == 0L
+ok[is.na(ok)] <- FALSE
+stopifnot(all(response$common_summary$n == sum(ok)))
+for (j in seq_len(nrow(response$common_summary))) {
+  d <- response$common_summary[j, ]
+  col <- if (d$contrast == "only") paste0("effect_", d$driver) else
+    if (d$contrast == "retained") paste0("retained_", d$driver) else
+    if (d$contrast == "total") "total_change" else "remainder"
+  if (any(ok)) stopifnot(abs(d$mean_signed-mean(response_values[ok, col])) < 1e-12)
+}
+before <- tools::md5sum(response$raster_file)
+display <- file.path(qa, "actual_response_display.tif")
+castSDM:::.cast_figure_display(response$raster_file, display, .02)
+stopifnot(identical(before, tools::md5sum(response$raster_file)), file.exists(paste0(display, ".csv")))
+flags <- terra::values(terra::rast(display)[["support_total"]], mat = FALSE)
+stopifnot(all(flags[is.finite(flags)] %in% c(0, 1)))
+cat("Common-domain response means and display-only resampling preserve native data and binary support.\n")

@@ -37,3 +37,9 @@ measurements and does not run the national research workflow.
 
 It also verifies compact current-GAM reuse and member response summaries against
 native change rasters and their frozen ensemble.
+
+`metadata.R <converted_SchiSOFT_csv> <official_occurrence_csv>` checks original
+IDs/names/coordinates and distinguishes reported sampling years from ambiguous
+intervals and source-date substitutes. It changes no record coordinates or years.
+`scenario-io.R` also checks equal-domain driver summaries and display-only
+resampling, including native-file integrity and binary support flags.

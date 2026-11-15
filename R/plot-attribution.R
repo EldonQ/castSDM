@@ -9,7 +9,8 @@
 #'   require longitude/latitude coordinates. Raster display is reprojected
 #'   to WGS84 when needed; source rasters remain unchanged.
 #' @param limits Optional symmetric suitability-change colour limits.
-#' @param supported_only Whether to hide cells outside the training range.
+#' @param supported_only For maps, hide cells outside marginal training support.
+#'   For summaries, use the same paired all-predictor support across drivers.
 #' @param max_cells Maximum display cells (regular aggregation for rasters;
 #'   table maps retain all observations).
 #' @param ... Ignored.
@@ -24,7 +25,10 @@ plot.cast_attribution <- function(x, type = c("summary", "map"),
   basemap <- match.arg(basemap, c("none", "china", "world"))
   type <- match.arg(type); contrast <- match.arg(contrast)
   if (type == "summary") {
-    d <- x$summary[x$summary$contrast == contrast, , drop = FALSE]
+    if (supported_only && is.null(x$common_summary))
+      cli::cli_abort("Recompute the response products to obtain a common supported-domain summary.")
+    summary <- if (supported_only) x$common_summary else x$summary
+    d <- summary[summary$contrast == contrast, , drop = FALSE]
     d$label <- .cast_var_label(d$driver)
     d$label <- factor(d$label, levels = d$label[order(d$mean_abs)])
     return(ggplot2::ggplot(d, ggplot2::aes(.data$mean_signed, .data$label)) +
@@ -36,7 +40,8 @@ plot.cast_attribution <- function(x, type = c("summary", "map"),
         midpoint = 0, guide = "none") +
       ggplot2::labs(x = "Mean suitability change", y = NULL,
         title = if (contrast == "only") "Driver-only environmental change" else "Contribution of future driver changes",
-        caption = "Frozen model weights; scenario contrasts are non-additive. Range coverage is reported in the summary table.") +
+        caption = if (supported_only) "Same all-predictor paired support across drivers; frozen model weights; non-additive responses." else
+          "Full eligible domain; frozen model weights; non-additive responses. Range coverage is reported in the summary table.") +
       theme_cast(base_size = 8))
   }
   if (!is.null(driver) && (!is.character(driver) || length(driver) != 1L ||

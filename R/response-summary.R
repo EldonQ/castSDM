@@ -1,4 +1,15 @@
 # Unweighted member responses on the same paired domain as the ensemble.
+.cast_response_summary <- function(sums, drivers) {
+  divide <- function(x, n) ifelse(n > 0, x/n, NA_real_)
+  at <- seq_len(1L+2L*length(drivers))
+  data.frame(driver = c(NA_character_, drivers, drivers, NA_character_),
+    contrast = c("total", rep("only", length(drivers)), rep("retained", length(drivers)), "remainder"),
+    n = sums[, "n"], n_supported = sums[, "ns"], support = divide(sums[, "ns"], sums[, "n"]),
+    mean_signed = divide(sums[, "sum"], sums[, "n"]), mean_abs = divide(sums[, "abs"], sums[, "n"]),
+    mean_signed_supported = divide(sums[, "sums"], sums[, "ns"]), mean_abs_supported = divide(sums[, "abss"], sums[, "ns"]),
+    mean_model_sd = c(divide(sums[at, "sd"], sums[at, "nsd"]), NA_real_), row.names = NULL)
+}
+
 .cast_model_response_sums <- function(value, support, weights, driver, contrast) {
   valid <- .cast_finite_rows(value)
   supported <- valid & !is.na(support) & support

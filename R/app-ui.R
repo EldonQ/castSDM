@@ -170,6 +170,8 @@
   if (is.null(p)) return(NULL)
   tab <- p$comparison$support_scope
   detail <- character()
+  if (identical(p$case$cfg$domain_mode, "freshwater_river"))
+    detail <- c(detail, "\u672c\u6848\u4f8b\u662f\u6cb3\u6d41\u5c40\u5730\u5206\u6790\uff0c\u9650\u4e8e\u58f0\u660e\u7684\u6cb3\u7f51\u548c\u8bb0\u5f55\u5468\u8fb9\u8303\u56f4\u3002\u57df\u5916\u7a7a\u767d\u672a\u9884\u6d4b\uff1b\u7f51\u683c\u8986\u76d6\u9762\u79ef\u4e0d\u662f\u771f\u5b9e\u6c34\u57df\u9762\u79ef\u3002")
   if (is.data.frame(tab) && length(scenario) == 1L && is.null(shifts)) {
     tab <- tab[tab$scenario == scenario, , drop = FALSE]
     share <- function(scope) { x <- tab$share[tab$scope == scope]; if (length(x) && is.finite(x[1L])) sprintf("%.1f%%", 100*x[1L]) else "N/A" }

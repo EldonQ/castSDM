@@ -32,7 +32,8 @@ to WGS84 when needed; source rasters remain unchanged.}
 
 \item{limits}{Optional symmetric suitability-change colour limits.}
 
-\item{supported_only}{Whether to hide cells outside the training range.}
+\item{supported_only}{For maps, hide cells outside marginal training support.
+For summaries, use the same paired all-predictor support across drivers.}
 
 \item{max_cells}{Maximum display cells (regular aggregation for rasters;
 table maps retain all observations).}

@@ -95,13 +95,20 @@
   discrete <- grepl("^support|common_support|^range_class|^novel_|^sign_|^context_direction_", names(stack))
   # The saved model rasters are never resampled or overwritten. These files
   # are a declared display-only grid, shared by the PNG/PDF panels.
-  template <- terra::project(stack[[1L]], "EPSG:4326", res = resolution, method = "bilinear")
-  continuous <- if (any(!discrete)) terra::project(stack[[which(!discrete)]], template, method = "bilinear")
-  categorical <- if (any(discrete)) terra::project(stack[[which(discrete)]], template, method = "near")
-  display <- if (is.null(continuous)) categorical else if (is.null(categorical)) continuous else c(continuous, categorical)
+  support <- grepl("^support|^common_support|^novel_", names(stack))
+  template <- terra::project(stack[[1L]], "EPSG:4326", res = resolution, method = "average")
+  continuous <- if (any(!discrete)) terra::project(stack[[which(!discrete)]], template, method = "average")
+  categorical <- if (any(discrete & !support)) terra::project(stack[[which(discrete & !support)]], template, method = "mode")
+  # A coarse cell is supported only when every contributing valid flag is 1.
+  # Novelty is the converse: preserve any flagged source cell.
+  novel <- startsWith(names(stack), "novel_")
+  flags <- if (any(support & !novel)) terra::project(stack[[which(support & !novel)]], template, method = "min")
+  novelty <- if (any(novel)) terra::project(stack[[which(novel)]], template, method = "max")
+  display <- do.call(c, Filter(Negate(is.null), list(continuous, categorical, flags, novelty)))
   display <- display[[names(stack)]]
   terra::writeRaster(display, output, overwrite = TRUE,
     wopt = list(datatype = "FLT4S", gdal = c("COMPRESS=LZW", "TILED=YES", "INTERLEAVE=BAND")))
+  utils::write.csv(.cast_display_coverage(stack, display, resolution), paste0(output, ".csv"), row.names = FALSE)
   output
 }
 
@@ -124,7 +131,8 @@
     scenario, response_grid, display_resolution, response_method,
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
-    .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision)))
+    .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision),
+    .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
   old <- .cast_cache_read(bundle_path, base_key)
   valid_old <- !is.null(old)
   verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
@@ -216,7 +224,7 @@
         comparison, comparison$weights, object$protocol$clamp %||% FALSE) else NULL
   if ("attribution" %in% products && length(unlist(comparison$groups, use.names = FALSE)) &&
       is.null(attribution) && !is.null(current) && !is.null(future)) {
-    if (verbose) cli::cli_inform("Preparing reporting-scenario driver maps; reuse requires matching models, inputs, mask and settings.")
+    if (verbose) cli::cli_inform("Checking reporting-scenario response maps; a verified receipt skips numerical recomputation.")
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
     attribution <- .cast_attribution(fit, current, future,
@@ -258,7 +266,7 @@
     key <- .cast_digest(list(unname(tools::md5sum(input)),
       display_resolution, .cast_code_identity(.cast_figure_display)))
     displays[[s]] <- cached(paste0("display_", artifact_id), key,
-      .cast_figure_display(input, path, display_resolution), path)
+      .cast_figure_display(input, path, display_resolution), c(path, paste0(path, ".csv")))
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
   }
@@ -268,7 +276,7 @@
     key <- .cast_digest(list(unname(tools::md5sum(mess)), display_resolution,
       .cast_code_identity(.cast_figure_display)))
     mess_display <- cached("display_mess", key,
-      .cast_figure_display(mess, path, display_resolution), path)
+      .cast_figure_display(mess, path, display_resolution), c(path, paste0(path, ".csv")))
     outputs <- c(outputs, mess_display)
   }
   attribution_display <- NULL
@@ -278,7 +286,7 @@
     key <- .cast_digest(list(unname(tools::md5sum(attribution$raster_file)),
       display_resolution, .cast_code_identity(.cast_figure_display)))
     attribution_display <- cached("display_drivers", key,
-      .cast_figure_display(attribution$raster_file, path, display_resolution), path)
+      .cast_figure_display(attribution$raster_file, path, display_resolution), c(path, paste0(path, ".csv")))
     outputs <- c(outputs, attribution_display)
   }
   info <- object$cv$fold_info
@@ -298,7 +306,13 @@
   if (is.null(attribution)) completed <- setdiff(completed, "attribution")
   if (is.null(mess)) completed <- setdiff(completed, "mess")
   if (!length(displays)) completed <- setdiff(completed, "maps")
-  data <- list(schema = "cast_figure_data/4", analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
+  coverage_files <- paste0(c(unlist(displays, use.names = FALSE), attribution_display, mess_display), ".csv")
+  coverage_files <- unique(coverage_files[file.exists(coverage_files)])
+  display_coverage <- if (length(coverage_files)) do.call(rbind, lapply(coverage_files, function(p) {
+    value <- utils::read.csv(p); value$product <- basename(sub("[.]csv$", "", p)); value
+  }))
+  outputs <- c(outputs, coverage_files)
+  data <- list(schema = "cast_figure_data/4", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,

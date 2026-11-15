@@ -1,13 +1,21 @@
 # CHELSA 裂腹鱼亚科工作流
 
-0.37 在案例入口排除已核实的 GLU 全局锚点斑块近似指标，排除原因写入输入清单；不补零。其他有效土地利用指标照常参与 VIF，未规定变量数量。需重新准备数据、拟合和验证。
+本例明确为**裂腹鱼亚科的河流局地分析**：保留原河网条件和记录周边 10 km 范围，不代表整个亚科的完整河湖分布。域外空白没有预测；适宜网格覆盖面积不是实际河道水域面积。spatial_output_qc.csv 记录原生预测范围，figures/source_data/display_coverage.csv 记录显示网格对原生足迹的保留情况。
+
+显示副本使用有效原生像元的重叠面积均值，类别使用众数，支持标记使用最小值、外推标记使用最大值；原生预测不变。主效应图在同一支持域比较各驱动，全域 D_ 图集和原始表仍保留。
+
+SchiSOFT 官方原始记录可放在 occurrence_file 同目录的 SchiSOFT_occurrence_records.csv。工作流匹配 ID、学名和坐标后恢复 sampledDate、remarksOfSampledDate、sourceType，保留简化表原有 year，不伪造日期。明确报告的采样年用于训练侧参考年，包括单一日期或完全位于同一日历年的区间；跨年区间和来源日期替代值只作记录，不变成精确采样年。sampling_date_quality.csv 和 excluded_records_by_taxon.csv 保留质控依据。0.1 度网格坐标仅提示可能精度问题，不自动删除或移动。
+
+原始数据：[SchiSOFT v1](https://doi.org/10.6084/m9.figshare.24638538.v1)，CC BY 4.0；occurrence_records 文件下载 https://ndownloader.figshare.com/files/44560421 ，发布 MD5 为 7bbc7f681dfe98f6810f5db19dc24ee7。未提供原始元数据时保留原有年份语义，不推断真实采样日期。
+
+0.38 在案例入口排除已核实的 GLU 全局锚点斑块近似指标，排除原因写入输入清单；不补零。其他有效土地利用指标照常参与 VIF，未规定变量数量。需重新准备数据、拟合和验证。
 
 当前 GAM 分项贡献跨未来情景复用，预测仍采用常规、分批稳定的路径。逐模型响应见 comparison/tables/model_summary.csv 和 figures/source_data/environmental_driver_by_model.csv；Shiny 的逐模型表使用同批抽取位置，不代表面积。共有当前基线地图各绘一幅，未来情景及其他图件照常保留。
 
-0.37 从头运行写入 `output/cast037_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
+0.38 从头运行写入 `output/cast038_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
 当前有效环境数据按块缓存一次，供各情景复用。读取失败会重开同一数据块一次，持续失败则记录情景、变量、文件和行号。
 比较未完成时不生成完成标记；已成功的情景缓存保留。查看 `comparison/tables/scenario_status.csv`、`comparison/progress` 和 `comparison/failures`。
-同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.37。
+同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.38。
 `support_scope.csv` 区分变化因子和静态背景的边际范围支持；`gam_concurvity.csv` 报告保存GAM的响应替代性。两者都不证明因果效应。
 
 全部响应曲线保留为 `R_` 分页图集，每页最多12个面板；主图展示本次情景实际变化的因子。分页不改变拟合变量数量。
@@ -43,7 +51,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast037_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast038_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。

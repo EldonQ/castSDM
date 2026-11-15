@@ -56,8 +56,10 @@ castsdm_species_configs <- function(root) {
   presets <- list(
     Schizothoracinae = utils::modifyList(common, list(
       species_name = "Schizothoracinae",
-      taxon_level = "subfamily-level literature records",
+      taxon_level = "subfamily-level records; river/locality-restricted case",
+      occurrence_year_semantics = "Original record year retained; source sampling dates, intervals and substitutes audited separately",
       occurrence_file = file.path(occurrence_root, "Schizothoracinae_schisoft.csv"),
+      occurrence_metadata_file = file.path(occurrence_root, "SchiSOFT_occurrence_records.csv"),
       nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_glu.csv"),
       current_lulc_product = "glu", domain_mode = "freshwater_river",
       freshwater_river_distance_raster = file.path(data_root,

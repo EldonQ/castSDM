@@ -7,9 +7,13 @@ case_training_year <- function(preparation, split) {
   key <- function(x, y) paste(round(x, 3), round(y, 3), sep = "|")
   pres <- split$train[split$train$presence == 1L, ]
   idx <- match(key(pres$lon, pres$lat), key(qc$x_albers, qc$y_albers))
-  year <- suppressWarnings(as.numeric(qc$year[idx]))
+  column <- if ("sampling_year_verified" %in% names(qc)) "sampling_year_verified" else "year"
+  year <- suppressWarnings(as.numeric(qc[[column]][idx]))
   year <- year[is.finite(year) & year > 1500 & year < 2100]
-  if (length(year)) stats::median(year) else NULL
+  if (!length(year)) return(NULL)
+  result <- stats::median(year)
+  attr(result, "source") <- if (column == "sampling_year_verified") "reported_unambiguous_sampling_years_in_training_presences" else "unverified_record_years_in_training_presences"
+  result
 }
 
 case_match_training_layers <- function(data, split, meta, reference_year, mode) {
@@ -43,7 +47,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast037_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast038_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -92,6 +96,13 @@ run_species <- function(cfg) {
     "; spatial validation remains conditional on the declared preprocessing domain.")
   preparation <- timed("preparation", prepare_species(cfg))
   qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
+  used <- qc$used_in_model %in% TRUE
+  taxon_names <- if ("species" %in% names(qc)) qc$species else rep(cfg$species_name, nrow(qc))
+  if ("sampling_date_status" %in% names(qc)) utils::write.csv(as.data.frame(table(
+    sampling_date_status = qc$sampling_date_status[used], useNA = "always")),
+    file.path(out, "sampling_date_quality.csv"), row.names = FALSE)
+  excluded_taxa <- as.data.frame(table(taxon = taxon_names[!used], reason = qc$qc_reason[!used]))
+  utils::write.csv(excluded_taxa[excluded_taxa$Freq > 0, ], file.path(out, "excluded_records_by_taxon.csv"), row.names = FALSE)
   years <- suppressWarnings(as.numeric(qc$year[qc$used_in_model %in% TRUE]))
   periods <- cut(years, c(-Inf, 1949, 1979, 1999, 2009, 2019, Inf),
     labels = c("before_1950", "1950_1979", "1980_1999", "2000_2009", "2010_2019", "2020_onward"))
@@ -103,6 +114,9 @@ run_species <- function(cfg) {
     declared_first_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[1L],
     declared_last_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[2L],
     preprocessing_scope = cfg$preprocessing_scope,
+    domain = cfg$domain_mode, n_taxon_names = length(unique(taxon_names[used])),
+    n_possible_coarse_coordinates = if ("qc_tenth_degree_grid" %in% names(qc)) sum(qc$qc_tenth_degree_grid[used], na.rm = TRUE) else NA_integer_,
+    source_metadata_available = "sampling_year_verified" %in% names(qc),
     interpretation = "Pooled historical records; spatial hold-out is not external or temporal validation."),
     file.path(out, "case_design.csv"), row.names = FALSE)
   data <- data.table::fread(file.path(preparation,
@@ -113,13 +127,14 @@ run_species <- function(cfg) {
     coords_crs = p$coords_crs, block_size = p$block_size))
   meta <- case_pool_metadata(cfg, split$env_vars)
   year <- case_training_year(preparation, split)
-  if (is.null(year)) message("Training occurrence years unavailable: temporal matching skipped.")
+  if (is.null(year)) message("Usable training sampling years unavailable: temporal matching skipped.") else
+    message("Temporal reference source: ", attr(year, "source"), ". A reference year is not record-wise environmental matching.")
   matched <- case_match_training_layers(data, split, meta, year, cfg$select_temporal_match)
   utils::write.csv(matched$matching, file.path(out, "temporal_layer_matching.csv"), row.names = FALSE)
   prepared_meta <- meta
   meta <- matched$meta
   utils::write.csv(data.frame(reference_year = year %||% NA_real_,
-    source = if (is.null(year)) "unavailable" else "training_presences_only",
+    source = if (is.null(year)) "unavailable" else attr(year, "source"),
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
   result <- timed("training_validation", castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
@@ -145,6 +160,14 @@ run_species <- function(cfg) {
     groups = scenarios$groups, mask = mask, support_probs = cfg$support_probs,
     domain = "common", resources = cfg$resources,
     output_dir = file.path(out, "comparison"), thresholds = cfg$diagnostic_thresholds))
+  footprint <- comparison$summary[, c("scenario", "n_valid", "n_supported", "support_share")]
+  domain_summary <- utils::read.csv(file.path(preparation, "analysis_domain_summary.csv"))
+  footprint$domain_cells <- domain_summary$domain_cells[1L]
+  footprint$national_mask_cells <- domain_summary$national_mask_cells[1L]
+  footprint$prediction_share_national <- footprint$n_valid/footprint$national_mask_cells
+  footprint$n_inside_domain_without_paired_prediction <- footprint$domain_cells-footprint$n_valid
+  footprint$scope <- "Declared analysis domain; continuous maps do not discard values below the binary threshold."
+  utils::write.csv(footprint, file.path(out, "spatial_output_qc.csv"), row.names = FALSE)
   timed("diagnostics", castSDM::cast_diagnose(result, comparison = comparison,
     output_dir = file.path(out, "diagnostics")))
   case <- list(schema = "cast_single_species/1", species = cfg$species_name,
