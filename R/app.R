@@ -267,7 +267,7 @@
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
       if (identical(pending$operation, "setup") && isTRUE(pending$run)) {
-        directory <- file.path(pending$path, "output", "cast036_chelsa_ensmean", pending$species, "comparison", "progress")
+        directory <- file.path(pending$path, "output", "cast037_chelsa_ensmean", pending$species, "comparison", "progress")
         files <- if (dir.exists(directory)) list.files(directory, pattern = "[.]rds$", full.names = TRUE) else character()
         states <- lapply(files, function(f) tryCatch(readRDS(f), error = function(e) NULL))
         states <- Filter(Negate(is.null), states)
@@ -498,6 +498,16 @@
       shiny::tags$p(class = "cast-note", paste("\u5171\u540c\u652f\u6301\u6837\u70b9", p$n_common, "/", p$n_input,
         "\u00b7 \u54cd\u5e94\u548c\u53cd\u53f7\u7387\u4f7f\u7528\u540c\u4e00\u6279\u4f4d\u7f6e\uff0c\u540c\u5411\u7387\u4ec5\u9488\u5bf9\u5b9e\u9645\u53d8\u5316\u6837\u70b9\u3002\u6bd4\u4f8b\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"))
     })
+    output$model_response <- shiny::renderTable({
+      d <- active()$model_summary
+      shiny::req(d)
+      focus <- input$focus_driver %||% ""
+      d <- d[is.na(d$driver) & d$contrast == "total" | (!is.na(d$driver) & d$driver == focus), , drop = FALSE]
+      d <- d[, c("model", "driver", "contrast", "n", "support", "mean_signed", "mean_signed_supported")]
+      names(d) <- c("\u6a21\u578b", "\u56e0\u5b50", "\u5bf9\u6bd4", "\u6709\u6548\u6837\u70b9",
+        "\u8fb9\u9645\u652f\u6301\u6bd4\u4f8b", "\u5e73\u5747\u54cd\u5e94", "\u652f\u6301\u57df\u5e73\u5747\u54cd\u5e94")
+      d
+    }, digits = 5)
     output$response_summary <- shiny::renderUI({
       x <- active()
       if (is.null(x$evidence)) return(shiny::div(class = "cast-empty", "\u70b9\u51fb\u5de6\u4fa7\u201c\u5206\u6790\u73af\u5883\u54cd\u5e94\u201d\uff0c\u4f7f\u7528\u5df2\u6709\u6a21\u578b\u751f\u6210\u6837\u70b9\u6982\u89c8\u3002"))
@@ -636,7 +646,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast036_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast037_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

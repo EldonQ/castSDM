@@ -98,7 +98,7 @@ predictions already calculated, without further fitted-model calls.}
 \item{...}{Ignored.}
 }
 \value{
-A \code{cast_attribution} list with \code{summary}, frozen \code{weights},
+A \code{cast_attribution} list with \code{summary}, \code{model_summary}, frozen \code{weights},
 optional \code{consistency} counts/fractions on both-background supported cells,
 \code{drivers}, \code{data} (tables) or \code{raster_file} (rasters), and \code{layers}.
 \verb{effect_<driver>} is driver-only future minus current; \verb{retained_<driver>}
@@ -128,7 +128,9 @@ Active models are fixed; a non-finite active-model prediction makes that
 comparison missing rather than switching weights. Scenario attribution is
 a predictive explanation, not identification of ecological causal effects,
 realized occupancy, colonisation, or dispersal. Presence/background scores
-remain relative suitability. All summary means weight rows/cells equally;
+remain relative suitability. \code{model_summary} gives unweighted member responses
+on the paired domain, supported-domain means and frozen ensemble weights.
+All summary means weight rows/cells equally;
 use an equal-area grid when interpreting raster summaries spatially.
 Built-in GAM/BAM predictions are independent of processing batch size.
 Supported additive models reuse unchanged terms with regular prediction;

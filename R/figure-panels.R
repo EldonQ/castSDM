@@ -441,17 +441,20 @@
     for (layer in atlas_layers) local({
       v <- layer
       available <- data$displays[vapply(data$displays, function(p) v %in% names(terra::rast(p)), logical(1))]
-      if (identical(cmp$domain, "common") && (startsWith(v, "current_") || v == "common_support"))
-        available[] <- available[1L]
+      shared_baseline <- identical(cmp$domain, "common") &&
+        (startsWith(v, "current_") || v == "common_support")
+      if (shared_baseline) available <- available[1L]
       kind <- if (startsWith(v, "range_class")) "range" else if (v %in% effects || startsWith(v, "change_")) "signed" else if (v %in% c("support", "common_support")) "support" else
         if (v == "sign_conflict_joint") "conflict" else "continuous"
       add(paste0("S_", v), function() {
         limits <- if (kind %in% c("continuous", "signed")) .cast_figure_bound(available, v, kind == "signed") else NULL
-        plots <- lapply(names(available), function(s) map(v, .cast_figure_scenario_label(s), kind,
+        plots <- lapply(names(available), function(s) map(v,
+          if (shared_baseline) { if (v == "common_support") "Shared common support" else "Shared current baseline" } else .cast_figure_scenario_label(s), kind,
           limits, source = available[[s]], legend = gsub("_", " ", v)))
         patchwork::wrap_plots(plots, ncol = min(3L, length(plots))) +
           .cast_figure_annotation(gsub("_", " ", v),
-            "Every requested scenario is retained; shared display limits. Native values and domain denominators are preserved in source tables. SD and sign agreement describe model disagreement, not statistical confidence.")
+            if (shared_baseline) "The frozen current model or common support domain is identical across futures and is drawn once. Native rasters and source tables are retained." else
+              "Every requested scenario is retained; shared display limits. Native values and domain denominators are preserved in source tables. SD and sign agreement describe model disagreement, not statistical confidence.")
       }, max(90, ceiling(length(available)/3)*65),
       available = !startsWith(v, "sd_") || length(cmp$weights) > 1L,
       reason = "Cross-model SD is unassessed with fewer than two positive-weight models.")

@@ -152,7 +152,7 @@
   stats::setNames(labels, vars)
 }
 
-.cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE) {
+.cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE, gam_current = NULL) {
   reference <- fit$scaling$reference
   raw_current <- current; raw_future <- future
   if (clamp && !is.null(reference)) {
@@ -163,14 +163,18 @@
   prepared <- lapply(active, function(m) {
     if (is.null(terms[[m]])) return(NULL)
     info <- fit$models[[m]]
-    a <- .cast_predict_gam(info$model, current, type = "terms")
     changed <- names(current)[!vapply(names(current), function(v) identical(current[[v]], future[[v]]), logical(1))]
     cols <- unname(terms[[m]][intersect(changed, names(terms[[m]]))])
+    saved <- gam_current[[m]]
+    if (is.null(saved) || !all(cols %in% colnames(saved$terms))) {
+      a <- .cast_predict_gam(info$model, current, type = "terms")
+      saved <- list(eta = rowSums(a) + attr(a, "constant"), terms = a)
+    }
     delta <- if (length(cols)) {
       b <- .cast_predict_gam(info$model, future, type = "terms", terms = cols)
-      b - a[, colnames(b), drop = FALSE]
+      b - saved$terms[, colnames(b), drop = FALSE]
     } else matrix(numeric(), nrow(current), 0L)
-    list(eta = rowSums(a) + attr(a, "constant"), delta = delta)
+    list(eta = saved$eta, delta = delta)
   })
   names(prepared) <- active
   # A cached partial prediction cannot stand in for rows never computed.

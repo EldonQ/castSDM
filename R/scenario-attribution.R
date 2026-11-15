@@ -44,8 +44,8 @@
 
 .cast_attribution_block <- function(fit, current, future, drivers, weights,
                                     bounds, reference = NULL, clamp = FALSE,
-                                    diagnostics = FALSE, base = NULL, fut = NULL) {
-  context <- .cast_prediction_context(fit, weights, current, future, clamp)
+                                    diagnostics = FALSE, base = NULL, fut = NULL, gam_current = NULL) {
+  context <- .cast_prediction_context(fit, weights, current, future, clamp, gam_current)
   predict <- context$predict
   # Requiring the same finite active models preserves a paired comparison.
   average <- function(p) {
@@ -64,6 +64,8 @@
   total <- fut - base
   bc <- .cast_attribution_inside(current, bounds)
   fc <- .cast_attribution_inside(future, bounds)
+  model_sums <- .cast_model_response_sums(total, bc & fc, weights, NA_character_, "total")
+  only_sum <- matrix(0, nrow(current), length(weights))
   out <- cbind(current = average(base), future = average(fut),
                total_change = average(total),
                support_total = as.numeric(bc & fc),
@@ -87,6 +89,10 @@
     }
     effect <- po - base
     retained <- fut - ph
+    only_sum <- only_sum + effect
+    model_sums <- rbind(model_sums,
+      .cast_model_response_sums(effect, bc & .cast_attribution_inside(only, bounds), weights, v, "only"),
+      .cast_model_response_sums(retained, fc & .cast_attribution_inside(held, bounds), weights, v, "retained"))
     effects[, j] <- average(effect)
     z <- cbind(average(effect), average(retained),
                as.numeric(bc & .cast_attribution_inside(only, bounds)),
@@ -110,7 +116,10 @@
       out <- cbind(out, detail)
     }
   }
-  cbind(out, remainder = out[, "total_change"] - rowSums(effects))
+  out <- cbind(out, remainder = out[, "total_change"] - rowSums(effects))
+  attr(out, "model_sums") <- rbind(model_sums,
+    .cast_model_response_sums(total-only_sum, bc & fc, weights, NA_character_, "remainder"))
+  out
 }
 
 #' Attribute Habitat Change to Environmental Scenarios
@@ -161,7 +170,7 @@
 #' @param resume Reuse a verified result receipt for an existing filename,
 #'   including when `overwrite = TRUE`. Set `FALSE` to force recomputation.
 #'
-#' @return A `cast_attribution` list with `summary`, frozen `weights`,
+#' @return A `cast_attribution` list with `summary`, `model_summary`, frozen `weights`,
 #'   optional `consistency` counts/fractions on both-background supported cells,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
 #'   `effect_<driver>` is driver-only future minus current; `retained_<driver>`
@@ -184,7 +193,9 @@
 #'   comparison missing rather than switching weights. Scenario attribution is
 #'   a predictive explanation, not identification of ecological causal effects,
 #'   realized occupancy, colonisation, or dispersal. Presence/background scores
-#'   remain relative suitability. All summary means weight rows/cells equally;
+#'   remain relative suitability. `model_summary` gives unweighted member responses
+#'   on the paired domain, supported-domain means and frozen ensemble weights.
+#'   All summary means weight rows/cells equally;
 #'   use an equal-area grid when interpreting raster summaries spatially.
 #'   Built-in GAM/BAM predictions are independent of processing batch size.
 #'   Supported additive models reuse unchanged terms with regular prediction;
@@ -335,6 +346,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     dimnames = list(NULL, c("n", "ns", "sum", "abs", "sums", "abss", "sd", "nsd")))
   consistency <- matrix(0, length(drivers), 7L, dimnames = list(drivers,
     c("n_finite", "n_supported", "negative", "zero", "positive", "reversal", "one_zero")))
+  model_sums <- NULL
   accumulate <- function(z) {
     cols <- c("total_change", if (length(drivers)) paste0("effect_", drivers),
       if (length(drivers)) paste0("retained_", drivers), "remainder")
@@ -376,6 +388,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       if (!is.null(saved)) {
         z <- matrix(NA_real_, length(active), length(layer_names), dimnames = list(NULL, layer_names))
         z[saved$indices, ] <- saved$values
+        model_sums <- .cast_model_response_add(model_sums, saved$model_sums)
         accumulate(z); .cast_writer_block(writer, z, first, count)
         if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)} reused ({length(saved$indices)} finite cells).")
         next
@@ -395,14 +408,20 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     for (v in names(shifts)) b[[v]] <- b[[v]] + shifts[[v]]
     keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
     z <- matrix(NA_real_, block_n, length(layer_names), dimnames = list(NULL, layer_names))
+    block_sums <- NULL
     if (any(keep)) {
       seed <- if (raster && is.null(shifts)) .cast_reuse_predictions(prepared, first, count, positions[keep], weights)
-      z[positions[keep], ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
+      gam <- if (raster && !is.null(blocks) && is.null(shifts))
+        .cast_gam_current_read(prepared$gam_current, first, count, positions[keep])
+      value <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
         b[keep, , drop = FALSE], drivers, weights, bounds,
         reference = reference, clamp = clamp, diagnostics = diagnostics,
-        base = seed$current, fut = seed$future)
+        base = seed$current, fut = seed$future, gam_current = gam)
+      z[positions[keep], ] <- value
+      block_sums <- attr(value, "model_sums")
+      model_sums <- .cast_model_response_add(model_sums, block_sums)
     }
-    if (raster) .cast_cache_write(list(indices = positions[keep], values = z[positions[keep], , drop = FALSE]),
+    if (raster) .cast_cache_write(list(indices = positions[keep], values = z[positions[keep], , drop = FALSE], model_sums = block_sums),
       checkpoint, checkpoint_key)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
@@ -436,7 +455,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   if (!is.null(evidence)) for (name in c("negative", "zero", "positive", "reversal", "one_zero"))
     evidence[[paste0(name, "_fraction")]] <- ifelse(evidence$n_supported > 0,
       evidence[[name]]/evidence$n_supported, NA_real_)
-  result <- structure(list(summary = summary, data = data, consistency = evidence,
+  result <- structure(list(summary = summary, model_summary = .cast_model_response_summary(model_sums, weights), data = data, consistency = evidence,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,
     shifts = shifts, diagnostics = diagnostics, sign_tolerance = if (diagnostics) 1e-12 else NULL,

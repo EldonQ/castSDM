@@ -108,7 +108,8 @@ saved predictions. Counts use \code{>=} and report their domain denominators.}
 or \code{"none"}; China retains the established South China Sea inset.}
 }
 \value{
-A \code{cast_comparison} with combined \code{summary}, optional binary tables,
+A \code{cast_comparison} with combined \code{summary}, unweighted per-model
+\code{model_summary} on the paired domain, optional binary tables,
 \code{support_scope} (separate current/background/changing-factor marginal
 range counts) and \code{scenario_status}. Incomplete executions preserve
 successful caches and write progress/failure records before raising a

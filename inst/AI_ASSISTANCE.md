@@ -156,3 +156,11 @@ are not guessed, and no automatic soil-variable deletion or novel selector is
 introduced. Engineering verification uses retained actual records/models and
 native CHELSA crops; controlled execution faults do not change measurements.
 The full national case and the resulting scientific conclusions remain author-run.
+
+On 15 November 2026, Codex assisted 0.37.0 case-library qualification for the
+verified N-SDM GLU global-anchor metrics, shared regular-GAM current terms,
+per-member environmental response summaries and shared-baseline map rendering.
+Verification uses saved real-case models, observed records and native-grid
+crops, plus a lightweight package check. Full national workflow timing and
+scientific results must be obtained by the author in a fresh run; no causal
+identification or journal acceptance is claimed.

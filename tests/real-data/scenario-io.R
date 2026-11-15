@@ -65,6 +65,9 @@ scenario <- tail(scenarios, 1L)
 prepared <- castSDM:::.cast_compare_reuse(p$fit, current, future[[scenario]], a,
   a$weights, isTRUE(p$run$protocol$clamp))
 stopifnot(!is.null(prepared$blocks))
+if (any(vapply(names(a$weights), function(m)
+    !is.null(castSDM:::.cast_gam_terms(p$fit$models[[m]])), logical(1))))
+  stopifnot(!is.null(prepared$gam_current))
 response <- castSDM:::.cast_attribution(p$fit, current, future[[scenario]],
   drivers = changing, weights = a$weights, clamp = isTRUE(p$run$protocol$clamp),
   support_probs = a$support_probs, prepared = prepared, diagnostics = TRUE,
@@ -75,3 +78,23 @@ if (identical(a$design, "paired")) stopifnot(max(abs(
   projection[, c("current", "joint", "joint_change")]-
   response_values[, c("current", "future", "total_change")]), na.rm = TRUE) < 1e-12)
 cat("Saved-model batch invariance and paired response reuse passed.\n")
+
+# Member summaries use the same paired cells as their frozen ensemble.
+if (identical(a$design, "paired")) for (s in scenarios) {
+  v <- terra::values(terra::rast(a$results[[s]]$raster_file))
+  for (m in names(a$weights)) {
+    d <- a$model_summary[a$model_summary$scenario == s & a$model_summary$model == m, ]
+    x <- v[, paste0("change_", m)]; ok <- is.finite(x)
+    stopifnot(nrow(d) == 1L, d$n == sum(ok), abs(d$mean_signed-mean(x[ok])) < 1e-12)
+  }
+}
+for (j in seq_len(nrow(response$summary))) {
+  d <- response$summary[j, ]
+  m <- response$model_summary
+  same_driver <- if (is.na(d$driver)) is.na(m$driver) else !is.na(m$driver) & m$driver == d$driver
+  m <- m[same_driver & m$contrast == d$contrast, ]
+  stopifnot(nrow(m) == length(a$weights), all(m$n == d$n))
+  if (is.finite(d$mean_signed)) stopifnot(abs(
+    sum(m$mean_signed*m$ensemble_weight)-d$mean_signed) < 1e-12)
+}
+cat("Unweighted member summaries match native change rasters and reconstruct frozen ensemble means.\n")

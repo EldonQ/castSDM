@@ -1,3 +1,21 @@
+# castSDM 0.37.0
+
+- Qualify the documented N-SDM GLU global-anchor patch approximations out of
+  the case input pool. Preserve other eligible landscape predictors, record
+  the reason and source, and never impute undefined patch metrics. This is
+  case-library qualification, not a new generic selection rule. Keep VIF <= 10
+  without a predictor-count target. Start a fresh cast037_chelsa_ensmean case.
+- Calculate regular GAM current contributions once per verified raster batch
+  and share compact contributions across futures and response maps. Keep the
+  regular, batch-invariant prediction policy and direct-prediction fallback.
+- Export unweighted per-model paired response summaries alongside frozen
+  ensemble weights, including signed/absolute means and supported-domain means.
+  Reuse existing predictions; retain summary increments in resumable batches.
+  Expose sampled member responses in the Shiny response panel and bundle.
+- Draw shared current-member and common-support atlas maps once instead of
+  repeating them under future labels. Preserve all distinct future maps,
+  predictor response pages, original cartography, PNG/PDF and native rasters.
+
 # castSDM 0.36.0
 
 - Retain discrete BAM fitting but use regular prediction everywhere. Predictions

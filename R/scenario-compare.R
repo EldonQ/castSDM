@@ -126,7 +126,7 @@
   list(domain = path, support = if (!is.null(bounds)) support_path)
 }
 
-.cast_compare_baseline <- function(fit, plan, weights, clamp, block_size, path = NULL, blocks = NULL) {
+.cast_compare_baseline <- function(fit, plan, weights, clamp, block_size, path = NULL, blocks = NULL, gam_current = NULL) {
   current <- plan$current
   old <- options(castSDM.predict_threads = getOption("castSDM.compare_threads", 1L))
   on.exit(options(old), add = TRUE)
@@ -149,22 +149,32 @@
     count <- min(rows, terra::nrow(current)-row+1L)
     saved <- .cast_compare_current_block(blocks, row, count, current, plan$mask)
     p <- matrix(NA_real_, count*terra::ncol(current), length(weights))
+    x <- saved$values
+    if (clamp && !is.null(fit$scaling$reference)) x <- .cast_clamp(x, fit$scaling$reference)
+    prepared <- .cast_gam_current_read(gam_current, row, count, saved$indices, required = FALSE)
+    if (!is.null(gam_current) && is.null(prepared)) {
+      prepared <- .cast_gam_current_values(fit, x, gam_current$models, gam_current$variables)
+      .cast_gam_current_write(gam_current, row, count, saved$indices, prepared)
+    }
     if (length(saved$indices)) {
-      x <- saved$values
-      if (clamp && !is.null(fit$scaling$reference)) x <- .cast_clamp(x, fit$scaling$reference)
-      for (j in seq_along(weights)) p[saved$indices, j] <- predict_single_model(fit$models[[names(weights)[j]]], x)
+      for (j in seq_along(weights)) {
+        m <- names(weights)[j]; info <- fit$models[[m]]
+        p[saved$indices, j] <- if (!is.null(prepared[[m]]))
+          .cast_apply_offset(info$model$family$linkinv(prepared[[m]]$eta), info$offset) else predict_single_model(info, x)
+      }
     }
     .cast_writer_block(writer, p, row, count)
   }
   .cast_writer_finish(writer)
+  .cast_gam_current_finish(gam_current)
   path
 }
 
-.cast_compare_block <- function(fit, a, b, groups, static, weights, base, bounds, clamp) {
+.cast_compare_block <- function(fit, a, b, groups, static, weights, base, bounds, clamp, gam_current = NULL) {
   if (length(static)) for (v in static) {
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
-  context <- if (length(groups) == 1L && !length(groups[[1L]])) NULL else .cast_prediction_context(fit, weights, a, b, clamp)
+  context <- if (length(groups) == 1L && !length(groups[[1L]])) NULL else .cast_prediction_context(fit, weights, a, b, clamp, gam_current)
   if (length(groups) == 1L) {
     future <- if (length(groups[[1L]])) context$predict(groups[[1L]]) else base
     if (any(!is.finite(base)) || any(!is.finite(future)))
@@ -179,7 +189,8 @@
     colnames(members) <- unlist(lapply(c("current_", "future_", "change_"), paste0, names(weights)))
     return(list(faces = faces, effects = effects, sd = sd, support = supported,
       sign = .cast_sign_values(lapply(seq_along(weights), function(j) matrix(change[, j], ncol = 1L))),
-      model_layers = members))
+      model_layers = members,
+      model_sums = .cast_model_response_sums(change, supported, weights, NA_character_, "joint_change")))
   }
   changed <- lapply(groups, function(vars) Reduce(`|`, lapply(vars,
     function(v) context$current[[v]] != context$future[[v]])))
@@ -211,12 +222,15 @@
   supported <- if (is.null(bounds)) rep(NA, nrow(a)) else
     .cast_attribution_inside(a, bounds) & .cast_attribution_inside(b, bounds)
   list(faces = faces, effects = effects, sd = sd, support = supported,
-       sign = .cast_sign_values(per_model))
+       sign = .cast_sign_values(per_model),
+       model_sums = do.call(rbind, lapply(seq_len(ncol(effects)), function(k)
+         .cast_model_response_sums(do.call(cbind, lapply(per_model, function(x) x[, k])),
+           supported, weights, NA_character_, .cast_factorial_names()[k]))))
 }
 
 .cast_compare_one <- function(fit, plan, scenario, weights, threshold, bounds, clamp,
                               baseline, domain, block_size, filename = NULL,
-                              common_support = NULL, thresholds = numeric(), blocks = NULL, progress = NULL) {
+                              common_support = NULL, thresholds = numeric(), blocks = NULL, progress = NULL, gam_current = NULL) {
   current <- plan$current; future <- plan$future[[scenario]]
   shared_static <- plan$raster && .cast_shared_raster_layers(current, future, plan$static)
   changing <- setdiff(plan$vars, plan$static)
@@ -233,6 +247,7 @@
   scope_counts <- stats::setNames(numeric(5), c("current_all", "static_background", "changing_current", "changing_future", "changing_both"))
   if (!length(changing)) scope_counts[3:5] <- NA_real_
   scope_n <- 0L
+  model_sums <- NULL
   previous_context <- options(castSDM.read_context = scenario)
   on.exit(options(previous_context), add = TRUE)
   last_progress <- 0
@@ -286,8 +301,10 @@
       keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {
         aa <- a[keep, , drop = FALSE]; bb <- b[keep, , drop = FALSE]
+        gam <- if (plan$raster) .cast_gam_current_read(gam_current, first, count, positions[keep])
         p <- timed("predict", .cast_compare_block(fit, aa, bb,
-          plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp))
+          plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp, gam))
+        model_sums <- .cast_model_response_add(model_sums, p$model_sums)
         .cast_factorial_accumulate(acc, p$faces, p$effects, p$support,
           if (!is.null(threshold)) (p$faces >= threshold)*1, model_sd = p$sd)
         cs <- if (is.null(common_support)) NULL else if (plan$raster)
@@ -317,7 +334,8 @@
     }
   }
   if (plan$raster) timed("write", .cast_writer_finish(writer))
-  list(design = plan$design, support_scope = if (!is.null(bounds)) data.frame(
+  list(design = plan$design, model_summary = .cast_model_response_summary(model_sums, weights),
+    support_scope = if (!is.null(bounds)) data.frame(
     scope = names(scope_counts), n_valid = scope_n, n_supported = unname(scope_counts),
     share = if (scope_n) unname(scope_counts)/scope_n else NA_real_,
     criterion = "marginal_training_quantiles"), summary = .cast_factorial_summary(acc, !is.null(bounds)),
@@ -356,7 +374,7 @@
   .cast_assert_compare_sources(plan)
   value <- .cast_compare_one(job$fit, plan, job$scenario, job$weights,
     job$threshold, job$bounds, job$clamp, job$baseline, job$domain,
-    job$block_size, job$file, job$common_support, job$thresholds, job$blocks, job$progress)
+    job$block_size, job$file, job$common_support, job$thresholds, job$blocks, job$progress, job$gam_current)
   .cast_cache_write(value, job$receipt, job$key, if (plan$raster) job$file else character())
   .cast_compare_progress(job$progress, job$scenario, "completed")
   list(value = value, elapsed = as.numeric(difftime(Sys.time(), start, units = "secs")),
@@ -490,7 +508,8 @@
 #' @param overwrite Replace stale public artifacts; default `FALSE`. Matching
 #'   artifacts can be resumed without overwriting.
 #' @param verbose Print the execution plan and progress.
-#' @return A `cast_comparison` with combined `summary`, optional binary tables,
+#' @return A `cast_comparison` with combined `summary`, unweighted per-model
+#'   `model_summary` on the paired domain, optional binary tables,
 #'   `support_scope` (separate current/background/changing-factor marginal
 #'   range counts) and `scenario_status`. Incomplete executions preserve
 #'   successful caches and write progress/failure records before raising a
@@ -594,18 +613,21 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       list(current_key, mask_key), verbose), "current_inputs", output_dir) else NULL
   if (plan$raster) event("current_input_blocks", start, isTRUE(attr(blocks, "cache_hit")))
   start <- Sys.time()
-  base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, .cast_code_identity(.cast_compare_baseline)))
+  gam_current <- if (plan$raster) .cast_gam_current_cache(fit, weights,
+    unlist(plan$groups, use.names = FALSE), blocks, file.path(cache_dir, "gam_current"), clamp)
+  base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, gam_current$key, .cast_code_identity(.cast_compare_baseline)))
   base_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "current.rds")
   baseline <- if (resume) .cast_cache_read(base_receipt, base_key) else NULL
-  reused <- !is.null(baseline)
+  reused <- !is.null(baseline) && (is.null(gam_current) || isTRUE(attr(gam_current, "ready")))
   if (reused && plan$raster) baseline <- file.path(cache_dir, baseline)
   if (!reused) {
     baseline <- .cast_compare_input_stage(.cast_compare_baseline(fit, plan, weights, clamp, block_size,
-      if (plan$raster) file.path(cache_dir, "current_models.tif"), blocks), "current_prediction", output_dir)
+      if (plan$raster) file.path(cache_dir, "current_models.tif"), blocks, gam_current), "current_prediction", output_dir)
     .cast_cache_write(if (plan$raster) basename(baseline) else baseline, base_receipt, base_key,
       if (plan$raster) baseline else character())
   }
   event("current_prediction", start, reused)
+  if (verbose && !is.null(gam_current)) cli::cli_inform("Current GAM contributions: shared across {length(plan$future)} futures; regular prediction preserved.")
   start <- Sys.time()
   common_key <- .cast_digest(list(current_key, future_keys, mask_key, bounds,
     .cast_code_identity(.cast_compare_common_mask), .cast_code_identity(.cast_shared_raster_layers)))
@@ -629,7 +651,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     if (first != scenario) { aliases[[scenario]] <- first; next }
     start <- Sys.time()
     key <- .cast_digest(list(fit_key, current_key, future_keys[[scenario]], mask_key,
-      if (needs_common) common_key, plan$groups, weights, threshold, support_probs, clamp,
+      if (needs_common) common_key, gam_current$key, plan$groups, weights, threshold, support_probs, clamp,
       .cast_code_identity(.cast_compare_one), .cast_code_identity(.cast_compare_block), .cast_code_identity(.cast_factorial_accumulate)))
     receipt <- if (!is.null(raster_dir)) file.path(raster_dir, paste0(scenario, ".rds"))
     x <- if (resume) .cast_cache_read(receipt, key) else NULL
@@ -646,7 +668,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
         common_support = common$support, thresholds = thresholds,
         block_size = block_size, file = file,
         key = key, receipt = receipt, threads = budget$threads, scratch_dir = budget$scratch_dir,
-        blocks = blocks,
+        blocks = blocks, gam_current = gam_current,
         progress = if (!is.null(output_dir)) file.path(output_dir, "progress", paste0(scenario, ".rds")),
         failure = if (!is.null(output_dir)) file.path(output_dir, "failures", paste0(scenario, ".rds")))
       next
@@ -729,7 +751,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     if (!any(lengths(rows))) return(NULL)
     do.call(rbind, rows)
   }
-  result <- structure(list(summary = combine("summary"), binary = combine("binary"),
+  result <- structure(list(summary = combine("summary"), model_summary = combine("model_summary"), binary = combine("binary"),
     binary_supported = combine("binary_supported"),
     summary_common_support = combine("summary_common_support"),
     binary_common_support = combine("binary_common_support"), agreement = combine("agreement"),
@@ -741,7 +763,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
         as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
     common_support_file = if (plan$raster) common$support,
     results = results, groups = plan$groups, design = plan$design,
-    current_blocks = blocks, clamp = clamp, prediction_policy = "regular_gam/1",
+    current_blocks = blocks, gam_current = gam_current, clamp = clamp, prediction_policy = "regular_gam/1",
     changing_predictors = unlist(plan$groups, use.names = FALSE),
     scenario_aliases = aliases,
     static = plan$static, weights = weights, threshold = threshold, threshold_source = threshold_source,
@@ -753,7 +775,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     class = "cast_comparison")
   if (!is.null(output_dir)) {
     tables <- file.path(output_dir, "tables"); dir.create(tables, showWarnings = FALSE)
-    for (field in c("summary", "binary", "binary_supported", "summary_common_support",
+    for (field in c("summary", "model_summary", "binary", "binary_supported", "summary_common_support",
         "binary_common_support", "agreement", "threshold_sensitivity", "timings", "runtime", "events", "contract", "support_scope", "scenario_status")) {
       path <- file.path(tables, paste0(field, ".csv"))
       if (!is.null(result[[field]])) utils::write.csv(result[[field]], path, row.names = FALSE) else

@@ -1,3 +1,10 @@
+# Qualification is specific to the documented N-SDM derivation, not to
+# arbitrary user-supplied or independently validated landscape metrics.
+case_anchor_patch_layers <- function(current) {
+  current$group == "lulc" & current$product == "glu1km" &
+    grepl("(^|_)patch(density|size)(_|$)", current$layer)
+}
+
 # CHELSA v2.1 current climate and ensemble-mean future climate inventory.
 # Land use, soil, topography and hydrology remain current in every projection.
 # Nonclimate observations are held current under an explicit projection assumption.
@@ -273,13 +280,20 @@ case_inventory_build <- function(root, data_root,
   metadata <- case_inventory_metadata(root, data_root, current)
   current$role <- metadata$role[match(current$layer, metadata$layer)]
   numeric_role <- current$role %in% c("numeric", "binary", "ordinal")
+  # These known N-SDM products use global patch anchors, not local-window
+  # land-cover patch counts. Their undefined values must not delete records.
+  anchor_patch <- case_anchor_patch_layers(current)
+  source_ok <- !anchor_patch
+  if (verbose && any(anchor_patch)) message("Source qualification: ", sum(anchor_patch),
+    " global-anchor patch approximations excluded; retain verified proportions and other eligible indicators. See pool_current_all.csv.")
   current$qualification <- ifelse(!current$geom_ok, "geometry_mismatch",
     ifelse(!is.finite(current$cover) | current$cover <= 0, "no_finite_source_data",
-      ifelse(numeric_role, "eligible_numeric_role", "excluded_semantic_role")))
-  current$eligible_glu <- current$status == "kept" & numeric_role &
+      ifelse(!source_ok, "excluded_global_anchor_patch_approximation",
+        ifelse(numeric_role, "eligible_numeric_role", "excluded_semantic_role"))))
+  current$eligible_glu <- current$status == "kept" & numeric_role & source_ok &
     current$future_policy %in% c("climate", "static") &
     !(current$group == "lulc" & current$product != "glu1km")
-  current$eligible_hlu <- current$status == "kept" & numeric_role &
+  current$eligible_hlu <- current$status == "kept" & numeric_role & source_ok &
     current$future_policy %in% c("climate", "static") &
     !(current$group == "lulc" & current$product != "hlu1km")
 
@@ -386,6 +400,9 @@ case_inventory_metadata <- function(root, data_root, current) {
   direction <- grepl("D8 encoding|aspect.*angle", metadata$definition, ignore.case = TRUE)
   metadata$role[direction] <- "cyclic"
   metadata$role[grepl("Munsell hue", metadata$definition, ignore.case = TRUE)] <- "nominal"
+  anchor <- case_anchor_patch_layers(current)
+  metadata$notes[anchor] <- paste0(metadata$notes[anchor],
+    "; Excluded from this workflow: global component-anchor approximation, not local-window patch counts. Source: N-SDM/R/05_derive_lulc.R and 00_docs/lulc_scope.md. Undefined values are not imputed.")
   utils::write.csv(metadata, file.path(root, "config", "predictor_metadata.csv"), row.names = FALSE, fileEncoding = "UTF-8")
   metadata
 }

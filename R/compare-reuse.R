@@ -30,7 +30,11 @@
     saved <- tryCatch(readRDS(receipt), error = function(e) NULL)
     if (is.null(saved) || is.null(.cast_cache_read(receipt, saved$key))) prediction <- NULL
   }
-  list(blocks = blocks, prediction = prediction, layers = layers,
+  gam <- if (!is.null(blocks) && !is.null(comparison$gam_current))
+    .cast_gam_current_cache(fit, weights, comparison$changing_predictors, blocks,
+      file.path(comparison$output_dir, ".cache", "gam_current"), clamp)
+  if (!isTRUE(attr(gam, "ready"))) gam <- NULL
+  list(blocks = blocks, gam_current = gam, prediction = prediction, layers = layers,
     current_key = current_key, future_key = future_key)
 }
 

@@ -34,3 +34,6 @@ the latter are not common-support confidence estimates.
 serial/PSOCK execution, verified resume, saved-model batch invariance and
 paired-prediction reuse in environmental response maps. It changes no input
 measurements and does not run the national research workflow.
+
+It also verifies compact current-GAM reuse and member response summaries against
+native change rasters and their frozen ensemble.

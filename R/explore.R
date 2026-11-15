@@ -279,6 +279,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     group = if (is.null(groups)) NA_integer_ else groups$group)
   utils::write.csv(points, file.path(directory, "responses.csv"), row.names = FALSE)
   utils::write.csv(response$summary, file.path(directory, "summary.csv"), row.names = FALSE)
+  utils::write.csv(response$model_summary, file.path(directory, "response_by_model.csv"), row.names = FALSE)
   utils::write.csv(evidence$summary, file.path(directory, "drivers_common.csv"), row.names = FALSE)
   utils::write.csv(evidence$population, file.path(directory, "support_population.csv"), row.names = FALSE)
   utils::write.csv(evidence$drivers, file.path(directory, "driver_ids.csv"), row.names = FALSE)
@@ -308,6 +309,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   }
   result <- list(schema = "cast_explore/1", directory = directory, key = key,
     case_dir = project$directory, settings = settings, summary = response$summary,
+    model_summary = response$model_summary,
     evidence = evidence,
     groups = groups, group_note = group_note, raster_file = raw_file,
     group_file = group_file, preview = preview,
