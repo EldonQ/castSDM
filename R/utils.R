@@ -689,7 +689,9 @@ check_suggested <- function(pkg, reason = NULL, call = parent.frame()) {
     if (is.environment(value) && inherits(value, "srcfile"))
       "castSDM:source_file_metadata/v1" else NULL
   }
-  raw <- serialize(x, NULL, version = 3L, refhook = source_reference)
+  # Version 2 omits the session-native encoding header present in version 3.
+  # Cache identities must not change between C and UTF-8 for the same inputs.
+  raw <- serialize(x, NULL, version = 2L, refhook = source_reference)
   out <- digest::digest(raw, algo = "sha256", serialize = FALSE)
   if (!is.null(len)) out <- substr(out, 1L, len)
   out

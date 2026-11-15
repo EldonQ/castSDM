@@ -26,6 +26,10 @@ composition, selection stability, and training OOF score-scale comparisons.
 was requested. No policy is selected from hold-out labels.
 }
 \details{
+Saved-GAM concurvity and effective degrees of freedom describe response
+substitutability without refitting. Separate comparison support scopes
+distinguish changing factors from the static background; they are marginal
+range criteria, not joint support or causal identification.
 Score comparisons use first-repeat training OOF predictions with the
 declared ensemble weights held fixed. Native means the same fitted engine
 before its logit shift; it is not a fit with different class weights.

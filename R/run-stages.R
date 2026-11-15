@@ -18,11 +18,13 @@
   }
   for (root in roots) visit(root)
   packages <- switch(stage,
-    `01_prepare` = c("blockCV", "sf"), `02_select` = c("glmnet", "blockCV", "sf"),
-    `04_cv` = c("blockCV", "sf", "FNN", "glmnet", "pROC"),
+    `01_prepare` = c("blockCV", "sf"), `02_select` = character(),
+    `04_cv` = c("blockCV", "sf", "FNN", "pROC"),
     `05_evaluate` = "pROC", character())
   if (stage %in% c("03_fit", "04_cv", "06_refit"))
     packages <- c(packages, vapply(models, .cast_engine_package, character(1)))
+  if (stage %in% c("03_fit", "04_cv", "06_refit") && "maxent" %in% models)
+    packages <- c(packages, "glmnet")
   versions <- vapply(unique(packages), function(p) {
     if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "not_installed"
   }, character(1))

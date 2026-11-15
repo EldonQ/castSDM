@@ -1,11 +1,17 @@
-0.34 默认流程：输入质控 → 训练折内 VIF≤10 → RF/MaxEnt/GAM → 空间验证 → CHELSA 气候情景 → 环境响应地图。
+# CHELSA 裂腹鱼亚科工作流
+
+0.35 从头运行写入 `output/cast035_chelsa_ensmean`。筛选、模型和阈值规则延续0.34。
+当前有效环境数据按块缓存一次，供各情景复用。读取失败会重开同一数据块一次，持续失败则记录情景、变量、文件和行号。
+比较未完成时不生成完成标记；已成功的情景缓存保留。查看 `comparison/tables/scenario_status.csv`、`comparison/progress` 和 `comparison/failures`。
+同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.35。
+`support_scope.csv` 区分变化因子和静态背景的边际范围支持；`gam_concurvity.csv` 报告保存GAM的响应替代性。两者都不证明因果效应。
+
+默认流程：输入质控 → 训练折内 VIF≤10 → RF/MaxEnt/GAM → 空间验证 → CHELSA 气候情景 → 环境响应地图。
 不规定变量数量；MaxEnt 使用标准 lq 特征，GAM 使用 bam。
 默认 `predictor_missing="complete_cases"` 保留合格指标并使用完整样本，逐项记录缺失造成的记录损失。可选 `"drop_predictors"` 在分割前按实际采样位置剔除不完整指标、保留位置；该严格选项可能因少数缺值删除很多指标，不作为默认。两者都不插补；内部验证以输入质控为条件，不是独立外部验证。
-`predictor_missing="complete_cases"` 可选择保留指标并使用完整样本。详情写入准备目录的 `predictor_missing_qc.csv`。
+详情写入准备目录的 `predictor_missing_qc.csv`。
 界面高级设置可修改 VIF 阈值和缺失策略；假设改变处显示实际训练范围，不自动生成干预幅度。
-新运行使用 `cast034_chelsa_ensmean`；旧结果保留。模型没有变化因子时保留当前预测并明确标注，跳过无效因子归因。
-
-# CHELSA 裂腹鱼亚科工作流
+模型没有变化因子时保留当前预测并明确标注，跳过无效因子归因。
 
 唯一维护的源码位于 `cast/inst/workflows/single_species`。本目录是部署副本。
 `Schizothoracinae` 是亚科级历史文献记录，不代表单一生物学物种。
@@ -29,7 +35,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast033_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast035_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。

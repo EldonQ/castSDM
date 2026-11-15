@@ -108,18 +108,17 @@
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
     .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision)))
-  old <- if (file.exists(bundle_path)) tryCatch(readRDS(bundle_path), error = function(e) NULL) else NULL
-  valid_old <- !is.null(old) && identical(old$key, base_key) &&
-    !is.null(.cast_cache_read(bundle_path, base_key))
+  old <- .cast_cache_read(bundle_path, base_key)
+  valid_old <- !is.null(old)
   verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
     !is.null(current) && !is.null(future)
-  products <- union(products, if (valid_old) old$value$products)
-  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$value$products)) {
+  products <- union(products, if (valid_old) old$products)
+  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products)) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
-    return(old$value)
+    return(old)
   }
-  if (valid_old && is.null(attribution) && !verify_raw && "attribution" %in% old$value$products)
-    attribution <- old$value$attribution
+  if (valid_old && is.null(attribution) && !verify_raw && "attribution" %in% old$products)
+    attribution <- old$attribution
   if (render_only) cli::cli_abort("A matching figure-data cache is missing. Run once with render_only = FALSE to compute frozen-model diagnostic products.")
   budget <- .cast_resources(resources)
   previous <- options(castSDM.predict_threads = budget$cores)

@@ -1,3 +1,22 @@
+# castSDM 0.35.0
+
+- Cache observed, finite current cells once per raster block; baseline, domain
+  checks and all futures reuse them. Keep numerical contrasts, native scores,
+  thresholds and model-fitting policies unchanged.
+- Retry a failed file-backed block once through a fresh source handle. Persistent
+  failures report scenario/phase, rows, variables, paths and captured warnings.
+  Never fill failed reads with NA or silently omit a failed scenario.
+- Return structured worker failures, preserve completed results, publish
+  scenario_status.csv and per-scenario progress/failure records, and start workers
+  only for pending tasks. An incomplete comparison cannot produce a completion marker.
+- Store checksummed serialized cache bytes and use encoding-header-independent
+  identity serialization. Old cache formats are intentionally invalidated; use
+  the new cast035_chelsa_ensmean directory for a fresh scientific run.
+- Separate changing-factor and static-background marginal range support. Report
+  saved-GAM concurvity and effective degrees of freedom without refitting, and
+  expose interpretation limits in Shiny. Actual-scenario explanations default
+  to the genuinely changing factors; explicit hypothetical shifts remain available.
+
 # castSDM 0.34.0
 
 - Replace the default elastic-net selector with iterative training-fold VIF;

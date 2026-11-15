@@ -136,7 +136,7 @@
             shiny::tabPanel("\u73af\u5883\u54cd\u5e94", value = "drivers",
               shiny::div(class = "cast-view-heading", shiny::tags$h2("\u54ea\u4e9b\u53d8\u5316\u5f71\u54cd\u66f4\u660e\u663e"),
                 shiny::tags$p(class = "cast-subtitle", "\u5728\u540c\u4e00\u6279\u652f\u6301\u6837\u70b9\u4e0a\u6bd4\u8f83\u73af\u5883\u56e0\u5b50\uff0c\u67e5\u770b\u80cc\u666f\u4f9d\u8d56\u4e0e\u6a21\u578b\u4e00\u81f4\u6027\u3002")),
-              shiny::uiOutput("response_summary"), shiny::uiOutput("evidence_note"),
+              shiny::uiOutput("response_summary"), shiny::uiOutput("evidence_note"), shiny::uiOutput("interpretation_scope"),
               shiny::div(class = "cast-table-scroll", shiny::uiOutput("drivers")),
               shiny::div(class = "cast-focus-toolbar", shiny::selectInput("focus_driver", "\u67e5\u770b\u56e0\u5b50\u5730\u56fe", choices = character(), width = "100%"),
                 shiny::actionButton("map_driver", "\u751f\u6210\u56e0\u5b50\u5730\u56fe", class = "btn-primary", `data-cast-action` = "")),
@@ -161,4 +161,25 @@
               shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u6a21\u578b\u8bc4\u4ef7"),
                 shiny::div(class = "cast-table-scroll", shiny::tableOutput("evaluation")))))))))
 
+}
+
+.cast_app_interpretation_scope <- function(p, scenario, shifts = NULL) {
+  if (is.null(p)) return(NULL)
+  tab <- p$comparison$support_scope
+  detail <- character()
+  if (is.data.frame(tab) && length(scenario) == 1L && is.null(shifts)) {
+    tab <- tab[tab$scenario == scenario, , drop = FALSE]
+    share <- function(scope) { x <- tab$share[tab$scope == scope]; if (length(x) && is.finite(x[1L])) sprintf("%.1f%%", 100*x[1L]) else "N/A" }
+    overall <- p$comparison$summary
+    overall <- overall$support_share[overall$scenario == scenario & overall$component == "joint_change"]
+    detail <- c(detail, paste0("\u53d8\u5316\u56e0\u5b50\u7684\u4e24\u671f\u8303\u56f4\u652f\u6301\uff1a", share("changing_both"),
+      "\uff1b\u9759\u6001\u80cc\u666f\u8303\u56f4\u652f\u6301\uff1a", share("static_background"), "\uff1b\u5168\u90e8\u56e0\u5b50\u7684\u8fb9\u9645\u8303\u56f4\u540c\u65f6\u901a\u8fc7\uff1a",
+      if (length(overall)) sprintf("%.1f%%", 100*overall[1L]) else "NA", "\u3002"))
+  }
+  g <- p$run$diagnostics$gam_concurvity
+  if (is.data.frame(g) && any(is.finite(g$estimate)))
+    detail <- c(detail, sprintf("GAM\u5171\u66f2\u7387\u4e2d\u4f4d\u6570 %.2f\uff1b\u8f83\u9ad8\u503c\u8868\u793a\u56e0\u5b50\u54cd\u5e94\u53ef\u76f8\u4e92\u66ff\u4ee3\uff0c\u5355\u56e0\u5b50\u56fe\u5e94\u4f5c\u4e3a\u6a21\u578b\u6761\u4ef6\u654f\u611f\u6027\u89e3\u91ca\u3002", stats::median(g$estimate, na.rm = TRUE)))
+  if (!length(detail)) return(NULL)
+  shiny::tags$p(class = "cast-note", paste(c(detail,
+    "\u8303\u56f4\u652f\u6301\u4e0d\u662f\u7f6e\u4fe1\u5ea6\uff0c\u4e5f\u4e0d\u5efa\u7acb\u8054\u5408\u652f\u6301\u6216\u56e0\u679c\u6548\u5e94\u3002"), collapse = " "))
 }

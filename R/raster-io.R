@@ -32,7 +32,36 @@
 }
 
 .cast_raster_block <- function(r, row, nrows) {
-  values <- terra::values(r, row = row, nrows = nrows, mat = TRUE)
+  notes <- character()
+  read <- function(x) withCallingHandlers(
+    terra::values(x, row = row, nrows = nrows, mat = TRUE),
+    warning = function(w) { notes <<- c(notes, conditionMessage(w)); invokeRestart("muffleWarning") })
+  values <- tryCatch(read(r), error = identity)
+  if (inherits(values, "error")) {
+    original <- conditionMessage(values)
+    sources <- lapply(seq_len(terra::nlyr(r)), function(i) terra::sources(r[[i]]))
+    backed <- all(vapply(sources, function(x) length(x) && all(nzchar(x)) && all(file.exists(x)), logical(1)))
+    reopened <- if (backed) tryCatch(terra::unwrap(terra::wrap(r, proxy = TRUE)), error = identity) else NULL
+    if (inherits(reopened, "SpatRaster") && isTRUE(terra::compareGeom(r, reopened,
+        lyrs = TRUE, stopOnError = FALSE))) values <- tryCatch(read(reopened), error = identity)
+    if (inherits(values, "error")) {
+      failed <- vapply(seq_len(terra::nlyr(r)), function(i)
+        inherits(tryCatch(read(r[[i]]), error = identity), "error"), logical(1))
+      selected <- if (any(failed)) which(failed) else seq_len(terra::nlyr(r))
+      detail <- data.frame(variable = names(r)[selected],
+        path = vapply(sources[selected], paste, character(1), collapse = ";"), stringsAsFactors = FALSE)
+      context <- getOption("castSDM.read_context", "raster read")
+      message <- paste0(context, ": rows ", row, "-", row+nrows-1L,
+        "; ", paste(utils::head(paste(detail$variable, detail$path, sep = " = "), 3), collapse = "; "),
+        if (nrow(detail) > 3L) paste0("; ", nrow(detail), " sources recorded"),
+        ". Initial error: ", original, ". Retry: ", conditionMessage(values))
+      stop(structure(list(message = message, call = NULL, context = context,
+        row = row, nrows = nrows, sources = detail, warnings = unique(notes)),
+        class = c("cast_raster_read_error", "error", "condition")))
+    }
+    cli::cli_warn("Recovered raster read after reopening the same sources once: {getOption('castSDM.read_context', 'raster read')}; rows {row}-{row+nrows-1L}; initial error: {original}.")
+  }
+  if (length(notes)) cli::cli_warn("Raster read warning: {paste(unique(notes), collapse = '; ')}")
   if (nrow(values) != nrows * terra::ncol(r)) {
     cli::cli_abort("Raster block read returned an unexpected number of cells.")
   }
@@ -41,8 +70,7 @@
 
 .cast_mask_rows <- function(mask, row, nrows, n) {
   if (is.null(mask)) return(rep(TRUE, n))
-  m <- tryCatch(terra::values(mask, row = row, nrows = nrows, mat = FALSE),
-    error = function(e) cli::cli_abort("Mask read failed: {conditionMessage(e)}"))
+  m <- .cast_raster_block(mask, row, nrows)[[1L]]
   if (length(m) != n) cli::cli_abort("Mask block read returned an unexpected number of cells.")
   is.finite(m) & m != 0
 }

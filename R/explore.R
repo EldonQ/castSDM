@@ -141,7 +141,7 @@
 #' @param scenario Saved scenario identifier. Default the case reporting scenario.
 #' @param variables Fitted predictors to explain. Scenario mode preserves the
 #'   complete imported current/future pair; selecting one factor does not
-#'   freeze the other scenario changes. `NULL` uses all predictors.
+#'   freeze the other scenario changes. `NULL` uses the fitted scenario-changing predictors.
 #'   Related derived predictors should be changed together using a consistent
 #'   scenario. A single derived-variable change is a sensitivity analysis.
 #' @param shifts Optional named numeric vector of raw-unit predictor shifts.
@@ -195,6 +195,10 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     if (!is.null(variables) && !setequal(variables, names(shifts)))
       cli::cli_abort("With shifts, variables must equal names(shifts), or be NULL.")
     variables <- names(shifts)
+  }
+  if (is.null(variables) && is.null(shifts)) {
+    variables <- as.character(unlist(project$comparison$groups, use.names = FALSE))
+    if (!length(variables)) cli::cli_abort("No fitted predictor changes in this scenario. Choose an explicit hypothetical shift to inspect sensitivity.")
   }
   variables <- .cast_explore_selection(project, variables)
   requested_focus <- focus

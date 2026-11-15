@@ -295,3 +295,12 @@ The explicit case budget defaults to 10,000 background cells; it is configurable
 in Shiny. `tests/real-data/background.R` compares actual saved budgets without
 changing evaluation locations/folds, conditional on a frozen predictor set.
 Scientific changes require a fresh `cast033_chelsa_ensmean` run.
+
+Version 0.35 keeps the 0.34 VIF and engine policies. It reuses content-verified
+blocks of actual current inputs, preserves successful scenario caches on a
+partial failure, and records exact read contexts and per-scenario progress.
+`support_scope.csv` separates changing-factor and static-background marginal
+range checks; none of these flags establishes joint support or causal effects.
+Saved-GAM concurvity is descriptive and does not trigger another feature selector.
+Cache encoding changed; start the declared cast035 analysis rather than relabel
+old numerical products.

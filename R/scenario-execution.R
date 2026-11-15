@@ -57,13 +57,14 @@
 .cast_cache_read <- function(path, key) {
   if (is.null(path) || !file.exists(path)) return(NULL)
   x <- tryCatch(readRDS(path), error = function(e) NULL)
-  if (!is.list(x) || !identical(x$schema, "cast_cache/2") || !identical(x$key, key) ||
-      !identical(x$digest, .cast_digest(x$value))) return(NULL)
+  if (!is.list(x) || !identical(x$schema, "cast_cache/3") || !identical(x$key, key) ||
+      !is.raw(x$payload) || !identical(x$digest,
+        digest::digest(x$payload, algo = "sha256", serialize = FALSE))) return(NULL)
   if (length(x$files)) {
     files <- file.path(dirname(path), names(x$files))
     if (any(!file.exists(files)) || !identical(unname(tools::md5sum(files)), unname(x$files))) return(NULL)
   }
-  x$value
+  tryCatch(unserialize(x$payload), error = function(e) NULL)
 }
 
 .cast_cache_write <- function(value, path, key, files = character()) {
@@ -73,8 +74,11 @@
       normalizePath(dirname(path), winslash = "/", mustWork = FALSE)))
     cli::cli_abort("Cached artifacts must share their receipt directory.")
   hashes <- if (length(files)) stats::setNames(unname(tools::md5sum(files)), basename(files)) else character()
-  .cast_atomic_rds(list(schema = "cast_cache/2", key = key, value = value,
-    digest = .cast_digest(value), files = hashes), path)
+  # Verify stored bytes before reconstructing the value. Re-hashing an
+  # unserialized object made integrity checks depend on the reader's locale.
+  payload <- serialize(value, NULL, version = 3L)
+  .cast_atomic_rds(list(schema = "cast_cache/3", key = key, payload = payload,
+    digest = digest::digest(payload, algo = "sha256", serialize = FALSE), files = hashes), path)
   invisible(value)
 }
 

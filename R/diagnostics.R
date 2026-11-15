@@ -13,6 +13,10 @@
 #' @param output_dir Optional directory for diagnostic CSVs and an RDS object.
 #' @return A `cast_diagnostics` list of tables and interpretation notes.
 #' @details
+#' Saved-GAM concurvity and effective degrees of freedom describe response
+#' substitutability without refitting. Separate comparison support scopes
+#' distinguish changing factors from the static background; they are marginal
+#' range criteria, not joint support or causal identification.
 #' Score comparisons use first-repeat training OOF predictions with the
 #' declared ensemble weights held fixed. Native means the same fitted engine
 #' before its logit shift; it is not a fit with different class weights.
@@ -124,6 +128,8 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
   d <- structure(list(holdout = bind(holdout), score_views_oof = bind(score_views),
     reliability_oof = bind(reliability), folds = folds, fold_metrics = cv$fold_metrics,
     selection_frequency = cv$selection_freq, score_offsets = cv$offsets,
+    gam_concurvity = .cast_gam_response_diagnostics(object),
+    comparison_support_scope = comparison$support_scope,
     ensemble_policy = if (!is.null(policy)) data.frame(model = names(policy$weights),
       weight = as.numeric(policy$weights), method = policy$method),
     comparison_support = comparison$summary_common_support,

@@ -127,3 +127,18 @@ manufactured. Runnable synthetic vignette/adapter examples were replaced with
 real-case instructions. Legacy synthetic test fixtures are not executed by this
 lightweight check. The full 0.34 study remains author-run; no causal identification,
 predictive superiority, methodological priority or journal readiness is claimed.
+
+
+On 15 November 2026, Codex assisted 0.35.0 after a real national scenario read
+failure. The original failure was not reproduced by complete source-band reads
+or bounded parallel reads; no unique physical cause is asserted. Changes add
+bounded current-input reuse, one controlled fresh-handle read retry, exact I/O
+contexts, structured partial failures/progress, locale-stable cache integrity,
+separate marginal support scopes, and cached saved-GAM concurvity diagnostics.
+VIF, fitted engines, native scores, thresholds and weighting policies remain
+unchanged. The author deleted the previous outputs and requested a fresh run;
+no old-result migration or relabelling is performed. Numeric regression uses
+real retained rows/models and native crops of three actual CHELSA scenarios,
+compared with the frozen installed 0.34 implementation. Execution-fault injection
+changes no environmental measurements or labels. No synthetic ecological data,
+causal identification, new estimator or complete-study validation is claimed.

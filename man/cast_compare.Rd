@@ -109,6 +109,11 @@ or \code{"none"}; China retains the established South China Sea inset.}
 }
 \value{
 A \code{cast_comparison} with combined \code{summary}, optional binary tables,
+\code{support_scope} (separate current/background/changing-factor marginal
+range counts) and \code{scenario_status}. Incomplete executions preserve
+successful caches and write progress/failure records before raising a
+\code{cast_compare_incomplete} condition. Current finite cells are cached once
+per block; source read failures are retried once through fresh handles.
 named scenario \code{results}, group/static metadata, frozen \code{weights}, the
 threshold source, artifact paths, stage events and provenance. Legacy
 \verb{climate_*} and \verb{lulc_*} columns refer to the first and second named groups;

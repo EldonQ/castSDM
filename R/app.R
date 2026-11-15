@@ -236,7 +236,7 @@
         settings = list(domain = input$setup_domain, input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
           background_points = input$setup_background, vif_threshold = input$setup_vif %||% 10,
-          predictor_missing = input$setup_missing %||% "drop_predictors",
+          predictor_missing = input$setup_missing %||% "complete_cases",
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
     }
     shiny::observeEvent(input$check_inputs, {
@@ -264,6 +264,17 @@
       if (is.null(job)) return()
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
+      if (identical(pending$operation, "setup") && isTRUE(pending$run)) {
+        directory <- file.path(pending$path, "output", "cast035_chelsa_ensmean", pending$species, "comparison", "progress")
+        files <- if (dir.exists(directory)) list.files(directory, pattern = "[.]rds$", full.names = TRUE) else character()
+        states <- lapply(files, function(f) tryCatch(readRDS(f), error = function(e) NULL))
+        states <- Filter(Negate(is.null), states)
+        if (length(states)) {
+          lines <- vapply(states, function(x) paste(x$scenario, x$phase,
+            if (is.finite(x$row)) paste0(" / raster row ", x$row) else ""), character(1))
+          log_text(paste(log_text(), paste(lines, collapse = "\n"), sep = "\n"))
+        }
+      }
       if (job$is_alive()) return()
       finished <- job; job <<- NULL; job_busy(FALSE)
       tryCatch({
@@ -474,6 +485,11 @@
       shiny::req(active()$evidence)
       active()$evidence$summary
     })
+    output$interpretation_scope <- shiny::renderUI({
+      p <- project()
+      .cast_app_interpretation_scope(p, active()$settings$scenario %||% input$scenario,
+        active()$settings$shifts)
+    })
     output$evidence_note <- shiny::renderUI({
       shiny::req(active()$evidence)
       p <- active()$evidence$population
@@ -618,7 +634,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast034_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast035_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

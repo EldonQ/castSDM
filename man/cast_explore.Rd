@@ -28,7 +28,7 @@ training result, current inventory and scenario table.}
 
 \item{variables}{Fitted predictors to explain. Scenario mode preserves the
 complete imported current/future pair; selecting one factor does not
-freeze the other scenario changes. \code{NULL} uses all predictors.
+freeze the other scenario changes. \code{NULL} uses the fitted scenario-changing predictors.
 Related derived predictors should be changed together using a consistent
 scenario. A single derived-variable change is a sensitivity analysis.}
 
