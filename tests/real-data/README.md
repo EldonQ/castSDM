@@ -29,3 +29,8 @@ It refits learners on actual rows with the saved predictors: this is conditional
 sensitivity, not a new variable-selection validation or a test of a new domain.
 It writes discrimination/loss and finite-location response-sign comparisons;
 the latter are not common-support confidence estimates.
+
+`scenario-io.R <actual-case> <QA-directory>` checks actual native crops across
+serial/PSOCK execution, verified resume, saved-model batch invariance and
+paired-prediction reuse in environmental response maps. It changes no input
+measurements and does not run the national research workflow.

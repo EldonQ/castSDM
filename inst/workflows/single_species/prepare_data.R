@@ -426,11 +426,22 @@ prepare_species <- function(cfg) {
     ratio = sum(model_data$presence == 0L)/sum(model_data$presence == 1L),
     strategy = cfg$bg_strategy), file.path(out_dir, "background_summary.csv"))
   vars <- castSDM::get_env_vars(model_data)
+  missing_file <- file.path(out_dir, "predictor_missing_qc.csv")
+  if (file.exists(missing_file)) {
+    missing_qc <- data.table::fread(missing_file, data.table = FALSE)
+    affected <- missing_qc[missing_qc$n_presence_missing > 0, , drop = FALSE]
+    if (nrow(affected)) {
+      affected <- affected[order(-affected$n_presence_missing), , drop = FALSE]
+      message("Occurrence missingness by layer (counts overlap): ",
+        paste(paste0(utils::head(affected$variable, 3), "=", utils::head(affected$n_presence_missing, 3)), collapse = ", "),
+        ". Missingness may be structural or unobserved; no values are filled.")
+    }
+  }
   dropped <- setdiff(setdiff(names(model_data), c("lon", "lat", "presence")), vars)
   if (length(dropped)) {
     warning(sprintf(
       "%d/%d pool layers are constant in the complete prepared sample (zero variance or all NA) and were dropped; first few: %s",
-      length(dropped), n_layers, paste(utils::head(dropped, 15), collapse = ", ")),
+      length(dropped), terra::nlyr(current), paste(utils::head(dropped, 15), collapse = ", ")),
       call. = FALSE)
     data.table::fwrite(data.frame(layer = dropped),
                        file.path(out_dir, "zero_variance_layers.csv"))

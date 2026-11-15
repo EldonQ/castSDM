@@ -1,3 +1,13 @@
+# Bounded-height publication pages preserve every computed response curve.
+.cast_figure_response_panel <- function(response, variables, title, caption) {
+  response <- response[response$variable %in% variables, , drop = FALSE]
+  plot(response, ensemble = FALSE) +
+    ggplot2::facet_wrap(~variable, scales = "free", ncol = 3,
+      labeller = ggplot2::as_labeller(.cast_figure_variable_labels)) +
+    ggplot2::labs(title = title, caption = .cast_figure_wrap(caption)) + .cast_figure_theme() +
+    ggplot2::theme(plot.margin = ggplot2::margin(6, 12, 6, 10))
+}
+
 # AI-assisted restoration; scope and verification: inst/AI_ASSISTANCE.md.
 # Reuses the established package cartography and the original paper layouts.
 .cast_figure_theme <- function() {
@@ -286,15 +296,15 @@
       paste("Paired scenario contrasts:", paste(group_labels, collapse = " and ")),
       "Baseline effects compare each partial scenario with current. Interaction = joint - first-only - second-only + current. Model-conditional contrasts, not identified ecological causation. Inspect average and conditional effects in the supplementary atlases.")
   }, 150, !is.null(path) && !is.null(cmp$binary))
-  add("06_response_curves", function() {
-    p <- plot(data$responses$ale %||% data$responses$pdp, ensemble = FALSE) +
-      ggplot2::facet_wrap(~variable, scales = "free", ncol = 3,
-        labeller = ggplot2::as_labeller(.cast_figure_variable_labels)) +
-      ggplot2::labs(title = if (!is.null(data$responses$ale)) "Accumulated local effects" else "Partial-dependence response curves",
-        subtitle = sprintf("All %d fitted predictors; deterministic %d-row training reference", length(data$variables), data$pdp_reference_n),
-        caption = .cast_figure_wrap(if (!is.null(data$responses$ale)) "Published ALE (iml): observed local changes are accumulated and centred. Curves describe fitted score responses, not causal effects." else "Individual engine curves are unweighted. Correlated predictors can create unsupported combinations. Model-implied profiles are not causal effects."))
-    p + .cast_figure_theme()
-  }, max(110, ceiling(length(data$variables)/3)*39), !is.null(data$responses$ale %||% data$responses$pdp))
+  response_variables <- intersect(unlist(cmp$groups, use.names = FALSE), data$variables)
+  if (!length(response_variables)) response_variables <- data$variables
+  main_variables <- utils::head(response_variables, 12L)
+  curve <- data$responses$ale %||% data$responses$pdp
+  curve_type <- if (!is.null(data$responses$ale)) "ALE" else "PDP"
+  add("06_response_curves", function() .cast_figure_response_panel(curve, main_variables,
+    if (curve_type == "ALE") "Accumulated local effects" else "Partial dependence",
+    "Scenario-changing predictors shown when available; all fitted predictors are in the paginated R_ atlas. Curves describe fitted score responses, not causal effects."),
+    max(110, ceiling(length(main_variables)/3)*39), !is.null(curve))
   add("07_model_performance", function() .cast_figure_performance(data), 100,
     !is.null(data$curves) && !is.null(data$reliability))
   add("08_range_change_class", function() {
@@ -363,11 +373,24 @@
     patchwork::wrap_plots(a, b, ncol = 2) + .cast_figure_annotation(
       "Ensemble policy and sampled-response loss", "Weights are frozen from training CV. The constant baseline uses training prevalence. Brier score concerns sampled labels, not calibrated ecological occurrence probability.") & .cast_figure_theme()
   }, 100, length(cmp$weights) > 0 && !is.null(data$diagnostics$holdout))
-  add("14_fixed_response_profiles", function() plot(data$responses$fixed, ensemble = FALSE) +
-    ggplot2::facet_wrap(~variable, scales = "free", ncol = 3,
-      labeller = ggplot2::as_labeller(.cast_figure_variable_labels)) +
-    ggplot2::labs(title = "Fixed response profiles", caption = .cast_figure_wrap("Each variable varies across its reference range; all others are fixed at training medians. These are not partial-dependence averages or causal effects.")) +
-    .cast_figure_theme(), max(110, ceiling(length(data$variables)/3)*39), !is.null(data$responses$fixed))
+  add("14_fixed_response_profiles", function() .cast_figure_response_panel(data$responses$fixed,
+    main_variables, "Fixed response profiles",
+    "Other predictors are held at training medians. Full fitted-predictor profiles are in the R_fixed atlas; neither fixed profiles nor ALE identify causal effects."),
+    max(110, ceiling(length(main_variables)/3)*39), !is.null(data$responses$fixed))
+  for (kind in c(tolower(curve_type), "fixed")) {
+    response <- if (kind == "fixed") data$responses$fixed else curve
+    if (is.null(response)) next
+    variables <- intersect(data$variables, unique(response$variable))
+    pages <- split(variables, ceiling(seq_along(variables)/12L))
+    for (page in seq_along(pages)) local({
+      number <- page; subset <- pages[[number]]; value <- response; label <- kind
+      total <- length(pages)
+      add(sprintf("R_%s_%02d", label, number), function() .cast_figure_response_panel(value,
+        subset, sprintf("Complete %s responses: page %d of %d", toupper(label), number, total),
+        "Every fitted predictor is retained across the atlas pages. Page size is a display setting and does not select model variables. Curves are model-conditional, not causal."),
+        max(110, ceiling(length(subset)/3)*39))
+    })
+  }
   add("15_area_of_applicability", function() {
     a <- data$cv$aoa
     caption <- "The dashed line is the recorded training-side AOA threshold. OOF diagnostics refer to repeat 1 and do not by themselves explain a weak spatial fold."

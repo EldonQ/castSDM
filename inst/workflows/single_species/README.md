@@ -1,10 +1,14 @@
 # CHELSA 裂腹鱼亚科工作流
 
-0.35 从头运行写入 `output/cast035_chelsa_ensmean`。筛选、模型和阈值规则延续0.34。
+0.36 从头运行写入 `output/cast036_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
 当前有效环境数据按块缓存一次，供各情景复用。读取失败会重开同一数据块一次，持续失败则记录情景、变量、文件和行号。
 比较未完成时不生成完成标记；已成功的情景缓存保留。查看 `comparison/tables/scenario_status.csv`、`comparison/progress` 和 `comparison/failures`。
-同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.35。
+同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.36。
 `support_scope.csv` 区分变化因子和静态背景的边际范围支持；`gam_concurvity.csv` 报告保存GAM的响应替代性。两者都不证明因果效应。
+
+全部响应曲线保留为 `R_` 分页图集，每页最多12个面板；主图展示本次情景实际变化的因子。分页不改变拟合变量数量。
+`workflow_timings.csv`、`figures/phase_timings.csv` 与 `comparison/tables/events.csv` 分别记录工作流、图件阶段及当前数据块准备耗时。
+`temporal_layer_matching.csv` 明确标记没有过去时间片而保留较晚来源年份的指标；`predictor_pool_summary.csv` 记录各类指标的保留数量。缺失值不自动填零，指标类别和 VIF 也不等于生态重要性。
 
 默认流程：输入质控 → 训练折内 VIF≤10 → RF/MaxEnt/GAM → 空间验证 → CHELSA 气候情景 → 环境响应地图。
 不规定变量数量；MaxEnt 使用标准 lq 特征，GAM 使用 bam。
@@ -35,7 +39,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast035_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast036_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。

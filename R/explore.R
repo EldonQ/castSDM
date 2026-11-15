@@ -43,6 +43,7 @@
     if (!is.null(x$artifact)) x$raster_file <- file.path(directory, "comparison", "rasters", x$artifact)
     x
   })
+  comparison$output_dir <- file.path(directory, "comparison")
   list(directory = directory, case = case, run = run, fit = fit,
     comparison = comparison, pool = selected, scenarios = scenarios, metadata = metadata)
 }
@@ -184,6 +185,8 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   case_lock <- .cast_lock(file.path(case_dir, ".case.lock"))
   on.exit(filelock::unlock(case_lock), add = TRUE)
   project <- .cast_explore_project(case_dir)
+  if (!identical(project$comparison$prediction_policy, "regular_gam/1"))
+    cli::cli_abort("This saved case used an earlier prediction approximation. Run the current workflow in its new analysis directory before computing new responses. Saved maps remain available for browsing.")
   scenario <- scenario %||% project$case$report_scenario
   if (length(scenario) != 1L || is.na(scenario) || !scenario %in% names(project$comparison$results))
     cli::cli_abort("Select one saved scenario.")
@@ -230,6 +233,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     evidence = .cast_code_identity(.cast_response_evidence),
     direction = .cast_code_identity(.cast_response_direction),
     compute = .cast_code_identity(cast_explore), attribution = .cast_code_identity(cast_attribution),
+    attribution_execution = .cast_code_identity(.cast_attribution),
     sample = .cast_code_identity(.cast_explore_sample), pair = .cast_code_identity(.cast_explore_pair),
     group_map = .cast_code_identity(.cast_explore_group_map),
     preview = .cast_code_identity(.cast_explore_preview),
@@ -288,10 +292,12 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   if (maps) {
     cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
     raw_file <- file.path(directory, "response.tif")
-    cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
+    prepared <- if (is.null(shifts)) .cast_compare_reuse(project$fit, a, b,
+      project$comparison, settings$weights, settings$clamp) else NULL
+    .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
       shifts = shifts, support_probs = settings$support_probs, clamp = settings$clamp,
       mask = mask, filename = raw_file, overwrite = TRUE, resources = resources,
-      resume = resume, diagnostics = TRUE)
+      resume = resume, diagnostics = TRUE, prepared = prepared)
     if (!is.null(groups)) group_file <- .cast_explore_group_map(groups, a,
       terra::rast(raw_file)[["support_total"]], file.path(directory, "groups.tif"))
     cli::cli_inform("Preparing a separate interactive preview (not the analysis grid).")

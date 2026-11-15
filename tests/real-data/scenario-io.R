@@ -48,3 +48,30 @@ key <- castSDM:::.cast_digest(a$summary)
 castSDM:::.cast_cache_write(a$summary, payload, key)
 stopifnot(identical(a$summary, castSDM:::.cast_cache_read(payload, key)))
 cat("Actual-case serial/parallel, resume and cache-integrity checks passed.\n")
+
+# Same saved coefficients and observed rows must be independent of batch size.
+reference <- p$fit$scaling$reference
+reference <- reference[seq_len(min(2000L, nrow(reference))), , drop = FALSE]
+chunks <- split(seq_len(nrow(reference)), ceiling(seq_len(nrow(reference))/1000L))
+for (model in names(p$fit$models)) {
+  whole <- castSDM:::predict_single_model(p$fit$models[[model]], reference)
+  parts <- unlist(lapply(chunks, function(i)
+    castSDM:::predict_single_model(p$fit$models[[model]], reference[i, , drop = FALSE])), use.names = FALSE)
+  stopifnot(max(abs(whole-parts)) < 1e-12)
+}
+
+# A new comparison provides checked inputs and paired predictions for explanation.
+scenario <- tail(scenarios, 1L)
+prepared <- castSDM:::.cast_compare_reuse(p$fit, current, future[[scenario]], a,
+  a$weights, isTRUE(p$run$protocol$clamp))
+stopifnot(!is.null(prepared$blocks))
+response <- castSDM:::.cast_attribution(p$fit, current, future[[scenario]],
+  drivers = changing, weights = a$weights, clamp = isTRUE(p$run$protocol$clamp),
+  support_probs = a$support_probs, prepared = prepared, diagnostics = TRUE,
+  filename = file.path(qa, "actual_response.tif"), resources = list(cores = 2L, memory_mb = 512))
+projection <- terra::values(terra::rast(a$results[[scenario]]$raster_file))
+response_values <- terra::values(terra::rast(response$raster_file))
+if (identical(a$design, "paired")) stopifnot(max(abs(
+  projection[, c("current", "joint", "joint_change")]-
+  response_values[, c("current", "future", "total_change")]), na.rm = TRUE) < 1e-12)
+cat("Saved-model batch invariance and paired response reuse passed.\n")

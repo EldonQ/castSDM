@@ -447,6 +447,9 @@
 #' calculated after within-model paired contrasts, never from surface SDs.
 #' Every active model must return finite predictions on eligible inputs;
 #' otherwise the comparison fails instead of changing weights or domains.
+#' Built-in GAM/BAM predictions use the regular saved basis, so block sizes
+#' and parallel resource budgets do not change predicted scores. BAM fitting
+#' still uses its declared discrete fitting method.
 #' @param fit A [cast_fit] or the `cast_result` returned by [cast_run()].
 #' @param current Current predictor frame or `SpatRaster`/path.
 #'   Local file-backed sources must remain available throughout comparison;
@@ -578,9 +581,6 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   future_keys <- vapply(plan$future, .cast_data_identity, character(1), memo = memo)
   mask_key <- if (!is.null(plan$mask)) .cast_data_identity(plan$mask, memo) else NULL
   identity_elapsed <- as.numeric(difftime(Sys.time(), identity_start, units = "secs"))
-  blocks <- if (plan$raster) .cast_compare_input_stage(
-    .cast_compare_current_blocks(plan, block_size, file.path(cache_dir, "current_blocks"),
-      list(current_key, mask_key), verbose), "current_inputs", output_dir) else NULL
   events <- list()
   event <- function(stage, start, reused, scenario = NA_character_) {
     events[[length(events)+1L]] <<- data.frame(stage = stage, scenario = scenario, cache_hit = reused,
@@ -588,6 +588,11 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       started = format(start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
       finished = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   }
+  start <- Sys.time()
+  blocks <- if (plan$raster) .cast_compare_input_stage(
+    .cast_compare_current_blocks(plan, block_size, file.path(cache_dir, "current_blocks"),
+      list(current_key, mask_key), verbose), "current_inputs", output_dir) else NULL
+  if (plan$raster) event("current_input_blocks", start, isTRUE(attr(blocks, "cache_hit")))
   start <- Sys.time()
   base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, .cast_code_identity(.cast_compare_baseline)))
   base_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "current.rds")
@@ -736,6 +741,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
         as.numeric(difftime(Sys.time(), wall_start, units = "secs")))),
     common_support_file = if (plan$raster) common$support,
     results = results, groups = plan$groups, design = plan$design,
+    current_blocks = blocks, clamp = clamp, prediction_policy = "regular_gam/1",
     changing_predictors = unlist(plan$groups, use.names = FALSE),
     scenario_aliases = aliases,
     static = plan$static, weights = weights, threshold = threshold, threshold_source = threshold_source,

@@ -142,3 +142,17 @@ real retained rows/models and native crops of three actual CHELSA scenarios,
 compared with the frozen installed 0.34 implementation. Execution-fault injection
 changes no environmental measurements or labels. No synthetic ecological data,
 causal identification, new estimator or complete-study validation is claimed.
+
+
+On 15 November 2026, Codex assisted 0.36.0 after the completed 0.35 case exposed
+BAM batch-dependent prediction. The same saved national GAM and 2,000 observed
+rows reproduced the issue; regular prediction removed it without changing the
+saved coefficients. Changes unify regular prediction, permit exact additive
+term reuse, share verified current blocks and paired predictions with response
+maps, prepare MESS references once, paginate every response predictor, and add
+execution/temporal/missingness receipts. Scientific data, labels and intervention
+magnitudes were not manufactured. Ecological relevance or structural-NA meanings
+are not guessed, and no automatic soil-variable deletion or novel selector is
+introduced. Engineering verification uses retained actual records/models and
+native CHELSA crops; controlled execution faults do not change measurements.
+The full national case and the resulting scientific conclusions remain author-run.

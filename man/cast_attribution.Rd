@@ -130,6 +130,9 @@ a predictive explanation, not identification of ecological causal effects,
 realized occupancy, colonisation, or dispersal. Presence/background scores
 remain relative suitability. All summary means weight rows/cells equally;
 use an equal-area grid when interpreting raster summaries spatially.
+Built-in GAM/BAM predictions are independent of processing batch size.
+Supported additive models reuse unchanged terms with regular prediction;
+this is a computational identity, not a new effect estimator.
 }
 \seealso{
 \code{\link[=cast_effect_map]{cast_effect_map()}}, \code{\link[=cast_project]{cast_project()}}, \code{\link[=plot.cast_attribution]{plot.cast_attribution()}}

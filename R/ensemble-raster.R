@@ -179,6 +179,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
 
   reference <- fit$scaling$reference
   want_mess <- isTRUE(extrapolation) && !is.null(reference)
+  mess_reference <- if (want_mess) .cast_mess_reference(reference) else NULL
 
   # AOA setup: validate the calibration and project the training reference
   # into the standardized DI space once, reused block by block.
@@ -300,7 +301,7 @@ cast_ensemble_raster <- function(fit, cv, raster_stack,
       # therefore never masks extrapolation.
       if (want_mess) {
         block[valid_idx, "mess"] <- tryCatch(
-          .cast_mess(reference, X_raw),
+          .cast_mess_apply(mess_reference, X_raw),
           error = function(e) rep(NA_real_, n_ok)
         )
       }

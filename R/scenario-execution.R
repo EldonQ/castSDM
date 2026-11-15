@@ -101,7 +101,7 @@
     models = models, env_vars = fit$env_vars, scaling = fit$scaling,
     calibration = fit$calibration, engines = versions, predictor = .cast_code_identity(predict_single_model),
     contrast = .cast_code_identity(.cast_factorial_values), context = .cast_code_identity(.cast_prediction_context),
-    gam = .cast_code_identity(.cast_gam_terms), offset = .cast_code_identity(.cast_apply_offset),
+    gam = .cast_code_identity(.cast_gam_terms), gam_prediction = .cast_code_identity(.cast_predict_gam), offset = .cast_code_identity(.cast_apply_offset),
     clamp = .cast_code_identity(.cast_clamp), schema = "paired_scenarios/1"))
 }
 
@@ -129,9 +129,7 @@
   if (!identical(info$name, "gam") || identical(info$type, "external")) return(NULL)
   if (!requireNamespace("mgcv", quietly = TRUE)) return(NULL)
   model <- info$model
-  # Discrete BAM owns its prediction approximation and threading. Keep that
-  # engine path intact rather than mixing term predictions with discrete scores.
-  if (inherits(model, "bam")) return(NULL)
+  # GAM and BAM both use regular, batch-invariant prediction throughout.
   if (!inherits(model, "gam") || !identical(model$family$link, "logit") ||
       length(attr(model$terms, "offset")) ||
       !is.null(model$call$offset) || !length(model$smooth)) return(NULL)
@@ -165,18 +163,18 @@
   prepared <- lapply(active, function(m) {
     if (is.null(terms[[m]])) return(NULL)
     info <- fit$models[[m]]
-    a <- stats::predict(info$model, current, type = "terms", newdata.guaranteed = TRUE)
+    a <- .cast_predict_gam(info$model, current, type = "terms")
     changed <- names(current)[!vapply(names(current), function(v) identical(current[[v]], future[[v]]), logical(1))]
     cols <- unname(terms[[m]][intersect(changed, names(terms[[m]]))])
     delta <- if (length(cols)) {
-      b <- stats::predict(info$model, future, type = "terms", terms = cols, newdata.guaranteed = TRUE)
+      b <- .cast_predict_gam(info$model, future, type = "terms", terms = cols)
       b - a[, colnames(b), drop = FALSE]
     } else matrix(numeric(), nrow(current), 0L)
     list(eta = rowSums(a) + attr(a, "constant"), delta = delta)
   })
   names(prepared) <- active
-  # Cache only the same environmental combination AND requested row subset.
-  # Keeping the row subset avoids changing discrete bam's prediction batches.
+  # A cached partial prediction cannot stand in for rows never computed.
+  # Include both the environmental combination and requested row subset.
   changed <- names(current)[!vapply(names(current), function(v)
     identical(current[[v]], future[[v]]), logical(1))]
   predictions <- new.env(parent = emptyenv())

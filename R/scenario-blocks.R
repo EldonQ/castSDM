@@ -9,6 +9,7 @@
   if (!is.null(old)) {
     old$directory <- directory
     if (verbose) cli::cli_inform("Current environmental blocks: verified cache; no source-layer reread.")
+    attr(old, "cache_hit") <- TRUE
     return(old)
   }
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
@@ -37,6 +38,7 @@
   .cast_cache_write(value, receipt, key, paths)
   stale <- setdiff(list.files(directory, pattern = "^rows_[0-9]+[.]rds$", full.names = TRUE), paths)
   if (length(stale)) unlink(stale)
+  attr(value, "cache_hit") <- FALSE
   value
 }
 

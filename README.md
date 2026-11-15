@@ -302,5 +302,13 @@ partial failure, and records exact read contexts and per-scenario progress.
 `support_scope.csv` separates changing-factor and static-background marginal
 range checks; none of these flags establishes joint support or causal effects.
 Saved-GAM concurvity is descriptive and does not trigger another feature selector.
-Cache encoding changed; start the declared cast035 analysis rather than relabel
+Cache encoding changed in 0.35; start the currently declared analysis rather than relabel
 old numerical products.
+
+Version 0.36 retains BAM fitting and uses regular prediction for batch-invariant
+scores. Old 0.35 predictions and OOF thresholds must be recomputed through the
+new cast036 workflow. Frozen model coefficients can still be inspected. Current
+blocks and paired model predictions are shared with response maps; MESS references
+are prepared once. All response curves remain available in bounded-height R_
+atlas pages; the main panels focus on actual scenario-changing factors.
+Workflow and figure-phase timing CSVs expose preparation and explanation costs.

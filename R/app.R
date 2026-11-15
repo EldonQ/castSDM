@@ -39,7 +39,8 @@
 .cast_app_point <- function(project, result, longitude, latitude, driver) {
   settings <- result$settings
   source_paths <- c(project$pool$path, project$scenarios$path[project$scenarios$scenario == settings$scenario])
-  if (any(!file.exists(source_paths)) && !is.null(result$raster_file)) {
+  compatible <- identical(project$comparison$prediction_policy, "regular_gam/1")
+  if ((any(!file.exists(source_paths)) || !compatible) && !is.null(result$raster_file)) {
     # Native results remain inspectable when historical source inputs are archived.
     basic <- c("current", "future", "total_change", "support_total", "total_sd")
     details <- if (!is.null(settings$focus)) paste0(c("effect_", "retained_", "effect_agreement_",
@@ -53,7 +54,8 @@
       driver_response = if (has_details) native[, details[1:6], drop = FALSE],
       driver_support = if (has_details) native[, details[7:8], drop = FALSE],
       driver = driver, longitude = longitude, latitude = latitude,
-      note = "Native saved values only: environmental sources are unavailable for profiles or new responses."))
+      note = if (compatible) "Native saved values only: environmental sources are unavailable for profiles or new responses." else
+        "Native saved values only: this case used an earlier prediction approximation. Rerun the current workflow before computing new profiles or responses."))
   }
   pair <- .cast_explore_pair(project, settings$scenario, settings$variables,
     settings$shifts, settings$context)
@@ -265,7 +267,7 @@
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
       if (identical(pending$operation, "setup") && isTRUE(pending$run)) {
-        directory <- file.path(pending$path, "output", "cast035_chelsa_ensmean", pending$species, "comparison", "progress")
+        directory <- file.path(pending$path, "output", "cast036_chelsa_ensmean", pending$species, "comparison", "progress")
         files <- if (dir.exists(directory)) list.files(directory, pattern = "[.]rds$", full.names = TRUE) else character()
         states <- lapply(files, function(f) tryCatch(readRDS(f), error = function(e) NULL))
         states <- Filter(Negate(is.null), states)
@@ -634,7 +636,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast035_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast036_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

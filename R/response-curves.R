@@ -119,10 +119,13 @@ cast_response_curves <- function(fit,
   }, logical(1))]
 
   .predict_mean_or_vec <- function(m, X) {
-    tryCatch(
+    value <- tryCatch(
       predict_single_model(fit$models[[m]], X, clamp = isTRUE(clamp)),
-      error = function(e) rep(NA_real_, nrow(X))
+      error = function(e) cli::cli_abort("Response prediction failed for {.val {m}}: {conditionMessage(e)}")
     )
+    if (length(value) != nrow(X) || any(!is.finite(value)))
+      cli::cli_abort("Response prediction for {.val {m}} returned missing or invalid scores.")
+    value
   }
 
   if (type == "ale" && !is.null(pair)) cli::cli_abort("ALE currently supports one-variable curves; pair grids use fixed profiles.")

@@ -49,25 +49,39 @@
   path
 }
 
-.cast_figure_mess <- function(fit, current, future, domain, path, block_size = 250000L) {
+.cast_figure_mess <- function(fit, current, future, domain, path, block_size = 250000L,
+                              prepared = NULL) {
   r <- terra::rast(domain)[["current"]]
   writer <- .cast_raster_writer(r, path,
     c("mess_current", "mess_future", "novel_current", "novel_future"),
     datatype = "FLT8S", overwrite = TRUE)
   on.exit(.cast_writer_abort(writer), add = TRUE)
-  rows <- max(1L, as.integer(block_size/terra::ncol(r)))
+  reference <- .cast_mess_reference(fit$scaling$reference)
+  shared <- names(reference)[vapply(names(reference), function(v)
+    .cast_shared_raster_layers(current, future, v), logical(1))]
+  changing <- setdiff(names(reference), shared)
+  blocks <- prepared$blocks
+  if (!is.null(blocks) && blocks$rows*terra::ncol(r) > block_size) blocks <- NULL
+  rows <- if (!is.null(blocks)) blocks$rows else max(1L, as.integer(block_size/terra::ncol(r)))
   for (first in seq.int(1L, terra::nrow(r), by = rows)) {
     nr <- min(rows, terra::nrow(r)-first+1L)
-    eligible <- is.finite(terra::values(r, row = first, nrows = nr, mat = FALSE))
+    eligible <- is.finite(.cast_raster_block(r, first, nr)[[1L]])
     z <- matrix(NA_real_, length(eligible), 4L)
     if (any(eligible)) {
-      a <- .cast_raster_block(current, first, nr)
-      b <- .cast_raster_block(future, first, nr)
-      ok <- eligible & .cast_finite_rows(a) & .cast_finite_rows(b)
+      saved <- if (!is.null(blocks)) .cast_compare_current_block(blocks, first, nr) else
+        list(indices = which(eligible), values = .cast_raster_block(current, first, nr)[eligible, , drop = FALSE])
+      use <- eligible[saved$indices]; positions <- saved$indices[use]
+      a <- saved$values[use, , drop = FALSE]; b <- a
+      if (length(changing) && length(positions)) b[changing] <-
+        .cast_raster_block(future[[changing]], first, nr)[positions, , drop = FALSE]
+      ok <- .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(ok)) {
-        ma <- .cast_mess(fit$scaling$reference, a[ok, , drop = FALSE])
-        mb <- .cast_mess(fit$scaling$reference, b[ok, , drop = FALSE])
-        z[ok, ] <- cbind(ma, mb, as.numeric(ma < 0), as.numeric(mb < 0))
+        evaluate <- function(vars, x) if (length(vars))
+          .cast_mess_apply(reference[vars], x[, vars, drop = FALSE]) else rep(Inf, nrow(x))
+        static <- evaluate(shared, a[ok, , drop = FALSE])
+        ma <- pmin(static, evaluate(changing, a[ok, , drop = FALSE]))
+        mb <- pmin(static, evaluate(changing, b[ok, , drop = FALSE]))
+        z[positions[ok], ] <- cbind(ma, mb, as.numeric(ma < 0), as.numeric(mb < 0))
       }
     }
     .cast_writer_block(writer, z, first, nr)
@@ -97,6 +111,9 @@
     products = c("maps", "responses", "attribution", "mess"), response_method = "ale") {
   fit <- object$fit_full %||% object$fit
   .cast_check_fit(fit)
+  if (!render_only && any(products %in% c("responses", "attribution", "mess")) &&
+      !identical(comparison$prediction_policy, "regular_gam/1"))
+    cli::cli_abort("Recompute the comparison with the current prediction policy before preparing new response products. Do not combine earlier approximate GAM projections with regular predictions.")
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
   bundle_path <- file.path(directory, "figure_data.rds")
   provenance <- comparison$provenance
@@ -194,17 +211,20 @@
     future <- future[[fit$env_vars]]
   }
   report <- comparison$results[[scenario]]
+  prepared <- if (!is.null(current) && !is.null(future) &&
+      any(products %in% c("attribution", "mess"))) .cast_compare_reuse(fit, current, future,
+        comparison, comparison$weights, object$protocol$clamp %||% FALSE) else NULL
   if ("attribution" %in% products && length(unlist(comparison$groups, use.names = FALSE)) &&
       is.null(attribution) && !is.null(current) && !is.null(future)) {
     if (verbose) cli::cli_inform("Preparing reporting-scenario driver maps; reuse requires matching models, inputs, mask and settings.")
     domain <- if (!is.null(report$raster_file)) terra::rast(report$raster_file)[["current"]] else NULL
     if (!is.null(domain)) domain <- terra::ifel(is.finite(domain), 1, NA)
-    attribution <- cast_attribution(fit, current, future,
+    attribution <- .cast_attribution(fit, current, future,
       drivers = as.character(unlist(comparison$groups, use.names = FALSE)),
       weights = comparison$weights, mask = domain,
       clamp = object$protocol$clamp %||% FALSE, support_probs = comparison$support_probs %||% c(.01, .99),
       resources = resources, block_size = 250000L,
-      overwrite = TRUE, diagnostics = TRUE,
+      overwrite = TRUE, diagnostics = TRUE, prepared = prepared,
       filename = if (!is.null(domain)) file.path(directory, "driver_attribution.tif"))
   }
   if ("attribution" %in% products && is.null(attribution)) note("03_environmental_driver",
@@ -214,9 +234,11 @@
   if ("mess" %in% products && !is.null(current) && !is.null(future) && !is.null(report$raster_file)) {
     path <- file.path(directory, "mess_native.tif")
     memo <- new.env(parent = emptyenv())
-    key <- .cast_digest(list(.cast_fit_identity(fit), .cast_data_identity(current, memo),
-      .cast_data_identity(future, memo), provenance, scenario, .cast_code_identity(.cast_figure_mess)))
-    mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path), path)
+    key <- .cast_digest(list(.cast_fit_identity(fit), prepared$current_key %||% .cast_data_identity(current, memo),
+      prepared$future_key %||% .cast_data_identity(future, memo), provenance, scenario,
+      .cast_code_identity(.cast_figure_mess), .cast_code_identity(.cast_mess_apply),
+      .cast_code_identity(.cast_mess_reference)))
+    mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path, prepared = prepared), path)
     outputs <- c(outputs, mess)
   } else if ("mess" %in% products) note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
   for (s in if ("maps" %in% products) names(comparison$results) else character()) {
@@ -301,7 +323,7 @@
     pattern <- switch(x,
       basic = "^(01_|07_|11_|12_|13_|15_|S_selection_|S_stability_)",
       maps = "^(02_|04_|05_|08_|10_|S_(?!selection_|stability_))",
-      responses = "^(06_|14_)", drivers = "^(03_|D_|E_)", novelty = "^09_", NULL)
+      responses = "^(06_|14_|R_)", drivers = "^(03_|D_|E_)", novelty = "^09_", NULL)
     if (!is.null(pattern)) return(grep(pattern, inventory, value = TRUE, perl = TRUE))
     inventory[inventory == x | startsWith(inventory, paste0(x, "_"))]
   }), use.names = FALSE))
@@ -315,7 +337,7 @@
   for (x in include) {
     if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
         (startsWith(x, "S_") && !grepl("^S_(selection|stability)", x)) || x == "S") out <- c(out, "maps")
-    if (x == "responses" || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
+    if (x == "responses" || startsWith(x, "R_") || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
     if (x == "drivers" || grepl("^03(_|$)|^[DE]_", x)) out <- c(out, "attribution")
     if (x == "novelty" || grepl("^09(_|$)", x)) out <- c(out, "mess")
   }

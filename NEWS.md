@@ -1,3 +1,22 @@
+# castSDM 0.36.0
+
+- Retain discrete BAM fitting but use regular prediction everywhere. Predictions
+  no longer depend on raster batch size; supported additive GAM/BAM contrasts
+  reuse exact term contributions. Evaluation and projection caches invalidate.
+- Reuse verified current raster blocks and matching per-model paired predictions
+  in environmental response maps. MESS prepares its empirical reference once,
+  reuses unchanged factors and avoids repeated current-source extraction.
+- Preserve every fitted-predictor response in paginated R_ atlases (12 panels per
+  page); main response panels show scenario-changing factors when available.
+  Keep the existing cartography and PNG/PDF exports. Failed fixed-profile
+  predictions raise an explicit error instead of silently producing NA curves.
+- Record workflow and figure-phase elapsed times plus the one-time current-block
+  preparation cost. Report temporal slice decisions, unavailable earlier slices,
+  predictor-category counts and overlapping occurrence missingness.
+- Start the single-species case in cast036_chelsa_ensmean. Do not combine 0.35
+  approximate GAM predictions, OOF thresholds or comparison outputs with 0.36.
+  VIF <= 10, engine-fitting policies and complete figure availability remain.
+
 # castSDM 0.35.0
 
 - Cache observed, finite current cells once per raster block; baseline, domain

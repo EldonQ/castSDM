@@ -211,44 +211,46 @@ cast_predict <- function(fit, new_data, models = NULL,
 #'
 #' @keywords internal
 #' @noRd
+# Prepare the empirical reference once; all raster blocks share this ordering.
+.cast_mess_reference <- function(reference) {
+  lapply(reference, function(x) {
+    x <- sort(x[is.finite(x)])
+    list(values = x, min = if (length(x)) x[1L] else NA_real_,
+      max = if (length(x)) x[length(x)] else NA_real_)
+  })
+}
+
 .cast_mess <- function(reference, newdata) {
+  .cast_mess_apply(.cast_mess_reference(reference), newdata)
+}
+
+.cast_mess_apply <- function(reference, newdata) {
   vars <- intersect(names(reference), names(newdata))
   if (!length(vars)) return(rep(NA_real_, nrow(newdata)))
-  sim <- matrix(NA_real_, nrow = nrow(newdata), ncol = length(vars))
-  for (j in seq_along(vars)) {
-    v <- vars[j]
-    ref <- reference[[v]][is.finite(reference[[v]])]
+  mess <- rep(Inf, nrow(newdata))
+  for (v in vars) {
+    r <- reference[[v]]
+    if (!length(r$values)) next
     p <- as.numeric(newdata[[v]])
-    if (!length(ref)) next
-    mn <- min(ref); mx <- max(ref); rng <- mx - mn
-    n <- length(ref)
-    # f = 100 * (number of reference values strictly below p) / n.
-    # left.open = TRUE makes findInterval() count ref < p (not ref <= p).
-    f <- 100 * findInterval(p, sort(ref), left.open = TRUE) / n
+    f <- 100 * findInterval(p, r$values, left.open = TRUE) / length(r$values)
     ok <- is.finite(p)
-    s <- rep(NA_real_, length(p))
+    s <- rep(Inf, length(p))
     if (any(ok)) {
-      po <- p[ok]; fo <- f[ok]
+      po <- p[ok]; fo <- f[ok]; rng <- r$max-r$min
       sj <- numeric(length(po))
       if (rng <= 0) {
-        sj[] <- ifelse(po == mn, 100, -100)
+        sj[] <- ifelse(po == r$min, 100, -100)
       } else {
-        below  <- fo == 0
-        low    <- fo > 0 & fo <= 50
-        high   <- fo > 50 & fo < 100
-        above  <- fo >= 100
-        sj[below] <- (po[below] - mn) / rng * 100
-        sj[low]   <- 2 * fo[low]
-        sj[high]  <- 2 * (100 - fo[high])
-        sj[above] <- (mx - po[above]) / rng * 100
+        below <- fo == 0; low <- fo > 0 & fo <= 50
+        high <- fo > 50 & fo < 100; above <- fo >= 100
+        sj[below] <- (po[below]-r$min)/rng * 100
+        sj[low] <- 2*fo[low]; sj[high] <- 2*(100-fo[high])
+        sj[above] <- (r$max-po[above])/rng * 100
       }
       s[ok] <- sj
     }
-    sim[, j] <- s
+    mess <- pmin(mess, s)
   }
-  # Row-wise minimum over predictors; rows with no finite similarity -> NA.
-  sim[!is.finite(sim)] <- Inf
-  mess <- do.call(pmin, lapply(seq_len(ncol(sim)), function(j) sim[, j]))
   mess[!is.finite(mess)] <- NA_real_
   mess
 }

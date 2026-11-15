@@ -90,6 +90,8 @@ selection, threshold, weight, AOA and all available contrast/driver atlases.
 Uses the package cartography, including China outlines and South China Sea
 inset when \code{basemap = "china"}. Numerical diagnostic products are cached
 separately from PNG/PDF rendering; fitted models are never refitted.
+Scenario-changing response curves are shown in the main panels. The complete
+fitted predictor set is retained in bounded-height \code{R_} response atlas pages.
 Unchanged installed-package exports are reused after checking their data,
 code, rendering settings and file hashes. Missing or damaged exports are
 regenerated individually.

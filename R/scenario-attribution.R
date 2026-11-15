@@ -44,7 +44,7 @@
 
 .cast_attribution_block <- function(fit, current, future, drivers, weights,
                                     bounds, reference = NULL, clamp = FALSE,
-                                    diagnostics = FALSE) {
+                                    diagnostics = FALSE, base = NULL, fut = NULL) {
   context <- .cast_prediction_context(fit, weights, current, future, clamp)
   predict <- context$predict
   # Requiring the same finite active models preserves a paired comparison.
@@ -58,8 +58,9 @@
     z[rowSums(!is.finite(p)) > 0] <- NA_real_
     z
   }
-  base <- predict()
-  fut <- predict(names(future))
+  base <- predict(base = base, changed_rows = if (!is.null(base)) !.cast_finite_rows(base))
+  fut <- predict(names(future), base = fut,
+    changed_rows = if (!is.null(fut)) !.cast_finite_rows(fut))
   total <- fut - base
   bc <- .cast_attribution_inside(current, bounds)
   fc <- .cast_attribution_inside(future, bounds)
@@ -185,6 +186,9 @@
 #'   realized occupancy, colonisation, or dispersal. Presence/background scores
 #'   remain relative suitability. All summary means weight rows/cells equally;
 #'   use an equal-area grid when interpreting raster summaries spatially.
+#'   Built-in GAM/BAM predictions are independent of processing batch size.
+#'   Supported additive models reuse unchanged terms with regular prediction;
+#'   this is a computational identity, not a new effect estimator.
 #' @seealso [cast_effect_map()], [cast_project()], [plot.cast_attribution()]
 #' @export
 cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
@@ -197,6 +201,24 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              filename = NULL, mask = NULL, overwrite = FALSE,
                              verbose = TRUE, resources = list(), resume = TRUE,
                              shifts = NULL, diagnostics = FALSE) {
+  .cast_attribution(fit = fit, current = current, future = future, drivers = drivers,
+    cv = cv, weights = weights, models = models, method = match.arg(method), min_score = min_score,
+    decay = decay, fallback = fallback, min_metric_folds = min_metric_folds,
+    support_probs = support_probs, clamp = clamp, block_size = block_size,
+    filename = filename, mask = mask, overwrite = overwrite, verbose = verbose,
+    resources = resources, resume = resume, shifts = shifts, diagnostics = diagnostics)
+}
+
+.cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
+                             weights = NULL, models = NULL,
+                             method = c("equal", "weighted", "best"),
+                             min_score = 0.5, decay = 1, fallback = "best",
+                             min_metric_folds = 2L,
+                             support_probs = c(0.01, 0.99), clamp = FALSE,
+                             block_size = 50000L,
+                             filename = NULL, mask = NULL, overwrite = FALSE,
+                             verbose = TRUE, resources = list(), resume = TRUE,
+                             shifts = NULL, diagnostics = FALSE, prepared = NULL) {
   .cast_check_fit(fit)
   budget <- .cast_resources(resources)
   old_options <- options(castSDM.predict_threads = budget$cores)
@@ -256,11 +278,14 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     if (is.null(filename)) filename <- tempfile("cast_attribution_", fileext = ".tif")
     lock <- .cast_lock(paste0(filename, ".lock"))
     on.exit(filelock::unlock(lock), add = TRUE)
-    signature <- list(schema = "cast_attribution/2", fit = .cast_fit_identity(fit), weights = weights,
-      current = .cast_data_identity(current), future = .cast_data_identity(future),
+    memo <- new.env(parent = emptyenv())
+    signature <- list(schema = "cast_attribution/3", fit = .cast_fit_identity(fit), weights = weights,
+      current = prepared$current_key %||% .cast_data_identity(current, memo),
+      future = prepared$future_key %||% .cast_data_identity(future, memo),
       mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
       support_probs = support_probs, clamp = clamp,
       core = .cast_code_identity(.cast_attribution_block),
+      execution = .cast_code_identity(.cast_attribution),
       raster_reader = .cast_code_identity(.cast_shared_raster_layers))
     if (!is.null(shifts)) signature$shifts <- shifts
     if (diagnostics) {
@@ -282,7 +307,10 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       datatype = "FLT8S", overwrite = overwrite)
     on.exit(.cast_writer_abort(writer), add = TRUE)
     n <- terra::ncell(current)
-    rows <- max(1L, as.integer(block_size / terra::ncol(current)))
+    blocks <- prepared$blocks
+    if (!is.null(blocks) && blocks$rows*terra::ncol(current) > block_size) blocks <- NULL
+    rows <- if (!is.null(blocks)) blocks$rows else max(1L, as.integer(block_size / terra::ncol(current)))
+    if (verbose && !is.null(blocks)) cli::cli_inform("Environmental response maps: reusing verified current blocks and matching paired predictions.")
     starts <- seq.int(1L, terra::nrow(current), by = rows)
   } else {
     if (!is.data.frame(current) || !is.data.frame(future) || !nrow(current) ||
@@ -352,22 +380,29 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
         if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)} reused ({length(saved$indices)} finite cells).")
         next
       }
-      a <- .cast_raster_block(current, first, count)
-      b <- a
-      if (length(future_read)) b[future_read] <-
-        .cast_raster_block(future[[future_read]], first, count)
+      saved <- .cast_compare_current_block(blocks, first, count, current, mask)
+      use <- active[saved$indices]
+      positions <- saved$indices[use]
+      a <- saved$values[use, , drop = FALSE]; b <- a
+      if (length(future_read) && length(positions)) b[future_read] <-
+        .cast_raster_block(future[[future_read]], first, count)[positions, , drop = FALSE]
+      block_n <- length(active)
     } else {
       idx <- seq.int(first, min(n, first + block_size - 1L))
       a <- current[idx, vars, drop = FALSE]; b <- future[idx, vars, drop = FALSE]
+      positions <- seq_along(idx); block_n <- length(idx)
     }
     for (v in names(shifts)) b[[v]] <- b[[v]] + shifts[[v]]
     keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
-    if (raster) keep <- keep & .cast_mask_rows(mask, first, count, nrow(a))
-    z <- matrix(NA_real_, nrow(a), length(layer_names), dimnames = list(NULL, layer_names))
-    if (any(keep)) z[keep, ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
-      b[keep, , drop = FALSE], drivers, weights, bounds,
-      reference = reference, clamp = clamp, diagnostics = diagnostics)
-    if (raster) .cast_cache_write(list(indices = which(keep), values = z[keep, , drop = FALSE]),
+    z <- matrix(NA_real_, block_n, length(layer_names), dimnames = list(NULL, layer_names))
+    if (any(keep)) {
+      seed <- if (raster && is.null(shifts)) .cast_reuse_predictions(prepared, first, count, positions[keep], weights)
+      z[positions[keep], ] <- .cast_attribution_block(fit, a[keep, , drop = FALSE],
+        b[keep, , drop = FALSE], drivers, weights, bounds,
+        reference = reference, clamp = clamp, diagnostics = diagnostics,
+        base = seed$current, fut = seed$future)
+    }
+    if (raster) .cast_cache_write(list(indices = positions[keep], values = z[positions[keep], , drop = FALSE]),
       checkpoint, checkpoint_key)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z

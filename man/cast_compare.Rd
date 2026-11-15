@@ -127,6 +127,9 @@ the same positive-weight models and common finite domain. Model SD is
 calculated after within-model paired contrasts, never from surface SDs.
 Every active model must return finite predictions on eligible inputs;
 otherwise the comparison fails instead of changing weights or domains.
+Built-in GAM/BAM predictions use the regular saved basis, so block sizes
+and parallel resource budgets do not change predicted scores. BAM fitting
+still uses its declared discrete fitting method.
 }
 \details{
 A single empty predictor group explicitly records model non-response:

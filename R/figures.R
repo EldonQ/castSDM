@@ -56,6 +56,8 @@
 #' Uses the package cartography, including China outlines and South China Sea
 #' inset when `basemap = "china"`. Numerical diagnostic products are cached
 #' separately from PNG/PDF rendering; fitted models are never refitted.
+#' Scenario-changing response curves are shown in the main panels. The complete
+#' fitted predictor set is retained in bounded-height `R_` response atlas pages.
 #' Unchanged installed-package exports are reused after checking their data,
 #' code, rendering settings and file hashes. Missing or damaged exports are
 #' regenerated individually.
@@ -159,14 +161,22 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     on.exit(options(old_cache), add = TRUE)
   }
   if (identical(include, "all") && !render_only) {
-    phase_errors <- character()
+    phase_errors <- character(); phase_times <- list()
     for (phase in c("basic", "maps", "responses", "drivers", "novelty")) {
       if (verbose) cli::cli_inform("Figure phase: {phase}; earlier exports remain available.")
+      phase_start <- Sys.time(); phase_clock <- proc.time()[["elapsed"]]
       value <- tryCatch(cast_figures(object, comparison, output_dir, scenario, current, future,
         attribution, basemap, include = phase, render_only = FALSE,
         response_grid = response_grid, display_resolution = display_resolution,
         width_mm = width_mm, dpi = dpi, resources = resources, verbose = verbose,
         formats = formats, response_method = response_method), error = identity)
+      seconds <- proc.time()[["elapsed"]]-phase_clock
+      phase_times[[phase]] <- data.frame(phase = phase,
+        started = format(phase_start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+        elapsed_s = seconds, status = if (inherits(value, "error")) "failed" else "completed")
+      if (dir.exists(output_dir)) utils::write.csv(do.call(rbind, phase_times),
+        file.path(output_dir, "phase_timings.csv"), row.names = FALSE)
+      if (verbose) cli::cli_inform("Figure phase {phase}: {round(seconds, 1)} s.")
       if (inherits(value, "error")) {
         phase_errors <- c(phase_errors, paste0(phase, ": ", conditionMessage(value)))
         if (verbose) cli::cli_inform("Figure phase {phase} failed; other available products will still be exported.")

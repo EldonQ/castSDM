@@ -228,13 +228,20 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
     as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic",
                               clamp = isTRUE(clamp)))
   } else if (nm == "gam") {
-    args <- list(object = mdl_info$model, newdata = X_raw, type = "response")
-    if (inherits(mdl_info$model, "bam")) args$n.threads <- getOption("castSDM.predict_threads", 1L)
-    as.numeric(do.call(stats::predict, args))
+    as.numeric(.cast_predict_gam(mdl_info$model, X_raw))
   } else {
     rep(NA_real_, nrow(X_raw))
   }
   .cast_prediction_output(p, offset, output)
+}
+
+# Discrete BAM fitting is retained; regular prediction evaluates the saved
+# smooths on a fixed basis, independent of batch size or worker allocation.
+.cast_predict_gam <- function(model, newdata, type = "response", terms = NULL) {
+  args <- list(object = model, newdata = newdata, type = type)
+  if (!is.null(terms)) args$terms <- terms
+  if (inherits(model, "bam")) args$discrete <- FALSE
+  do.call(stats::predict, args)
 }
 
 .cast_prediction_output <- function(p, offset, output) {
