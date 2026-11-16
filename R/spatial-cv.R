@@ -116,6 +116,12 @@
 #'   blocking; supplied assignments are returned unchanged.
 #' @param coords_crs Coordinate CRS, required for projected coordinates.
 #' @param gam_backend GAM fitting backend; see [cast_fit()].
+#' @param response_data Optional list with paired numeric `current` and `future`
+#'   tables at fixed external locations, every candidate predictor, unique
+#'   `drivers`, a `scenario` identifier and optional `support_probs`. Each spatial
+#'   training fit predicts these same locations before it is discarded. No
+#'   response labels are used. Saved contrasts allow descriptive explanation
+#'   sensitivity checks without additional fits. `NULL` skips these predictions.
 #' @param clamp Clamp each fold's test predictors to that fold's training
 #'   range for all engines. Default `FALSE`; [cast_run()] supplies its protocol.
 #'   AOA continues to use original predictors.
@@ -143,7 +149,7 @@ cast_cv <- function(data,
                     rf_mtry = NULL,
                     maxent_classes = NULL, maxent_regmult = NULL,
                     num_threads = 1L, fold_ids = NULL, clamp = FALSE, coords_crs = NULL,
-                    gam_backend = c("bam", "gam")) {
+                    gam_backend = c("bam", "gam"), response_data = NULL) {
   block_method <- match.arg(block_method)
   if (!is.logical(clamp) || length(clamp) != 1L || is.na(clamp))
     cli::cli_abort("clamp must be TRUE or FALSE.")
@@ -210,6 +216,9 @@ cast_cv <- function(data,
       i = "That screen was selected on the full data set, so selection leaks into these CV metrics; treat them as optimistic."
     ))
   }
+
+  candidates <- setdiff(names(data), c("lon", "lat", response))
+  response_data <- .cast_response_validation_data(response_data, candidates)
 
   # Environmental blocking needs the numeric predictor matrix (coordinates
   # and the response excluded); computed once, reused by every repeat.
@@ -345,7 +354,11 @@ cast_cv <- function(data,
       updates[[mdl]] <- list(idx = test_idx, pred = pred,
                             native = pair$native, offset = info$offset %||% 0)
     }
-    list(updates = updates, selected = fold_screen$selected, n_train = nrow(train),
+    response_started <- proc.time()[["elapsed"]]
+    response_check <- if (!is.null(response_data))
+      .cast_response_validation_fold(fit, response_data, models, clamp) else NULL
+    response_elapsed_s <- proc.time()[["elapsed"]] - response_started
+    list(response_elapsed_s = response_elapsed_s, response_check = response_check, updates = updates, selected = fold_screen$selected, n_train = nrow(train),
          selection_elapsed_s = selection_elapsed, engine_fits = .cast_fit_table(fit),
          screen = fold_screen, di = di_fold, di_train = di_fold_train,
          pred_ok = pred_ok,
@@ -369,7 +382,8 @@ cast_cv <- function(data,
     value$timing <- data.frame(fold = i, status = value$status %||% "single_class",
       n_train = value$n_train %||% NA_integer_,
       n_test = sum(folds == i), n_selected = length(value$selected),
-      selection_elapsed_s = value$selection_elapsed_s %||% NA_real_, elapsed_s = elapsed,
+      selection_elapsed_s = value$selection_elapsed_s %||% NA_real_,
+      response_elapsed_s = value$response_elapsed_s %||% 0, elapsed_s = elapsed,
       warnings = paste(notes, collapse = "; "))
     if (verbose) {
       cli::cli_inform("Spatial CV fold {i}/{k}: {value$timing$status}; {length(value$selected)} predictors; {round(elapsed, 1)} s.")
@@ -455,30 +469,17 @@ cast_cv <- function(data,
     thresholds <- vapply(models, function(mdl) {
       pred <- oof[[mdl]]
       ok <- is.finite(pred)
-      # Fold coverage floor: at least 80% of folds (and never fewer than 2)
-      # must have produced predictions. `sum(ok)` alone cannot detect a
-      # surface that is complete within the folds that worked but missing
-      # every fold where the model failed.
+      # Every scheduled spatial fold is required. A partial OOF surface must
+      # not silently define the operating threshold for a complete study.
       n_folds_ok <- pred_folds[[mdl]]
-      min_folds_ok <- max(2L, ceiling(k * 0.8))
+      min_folds_ok <- k
       if (n_folds_ok < min_folds_ok) {
-        cli::cli_warn(c(
-          "{.val {mdl}} produced predictions in only {n_folds_ok}/{k} fold{?s}",
-          i = "Fewer than the required {min_folds_ok} usable fold{?s}; the",
-          i = "out-of-fold surface is incomplete and its threshold is not",
-          i = "trustworthy. Threshold falls back to 0.5, which changes every",
-          i = "threshold-based metric and any binarised product."
-        ))
-        return(0.5)
+        cli::cli_abort("{mdl} predicted only {n_folds_ok}/{k} spatial folds; no defensible OOF threshold is available. Inspect fold warnings and rerun after fixing the failed fits.",
+          class = "cast_cv_insufficient_predictions")
       }
-      if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L) {
-        cli::cli_warn(c(
-          "Fewer than 10 usable {.val {mdl}} out-of-fold values (or one class",
-          "only); threshold falls back to 0.5, which silently changes every",
-          "threshold-based metric and any binarised product."
-        ))
-        return(0.5)
-      }
+      if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L)
+        cli::cli_abort("Insufficient usable OOF predictions for {mdl}; no threshold is substituted.",
+          class = "cast_cv_insufficient_predictions")
       cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
     }, numeric(1))
 
@@ -520,7 +521,8 @@ cast_cv <- function(data,
     }
     fold_df <- if (length(row_list)) do.call(rbind, row_list) else data.frame()
 
-    list(timings = do.call(rbind, lapply(results, `[[`, "timing")),
+    list(response_checks = lapply(results, `[[`, "response_check"),
+         timings = do.call(rbind, lapply(results, `[[`, "timing")),
          engine_fits = do.call(rbind, lapply(seq_along(results), function(i) {
            x <- results[[i]]$engine_fits
            if (!is.null(x)) cbind(fold = i, x)
@@ -658,6 +660,10 @@ cast_cv <- function(data,
                            obs = data[[response]], lon = data$lon, lat = data$lat),
     offsets = reps[[1]]$offsets
   )
+  if (!is.null(response_data)) result$response_validation <- list(
+    scenario = response_data$scenario, drivers = response_data$drivers,
+    support_probs = response_data$support_probs,
+    runs = do.call(c, lapply(reps, `[[`, "response_checks")))
   result$fold_design <- lapply(reps, `[[`, "fold_design")
   result$clamp <- clamp
   for (field in c("timings", "engine_fits")) result[[field]] <- do.call(rbind, lapply(seq_along(reps), function(i) {

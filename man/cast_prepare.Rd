@@ -21,7 +21,11 @@ cast_prepare(
 \item{data}{A \code{data.frame} with columns: \code{lon}, \code{lat}, \code{presence} (0/1),
 and environmental variables.}
 
-\item{train_fraction}{Numeric in (0, 1), strictly. Fraction for the
+\item{train_fraction}{Numeric in (0, 1), strictly. Spatial splits allocate
+whole blocks toward the requested fraction separately for each response
+class. Achieved fractions and dominant-block limits are reported in
+\code{fold_design$class_balance}; large blocks may make the target unattainable.
+Fraction for the
 training set. Values outside the open interval are rejected.
 Default \code{0.7}.}
 

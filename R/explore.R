@@ -108,15 +108,66 @@
 
 .cast_explore_preview <- function(path, output, pixels = 250000L) {
   r <- if (inherits(path, "SpatRaster")) path else terra::rast(path)
-  coarse <- terra::spatSample(r, size = min(pixels, terra::ncell(r)),
-    method = "regular", as.raster = TRUE)
-  categorical <- grepl("^support|^response_group$|^context_direction_|^(effect|retained)_agreement_", names(coarse))
-  template <- leaflet::projectRasterForLeaflet(coarse[[1L]], method = "bilinear")
-  out <- lapply(seq_len(terra::nlyr(coarse)), function(i)
-    terra::project(coarse[[i]], template, method = if (categorical[i]) "near" else "bilinear"))
-  display <- do.call(c, out); names(display) <- names(r)
+  # A geometric template, not regular-cell sampling: narrow valid features
+  # contribute to their overlapping display cells instead of being missed.
+  template <- terra::project(terra::rast(r[[1L]]), "EPSG:3857")
+  ratio <- max(1, sqrt(terra::ncell(template)/pixels))
+  template <- terra::rast(nrows = max(1, floor(terra::nrow(template)/ratio)),
+    ncols = max(1, floor(terra::ncol(template)/ratio)),
+    ext = terra::ext(template), crs = terra::crs(template))
+  fields <- names(r)
+  flags <- grepl("^support_", fields)
+  categorical <- grepl("^response_group$|^context_direction_|^sign_conflict", fields)
+  eligible <- fields[!flags & fields != "response_group"]
+  support_for <- function(v) {
+    if (grepl("^context_(gap|direction)_", v)) {
+      driver <- sub("^context_(gap|direction)_", "", v)
+      return(paste0(c("support_effect_", "support_retained_"), driver))
+    }
+    for (prefix in c("effect_", "retained_")) if (startsWith(v, prefix)) {
+      driver <- sub("^(effect|retained)_(agreement_|sd_)?", "", v)
+      return(paste0("support_", prefix, driver))
+    }
+    "support_total"
+  }
+  masks <- stats::setNames(lapply(eligible, support_for), eligible)
+  masks <- masks[vapply(masks, function(x) all(x %in% fields), logical(1))]
+  source <- tempfile("cast-preview-native-", fileext = ".tif")
+  on.exit(unlink(source), add = TRUE)
+  layers <- c(fields, if (length(masks)) paste0("supported_", names(masks)))
+  writer <- .cast_raster_writer(r, source, layers, datatype = "FLT4S", overwrite = TRUE)
+  on.exit(.cast_writer_abort(writer), add = TRUE)
+  rows <- max(1L, as.integer(250000L/terra::ncol(r)))
+  terra::readStart(r); on.exit(terra::readStop(r), add = TRUE)
+  for (first in seq.int(1L, terra::nrow(r), by = rows)) {
+    count <- min(rows, terra::nrow(r)-first+1L)
+    x <- terra::readValues(r, row = first, nrows = count, mat = TRUE)
+    z <- matrix(NA_real_, nrow(x), length(layers), dimnames = list(NULL, layers))
+    z[, fields] <- x
+    for (v in names(masks)) {
+      support <- x[, masks[[v]], drop = FALSE]
+      keep <- rowSums(!is.finite(support) | support != 1) == 0L
+      z[keep, paste0("supported_", v)] <- x[keep, v]
+    }
+    .cast_writer_block(writer, z, first, count)
+  }
+  .cast_writer_finish(writer)
+  input <- terra::rast(source)
+  discrete <- c(fields[categorical], if (any(fields[categorical] %in% names(masks)))
+    paste0("supported_", intersect(fields[categorical], names(masks))))
+  continuous <- setdiff(layers, c(fields[flags], discrete))
+  parts <- list()
+  if (length(continuous)) parts <- c(parts, list(terra::project(input[[continuous]], template, method = "average")))
+  if (length(discrete)) parts <- c(parts, list(terra::project(input[[discrete]], template, method = "mode")))
+  if (any(flags)) {
+    low <- terra::project(input[[fields[flags]]], template, method = "min")
+    high <- terra::project(input[[fields[flags]]], template, method = "max")
+    mixed <- terra::ifel(low == high, low, 2); names(mixed) <- fields[flags]
+    parts <- c(parts, list(mixed))
+  }
+  display <- do.call(c, parts)[[layers]]
   terra::writeRaster(display, output, overwrite = TRUE,
-    wopt = list(gdal = c("COMPRESS=LZW", "TILED=YES")))
+    wopt = list(datatype = "FLT4S", gdal = c("COMPRESS=LZW", "TILED=YES")))
   output
 }
 
@@ -160,6 +211,8 @@
 #' @param maxdepth Maximum response tree depth. See [cast_response_groups()].
 #' @param maps Compute native-grid response/group rasters. `FALSE` only computes
 #'   the real-location response table and grouping; it never predicts a full grid.
+#'   Matching saved publication response maps remain available even with FALSE;
+#'   native common-support summaries and location summaries are kept separate.
 #' @param focus Optional selected driver for detailed maps. `NULL` automatically
 #'   uses the largest mean absolute driver-only response on the shared support
 #'   subset of the saved training-CV locations. Only this driver's two background responses, model sign agreement
@@ -232,7 +285,10 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   mask_file <- file.path(project$case$preparation, "analysis_domain_mask.tif")
   if (!file.exists(mask_file)) cli::cli_abort("Missing recorded analysis domain: {.path {mask_file}}.")
   mask <- terra::rast(mask_file)
-  key <- .cast_digest(list(schema = "cast_explore/1", settings = settings,
+  saved <- if (is.null(shifts)) .cast_explore_saved(project, scenario, a, b, memo) else NULL
+  if (!is.null(saved) && !all(variables %in% saved$drivers)) saved <- NULL
+  key <- .cast_digest(list(schema = "cast_explore/2", settings = settings,
+    saved = if (!is.null(saved)) unname(tools::md5sum(saved$raster_file)),
     fit = .cast_fit_identity(project$fit),
     current = .cast_data_identity(a, memo), future = .cast_data_identity(b, memo),
     mask = .cast_data_identity(mask, memo), folds = project$run$cv$fold_info,
@@ -258,13 +314,18 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     if (!is.null(cached)) {
       for (field in c("raster_file", "group_file", "preview", "points_file"))
         if (!is.null(cached[[field]])) cached[[field]] <- file.path(directory, basename(cached[[field]]))
+      if (!is.null(saved)) cached$raster_file <- saved$raster_file
       cached$directory <- directory; cached$case_dir <- project$directory
       return(cached)
     }
   }
   cli::cli_inform("Reading saved training-CV locations and aligned scenario values; rankings describe these locations, not habitat area.")
   sample <- .cast_explore_sample(project, a, b, sample_n)
-  response <- cast_attribution(project$fit, sample$current, sample$future,
+  response <- if (!is.null(saved)) {
+    value <- saved
+    value$data <- terra::extract(terra::rast(saved$raster_file), sample$xy)
+    value
+  } else cast_attribution(project$fit, sample$current, sample$future,
     drivers = variables, weights = settings$weights, shifts = shifts,
     support_probs = settings$support_probs, clamp = settings$clamp,
     resources = resources, verbose = FALSE, diagnostics = TRUE)
@@ -298,13 +359,14 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     utils::write.csv(groups$cv, file.path(directory, "group_tuning.csv"), row.names = FALSE)
     utils::write.csv(groups$fold_losses, file.path(directory, "group_fold_losses.csv"), row.names = FALSE)
   }
+  mapped <- saved
   raw_file <- preview <- group_file <- NULL
-  if (maps) {
+  if (maps || !is.null(saved)) {
     cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
-    raw_file <- file.path(directory, "response.tif")
+    raw_file <- if (!is.null(saved)) saved$raster_file else file.path(directory, "response.tif")
     prepared <- if (is.null(shifts)) .cast_compare_reuse(project$fit, a, b,
       project$comparison, settings$weights, settings$clamp) else NULL
-    .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
+    if (is.null(saved)) mapped <- .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
       shifts = shifts, support_probs = settings$support_probs, clamp = settings$clamp,
       mask = mask, filename = raw_file, overwrite = TRUE, resources = resources,
       resume = resume, diagnostics = TRUE, prepared = prepared)
@@ -312,14 +374,36 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
       terra::rast(raw_file)[["support_total"]], file.path(directory, "groups.tif"))
     cli::cli_inform("Preparing a separate interactive preview (not the analysis grid).")
     preview_source <- terra::rast(raw_file)
+    wanted <- c("current", "future", "total_change", "support_total", "total_sd",
+      if (!is.null(focus)) paste0(c("effect_", "retained_", "support_effect_", "support_retained_",
+        "context_direction_", "context_gap_", "effect_agreement_", "retained_agreement_"), focus))
+    preview_source <- preview_source[[intersect(wanted, names(preview_source))]]
+    if (is.null(shifts)) {
+      models <- terra::rast(project$comparison$results[[scenario]]$raster_file)
+      detail <- grep("^change_|^sign_conflict_joint$", names(models), value = TRUE)
+      if (length(detail)) preview_source <- c(preview_source, models[[detail]])
+    }
     if (!is.null(group_file)) preview_source <- c(preview_source, terra::rast(group_file))
     # The preview helper accepts raster objects without crossing process boundaries.
     preview <- .cast_explore_preview(preview_source, file.path(directory, "preview.tif"))
   }
+  if (!is.null(mapped)) {
+    utils::write.csv(mapped$common_summary, file.path(directory,"native_common_summary.csv"), row.names=FALSE)
+    if (!is.null(mapped$model_summary_common)) utils::write.csv(mapped$model_summary_common,
+      file.path(directory,"native_response_by_model.csv"), row.names=FALSE)
+  }
+  settings$response_limits <- .cast_app_response_limits(project, raw_file)
   result <- list(schema = "cast_explore/1", directory = directory, key = key,
     case_dir = project$directory, settings = settings, summary = response$summary,
     model_summary = response$model_summary,
-    evidence = evidence,
+    model_raster_file = if (is.null(shifts)) project$comparison$results[[scenario]]$raster_file,
+    native_summary = mapped$common_summary,
+    model_summary_population = if (!is.null(mapped$model_summary_common)) "Native grid cells; common paired support" else
+      if (!is.null(saved)) "Native grid cells; legacy per-driver support" else settings$group_population,
+    model_summary_common = mapped$model_summary_common,
+    raster_hashes = list(raster_file = if (!is.null(raw_file)) unname(tools::md5sum(raw_file)),
+      model_raster_file = if (is.null(shifts)) unname(tools::md5sum(project$comparison$results[[scenario]]$raster_file))),
+    reused_response_maps = !is.null(saved), evidence = evidence,
     groups = groups, group_note = group_note, raster_file = raw_file,
     group_file = group_file, preview = preview,
     points_file = file.path(directory, "responses.csv"),
@@ -341,8 +425,9 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   source <- project$comparison$results[[scenario]]$raster_file
   if (is.null(source) || !file.exists(source)) cli::cli_abort("Saved scenario raster is missing.")
   r <- terra::rast(source)
-  r <- r[[c("current", "joint", "joint_change", "support", "sd_joint_change")]]
-  names(r) <- c("current", "future", "total_change", "support_total", "total_sd")
+  detail <- grep("^change_|^sign_conflict_joint$", names(r), value = TRUE)
+  r <- r[[c("current", "joint", "joint_change", "support", "sd_joint_change", detail)]]
+  names(r) <- c("current", "future", "total_change", "support_total", "total_sd", detail)
   key <- .cast_digest(list(scenario = scenario, source = unname(tools::md5sum(source)),
     fit = .cast_fit_identity(project$fit), weights = project$comparison$weights,
     clamp = project$run$protocol$clamp %||% FALSE, support = project$comparison$support_probs,
@@ -358,14 +443,16 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   if (!is.null(cached)) {
     cached$directory <- directory; cached$case_dir <- project$directory
     cached$preview <- file.path(directory, "preview.tif")
-    cached$raster_file <- source
+    cached$raster_file <- source; cached$model_raster_file <- source
     return(cached)
   }
   preview <- .cast_explore_preview(r, file.path(directory, "preview.tif"))
   result <- list(schema = "cast_app_view/1", directory = directory,
-    case_dir = project$directory, preview = preview, raster_file = source,
+    case_dir = project$directory, preview = preview, raster_file = source, model_raster_file = source,
+    raster_hashes = list(raster_file = unname(tools::md5sum(source)), model_raster_file = unname(tools::md5sum(source))),
     settings = list(scenario = scenario, context = "current", variables = project$fit$env_vars,
       shifts = NULL, weights = project$comparison$weights,
+      response_limits = .cast_app_response_limits(project),
       clamp = project$run$protocol$clamp %||% FALSE,
       interpretation = "Saved joint scenario; paired fitted suitability"),
     groups = NULL, group_note = "Run response grouping to calculate descriptive subgroups.")
@@ -385,4 +472,42 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   }
   request$operation <- NULL
   do.call(cast_explore, request)
+}
+
+# A small, content-verified catalog connects publication maps to exploration.
+# The numerical data and extrapolation policy must match, not just filenames.
+.cast_explore_saved <- function(project, scenario, current, future, memo) {
+  path <- file.path(project$directory, "figures", ".data", "driver_catalog.rds")
+  if (!file.exists(path)) return(NULL)
+  envelope <- tryCatch(readRDS(path), error = function(e) NULL)
+  if (is.null(envelope$key)) return(NULL)
+  value <- .cast_cache_read(path, envelope$key)
+  if (is.null(value)) return(NULL)
+  expected <- list(fit = .cast_fit_identity(project$fit), scenario = scenario,
+    weights = project$comparison$weights, clamp = project$comparison$clamp,
+    support_probs = project$comparison$support_probs,
+    current = .cast_data_identity(current, memo), future = .cast_data_identity(future, memo),
+    comparison = unname(tools::md5sum(project$comparison$results[[scenario]]$raster_file)))
+  if (!identical(value$contract, expected) || !identical(envelope$key, .cast_digest(expected))) return(NULL)
+  value$attribution$raster_file <- file.path(dirname(path), basename(value$attribution$raster_file))
+  cli::cli_inform("Verified saved environmental responses: reuse native maps and extract location values; no response prediction required.")
+  value$attribution
+}
+
+# One observed magnitude scale across every saved scenario and available driver
+# map. Hypothetical maps may expand it; no values are clipped or overwritten.
+.cast_app_response_limits <- function(project, extra = NULL) {
+  catalog <- file.path(project$directory, "figures", ".data", "driver_attribution.tif")
+  paths <- unique(c(catalog, vapply(project$comparison$results, `[[`, character(1), "raster_file"), extra))
+  high <- 0
+  for (p in paths[file.exists(paths)]) {
+    r <- terra::rast(p)
+    use <- grep("^change_|^joint_change$|^total_change$|^effect_|^retained_|^context_gap_", names(r), value = TRUE)
+    use <- use[!grepl("agreement|_sd_", use)]
+    if (!length(use)) next
+    extrema <- terra::minmax(r[[use]], compute = TRUE)
+    high <- max(high, abs(extrema[is.finite(extrema)]))
+  }
+  if (!is.finite(high) || high == 0) high <- .Machine$double.eps
+  c(-high, high)
 }

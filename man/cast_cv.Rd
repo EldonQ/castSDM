@@ -33,7 +33,8 @@ cast_cv(
   fold_ids = NULL,
   clamp = FALSE,
   coords_crs = NULL,
-  gam_backend = c("bam", "gam")
+  gam_backend = c("bam", "gam"),
+  response_data = NULL
 )
 }
 \arguments{
@@ -160,6 +161,13 @@ AOA continues to use original predictors.}
 \item{coords_crs}{Coordinate CRS, required for projected coordinates.}
 
 \item{gam_backend}{GAM fitting backend; see \code{\link[=cast_fit]{cast_fit()}}.}
+
+\item{response_data}{Optional list with paired numeric \code{current} and \code{future}
+tables at fixed external locations, every candidate predictor, unique
+\code{drivers}, a \code{scenario} identifier and optional \code{support_probs}. Each spatial
+training fit predicts these same locations before it is discarded. No
+response labels are used. Saved contrasts allow descriptive explanation
+sensitivity checks without additional fits. \code{NULL} skips these predictions.}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.

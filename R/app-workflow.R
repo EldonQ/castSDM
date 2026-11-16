@@ -36,6 +36,7 @@
           shiny::numericInput("setup_background", "\u80cc\u666f\u70b9\u6570\u91cf", defaults$background_points %||% 10000L, min = 1L, step = 1000L),
           shiny::numericInput("setup_vif", "VIF \u9608\u503c", defaults$vif_threshold %||% 10, min = 1, step = 1),
           shiny::selectInput("setup_missing", "\u7f3a\u5931\u73af\u5883\u6307\u6807", stats::setNames(c("complete_cases", "drop_predictors"), c("\u4fdd\u7559\u6307\u6807\uff0c\u53ea\u7528\u5b8c\u6574\u6837\u672c", "\u4e25\u683c\u5254\u9664\u7f3a\u5931\u6307\u6807\uff0c\u4fdd\u7559\u4f4d\u7f6e")), defaults$predictor_missing %||% "complete_cases"),
+          shiny::numericInput("setup_block_size", "\u7a7a\u95f4\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u7559\u7a7a\u81ea\u52a8\uff09", defaults$block_size %||% NA_real_, min = 1),
           shiny::numericInput("setup_cv", "\u7a7a\u95f4\u4ea4\u53c9\u9a8c\u8bc1\u6298\u6570", defaults$cv_k, min = 3L, step = 1L),
           shiny::numericInput("setup_cores", "\u603b\u8ba1\u7b97\u7ebf\u7a0b", defaults$resources$cores, min = 1L, step = 1L),
           shiny::numericInput("setup_workers", "\u5e76\u884c\u60c5\u666f\u6570", defaults$resources$workers, min = 1L, step = 1L),

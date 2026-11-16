@@ -31,10 +31,10 @@
   mask
 }
 
-.cast_raster_block <- function(r, row, nrows) {
+.cast_raster_block <- function(r, row, nrows, col = 1L, ncols = terra::ncol(r)) {
   notes <- character()
   read <- function(x) withCallingHandlers(
-    terra::values(x, row = row, nrows = nrows, mat = TRUE),
+    terra::values(x, row = row, nrows = nrows, col = col, ncols = ncols, mat = TRUE),
     warning = function(w) { notes <<- c(notes, conditionMessage(w)); invokeRestart("muffleWarning") })
   values <- tryCatch(read(r), error = identity)
   if (inherits(values, "error")) {
@@ -62,10 +62,38 @@
     cli::cli_warn("Recovered raster read after reopening the same sources once: {getOption('castSDM.read_context', 'raster read')}; rows {row}-{row+nrows-1L}; initial error: {original}.")
   }
   if (length(notes)) cli::cli_warn("Raster read warning: {paste(unique(notes), collapse = '; ')}")
-  if (nrow(values) != nrows * terra::ncol(r)) {
+  if (nrow(values) != nrows * ncols) {
     cli::cli_abort("Raster block read returned an unexpected number of cells.")
   }
   as.data.frame(values, check.names = FALSE)
+}
+
+# Read only column-tile windows containing requested native cells. Indices are
+# block-relative and output retains their exact order, including duplicates.
+.cast_raster_cells <- function(r, row, nrows, indices) {
+  nc <- terra::ncol(r)
+  if (!length(indices)) return(as.data.frame(stats::setNames(rep(list(numeric()), terra::nlyr(r)), names(r))))
+  if (any(!is.finite(indices)) || any(indices < 1 | indices > nc*nrows) || any(indices != as.integer(indices)))
+    cli::cli_abort("Requested cell indices lie outside the native raster block.")
+  rr <- (indices-1L) %/% nc + 1L; cc <- (indices-1L) %% nc + 1L
+  tiles <- split(seq_along(indices), (cc-1L) %/% 256L)
+  windows <- lapply(tiles, function(at) c(min(rr[at]), max(rr[at]), min(cc[at]), max(cc[at])))
+  cells <- sum(vapply(windows, function(w) (w[2L]-w[1L]+1L)*(w[4L]-w[3L]+1L), numeric(1)))
+  north <- min(rr); left <- min(cc); height <- max(rr)-north+1L; width <- max(cc)-left+1L
+  # Dense windows favour one bulk read over repeated source opens. This I/O
+  # crossover never drops cells or changes the scientific analysis domain.
+  if (cells >= height*width/2) {
+    z <- .cast_raster_block(r, row+north-1L, height, left, width)
+    return(z[(rr-north)*width + cc-left+1L, , drop = FALSE])
+  }
+  out <- matrix(NA_real_, length(indices), terra::nlyr(r), dimnames = list(NULL, names(r)))
+  for (i in seq_along(tiles)) {
+    at <- tiles[[i]]; w <- windows[[i]]; width <- w[4L]-w[3L]+1L
+    z <- .cast_raster_block(r, row+w[1L]-1L, w[2L]-w[1L]+1L, w[3L], width)
+    local <- (rr[at]-w[1L])*width + cc[at]-w[3L]+1L
+    out[at, ] <- as.matrix(z[local, , drop = FALSE])
+  }
+  as.data.frame(out, check.names = FALSE)
 }
 
 .cast_mask_rows <- function(mask, row, nrows, n) {

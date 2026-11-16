@@ -200,3 +200,14 @@ uses response curves and counterfactual SDM maps, so no first-use or new causal
 estimator claim is made. Verification does not rerun the full national workflow.
 
 On 16 November 2026, Codex assisted 0.40.0: common raw-input clamping, paired shift execution, scoped content identities, complete reference populations and selection-frequency reporting. Legacy simulated tests and the unreferenced Alces example were removed. Replacement CI checks use the complete saved SchiSOFT/CHELSA sample with attribution and provenance. Full saved-model future parity is checked separately; the national research workflow is left for the user. These engineering checks do not establish ecological causality or MEE acceptance.
+
+
+The 0.41.0 maintenance adds spatial-training-fit response sensitivity using
+actual paired environments, verified response-map reuse, scope-specific Shiny
+summaries and native window I/O. Real squirrel records and the supplied
+national covariate library were used for a preparation and point-prediction
+comparison; the complete national future-map workflow remains user-run. No
+new occurrence records, ecological effects, labels or synthetic fixtures were
+created. Local QA receipts, source hashes, package tests and R CMD check record
+what was executed; successful engineering checks do not establish ecological
+causality, explanation truth or journal acceptance.

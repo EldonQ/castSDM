@@ -26,3 +26,4 @@
 ^benchmarks$
 
 ^\.local-checks$
+^\.gitattributes$

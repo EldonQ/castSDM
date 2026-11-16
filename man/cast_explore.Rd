@@ -48,7 +48,9 @@ existing rows; these summaries are not area-weighted raster summaries.}
 \item{maxdepth}{Maximum response tree depth. See \code{\link[=cast_response_groups]{cast_response_groups()}}.}
 
 \item{maps}{Compute native-grid response/group rasters. \code{FALSE} only computes
-the real-location response table and grouping; it never predicts a full grid.}
+the real-location response table and grouping; it never predicts a full grid.
+Matching saved publication response maps remain available even with FALSE;
+native common-support summaries and location summaries are kept separate.}
 
 \item{output_dir}{Separate directory for exploration artifacts. Default
 \verb{interactive/} within the case. Research fits and existing figures are not overwritten.}

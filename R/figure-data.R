@@ -73,7 +73,7 @@
       use <- eligible[saved$indices]; positions <- saved$indices[use]
       a <- saved$values[use, , drop = FALSE]; b <- a
       if (length(changing) && length(positions)) b[changing] <-
-        .cast_raster_block(future[[changing]], first, nr)[positions, , drop = FALSE]
+        .cast_raster_cells(future[[changing]], first, nr, positions)
       ok <- .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(ok)) {
         evaluate <- function(vars, x) if (length(vars))
@@ -139,14 +139,13 @@
 
 # Separate full-domain D_ maps from native-masked main/E_ display products.
 # Masks have exactly the native scopes used by their numerical summaries.
-.cast_figure_driver_display <- function(attribution, output, resolution) {
+.cast_figure_driver_display <- function(attribution, output, resolution, drivers = attribution$drivers, include_diagnostics = TRUE) {
   r <- terra::rast(attribution$raster_file)
-  drivers <- attribution$drivers
   contrasts <- c("total_change", paste0("effect_", drivers), paste0("retained_", drivers), "remainder")
   layers <- c(paste0("effect_", drivers), paste0("retained_", drivers))
   references <- stats::setNames("all_driver_paired_support", layers[1L])
   diagnostics <- list()
-  for (v in drivers) {
+  for (v in if (include_diagnostics) drivers else character()) {
     cols <- paste0(c("context_direction_", "context_gap_", "effect_agreement_", "retained_agreement_"), v)
     if (!all(cols %in% names(r))) next
     diagnostics[[v]] <- cols
@@ -156,7 +155,8 @@
   # Read the saved effects once in bounded blocks. Do not materialise the
   # national multiband stack or repeatedly mask it for each driver.
   needed <- unique(c(contrasts, "support_total", layers,
-    paste0("support_effect_", names(diagnostics)), paste0("support_retained_", names(diagnostics))))
+    if (length(diagnostics)) paste0("support_effect_", names(diagnostics)),
+    if (length(diagnostics)) paste0("support_retained_", names(diagnostics))))
   r <- r[[needed]]
   terra::readStart(r)
   on.exit(terra::readStop(r), add = TRUE)
@@ -185,7 +185,8 @@
     current = NULL, future = NULL, attribution = NULL, render_only = FALSE,
     response_grid = 50L, display_resolution = .02, resources = list(), verbose = TRUE,
     products = c("maps", "responses", "attribution", "mess"), response_method = "ale",
-    response_variables = NULL, response_types = c(response_method, "fixed")) {
+    response_variables = NULL, response_types = c(response_method, "fixed"),
+    display_request = NULL) {
   fit <- object$fit_full %||% object$fit
   .cast_check_fit(fit)
   if (!render_only && any(products %in% c("responses", "attribution", "mess")) &&
@@ -213,7 +214,8 @@
   curves_ready <- !"responses" %in% products || (valid_old &&
     all(vapply(response_types, function(type) !is.null(old$responses[[type]]) &&
       all(response_variables %in% old$responses[[type]]$variable), logical(1))))
-  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products) && curves_ready) {
+  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products) && curves_ready &&
+      identical(old$display_request, display_request)) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
     return(old)
   }
@@ -313,6 +315,17 @@
       overwrite = TRUE, diagnostics = TRUE, prepared = prepared,
       filename = if (!is.null(domain)) file.path(directory, "driver_attribution.tif"))
   }
+  if (!is.null(attribution$raster_file) && !is.null(current) && !is.null(future)) {
+    contract <- list(fit = .cast_fit_identity(fit), scenario = scenario,
+      weights = comparison$weights, clamp = comparison$clamp,
+      support_probs = comparison$support_probs,
+      current = prepared$current_key %||% .cast_data_identity(current),
+      future = prepared$future_key %||% .cast_data_identity(future),
+      comparison = unname(tools::md5sum(report$raster_file)))
+    .cast_cache_write(list(contract = contract, attribution = attribution),
+      file.path(directory, "driver_catalog.rds"), .cast_digest(contract), attribution$raster_file)
+    outputs <- c(outputs, file.path(directory, "driver_catalog.rds"))
+  }
   if ("attribution" %in% products && is.null(attribution)) note("03_environmental_driver",
     if (!length(unlist(comparison$groups, use.names = FALSE))) "No fitted predictor changes; scenario driver maps are inapplicable." else
       "Current/future predictor inputs or an existing cast_attribution object are required.")
@@ -336,7 +349,9 @@
     if (is.null(result$raster_file)) next
     if (verbose) cli::cli_inform("Display grid {s}: checking cache (scientific raster unchanged).")
     input <- result$raster_file
-    if (!is.null(comparison$threshold)) {
+    requested <- if (s == scenario) display_request$report_layers else display_request$other_layers
+    if (!is.null(requested) && !length(requested)) next
+    if (!is.null(comparison$threshold) && (is.null(display_request) || isTRUE(display_request$range))) {
       path <- file.path(directory, paste0("range_", artifact_id, ".tif"))
       key <- .cast_digest(list(unname(tools::md5sum(input)), comparison$threshold, .cast_code_identity(.cast_figure_classes)))
       classes[[s]] <- cached(paste0("range_", artifact_id), key,
@@ -345,9 +360,9 @@
     }
     path <- file.path(directory, paste0("display_", artifact_id, ".tif"))
     key <- .cast_digest(list(unname(tools::md5sum(input)),
-      display_resolution, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
+      display_resolution, requested, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
     displays[[s]] <- cached(paste0("display_", artifact_id), key,
-      .cast_figure_display(input, path, display_resolution, shared_key = shared_display),
+      .cast_figure_display(input, path, display_resolution, layers = requested, shared_key = shared_display),
       c(path, paste0(path, ".csv")))
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
@@ -365,7 +380,14 @@
   attribution_supported_display <- if (valid_old) old$attribution_supported_display else NULL
   if ("attribution" %in% products && !is.null(attribution$raster_file)) {
     outputs <- c(outputs, attribution$raster_file)
-    layers <- c(paste0("effect_", attribution$drivers), paste0("retained_", attribution$drivers))
+    drivers <- attribution$drivers
+    if (identical(display_request$driver_mode, "focus") && length(drivers)) {
+      z <- attribution$common_summary
+      z <- z[z$contrast == "only", , drop = FALSE]
+      drivers <- if (any(is.finite(z$mean_abs) & z$mean_abs > 0))
+        z$driver[which.max(replace(z$mean_abs, !is.finite(z$mean_abs), -Inf))] else drivers[1L]
+    }
+    layers <- c(paste0("effect_", drivers), paste0("retained_", drivers))
     path <- file.path(directory, "display_drivers.tif")
     key <- .cast_digest(list(unname(tools::md5sum(attribution$raster_file)),
       layers, display_resolution, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
@@ -377,7 +399,8 @@
       path <- file.path(directory, "display_drivers_supported.tif")
       key <- .cast_digest(list(key, .cast_code_identity(.cast_figure_driver_display)))
       attribution_supported_display <- cached("display_drivers_supported", key,
-        .cast_figure_driver_display(attribution, path, display_resolution), c(path, paste0(path, ".csv")))
+        .cast_figure_driver_display(attribution, path, display_resolution, drivers = drivers,
+          include_diagnostics = !identical(display_request$driver_mode, "focus")), c(path, paste0(path, ".csv")))
       outputs <- c(outputs, attribution_supported_display)
       if (verbose) {
         coverage <- utils::read.csv(paste0(path, ".csv"))[1L, ]
@@ -411,7 +434,7 @@
     value <- utils::read.csv(p); value$product <- basename(sub("[.]csv$", "", p)); value
   }))
   outputs <- c(outputs, coverage_files)
-  data <- list(schema = "cast_figure_data/7", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
+  data <- list(schema = "cast_figure_data/7", display_coverage = display_coverage, analysis_key = base_key, display_request = display_request, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,
@@ -471,4 +494,20 @@
   types <- c(if (both || any(include %in% "core" | grepl("^06(_|$)|^R_(ale|pdp)", include))) method,
     if (both || any(grepl("^14(_|$)|^R_fixed", include))) "fixed")
   list(variables = vars, types = unique(types))
+}
+
+# The core collection needs one future band per scenario, a few reporting
+# bands and only the leading driver's maps. Full atlases remain explicit.
+.cast_figure_display_request <- function(include) {
+  if (any(include %in% c("all", "maps", "S", "drivers")) ||
+      any(grepl("^[SDE]_", include))) return(NULL)
+  has <- function(id) any(grepl(paste0("^", id, "(_|$)"), include))
+  report <- character()
+  if ("core" %in% include || has("02")) report <- c(report, "current", "joint", "joint_change")
+  if ("core" %in% include || has("04")) report <- c(report, "support", "sd_joint_change", "sign_conflict_joint")
+  if (has("05")) report <- c(report, "climate_main", "lulc_main", "interaction")
+  if (has("08")) report <- c(report, "range_class", "range_class_supported", "range_class_common_support")
+  future <- if ("core" %in% include || has("10")) "joint" else character()
+  list(report_layers = unique(c(report, future)), other_layers = future,
+    range = has("08"), driver_mode = "focus")
 }

@@ -72,6 +72,10 @@
 #'   `predict`/`ensemble` (when `env_data` is supplied), `projection` (when
 #'   `env_raster` is supplied), the effective `protocol` and the receipt
 #'   log. Stage files live under `output_dir` when supplied.
+#' @param response_data Optional fixed hold-out scenario data as in [cast_cv()].
+#'   Its current predictors must exactly match the prepared hold-out in row
+#'   order. Future values must cover every eligible candidate, not just the
+#'   final selection, so fold-specific climate predictors are changed correctly.
 #' @seealso [cast_protocol()], [cast_select()], [cast_cv()],
 #'   [cast_evaluate()], [cast_report_odmap()]
 #' @export
@@ -86,7 +90,7 @@ cast_run <- function(species_data,
                      output_dir = NULL,
                      report_meta = list(),
                      verbose = TRUE, prepared = NULL, cache_dir = NULL,
-                     resume = TRUE) {
+                     resume = TRUE, response_data = NULL) {
   protocol <- .cast_validate_protocol(protocol)
   cl <- match.call()
   if (!is.data.frame(species_data)) {
@@ -184,7 +188,13 @@ cast_run <- function(species_data,
     .cast_digest(list(species_data, protocol$train_fraction,
                       protocol$block_method, protocol$holdout_blocks,
                       protocol$coords_crs, protocol$block_size, protocol$seed)),
-    split)
+    split, tables = list(split_class_balance = split$fold_design$class_balance))
+
+  response_data <- .cast_response_validation_data(response_data, split$env_vars)
+  if (!is.null(response_data) && !isTRUE(all.equal(
+      response_data$current[, split$env_vars, drop = FALSE],
+      split$test[, split$env_vars, drop = FALSE], check.attributes = FALSE)))
+    cli::cli_abort("cast_run response_data$current must match the prepared hold-out predictors in row order; hold-out labels are never used for explanation fitting.")
 
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
@@ -247,7 +257,7 @@ cast_run <- function(species_data,
     vif_threshold = protocol$select_vif_threshold,
     roles = select_roles,
     var_id = select_var_id, category = select_category)
-  cv_inputs <- list(split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
+  cv_inputs <- list(response_data, split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
     protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
@@ -267,7 +277,7 @@ cast_run <- function(species_data,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose,
-    clamp = protocol$clamp
+    clamp = protocol$clamp, response_data = response_data
   ))
   cv_tables <- list(
     cv_metrics = cv$metrics, cv_fold_timings = cv$timings, cv_engine_fits = cv$engine_fits,

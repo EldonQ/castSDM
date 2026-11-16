@@ -294,9 +294,9 @@
     if (length(positions)) {
       b <- timed("read_future", if (shared_static) {
         value <- a
-        if (length(changing)) value[changing] <- .cast_raster_block(future[[changing]], first, count)[positions, , drop = FALSE]
+        if (length(changing)) value[changing] <- .cast_raster_cells(future[[changing]], first, count, positions)
         value
-      } else if (plan$raster) .cast_raster_block(future, first, count)[positions, , drop = FALSE] else future[idx[positions], , drop = FALSE])
+      } else if (plan$raster) .cast_raster_cells(future, first, count, positions) else future[idx[positions], , drop = FALSE])
       base <- timed("read_baseline", if (plan$raster) as.matrix(.cast_raster_block(base_r, first, count))[positions, , drop = FALSE] else baseline[idx[positions], , drop = FALSE])
       keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {

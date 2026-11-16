@@ -594,14 +594,32 @@ prepare_species <- function(cfg) {
 case_domain_qualification <- function(current, domain, minimum) {
   if (length(minimum) != 1L || !is.finite(minimum) || minimum <= 0 || minimum > 1)
     stop("predictor_min_coverage must be in (0, 1].")
-  cells <- which(is.finite(terra::values(domain, mat = FALSE)))
-  if (!length(cells)) stop("The analysis mask has no finite cells.")
+  mask <- terra::values(domain, mat = FALSE)
+  cells <- which(is.finite(mask) & mask != 0)
+  if (!length(cells)) stop("The analysis mask has no active cells.")
+  nc <- terra::ncol(current)
+  # Open each source once. Repeated 100,000-cell extraction reopened a national
+  # raster up to 95 times per layer. Sequential bounded windows count exactly
+  # the same native cells without those reopen/extraction costs.
+  rows <- max(1L, as.integer(1000000L/nc))
+  windows <- lapply(seq.int(1L, terra::nrow(current), by = rows), function(first) {
+    count <- min(rows, terra::nrow(current)-first+1L)
+    at <- cells[cells > (first-1L)*nc & cells <= (first+count-1L)*nc] - (first-1L)*nc
+    if (!length(at)) return(NULL)
+    col <- (at-1L) %% nc + 1L
+    left <- min(col); width <- max(col)-left+1L
+    list(first=first, count=count, left=left, width=width,
+      index=((at-1L) %/% nc)*width + col-left+1L)
+  })
+  windows <- Filter(Negate(is.null), windows)
   counts <- vapply(seq_len(terra::nlyr(current)), function(i) {
-    n <- 0L
-    for (first in seq.int(1L, length(cells), by = 100000L)) {
-      at <- cells[first:min(length(cells), first + 99999L)]
-      n <- n + sum(is.finite(as.matrix(current[[i]][at])))
-    }
+    layer <- current[[i]]
+    terra::readStart(layer)
+    n <- tryCatch(sum(vapply(windows, function(w) {
+      z <- terra::readValues(layer, row=w$first, nrows=w$count,
+        col=w$left, ncols=w$width, mat=FALSE)
+      sum(is.finite(z[w$index]))
+    }, numeric(1))), finally=terra::readStop(layer))
     if (i %% 25L == 0L || i == terra::nlyr(current))
       message("Analysis-mask coverage: ", i, "/", terra::nlyr(current), " layers checked.")
     n

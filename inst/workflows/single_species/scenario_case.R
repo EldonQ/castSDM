@@ -49,3 +49,26 @@ case_scenarios <- function(cfg, selected, current, out_dir) {
   if (!report %in% names(stacks)) stop("Report scenario was not requested: ", report)
   list(future = stacks, groups = groups, report = report, table = table)
 }
+
+# Actual report-scenario values at the untouched hold-out locations. Prepare
+# ALL candidates so fold-specific selections never inherit present climate.
+case_response_validation <- function(cfg, split, meta) {
+  drivers <- meta$layer[meta$future_policy == "climate"]
+  future <- split$test[, split$env_vars, drop = FALSE]
+  inventory <- case_inventory_read_future(cfg)
+  paths <- vapply(drivers, function(v) {
+    m <- meta[meta$layer == v, ]
+    hit <- which(inventory$construct_id == m$construct_id &
+      inventory$ssp == cfg$scenario_report_ssp & inventory$period == cfg$scenario_report_period &
+      inventory$product == "chelsa21-ensmean")
+    if (length(hit) != 1L) stop("Expected one report-scenario layer for ", v)
+    inventory$path[hit]
+  }, character(1))
+  if (length(paths)) {
+    r <- terra::rast(paths); names(r) <- drivers
+    future[drivers] <- terra::extract(r, as.matrix(split$test[, c("lon", "lat")]))
+  }
+  list(current = split$test[, split$env_vars, drop = FALSE], future = future,
+    drivers = drivers, scenario = paste("climate_ensmean", cfg$scenario_report_ssp,
+      cfg$scenario_report_period, sep = "_"), support_probs = cfg$support_probs)
+}

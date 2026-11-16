@@ -99,7 +99,8 @@ predictions already calculated, without further fitted-model calls.}
 }
 \value{
 A \code{cast_attribution} list with \code{summary}, \code{common_summary},
-\code{model_summary}, frozen \code{weights},
+\code{model_summary}, \code{model_summary_common} on the same paired-support cells
+across drivers and engines, frozen \code{weights},
 optional \code{consistency} counts/fractions on both-background supported cells,
 \code{drivers}, \code{data} (tables) or \code{raster_file} (rasters), and \code{layers}.
 \verb{effect_<driver>} is driver-only future minus current; \verb{retained_<driver>}

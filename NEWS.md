@@ -1,3 +1,33 @@
+# castSDM 0.41.0
+
+- Check explanation sensitivity using the existing spatial training fits at
+  fixed external locations and actual future covariates, including predictors
+  selected only within folds. Save per-model contrasts and common-support
+  summaries, zero responses and selection counts; add no extra learner or fits.
+- Reuse verified publication response rasters in Shiny, including table-only
+  requests. Separate native common-support grid means from CV-location means;
+  show spatial-refit sensitivity and saved per-model change maps.
+- Aggregate valid native cells for interactive previews instead of regular-cell
+  subsampling; apply support masks before aggregation and distinguish mixed
+  support explicitly. Use a shared observed case magnitude scale;
+  retain saved maps while a table request finishes. No native values are clipped.
+- Prepare only requested figure bands and focus-driver previews. Core exports
+  no longer compute unused range classifications or complete driver atlases.
+  All previous atlas options and cartography remain available explicitly.
+- Read sparse native cell windows in their original order, and open coverage
+  sources once for sequential bounded reads. Preserve all observations and
+  scientific raster values; reject incomplete OOF threshold calibration rather
+  than substituting 0.5.
+- Allocate whole hold-out blocks toward each response class fraction rather
+  than total rows alone. Report both class counts, achieved fractions and
+  mathematically unattainable targets when a single block dominates a class.
+  Do not split blocks or select partitions using predictive performance.
+- Use the same GLU inventory in the supplied fish and squirrel presets. Treat
+  the projected squirrel file as supplied records with unverified provenance,
+  not automatically as audited GBIF data. Retain a frozen validation cohort and
+  report excluded records complete on the final predictors without adding them
+  after evaluating the hold-out. New runs use cast041_chelsa_ensmean.
+
 # castSDM 0.40.0
 
 - Apply one raw-input training-range clamp across response curves, ordinary

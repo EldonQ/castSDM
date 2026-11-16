@@ -2,7 +2,8 @@
 .cast_compare_current_blocks <- function(plan, block_size, directory, key, verbose) {
   rows <- max(1L, as.integer(block_size/terra::ncol(plan$current)))
   starts <- seq.int(1L, terra::nrow(plan$current), by = rows)
-  key <- .cast_digest(list(key, rows, plan$vars, "current_blocks/1",
+  key <- .cast_digest(list(key, rows, plan$vars, "current_blocks/2",
+    .cast_code_identity(.cast_raster_cells),
     .cast_code_identity(.cast_raster_block)))
   receipt <- file.path(directory, "manifest.rds")
   old <- .cast_cache_read(receipt, key)
@@ -24,7 +25,7 @@
       indices <- which(active)
       values <- as.data.frame(stats::setNames(rep(list(numeric()), length(plan$vars)), plan$vars))
       if (length(indices)) {
-        values <- .cast_raster_block(plan$current, first, count)[indices, , drop = FALSE]
+        values <- .cast_raster_cells(plan$current, first, count, indices)
         finite <- .cast_finite_rows(values)
         indices <- indices[finite]; values <- values[finite, , drop = FALSE]
       }
@@ -47,7 +48,7 @@
     indices <- which(.cast_mask_rows(mask, first, count, count*terra::ncol(current)))
     values <- as.data.frame(stats::setNames(rep(list(numeric()), terra::nlyr(current)), names(current)))
     if (length(indices)) {
-      values <- .cast_raster_block(current, first, count)[indices, , drop = FALSE]
+      values <- .cast_raster_cells(current, first, count, indices)
       finite <- .cast_finite_rows(values)
       indices <- indices[finite]; values <- values[finite, , drop = FALSE]
     }

@@ -15,7 +15,7 @@
 #' @param species Taxon identifier. The Schizothoracinae preset is a pooled subfamily.
 #' @param settings Named list: `domain` (`national` or `freshwater_river`),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
-#'   `models`, `cv_k`, `background_points`, `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
+#'   `models`, `cv_k`, `block_size` (metres; NULL estimates the range), `background_points`, `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
 #' @param run Execute preparation, fitting, projections and figures after checks.
 #'   Default `FALSE` only indexes and checks physical inputs.
 #' @return Workspace, entry, case directory and checked settings, invisibly.
@@ -41,12 +41,12 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
     cli::cli_abort("Keep the workspace outside the environmental data library.")
   if (length(species) != 1L || is.na(species) || !grepl("^[A-Za-z][A-Za-z0-9_-]*$", species))
     cli::cli_abort("Use a taxon identifier with letters, digits, underscores or hyphens.")
-  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "background_points", "vif_threshold", "predictor_missing", "resources")
+  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "vif_threshold", "predictor_missing", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
   defaults <- list(domain = if (species == "Schizothoracinae") "freshwater_river" else "national",
-    input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
+    input_type = if (species == "Callosciurus_erythraeus") "nsdm_occ" else "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
     cv_k = 5L, background_points = 10000L, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
   for (n in c("domain", "input_type", "lulc_product")) {
@@ -56,7 +56,7 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   }
   # Reuse package validation rather than maintain a second numerical contract.
   cast_protocol(models = settings$models, cv_k = settings$cv_k,
-    num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
+    block_size = settings$block_size, num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
   if (length(settings$predictor_missing) != 1L || is.na(settings$predictor_missing) || !settings$predictor_missing %in% c("drop_predictors", "complete_cases")) cli::cli_abort("Invalid predictor_missing policy.")
   settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
   .cast_resources(settings$resources)

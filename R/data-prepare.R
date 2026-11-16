@@ -191,7 +191,11 @@ cast_vif <- function(data,
 #'
 #' @param data A `data.frame` with columns: `lon`, `lat`, `presence` (0/1),
 #'   and environmental variables.
-#' @param train_fraction Numeric in (0, 1), strictly. Fraction for the
+#' @param train_fraction Numeric in (0, 1), strictly. Spatial splits allocate
+#'   whole blocks toward the requested fraction separately for each response
+#'   class. Achieved fractions and dominant-block limits are reported in
+#'   `fold_design$class_balance`; large blocks may make the target unattainable.
+#'   Fraction for the
 #'   training set. Values outside the open interval are rejected.
 #'   Default `0.7`.
 #' @param seed Integer or `NULL`. Random seed for reproducible splitting.
@@ -422,19 +426,43 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   # blockCV's two-fold assignment is used only to construct its block geometry.
   if (block_method == "blockcv") blocks <- design$block_ids
   ub <- sample(unique(blocks))
-  target_test <- round((1 - train_fraction) * n)
-  # Greedy block pick minimising |test size - target|: a block is added only
-  # when it brings the running total closer to the target. Whole blocks can
-  # make the achieved fraction differ from the requested one.
+  # Stratify at the physical-block level, with equal relative weight for
+  # each response class. Optimising only total rows can leave nearly every
+  # presence in training when backgrounds dominate the sample.
+  labels <- if (two_class) y else rep(1L, n)
+  counts <- table(factor(blocks, levels = ub), labels)
+  totals <- colSums(counts)
+  target <- 1-train_fraction
+  score <- function(z) mean((z/totals-target)^2)
   test_blocks <- integer(0)
-  cur_test <- 0L
-  for (b in ub) {
-    b_n <- sum(blocks == b)
-    if (abs((cur_test + b_n) - target_test) < abs(cur_test - target_test)) {
-      test_blocks <- c(test_blocks, b)
-      cur_test <- cur_test + b_n
+  current <- rep(0, ncol(counts))
+  remaining <- seq_along(ub)
+  while (length(remaining)) {
+    proposals <- sweep(counts[remaining, , drop = FALSE], 2L, current, "+")
+    losses <- rowMeans((sweep(proposals, 2L, totals, "/")-target)^2)
+    best <- which.min(losses)
+    if (losses[best] >= score(current)) break
+    test_blocks <- c(test_blocks, ub[remaining[best]])
+    current <- proposals[best, ]
+    remaining <- remaining[-best]
+  }
+  # A later block can make an earlier choice unnecessary. Drop it when the
+  # class allocation improves; labels stratify the design, never its scores.
+  for (b in test_blocks) {
+    proposal <- current-counts[match(b, ub), ]
+    if (score(proposal) < score(current)) {
+      test_blocks <- setdiff(test_blocks, b); current <- proposal
     }
   }
+  balance <- data.frame(response = colnames(counts), total = as.numeric(totals),
+    training = as.numeric(totals-current), holdout = as.numeric(current),
+    requested_holdout_fraction = target, achieved_holdout_fraction = as.numeric(current/totals),
+    largest_block_fraction = as.numeric(apply(counts, 2L, max)/totals))
+  design$class_balance <- balance
+  design$allocation <- "Whole physical blocks; squared relative class-count discrepancy; no model-performance selection"
+  if (any(balance$largest_block_fraction > max(train_fraction, target)))
+    cli::cli_warn("A physical spatial block contains more of a response class than either requested partition can accommodate; the requested class fractions are unattainable at this block scale. Inspect fold_design$class_balance and the occurrence domain; no block is split to manufacture balance.")
+  if (verbose) cli::cli_inform("Spatial hold-out class allocation: {paste(paste0(balance$response, ' = ', balance$holdout, '/', balance$total, ' (', round(100*balance$achieved_holdout_fraction, 1), '%)'), collapse = '; ')}; target {round(100*target, 1)}% per class; block size {round(design$block_size_m %||% NA_real_)} m.")
   test_idx <- which(blocks %in% test_blocks)
   train_idx <- setdiff(seq_len(n), test_idx)
   ok_classes <- if (two_class) {

@@ -13,7 +13,7 @@
 .cast_model_response_sums <- function(value, support, weights, driver, contrast) {
   valid <- .cast_finite_rows(value)
   supported <- valid & !is.na(support) & support
-  assessed <- any(!is.na(support))
+  assessed <- !length(support) || any(!is.na(support))
   do.call(rbind, lapply(seq_along(weights), function(j) {
     x <- value[, j]; sign <- .cast_response_sign(x[valid])
     data.frame(model = names(weights)[j], driver = driver, contrast = contrast,

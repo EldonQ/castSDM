@@ -64,6 +64,10 @@
   total <- fut - base
   bc <- .cast_attribution_inside(current, bounds)
   fc <- .cast_attribution_inside(future, bounds)
+  shared <- bc & fc
+  common_sum <- function(p, driver, contrast) .cast_model_response_sums(
+    p[shared, , drop = FALSE], rep(TRUE, sum(shared)), weights, driver, contrast)
+  common_models <- common_sum(total, NA_character_, "total")
   model_sums <- .cast_model_response_sums(total, bc & fc, weights, NA_character_, "total")
   only_sum <- matrix(0, nrow(current), length(weights))
   out <- cbind(current = average(base), future = average(fut),
@@ -93,6 +97,8 @@
     model_sums <- rbind(model_sums,
       .cast_model_response_sums(effect, bc & .cast_attribution_inside(only, bounds), weights, v, "only"),
       .cast_model_response_sums(retained, fc & .cast_attribution_inside(held, bounds), weights, v, "retained"))
+    common_models <- rbind(common_models, common_sum(effect, v, "only"),
+      common_sum(retained, v, "retained"))
     effects[, j] <- average(effect)
     z <- cbind(average(effect), average(retained),
                as.numeric(bc & .cast_attribution_inside(only, bounds)),
@@ -117,6 +123,8 @@
     }
   }
   out <- cbind(out, remainder = out[, "total_change"] - rowSums(effects))
+  attr(out, "model_sums_common") <- rbind(common_models,
+    common_sum(total-only_sum, NA_character_, "remainder"))
   attr(out, "model_sums") <- rbind(model_sums,
     .cast_model_response_sums(total-only_sum, bc & fc, weights, NA_character_, "remainder"))
   out
@@ -171,7 +179,8 @@
 #'   including when `overwrite = TRUE`. Set `FALSE` to force recomputation.
 #'
 #' @return A `cast_attribution` list with `summary`, `common_summary`,
-#'   `model_summary`, frozen `weights`,
+#'   `model_summary`, `model_summary_common` on the same paired-support cells
+#'   across drivers and engines, frozen `weights`,
 #'   optional `consistency` counts/fractions on both-background supported cells,
 #'   `drivers`, `data` (tables) or `raster_file` (rasters), and `layers`.
 #'   `effect_<driver>` is driver-only future minus current; `retained_<driver>`
@@ -355,7 +364,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   common_sums <- sums
   consistency <- matrix(0, length(drivers), 7L, dimnames = list(drivers,
     c("n_finite", "n_supported", "negative", "zero", "positive", "reversal", "one_zero")))
-  model_sums <- NULL
+  model_sums <- common_models <- NULL
   accumulate <- function(z) {
     cols <- c("total_change", if (length(drivers)) paste0("effect_", drivers),
       if (length(drivers)) paste0("retained_", drivers), "remainder")
@@ -403,6 +412,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
         z <- matrix(NA_real_, length(active), length(layer_names), dimnames = list(NULL, layer_names))
         z[saved$indices, ] <- saved$values
         model_sums <- .cast_model_response_add(model_sums, saved$model_sums)
+        common_models <- .cast_model_response_add(common_models, saved$model_sums_common)
         accumulate(z); .cast_writer_block(writer, z, first, count)
         if (verbose) cli::cli_inform("Environmental response maps: raster batch {i}/{length(starts)} reused ({length(saved$indices)} finite cells).")
         next
@@ -412,7 +422,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
       positions <- saved$indices[use]
       a <- saved$values[use, , drop = FALSE]; b <- a
       if (length(future_read) && length(positions)) b[future_read] <-
-        .cast_raster_block(future[[future_read]], first, count)[positions, , drop = FALSE]
+        .cast_raster_cells(future[[future_read]], first, count, positions)
       block_n <- length(active)
     } else {
       idx <- seq.int(first, min(n, first + block_size - 1L))
@@ -422,7 +432,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     for (v in names(shifts)) b[[v]] <- b[[v]] + shifts[[v]]
     keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
     z <- matrix(NA_real_, block_n, length(layer_names), dimnames = list(NULL, layer_names))
-    block_sums <- NULL
+    block_sums <- block_common <- NULL
     if (any(keep)) {
       seed <- if (raster && is.null(shifts)) .cast_reuse_predictions(prepared, first, count, positions[keep], weights)
       gam <- if (raster && !is.null(blocks) && is.null(shifts))
@@ -433,9 +443,11 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
         base = seed$current, fut = seed$future, gam_current = gam)
       z[positions[keep], ] <- value
       block_sums <- attr(value, "model_sums")
+      block_common <- attr(value, "model_sums_common")
+      common_models <- .cast_model_response_add(common_models, block_common)
       model_sums <- .cast_model_response_add(model_sums, block_sums)
     }
-    if (raster) .cast_cache_write(list(indices = positions[keep], values = z[positions[keep], , drop = FALSE], model_sums = block_sums),
+    if (raster) .cast_cache_write(list(indices = positions[keep], values = z[positions[keep], , drop = FALSE], model_sums = block_sums, model_sums_common = block_common),
       checkpoint, checkpoint_key)
     accumulate(z)
     if (raster) .cast_writer_block(writer, z, first, count) else out[idx, ] <- z
@@ -459,6 +471,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     evidence[[paste0(name, "_fraction")]] <- ifelse(evidence$n_supported > 0,
       evidence[[name]]/evidence$n_supported, NA_real_)
   result <- structure(list(summary = summary, common_summary = common_summary,
+    model_summary_common = .cast_model_response_summary(common_models, weights),
     model_summary = .cast_model_response_summary(model_sums, weights), data = data, consistency = evidence,
     raster_file = if (raster) filename else NULL, layers = layer_names,
     weights = weights, drivers = drivers, support_probs = support_probs,

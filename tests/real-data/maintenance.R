@@ -45,10 +45,19 @@ if ("gam" %in% names(fit$models)) {
   generic <- fit
   generic$models$gam$type <- "external"
   generic$models$gam$predict_function <- function(model, newdata)
-    as.numeric(stats::predict(model, newdata, type = "response"))
+    as.numeric(stats::predict(model, newdata, type = "response", discrete = FALSE))
   reference <- cast_attribution(generic, a, b, drivers = drivers, weights = cc$weights,
     clamp = r$protocol$clamp, verbose = FALSE, diagnostics = TRUE)
-  stopifnot(isTRUE(all.equal(expected$data, reference$data, tolerance = 1e-12)))
+  # Scores have a fixed [0,1] scale. Relative error on an almost-zero
+  # background gap magnifies ordinary cancellation at machine precision.
+  stopifnot(identical(names(expected$data),names(reference$data)),
+    identical(is.na(expected$data),is.na(reference$data)))
+  absolute_error <- max(abs(as.matrix(expected$data)-as.matrix(reference$data)),na.rm=TRUE)
+  stopifnot(is.finite(absolute_error),absolute_error <= 1e-12)
+  flags <- grep("^support_|agreement_|direction_",names(expected$data),value=TRUE)
+  stopifnot(identical(expected$data[flags],reference$data[flags]))
+  cat("Cached versus ordinary GAM: maximum absolute score error",absolute_error,
+    "; support, agreement and direction flags identical.\n")
 }
 # Fault injection exercises cancellation, using actual computed raster batches.
 .cast_real_check_writes <- 0L
@@ -70,8 +79,8 @@ stopifnot(inherits(cancelled, "error"), grepl("QA checkpoint cancellation", cond
 actual <- job()
 z <- terra::values(terra::rast(actual$raster_file))
 stopifnot(isTRUE(all.equal(unname(z[keep, , drop = FALSE]),
-  unname(as.matrix(expected$data[, actual$layers])), tolerance = 1e-12)))
-stopifnot(isTRUE(all.equal(actual$summary, expected$summary, tolerance = 1e-12)))
+  unname(as.matrix(expected$data[, actual$layers])), tolerance = 1e-12, scale = 1)))
+stopifnot(isTRUE(all.equal(actual$summary, expected$summary, tolerance = 1e-12, scale = 1)))
 # Basic plots must never call a fitted engine, PDP or ALE.
 trace("predict_single_model", where = asNamespace("castSDM"), print = FALSE,
   tracer = quote(stop("Unexpected engine prediction during basic plots")))

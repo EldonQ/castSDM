@@ -129,6 +129,8 @@ run_species <- function(cfg) {
   split <- timed("spatial_split", castSDM::cast_prepare(data, train_fraction = p$train_fraction,
     n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed,
     coords_crs = p$coords_crs, block_size = p$block_size))
+  if (is.data.frame(split$fold_design$class_balance))
+    utils::write.csv(split$fold_design$class_balance, file.path(out,"split_class_balance.csv"), row.names=FALSE)
   meta <- case_pool_metadata(cfg, split$env_vars)
   temporal_reference <- case_training_year(preparation, split)
   year <- temporal_reference$year
@@ -142,10 +144,13 @@ run_species <- function(cfg) {
     source = if (is.null(year)) "unavailable" else temporal_reference$source,
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
+  response_data <- timed("response_validation_inputs",
+    case_response_validation(cfg, matched$split, meta))
   result <- timed("training_validation", castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
     select_var_id = stats::setNames(meta$construct_id, meta$layer),
     select_category = stats::setNames(meta$group, meta$layer),
     select_roles = stats::setNames(meta$role, meta$layer),
+    response_data = response_data,
     cache_dir = cfg$cache_root, output_dir = file.path(out, "training"),
     report_meta = list(taxon = cfg$species_name,
       purpose = "CHELSA ensemble-mean climate projections; nonclimate predictors held current")))
@@ -155,7 +160,8 @@ run_species <- function(cfg) {
   semantics <- meta[, intersect(c("layer", "group", "product", "construct_id", "scale", "stat", "year", "role"), names(meta)), drop = FALSE]
   semantics$selected <- semantics$layer %in% selected
   semantics$construct_variants <- as.integer(table(meta$construct_id)[meta$construct_id])
-  semantics$spatial_context <- ifelse(semantics$group == "soil",
+  semantics$spatial_context <- if (cfg$domain_mode != "freshwater_river")
+    rep("Gridded environmental predictor; inspect source, scale and date for ecological relevance", nrow(semantics)) else ifelse(semantics$group == "soil",
     "Terrestrial grid property; not a measured in-stream condition",
     ifelse(semantics$group == "bioclim", "Gridded atmospheric climate; not measured water temperature",
       "See source definition for grid, neighbourhood or upstream aggregation"))
@@ -170,6 +176,16 @@ run_species <- function(cfg) {
     ". VIF is a collinearity check, not ecological or causal relevance selection.")
   message("Predictor context: ", sum(semantics$selected & semantics$construct_variants > 1L),
     " retained layers share a construct with another candidate; see predictor_semantics.csv for scale and source context. No fixed predictor quota is imposed.")
+  excluded <- qc[qc$qc_reason == "missing_environment", , drop = FALSE]
+  if (nrow(excluded) && "missing_predictors" %in% names(excluded)) {
+    excluded$missing_final_predictors <- vapply(strsplit(excluded$missing_predictors, ";", fixed = TRUE),
+      function(z) paste(intersect(z, selected), collapse = ";"), character(1))
+    excluded$complete_on_final_predictors <- !nzchar(excluded$missing_final_predictors)
+    excluded$cohort_policy <- "Excluded before splitting on the declared candidate pool; not reintroduced after hold-out evaluation"
+    utils::write.csv(excluded, file.path(out, "excluded_cohort_final_predictors.csv"), row.names = FALSE)
+    message("Frozen validation cohort: ", sum(excluded$complete_on_final_predictors),
+      " excluded records are complete on final predictors. They are not added after validation; candidate-pool or missingness policy changes require a new declared run.")
+  }
   current <- timed("selected_environment", wf_load_current_stack(cfg, varnames = selected))
   scenarios <- timed("scenario_inputs", case_scenarios(cfg, selected, current, out))
   mask <- terra::rast(file.path(preparation, "analysis_domain_mask.tif"))
@@ -187,6 +203,11 @@ run_species <- function(cfg) {
   utils::write.csv(footprint, file.path(out, "spatial_output_qc.csv"), row.names = FALSE)
   diagnostic <- timed("diagnostics", castSDM::cast_diagnose(result, comparison = comparison,
     output_dir = file.path(out, "diagnostics")))
+  sensitivity <- diagnostic$response_spatial_sensitivity
+  if (is.data.frame(sensitivity) && "n_common" %in% names(sensitivity))
+    message("Spatial-refit explanation check: ", sensitivity$n_available[1L], " fits on ",
+      sensitivity$n_locations[1L], " unchanged hold-out locations; ", sensitivity$n_common[1L],
+      " common marginal-support locations. See diagnostics/response_spatial_sensitivity.csv; these are descriptive sensitivities, not confidence intervals.")
   terms <- diagnostic$gam_concurvity
   if (is.data.frame(terms) && nrow(terms)) {
     terms <- terms[terms$term != "para", ]
@@ -196,7 +217,7 @@ run_species <- function(cfg) {
   }
   report_scope <- footprint[footprint$scenario == scenarios$report, ]
   message("Reporting map scope: ", report_scope$n_valid, " paired valid cells; ",
-    report_scope$n_supported, " inside the declared marginal range envelope. National blank areas are outside this local analysis or have no paired prediction; grid area is not aquatic surface area.")
+    report_scope$n_supported, " inside the declared marginal range envelope. Blank areas are outside the declared analysis domain or lack paired predictions. Grid area must be interpreted according to this domain.")
   case <- list(schema = "cast_single_species/1", species = cfg$species_name,
     cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
     training = "training/result.rds", comparison = "comparison/comparison.rds",

@@ -127,6 +127,7 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
     notes <- rbind(notes, data.frame(code = "single_class_fold", detail = "At least one spatial fold lacks a response class; inspect coverage before using thresholds."))
   d <- structure(list(holdout = bind(holdout), score_views_oof = bind(score_views),
     reliability_oof = bind(reliability), folds = folds, fold_metrics = cv$fold_metrics,
+    response_spatial_sensitivity = .cast_response_validation_summary(cv, policy$weights),
     selection_frequency = cv$selection_freq, score_offsets = cv$offsets,
     gam_concurvity = .cast_gam_response_diagnostics(object),
     comparison_support_scope = comparison$support_scope,

@@ -18,7 +18,8 @@ cast_run(
   verbose = TRUE,
   prepared = NULL,
   cache_dir = NULL,
-  resume = TRUE
+  resume = TRUE,
+  response_data = NULL
 )
 }
 \arguments{
@@ -60,6 +61,11 @@ output location does not invalidate fitted models. No future data or
 plotting settings enter a training-stage key.}
 
 \item{resume}{Reuse verified matching training-stage cache entries.}
+
+\item{response_data}{Optional fixed hold-out scenario data as in \code{\link[=cast_cv]{cast_cv()}}.
+Its current predictors must exactly match the prepared hold-out in row
+order. Future values must cover every eligible candidate, not just the
+final selection, so fold-specific climate predictors are changed correctly.}
 }
 \value{
 A \code{cast_result} object carrying \code{screen}, \code{fit} (training split),

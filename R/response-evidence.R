@@ -92,5 +92,6 @@
     interpretation = paste("Shared range-supported saved locations; rankings concern the supplied scenario changes.",
       "Changed-location agreement excludes predictors unchanged at those saved locations; unqualified agreement includes all common rows.",
       "Unchanged-scenario status refers to supplied locations, not the entire raster. Background dependence and model sign agreement are descriptive, not causal identification or confidence.",
+      "Additive-link GAM and linear/quadratic Maxnet can preserve within-model direction by construction; background direction agreement is not refitting stability. Inspect spatial training-fit sensitivity separately.",
       "Largest-response IDs: -1 exact tie, 0 no response, NA outside common support."))
 }

@@ -10,6 +10,22 @@
   bundle <- tempfile("cast-view-export-"); dir.create(bundle)
   if (length(files) && any(!file.copy(file.path(directory, files), bundle, recursive = TRUE)))
     cli::cli_abort("Cannot copy analysis artifacts into the export bundle.")
+  receipt <- file.path(directory, if (file.exists(file.path(directory,"exploration.rds"))) "exploration.rds" else "view.rds")
+  envelope <- tryCatch(readRDS(receipt), error=function(e) NULL)
+  result <- if (!is.null(envelope$key)) .cast_cache_read(receipt,envelope$key)
+  if (is.null(result)) cli::cli_abort("The completed result failed verification; regenerate it before exporting.")
+  copied <- character()
+  for (field in c("raster_file","model_raster_file")) {
+    source <- result[[field]]
+    if (is.null(source) || source %in% copied) next
+    if (!file.exists(source) || !identical(unname(tools::md5sum(source)), result$raster_hashes[[field]]))
+      cli::cli_abort("The native result changed or is missing; regenerate the view before exporting.")
+    if (normalizePath(dirname(source),winslash="/") != normalizePath(directory,winslash="/")) {
+      name <- if (field == "raster_file") "native_response.tif" else "native_model_scenario.tif"
+      if (!file.copy(source,file.path(bundle,name))) cli::cli_abort("Cannot archive the verified native result.")
+    }
+    copied <- c(copied,source)
+  }
   saveRDS(state, file.path(bundle, "view_state.rds"))
   writeLines(c("# Run from the extracted bundle; original real-case inputs must remain available.",
     "library(castSDM)", "state <- readRDS('view_state.rds')",
@@ -43,7 +59,9 @@
 }
 
 .cast_app_layer <- function(result, layer) {
-  r <- terra::rast(result$raster_file)
+  source <- if (length(layer) == 1L && grepl("^change_|^sign_conflict_joint$", layer) &&
+    !is.null(result$model_raster_file)) result$model_raster_file else result$raster_file
+  r <- terra::rast(source)
   name <- layer
   if (identical(result$schema, "cast_app_view/1")) {
     aliases <- c(future = "joint", total_change = "joint_change", support_total = "support", total_sd = "sd_joint_change")
@@ -68,6 +86,7 @@
     xy <- terra::project(matrix(c(longitude, latitude), ncol = 2L), "EPSG:4326", terra::crs(raster))
     native <- terra::extract(raster, xy); values <- native[, basic, drop = FALSE]
     if (!is.finite(values$current)) cli::cli_abort("Click inside the saved analysis domain.")
+    values <- cbind(values, .cast_app_model_values(project, settings, xy))
     return(list(values = values, group = NA_integer_, environment = NULL, curve = NULL,
       driver_response = if (has_details) native[, details[1:6], drop = FALSE],
       driver_support = if (has_details) native[, details[7:8], drop = FALSE],
@@ -115,6 +134,7 @@
   predicted <- context$predict()
   curve <- as.numeric(predicted %*% settings$weights)
   curve[rowSums(!is.finite(predicted)) > 0L] <- NA_real_
+  values <- cbind(values, .cast_app_model_values(project, settings, xy))
   list(values = values, group = group,
     driver_response = if (!is.null(details)) details[, seq_len(6L), drop = FALSE],
     driver_support = if (!is.null(details)) details[, 7:8, drop = FALSE],
@@ -254,6 +274,7 @@
         occurrence_file = input$setup_occurrence, species = input$setup_species,
         settings = list(domain = input$setup_domain, input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
+          block_size = if (length(input$setup_block_size) == 1L && is.finite(input$setup_block_size)) input$setup_block_size else NULL,
           background_points = input$setup_background, vif_threshold = input$setup_vif %||% 10,
           predictor_missing = input$setup_missing %||% "complete_cases",
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
@@ -307,6 +328,15 @@
             status_kind("ready"); status("Input checks passed; ready to run.")
           }
         } else {
+          previous <- active()
+          if (is.null(value$preview) && !is.null(previous$preview) &&
+              identical(value$settings$scenario, previous$settings$scenario) &&
+              identical(value$settings$shifts, previous$settings$shifts) &&
+              identical(value$settings$weights, previous$settings$weights) &&
+              identical(value$settings$clamp, previous$settings$clamp) &&
+              (is.null(value$settings$shifts) || identical(value$settings$context, previous$settings$context))) {
+            for (field in c("preview", "raster_file", "model_raster_file")) value[[field]] <- previous[[field]]
+          }
           active(value); active_request(pending); point(NULL)
           if (!is.null(value$evidence)) shiny::updateSelectInput(session, "focus_driver",
             choices = stats::setNames(value$evidence$summary$driver,
@@ -319,12 +349,17 @@
           focus <- value$settings$focus
           if (!is.null(focus) && is.null(restore_state))
             shiny::updateSelectInput(session, "profile_driver", selected = focus)
-          if (!is.null(focus) && !is.null(value$raster_file)) {
+          if (!is.null(focus) && !is.null(value$preview) &&
+              all(paste0(c("effect_", "retained_"), focus) %in% names(terra::rast(value$preview)))) {
             layers <- c(layers, paste0(c("effect_", "retained_", "context_direction_",
               "context_gap_", "effect_agreement_", "retained_agreement_"), focus))
             labels <- c(labels, paste(.cast_app_driver_label(project(), focus), c("| \u6bd4\u8f83\u524d\u80cc\u666f\u54cd\u5e94", "| \u6bd4\u8f83\u540e\u80cc\u666f\u54cd\u5e94",
               "| \u80cc\u666f\u65b9\u5411\u4e00\u81f4\u6027", "| \u4e24\u80cc\u666f\u54cd\u5e94\u5dee",
               "| \u6bd4\u8f83\u524d\u80cc\u666f\u6a21\u578b\u540c\u5411\u6bd4\u4f8b", "| \u6bd4\u8f83\u540e\u80cc\u666f\u6a21\u578b\u540c\u5411\u6bd4\u4f8b")))
+          }
+          if (!is.null(value$preview)) {
+            model_layers <- grep("^change_|^sign_conflict_joint$", names(terra::rast(value$preview)), value = TRUE)
+            layers <- c(layers, model_layers); labels <- c(labels, model_layers)
           }
           if (!is.null(value$group_file)) {
             layers <- c(layers, "response_group"); labels <- c(labels, "\u73af\u5883\u54cd\u5e94\u5206\u7ec4")
@@ -401,28 +436,35 @@
     shiny::observe({
       x <- active(); layer <- input$layer
       proxy <- leaflet::leafletProxy("map", session)
-      proxy <- leaflet::clearImages(proxy); proxy <- leaflet::clearControls(proxy)
-      if (is.null(x) || is.null(layer)) return()
-      if (is.null(x$preview) || !file.exists(x$preview)) return()
+      if (is.null(x) || is.null(layer) || is.null(x$preview) || !file.exists(x$preview)) {
+        leaflet::clearControls(leaflet::clearImages(proxy)); return()
+      }
       r <- terra::rast(x$preview)
       if (!layer %in% names(r)) return()
+      proxy <- leaflet::clearImages(proxy); proxy <- leaflet::clearControls(proxy)
       support <- if (startsWith(layer, "effect_")) paste0("support_effect_", x$settings$focus) else
         if (startsWith(layer, "retained_")) paste0("support_retained_", x$settings$focus) else "support_total"
-      if ((isTRUE(input$supported_only) || startsWith(layer, "context_")) &&
-          !layer %in% c("support_total", "response_group"))
+      supported <- isTRUE(input$supported_only) || startsWith(layer, "context_")
+      field <- if (supported && paste0("supported_", layer) %in% names(r)) paste0("supported_", layer) else layer
+      if (supported && field == layer && !layer %in% c("support_total", "response_group"))
         r[[layer]] <- terra::mask(r[[layer]], r[[support]], maskvalues = 0)
-      r <- r[[layer]]
+      r <- r[[field]]
       direction <- startsWith(layer, "context_direction_")
       signed <- layer == "total_change" || startsWith(layer, "context_gap_") ||
         layer %in% paste0(c("effect_", "retained_"), x$settings$focus)
+      signed <- signed || startsWith(layer, "change_")
       if (signed) {
-        # Shared fixed score scale permits comparisons between scenarios.
-        limits <- if (startsWith(layer, "context_gap_")) c(-2, 2) else c(-1, 1)
+        # Shared observed case scale; no per-layer stretching or clipping.
+        limits <- x$settings$response_limits %||% .cast_app_response_limits(project(), x$raster_file)
         palette <- leaflet::colorNumeric(c("#B35806", "#F7F7F7", "#2166AC"), limits, na.color = "#00000000")
       } else if (direction) {
         ids <- c(-1, 0, 1, 2, 3)
         palette <- leaflet::colorFactor(c("#B35806", "#D9D9D9", "#2166AC", "#8C2981", "#F2A541"),
           domain = ids, levels = ids, na.color = "#00000000")
+      } else if (layer == "support_total") {
+        palette <- leaflet::colorFactor(c("#D9D9D9", "#2166AC", "#F2A541"), c(0, 1, 2), na.color = "#00000000")
+      } else if (layer == "sign_conflict_joint") {
+        palette <- leaflet::colorFactor(c("#DFE8E8", "#B35806"), c(0, 1), na.color = "#00000000")
       } else if (layer == "response_group") {
         ids <- x$groups$summary$group
         palette <- leaflet::colorFactor(grDevices::hcl.colors(max(3L, length(ids)), "Dark 3"), domain = ids,
@@ -430,6 +472,8 @@
       } else palette <- leaflet::colorNumeric(c("#F5F7FA", "#468FAF", "#014F86"), c(0, 1), na.color = "#00000000")
       proxy <- leaflet::addRasterImage(proxy, r, colors = palette, project = FALSE,
         opacity = .85, layerId = "response", maxBytes = 8 * 1024 * 1024)
+      if (layer == "support_total") leaflet::addLegend(proxy,
+        colors = palette(c(0, 1, 2)), labels = c("Outside", "Inside", "Mixed native support"), title = "Range support", opacity = .85) else
       if (direction) leaflet::addLegend(proxy,
         colors = palette(ids), labels = c("Both negative", "Both zero", "Both positive", "Opposite signs", "Zero in one background"),
         title = "Background directions", opacity = .85) else
@@ -515,14 +559,37 @@
       shiny::tags$p(class = "cast-note", paste("\u8bad\u7ec3\u53c2\u8003\u4f4d\u7f6e\u4e2d\u7684\u5171\u540c\u652f\u6301\u6837\u70b9", p$n_common, "/", p$n_input,
         "\u00b7 \u54cd\u5e94\u548c\u53cd\u53f7\u7387\u4f7f\u7528\u540c\u4e00\u6279\u4f4d\u7f6e\uff0c\u540c\u5411\u7387\u4ec5\u9488\u5bf9\u5b9e\u9645\u53d8\u5316\u6837\u70b9\u3002\u6bd4\u4f8b\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"))
     })
+    output$model_population <- shiny::renderUI({
+      shiny::tags$p(class = "cast-note", active()$model_summary_population %||% "Saved training-CV locations")
+    })
     output$model_response <- shiny::renderTable({
-      d <- active()$model_summary
+      d <- active()$model_summary_common %||% active()$model_summary
       shiny::req(d)
       focus <- input$focus_driver %||% ""
       d <- d[is.na(d$driver) & d$contrast == "total" | (!is.na(d$driver) & d$driver == focus), , drop = FALSE]
       d <- d[, c("model", "driver", "contrast", "n", "support", "mean_signed", "mean_signed_supported")]
       names(d) <- c("\u6a21\u578b", "\u56e0\u5b50", "\u5bf9\u6bd4", "\u6709\u6548\u6837\u70b9",
         "\u8fb9\u9645\u652f\u6301\u6bd4\u4f8b", "\u5e73\u5747\u54cd\u5e94", "\u652f\u6301\u57df\u5e73\u5747\u54cd\u5e94")
+      d
+    }, digits = 5)
+    output$spatial_response_validation <- shiny::renderTable({
+      d <- .cast_response_validation_summary(project()$run$cv, project()$comparison$weights)
+      shiny::req(d)
+      if (!"model" %in% names(d)) return(d)
+      focus <- input$focus_driver %||% active()$settings$focus
+      d <- d[d$model == "ensemble" & (d$contrast == "total" | d$driver %in% focus), , drop = FALSE]
+      d <- d[, c("driver", "contrast", "n_locations", "n_common", "n_driver_selected",
+        "mean_response_min", "mean_response_max", "direction_unanimous_fraction", "all_zero_fraction")]
+      names(d) <- c("\u56e0\u5b50", "\u5bf9\u6bd4", "\u7559\u51fa\u4f4d\u7f6e\u6570", "\u5171\u540c\u652f\u6301\u4f4d\u7f6e", "\u5165\u9009\u6298\u6570", "\u5e73\u5747\u54cd\u5e94\u6700\u5c0f\u503c", "\u5e73\u5747\u54cd\u5e94\u6700\u5927\u503c", "\u65b9\u5411\u4e00\u81f4\u6bd4\u4f8b", "\u5168\u96f6\u6bd4\u4f8b")
+      d
+    }, digits = 5)
+    output$native_response <- shiny::renderTable({
+      d <- active()$native_summary
+      shiny::req(d)
+      focus <- input$focus_driver %||% active()$settings$focus
+      d <- d[d$contrast == "total" | d$driver %in% focus,
+        c("driver", "contrast", "n", "mean_signed", "mean_abs")]
+      names(d) <- c("\u56e0\u5b50", "\u5bf9\u6bd4", "\u5171\u540c\u652f\u6301\u7f51\u683c\u6570", "\u5e73\u5747\u54cd\u5e94", "\u5e73\u5747\u7edd\u5bf9\u54cd\u5e94")
       d
     }, digits = 5)
     output$response_summary <- shiny::renderUI({
@@ -667,4 +734,15 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
   app <- shiny::shinyApp(.cast_app_ui(case_dir, workflow), .cast_app_server(case_dir, workflow, state))
   if (!run) return(app)
   shiny::runApp(app, launch.browser = launch.browser, host = host, port = port)
+}
+
+# Coordinates already use the aligned native environmental grid CRS.
+.cast_app_model_values <- function(project, settings, xy) {
+  if (!is.null(settings$shifts)) return(NULL)
+  path <- project$comparison$results[[settings$scenario]]$raster_file
+  if (is.null(path) || !file.exists(path)) return(NULL)
+  r <- terra::rast(path)
+  fields <- grep("^(current_|future_|change_)|^sign_conflict_joint$", names(r), value = TRUE)
+  if (!length(fields)) return(NULL)
+  terra::extract(r[[fields]], xy)
 }

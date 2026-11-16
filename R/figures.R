@@ -191,7 +191,8 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   data <- .cast_figure_data(object, comparison, scenario, data_dir,
     current, future, attribution, render_only, response_grid,
     display_resolution, resources, verbose, products = products, response_method = response_method,
-    response_variables = response_request$variables, response_types = response_request$types)
+    response_variables = response_request$variables, response_types = response_request$types,
+    display_request = .cast_figure_display_request(include))
   phase_times <- data.frame(phase = "numerical_products",
     started = format(phase_start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     elapsed_s = proc.time()[["elapsed"]]-phase_clock, status = "completed")

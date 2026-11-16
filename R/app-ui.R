@@ -30,6 +30,14 @@
   result <- list(before = v$current, after = v$future, change = v$total_change,
     supported = isTRUE(v$support_total == 1), kind = "joint", selected = NULL)
   if (layer %in% names(v)) result$selected <- v[[layer]]
+  if (startsWith(layer, "change_")) {
+    model <- substring(layer, 8L)
+    fields <- paste0(c("current_", "future_", "change_"), model)
+    if (all(fields %in% names(v))) {
+      result$before <- v[[fields[1L]]]; result$after <- v[[fields[2L]]]
+      result$change <- v[[fields[3L]]]
+    }
+  }
   if (!is.null(focus) && !is.null(point$driver_response)) {
     d <- point$driver_response; s <- point$driver_support
     if (layer %in% names(d)) result$selected <- d[[layer]]
@@ -136,6 +144,13 @@
             shiny::tabPanel("\u73af\u5883\u54cd\u5e94", value = "drivers",
               shiny::div(class = "cast-view-heading", shiny::tags$h2("\u54ea\u4e9b\u53d8\u5316\u5f71\u54cd\u66f4\u660e\u663e"),
                 shiny::tags$p(class = "cast-subtitle", "\u5728\u540c\u4e00\u6279\u652f\u6301\u6837\u70b9\u4e0a\u6bd4\u8f83\u73af\u5883\u56e0\u5b50\uff0c\u67e5\u770b\u80cc\u666f\u4f9d\u8d56\u4e0e\u6a21\u578b\u4e00\u81f4\u6027\u3002")),
+              shiny::tags$details(class = "cast-detail", open = NA,
+                shiny::tags$summary("\u5730\u56fe\u8303\u56f4\u5185\u7684\u73af\u5883\u54cd\u5e94"),
+                shiny::tags$p(class = "cast-note", "\u4ee5\u4e0b\u5747\u503c\u4f7f\u7528\u539f\u751f\u7f51\u683c\u4e0a\u540c\u4e00\u6279\u5f53\u524d\u2014\u672a\u6765\u5171\u540c\u652f\u6301\u4f4d\u7f6e\u3002\u8bb0\u5f55\u4f4d\u7f6e\u7edf\u8ba1\u53e6\u5217\u4e8e\u4e0b\u65b9\uff0c\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"),
+                shiny::div(class = "cast-table-scroll", shiny::tableOutput("native_response"))),
+              shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u7a7a\u95f4\u8bad\u7ec3\u6298\u7684\u89e3\u91ca\u654f\u611f\u6027"),
+                shiny::tags$p(class = "cast-note", "\u76f8\u540c\u7559\u51fa\u4f4d\u7f6e\u4e0e\u76f8\u540c\u60c5\u666f\uff0c\u6bd4\u8f83\u7a7a\u95f4\u8bad\u7ec3\u6298\u91cd\u65b0\u62df\u5408\u540e\u7684\u54cd\u5e94\u3002\u96f6\u54cd\u5e94\u5355\u5217\uff1b\u8fd9\u4e0d\u662f\u7f6e\u4fe1\u533a\u95f4\u6216\u56e0\u679c\u68c0\u9a8c\u3002"),
+                shiny::div(class = "cast-table-scroll", shiny::tableOutput("spatial_response_validation"))),
               shiny::uiOutput("response_summary"), shiny::uiOutput("evidence_note"), shiny::uiOutput("interpretation_scope"),
               shiny::div(class = "cast-table-scroll", shiny::uiOutput("drivers")),
               shiny::div(class = "cast-focus-toolbar", shiny::selectInput("focus_driver", "\u67e5\u770b\u56e0\u5b50\u5730\u56fe", choices = character(), width = "100%"),
@@ -144,7 +159,7 @@
               shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u54cd\u5e94\u5bf9\u7167\u56fe"), shiny::plotOutput("driver_plot", height = 300)),
               shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u9010\u6a21\u578b\u54cd\u5e94"),
                 shiny::tags$p(class = "cast-note", "\u540c\u6279\u771f\u5b9e\u6837\u70b9\u7684\u9010\u6a21\u578b\u9884\u6d4b\u54cd\u5e94\uff0c\u5747\u503c\u672a\u4e58\u96c6\u6210\u6743\u91cd\u3002\u5404\u884c\u652f\u6301\u57df\u53ef\u80fd\u4e0d\u540c\uff1b\u6837\u70b9\u6bd4\u4f8b\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"),
-                shiny::div(class = "cast-table-scroll", shiny::tableOutput("model_response"))),
+                shiny::div(class = "cast-table-scroll", shiny::uiOutput("model_population"), shiny::tableOutput("model_response"))),
               shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u81ea\u52a8\u5206\u7ec4\u4e0e\u8bca\u65ad"), shiny::uiOutput("group_note"),
                 shiny::tableOutput("groups"), shiny::plotOutput("group_plot", height = 230), shiny::tableOutput("tuning")),
               shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u6307\u6807\u5b9a\u4e49\u4e0e\u6765\u6e90"),

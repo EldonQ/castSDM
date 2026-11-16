@@ -58,7 +58,7 @@ library(castSDM)
 install.packages(c("shiny", "bslib", "leaflet", "callr", "zip"))
 cast_app(case_dir)
 
-# Real saved locations only; no full-grid prediction or model refitting:
+# Real saved locations; matching publication response maps are reused without prediction:
 response <- cast_explore(case_dir, maps = FALSE)
 response$evidence$summary
 ```
@@ -73,6 +73,14 @@ backgrounds: where does fitted suitability increase, decrease or reverse sign?
 Native response maps retain support flags and engine disagreement. The
 publication collection includes `E_<driver>` consistency panels and source
 counts. These are model-conditional diagnostics, not a new causal estimator.
+Additive-link GAM and linear/quadratic Maxnet may preserve response directions
+by construction; cross-background agreement is not refitting stability. The
+workflow now predicts actual report-scenario values at the same untouched
+hold-out locations with each existing spatial training fit. The diagnostic
+`response_spatial_sensitivity.csv` reports common-support coverage, direction
+agreement, all-zero fractions and response magnitude variation, including
+fold-specific predictor selection. These dependent fits do not provide causal
+identification or confidence intervals.
 The optional descriptive tree (`grouping = TRUE`) remains available separately;
 it is off by default.
 

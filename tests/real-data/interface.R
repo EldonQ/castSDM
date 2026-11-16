@@ -14,6 +14,10 @@ relative <- c("case.rds", "completion.rds", "training_pool.csv", "predictor_meta
   "scenario_table.csv", "training/result.rds", "comparison/comparison.rds")
 rasters <- list.files(file.path(case, "comparison/rasters"), pattern = "[.]tif$", full.names = FALSE)
 relative <- c(relative, file.path("comparison/rasters", rasters))
+for (f in c("driver_catalog.rds", "driver_attribution.tif")) {
+  path <- file.path("figures", ".data", f)
+  if (file.exists(file.path(case,path))) relative <- c(relative,path)
+}
 for (file in relative) {
   target <- file.path(shadow, file)
   dir.create(dirname(target), recursive = TRUE, showWarnings = FALSE)
@@ -51,7 +55,8 @@ shiny::testServer(server, {
   value <- active()
   stopifnot(identical(value$schema, "cast_explore/1"), is.null(value$settings$sample_n),
     value$evidence$population$n_input == nrow(project()$run$cv$fold_info),
-    is.null(value$raster_file), file.exists(value$points_file))
+    file.exists(value$raster_file), file.exists(value$preview), file.exists(value$points_file))
+  if (!is.null(value$native_summary)) stopifnot(isTRUE(value$reused_response_maps))
   xy <- project()$run$cv$fold_info[1L, c("lon", "lat")]
   source <- terra::rast(project()$pool$path[1L])
   point_sf <- sf::st_as_sf(xy, coords = c("lon", "lat"), crs = terra::crs(source))
@@ -76,6 +81,6 @@ shiny::testServer(server, {
   stopifnot(inherits(cast_app(shadow, state = restored, run = FALSE), "shiny.appobj"))
   saveRDS(list(case = shadow, state = restored, response_key = value$key,
     n_locations = value$evidence$population$n_input, point = point(),
-    export = zip, replay_unchanged = TRUE), file.path(qa, "interface_receipt.rds"))
+    export = zip, response_maps_reused = isTRUE(value$reused_response_maps), replay_unchanged = TRUE), file.path(qa, "interface_receipt.rds"))
 })
 cat("Actual saved-case view, all-location response, point query, export and numeric replay passed.\n")

@@ -66,11 +66,11 @@ castsdm_species_configs <- function(root) {
         "covariates", scope, "dist/h90m/stream-dist-proximity",
         paste0(scope, "_dist_h90m_stream-dist-proximity_min.tif")))),
     Callosciurus_erythraeus = utils::modifyList(common, list(
-      species_name = "Callosciurus_erythraeus", taxon_level = "species-level GBIF records",
+      species_name = "Callosciurus_erythraeus", taxon_level = "species-level supplied records; source and sampling effort unverified",
       input_type = "nsdm_occ",
       occurrence_file = file.path(occurrence_root, "Callosciurus_erythraeus.csv"),
-      nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_hlu.csv"),
-      current_lulc_product = "hlu")))
+      nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_glu.csv"),
+      current_lulc_product = "glu")))
   if (is.null(settings)) return(presets)
   taxon <- settings$species
   base <- presets[[taxon]] %||% utils::modifyList(common, list(
@@ -88,6 +88,7 @@ castsdm_species_configs <- function(root) {
   base$resources <- settings$resources %||% base$resources
   base$protocol$models <- settings$models %||% base$protocol$models
   base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
+  if (!is.null(settings$block_size)) base$protocol$block_size <- settings$block_size
   base$protocol$num_threads <- base$resources$cores
   presets[[taxon]] <- base
   presets
