@@ -1,3 +1,19 @@
+# castSDM 0.38.2
+
+- Fix lost supported-response footprints: mask effects on the native grid,
+  then average valid portions into display cells. Main response maps use the
+  identical common support as their means; E_ diagnostics retain each driver's
+  both-background support. Preserve full-domain D_ maps and native rasters.
+- Audit full, common-supported and per-driver supported display footprints
+  separately. Mark coarse support cells as outside, inside or mixed instead of
+  masking valid native effects with conservative coarse minimum flags.
+- Reuse geometry-only display templates, common-domain current projections,
+  footprint audits and colour-limit statistics within figure export. Project
+  only driver bands actually drawn. Keep the original map style and all figures.
+- Add opt-in real-case display/cache regression. Start a fresh
+  cast0382_chelsa_ensmean example; VIF, fitted models, thresholds and the
+  river/locality domain remain unchanged.
+
 # castSDM 0.38.1
 
 - Fix workflow temporal matching after audited source dates are restored.

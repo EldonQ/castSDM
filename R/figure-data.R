@@ -90,26 +90,95 @@
   path
 }
 
-.cast_figure_display <- function(paths, output, resolution = .02) {
-  stack <- do.call(c, lapply(paths, terra::rast))
+.cast_figure_display <- function(paths, output, resolution = .02, layers = NULL,
+    references = NULL, shared_key = NULL) {
+  stack <- if (inherits(paths, "SpatRaster")) paths else do.call(c, lapply(paths, terra::rast))
+  if (!is.null(layers)) stack <- stack[[layers]]
+  if (is.null(references)) references <- stats::setNames("full_domain", names(stack)[1L])
+  cache <- getOption("castSDM.figure_display_cache")
+  template_key <- paste0("template_", .cast_digest(list(terra::crs(stack),
+    as.vector(terra::ext(stack)), terra::res(stack), resolution)))
+  template <- if (is.environment(cache)) cache[[template_key]]
+  if (is.null(template)) {
+    template <- terra::project(terra::rast(stack[[1L]]), "EPSG:4326", res = resolution)
+    if (is.environment(cache)) cache[[template_key]] <- template
+  }
+  original <- stack
+  shared <- if (is.environment(cache) && !is.null(shared_key)) cache[[shared_key]]
+  shared_layers <- intersect(grep("^current($|_)|^common_support$", names(stack), value = TRUE),
+    if (!is.null(shared)) names(terra::rast(shared$path)) else names(stack))
+  if (!is.null(shared)) stack <- stack[[setdiff(names(stack), shared_layers)]]
   discrete <- grepl("^support|common_support|^range_class|^novel_|^sign_|^context_direction_", names(stack))
   # The saved model rasters are never resampled or overwritten. These files
   # are a declared display-only grid, shared by the PNG/PDF panels.
   support <- grepl("^support|^common_support|^novel_", names(stack))
-  template <- terra::project(stack[[1L]], "EPSG:4326", res = resolution, method = "average")
   continuous <- if (any(!discrete)) terra::project(stack[[which(!discrete)]], template, method = "average")
   categorical <- if (any(discrete & !support)) terra::project(stack[[which(discrete & !support)]], template, method = "mode")
-  # A coarse cell is supported only when every contributing valid flag is 1.
-  # Novelty is the converse: preserve any flagged source cell.
+  # Preserve mixed support explicitly. A coarse support flag must never mask
+  # effects: their eligibility is applied on the native grid before averaging.
   novel <- startsWith(names(stack), "novel_")
-  flags <- if (any(support & !novel)) terra::project(stack[[which(support & !novel)]], template, method = "min")
+  flags <- if (any(support & !novel)) {
+    r <- stack[[which(support & !novel)]]
+    low <- terra::project(r, template, method = "min")
+    high <- terra::project(r, template, method = "max")
+    terra::ifel(low == high, low, 2)
+  }
   novelty <- if (any(novel)) terra::project(stack[[which(novel)]], template, method = "max")
   display <- do.call(c, Filter(Negate(is.null), list(continuous, categorical, flags, novelty)))
-  display <- display[[names(stack)]]
+  if (!is.null(shared) && length(shared_layers)) display <- c(display, terra::rast(shared$path)[[shared_layers]])
+  display <- display[[names(original)]]
   terra::writeRaster(display, output, overwrite = TRUE,
     wopt = list(datatype = "FLT4S", gdal = c("COMPRESS=LZW", "TILED=YES", "INTERLEAVE=BAND")))
-  utils::write.csv(.cast_display_coverage(stack, display, resolution), paste0(output, ".csv"), row.names = FALSE)
+  coverage <- if (!is.null(shared) && identical(references, shared$references)) shared$coverage else
+    .cast_display_coverage(original, display, resolution, references)
+  utils::write.csv(coverage, paste0(output, ".csv"), row.names = FALSE)
+  if (is.environment(cache) && !is.null(shared_key) && is.null(shared))
+    cache[[shared_key]] <- list(path = output, coverage = coverage, references = references)
   output
+}
+
+# Separate full-domain D_ maps from native-masked main/E_ display products.
+# Masks have exactly the native scopes used by their numerical summaries.
+.cast_figure_driver_display <- function(attribution, output, resolution) {
+  r <- terra::rast(attribution$raster_file)
+  drivers <- attribution$drivers
+  contrasts <- c("total_change", paste0("effect_", drivers), paste0("retained_", drivers), "remainder")
+  layers <- c(paste0("effect_", drivers), paste0("retained_", drivers))
+  references <- stats::setNames("all_driver_paired_support", layers[1L])
+  diagnostics <- list()
+  for (v in drivers) {
+    cols <- paste0(c("context_direction_", "context_gap_", "effect_agreement_", "retained_agreement_"), v)
+    if (!all(cols %in% names(r))) next
+    diagnostics[[v]] <- cols
+    layers <- c(layers, cols)
+    references <- c(references, stats::setNames(paste0("driver_paired_support:", v), cols[1L]))
+  }
+  # Read the saved effects once in bounded blocks. Do not materialise the
+  # national multiband stack or repeatedly mask it for each driver.
+  needed <- unique(c(contrasts, "support_total", layers,
+    paste0("support_effect_", names(diagnostics)), paste0("support_retained_", names(diagnostics))))
+  r <- r[[needed]]
+  terra::readStart(r)
+  on.exit(terra::readStop(r), add = TRUE)
+  path <- tempfile("cast-native-mask-", fileext = ".tif")
+  on.exit(unlink(path), add = TRUE)
+  writer <- .cast_raster_writer(r, path, layers, datatype = "FLT8S", overwrite = TRUE)
+  on.exit(.cast_writer_abort(writer), add = TRUE)
+  rows <- max(1L, as.integer(100000L/terra::ncol(r)))
+  for (first in seq.int(1L, terra::nrow(r), by = rows)) {
+    nr <- min(rows, terra::nrow(r)-first+1L)
+    x <- as.data.frame(terra::readValues(r, row = first, nrows = nr, mat = TRUE), check.names = FALSE)
+    common <- x$support_total == 1 & .cast_finite_rows(x[, contrasts, drop = FALSE])
+    z <- as.matrix(x[, layers, drop = FALSE])
+    z[which(is.na(common) | !common), seq_len(2L*length(drivers))] <- NA_real_
+    for (v in names(diagnostics)) {
+      ok <- x[[paste0("support_effect_", v)]] == 1 & x[[paste0("support_retained_", v)]] == 1
+      z[which(is.na(ok) | !ok), diagnostics[[v]]] <- NA_real_
+    }
+    .cast_writer_block(writer, z, first, nr)
+  }
+  .cast_writer_finish(writer)
+  .cast_figure_display(path, output, resolution, references = references)
 }
 
 .cast_figure_data <- function(object, comparison, scenario, directory,
@@ -125,14 +194,15 @@
   bundle_path <- file.path(directory, "figure_data.rds")
   provenance <- comparison$provenance
   provenance$session <- NULL
-  base_key <- .cast_digest(list(schema = "cast_figure_data/4", .cast_fit_identity(fit), provenance,
+  base_key <- .cast_digest(list(schema = "cast_figure_data/5", .cast_fit_identity(fit), provenance,
     object[c("screen", "cv", "eval")], object$protocol$clamp,
     comparison$weights, comparison$threshold, comparison$threshold_sensitivity,
     scenario, response_grid, display_resolution, response_method,
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
     .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision),
-    .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
+    .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_figure_driver_display),
+    .cast_code_identity(.cast_display_coverage)))
   old <- .cast_cache_read(bundle_path, base_key)
   valid_old <- !is.null(old)
   verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
@@ -249,6 +319,9 @@
     mess <- cached("mess", key, .cast_figure_mess(fit, current, future, report$raster_file, path, prepared = prepared), path)
     outputs <- c(outputs, mess)
   } else if ("mess" %in% products) note("09_extrapolation_mess", "Raw current/future predictor stacks are required for native-grid MESS; support flags cannot substitute for MESS.")
+  shared_display <- if (identical(comparison$domain, "common")) paste0("shared_",
+    .cast_digest(list(provenance, comparison$weights, comparison$clamp,
+      comparison$support_probs, display_resolution)))
   for (s in if ("maps" %in% products) names(comparison$results) else character()) {
     result <- comparison$results[[s]]
     artifact_id <- result$alias_of %||% s
@@ -264,9 +337,10 @@
     }
     path <- file.path(directory, paste0("display_", artifact_id, ".tif"))
     key <- .cast_digest(list(unname(tools::md5sum(input)),
-      display_resolution, .cast_code_identity(.cast_figure_display)))
+      display_resolution, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
     displays[[s]] <- cached(paste0("display_", artifact_id), key,
-      .cast_figure_display(input, path, display_resolution), c(path, paste0(path, ".csv")))
+      .cast_figure_display(input, path, display_resolution, shared_key = shared_display),
+      c(path, paste0(path, ".csv")))
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
   }
@@ -274,20 +348,33 @@
   if (!is.null(mess)) {
     path <- file.path(directory, "display_mess.tif")
     key <- .cast_digest(list(unname(tools::md5sum(mess)), display_resolution,
-      .cast_code_identity(.cast_figure_display)))
+      .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
     mess_display <- cached("display_mess", key,
       .cast_figure_display(mess, path, display_resolution), c(path, paste0(path, ".csv")))
     outputs <- c(outputs, mess_display)
   }
-  attribution_display <- NULL
+  attribution_display <- attribution_supported_display <- NULL
   if (!is.null(attribution$raster_file)) {
     outputs <- c(outputs, attribution$raster_file)
+    layers <- c(paste0("effect_", attribution$drivers), paste0("retained_", attribution$drivers))
     path <- file.path(directory, "display_drivers.tif")
     key <- .cast_digest(list(unname(tools::md5sum(attribution$raster_file)),
-      display_resolution, .cast_code_identity(.cast_figure_display)))
+      layers, display_resolution, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
     attribution_display <- cached("display_drivers", key,
-      .cast_figure_display(attribution$raster_file, path, display_resolution), c(path, paste0(path, ".csv")))
+      .cast_figure_display(attribution$raster_file, path, display_resolution, layers = layers),
+      c(path, paste0(path, ".csv")))
     outputs <- c(outputs, attribution_display)
+    if (!is.null(attribution$common_summary)) {
+      path <- file.path(directory, "display_drivers_supported.tif")
+      key <- .cast_digest(list(key, .cast_code_identity(.cast_figure_driver_display)))
+      attribution_supported_display <- cached("display_drivers_supported", key,
+        .cast_figure_driver_display(attribution, path, display_resolution), c(path, paste0(path, ".csv")))
+      outputs <- c(outputs, attribution_supported_display)
+      if (verbose) {
+        coverage <- utils::read.csv(paste0(path, ".csv"))[1L, ]
+        cli::cli_inform("Native-supported driver display: {coverage$native_valid_cells} cells; {round(100*coverage$native_centres_represented_fraction, 2)}% of native centres represented. Support masks precede display aggregation.")
+      }
+    }
   }
   info <- object$cv$fold_info
   if (is.null(info) && !is.null(split$train) && length(object$cv$folds) == nrow(split$train))
@@ -306,16 +393,18 @@
   if (is.null(attribution)) completed <- setdiff(completed, "attribution")
   if (is.null(mess)) completed <- setdiff(completed, "mess")
   if (!length(displays)) completed <- setdiff(completed, "maps")
-  coverage_files <- paste0(c(unlist(displays, use.names = FALSE), attribution_display, mess_display), ".csv")
+  coverage_files <- paste0(c(unlist(displays, use.names = FALSE), attribution_display,
+    attribution_supported_display, mess_display), ".csv")
   coverage_files <- unique(coverage_files[file.exists(coverage_files)])
   display_coverage <- if (length(coverage_files)) do.call(rbind, lapply(coverage_files, function(p) {
     value <- utils::read.csv(p); value$product <- basename(sub("[.]csv$", "", p)); value
   }))
   outputs <- c(outputs, coverage_files)
-  data <- list(schema = "cast_figure_data/4", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
+  data <- list(schema = "cast_figure_data/5", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,
+    attribution_supported_display = attribution_supported_display,
     displays = displays, mess_display = mess_display, range_files = classes, thresholds = thresholds,
     scenario = scenario, variables = fit$env_vars, model_names = names(fit$models),
     response_reference_n = nrow(fit$scaling$reference), pdp_reference_n = min(2000L, nrow(fit$scaling$reference)),

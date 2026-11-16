@@ -1,10 +1,10 @@
 # CHELSA 裂腹鱼亚科工作流
 
-0.38.1 修复参考年携带来源属性时，时间片匹配表发生 335/1 行数冲突的问题。年份和来源分开存放，新增 temporal_matching 阶段计时；筛选方法与时间片选择规则不变。新输出写入 output/cast0381_chelsa_ensmean，保留旧运行目录。
+0.38.2 修正支持域遮罩顺序：先在原生网格上应用共同支持域或单因子的双背景支持域，再生成显示副本，避免粗网格最小值把有效效应网格隐藏。保留河流局地范围、原始预测、阈值、配色及 D_/E_ 图集。display_coverage.csv 分别审计全域、共同支持域和单因子双背景支持域。支持概览图新增灰色“混合”状态，原生二元支持标记不变。复用显示模板、共有当前基线和覆盖检查，并减少不用于图件的波段投影。新运行写入 output/cast0382_chelsa_ensmean。
 
 本例明确为**裂腹鱼亚科的河流局地分析**：保留原河网条件和记录周边 10 km 范围，不代表整个亚科的完整河湖分布。域外空白没有预测；适宜网格覆盖面积不是实际河道水域面积。spatial_output_qc.csv 记录原生预测范围，figures/source_data/display_coverage.csv 记录显示网格对原生足迹的保留情况。
 
-显示副本使用有效原生像元的重叠面积均值，类别使用众数，支持标记使用最小值、外推标记使用最大值；原生预测不变。主效应图在同一支持域比较各驱动，全域 D_ 图集和原始表仍保留。
+显示副本使用有效原生像元的重叠面积均值，类别使用众数，支持概览区分域外、域内和混合三种状态，外推标记使用最大值；原生预测不变。主效应图在原生网格上应用共同支持条件后比较各驱动，全域 D_ 图集和原始表仍保留。
 
 SchiSOFT 官方原始记录可放在 occurrence_file 同目录的 SchiSOFT_occurrence_records.csv。工作流匹配 ID、学名和坐标后恢复 sampledDate、remarksOfSampledDate、sourceType，保留简化表原有 year，不伪造日期。明确报告的采样年用于训练侧参考年，包括单一日期或完全位于同一日历年的区间；跨年区间和来源日期替代值只作记录，不变成精确采样年。sampling_date_quality.csv 和 excluded_records_by_taxon.csv 保留质控依据。0.1 度网格坐标仅提示可能精度问题，不自动删除或移动。
 
@@ -14,7 +14,7 @@ SchiSOFT 官方原始记录可放在 occurrence_file 同目录的 SchiSOFT_occur
 
 当前 GAM 分项贡献跨未来情景复用，预测仍采用常规、分批稳定的路径。逐模型响应见 comparison/tables/model_summary.csv 和 figures/source_data/environmental_driver_by_model.csv；Shiny 的逐模型表使用同批抽取位置，不代表面积。共有当前基线地图各绘一幅，未来情景及其他图件照常保留。
 
-0.38 从头运行写入 `output/cast0381_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
+从头运行写入 `output/cast0382_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
 当前有效环境数据按块缓存一次，供各情景复用。读取失败会重开同一数据块一次，持续失败则记录情景、变量、文件和行号。
 比较未完成时不生成完成标记；已成功的情景缓存保留。查看 `comparison/tables/scenario_status.csv`、`comparison/progress` 和 `comparison/failures`。
 同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.38。
@@ -53,7 +53,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast0381_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast0382_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。

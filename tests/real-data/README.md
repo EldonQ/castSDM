@@ -42,7 +42,14 @@ native change rasters and their frozen ensemble.
 IDs/names/coordinates and distinguishes reported sampling years from ambiguous
 intervals and source-date substitutes. It changes no record coordinates or years.
 `scenario-io.R` also checks equal-domain driver summaries and display-only
-resampling, including native-file integrity and binary support flags.
+resampling, including native-file integrity and explicit mixed coarse support.
+
+`display.R <actual-case> <QA-dir> [national]` checks mask-before-aggregation
+against independent native-raster oracles, common-summary denominators,
+per-driver double-background support, unchanged source files and shared-display
+cache parity. The optional national mode checks the saved response footprint
+across the full original grid, without model fitting or scenario prediction.
+Comparison-cache parity remains bounded to an actual raster crop in either mode.
 
 `temporal.R <prepare_stage.rds> <occurrence_qc.csv> <eligible_pool.csv> <QA_dir>`
 checks the complete reported-year -> layer-matching -> CSV boundary using real

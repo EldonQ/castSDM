@@ -88,7 +88,8 @@
 #' @param display_resolution WGS84 display grid resolution in degrees, default
 #'   `0.02`. Original scientific rasters and native-grid range counts are
 #'   unchanged. Display rasters use overlapping valid-cell averages, categorical modes,
-#'   minimum support flags and maximum novelty flags; native rasters are unchanged.
+#'   explicit outside/inside/mixed support and maximum novelty flags. Supported
+#'   responses are masked before aggregation; native rasters are unchanged.
 #' @param width_mm,dpi Export width and PNG resolution, defaults `183` and
 #'   `600`; matching PDF exports retain vector boundaries/text and embed dense
 #'   gridded data as rasters. Display colour clipping is reported on maps.
@@ -160,6 +161,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
   if (is.null(getOption("castSDM.figure_map_cache"))) {
     old_cache <- options(castSDM.figure_map_cache = new.env(parent = emptyenv()))
     on.exit(options(old_cache), add = TRUE)
+  }
+  if (is.null(getOption("castSDM.figure_display_cache"))) {
+    old_display <- options(castSDM.figure_display_cache = new.env(parent = emptyenv()))
+    on.exit(options(old_display), add = TRUE)
   }
   if (identical(include, "all") && !render_only) {
     phase_errors <- character(); phase_times <- list()
@@ -238,7 +243,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       "response_grid_size", "response_reference_rows", "full_training_reference_rows", "response_method"),
       value = c(data$training_version, data$source_version, scenario,
         comparison$threshold %||% NA_real_, display_resolution,
-        "continuous area-weighted average; categorical mode; support minimum; novelty maximum; native scientific rasters unchanged",
+        "native support masks before aggregation; continuous area-weighted average; categorical mode; outside/inside/mixed support; novelty maximum; native scientific rasters unchanged",
         response_grid, data$pdp_reference_n, data$response_reference_n, response_method)),
     unavailable_products = data$notes %||% data.frame(product = character(), reason = character()))
   if (identical(comparison$design, "paired")) {

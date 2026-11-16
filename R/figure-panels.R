@@ -51,6 +51,11 @@
 }
 
 .cast_figure_bound <- function(paths, layers, signed = FALSE) {
+  paths <- unique(unlist(paths, use.names = FALSE))
+  cache <- getOption("castSDM.figure_display_cache")
+  info <- file.info(paths)
+  key <- paste0("bound_", .cast_digest(list(paths, info$size, as.numeric(info$mtime), layers, signed)))
+  if (is.environment(cache) && !is.null(cache[[key]])) return(cache[[key]])
   values <- unlist(lapply(unique(paths), function(path) {
     r <- terra::rast(path); present <- intersect(layers, names(r))
     if (!length(present)) return(numeric())
@@ -58,27 +63,22 @@
   }), use.names = FALSE)
   if (!length(values)) return(if (signed) c(-.01, .01) else c(0, 1))
   upper <- max(.01, unname(stats::quantile(if (signed) abs(values) else values, .995, names = FALSE)))
-  if (signed) c(-upper, upper) else c(0, upper)
+  value <- if (signed) c(-upper, upper) else c(0, upper)
+  if (is.environment(cache)) cache[[key]] <- value
+  value
 }
 
 .cast_figure_map <- function(path, layer, title, basemap, kind = "continuous",
-                             limits = NULL, legend = NULL, resolution = .02, support_layer = NULL) {
+                             limits = NULL, legend = NULL, resolution = .02) {
   title <- paste(strwrap(title, width = 32), collapse = "\n")
   cache <- getOption("castSDM.figure_map_cache")
   info <- file.info(path)
   key <- .cast_digest(list(path, info$size, as.numeric(info$mtime), layer, basemap,
-    kind, limits, legend, resolution, support_layer, getOption("castSDM.font_family")))
+    kind, limits, legend, resolution, getOption("castSDM.font_family")))
   if (is.environment(cache) && identical(cache$key, key))
     return(cache$plot + ggplot2::labs(title = title))
   stack <- terra::rast(path)
   r <- stack[[layer]]
-  if (!is.null(support_layer)) r <- terra::mask(r, terra::ifel(stack[[support_layer]] == 1, 1, NA))
-  if (grepl("^context_|^(effect|retained)_agreement_", layer)) {
-    variable <- sub("^context_(direction|gap)_|^(effect|retained)_agreement_", "", layer)
-    flags <- paste0(c("support_effect_", "support_retained_"), variable)
-    if (all(flags %in% names(stack)))
-      r <- terra::mask(r, terra::ifel(stack[[flags[1L]]] == 1 & stack[[flags[2L]]] == 1, 1, NA))
-  }
   d <- terra::as.data.frame(r, xy = TRUE, na.rm = TRUE)
   names(d) <- c("lon", "lat", "value")
   if (!nrow(d)) return(ggplot2::ggplot() + ggplot2::annotate("text", x = 0, y = 0,
@@ -87,12 +87,13 @@
   categorical <- kind %in% c("range", "support", "novelty", "conflict", "context")
   subtitle <- NULL
   if (categorical) {
-    levels <- if (kind == "range") c(-1, 0, 1, 2) else if (kind == "context") c(-1, 0, 1, 2, 3) else c(0, 1)
+    levels <- if (kind == "range") c(-1, 0, 1, 2) else if (kind == "context") c(-1, 0, 1, 2, 3) else
+      if (kind == "support") c(0, 1, 2) else c(0, 1)
     labels <- switch(kind, context = c("Consistent decrease", "No response", "Consistent increase", "Opposite signs", "One background zero"), range = c("Loss", "Stable absent", "Gain", "Stable present"),
-      support = c("Outside support", "Inside support"), novelty = c("Within envelope", "Novel (MESS < 0)"),
+      support = c("Outside support", "Inside support", "Mixed native support"), novelty = c("Within envelope", "Novel (MESS < 0)"),
       conflict = c("No opposite signs", "Positive/negative conflict"))
     colors <- switch(kind, context = c("#B35806", "#EDF2F4", "#2166AC", "#7B3294", "#999999"), range = c("#CB4335", "#F2F2F2", "#2E9E5B", "#2E86C1"),
-      support = c("#F4A582", "#0B3D5C"), novelty = c("#EDF2F4", "#0B3D5C"),
+      support = c("#F4A582", "#0B3D5C", "#999999"), novelty = c("#EDF2F4", "#0B3D5C"),
       conflict = c("#EDF2F4", "#B35806"))
     d$value <- factor(d$value, levels = levels, labels = labels)
     scale <- function(guide) ggplot2::scale_fill_manual(values = stats::setNames(colors, labels),
@@ -233,8 +234,8 @@
     registry[[name]] <<- list(build = build, height_mm = height, available = available, reason = reason)
   }
   map <- function(layer, title = unname(names_short[layer]), kind = "continuous", limits = NULL,
-                  source = path, legend = "Suitability", support_layer = NULL) .cast_figure_map(source, layer,
-    title, basemap, kind, limits, legend, data$display_resolution, support_layer)
+                  source = path, legend = "Suitability") .cast_figure_map(source, layer,
+    title, basemap, kind, limits, legend, data$display_resolution)
   add("01_model_validation", function() {
     info <- data$folds
     cv <- data$cv
@@ -255,6 +256,7 @@
   }, 155, !is.null(path) && !is.null(cmp$binary))
   add("03_environmental_driver", function() {
     common <- !is.null(att$common_summary)
+    source <- if (common) data$attribution_supported_display else data$attribution_display
     scope_summary <- if (common) att$common_summary else att$summary
     only <- scope_summary[scope_summary$contrast == "only", ]
     changing <- only$driver[is.finite(only$mean_abs) & only$mean_abs > 0]
@@ -274,9 +276,9 @@
           paste(strwrap(label, 27), collapse = "\n"), character(1)))
     }
     maps <- list(map(paste0("effect_", top), paste("Driver-only:", .cast_var_label(top)),
-      "signed", limits, source = data$attribution_display, legend = "Suitability change", support_layer = if (common) "support_total"),
+      "signed", limits, source = source, legend = "Suitability change"),
       map(paste0("retained_", top), paste("Retained-driver:", .cast_var_label(top)),
-        "signed", limits, source = data$attribution_display, legend = "Suitability change", support_layer = if (common) "support_total"))
+        "signed", limits, source = source, legend = "Suitability change"))
     plots <- c(maps, list(patchwork::wrap_plots(bars("only"), bars("retained"), ncol = 2)))
     patchwork::wrap_plots(plots, ncol = 1, heights = c(1, 1, 1.15)) + .cast_figure_annotation(
       "Environmental explanation under frozen fitted models",
@@ -284,6 +286,7 @@
         "Full-domain legacy responses; common-support summaries require recomputation.",
         "Non-additive predictive explanations; static predictors remain fixed. These contrasts do not identify ecological causal effects."))
   }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&
+      (is.null(att$common_summary) || !is.null(data$attribution_supported_display)) &&
       (is.null(att$common_summary) || any(att$common_summary$n > 0)),
     if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
       "Driver attribution requires raw scenario predictors and at least one common supported cell; full-domain D_ maps remain available.")
@@ -292,7 +295,7 @@
       map("sd_joint_change", "Paired cross-model disagreement", limits = .cast_figure_bound(path, "sd_joint_change"),
         legend = "SD of change"), ncol = 2) + .cast_figure_annotation(
         "Where scenario interpretation needs caution",
-        "Support is the marginal training-quantile envelope on raw inputs. SD is calculated after paired within-model changes; it is not a standard error or confidence interval. Uncoloured basemap areas are geographic context, not model predictions.")
+        "Support is the marginal training-quantile envelope on raw inputs; grey display cells contain both supported and unsupported native cells. SD is calculated after paired within-model changes, not a confidence interval. Uncoloured basemap areas are unpredicted geographic context.")
   }, 115, !is.null(path))
   if (!paired) add("05_factorial_attribution", function() {
     plots <- list(.cast_figure_trend(cmp$binary, c("climate_main", "lulc_main", "joint_change", "interaction"),
@@ -480,21 +483,23 @@
     }, 105)
     needed <- paste0(c("context_direction_", "context_gap_", "effect_agreement_", "retained_agreement_"), v)
     add(paste0("E_", v), function() {
-      gap <- .cast_figure_bound(data$attribution_display, needed[2L], TRUE)
+      source <- data$attribution_supported_display
+      gap <- .cast_figure_bound(source, needed[2L], TRUE)
       plots <- list(
         map(needed[1L], "Response direction in both backgrounds", "context",
-          source = data$attribution_display, legend = "Background consistency"),
+          source = source, legend = "Background consistency"),
         map(needed[2L], "Difference between background responses", "signed", gap,
-          source = data$attribution_display, legend = "Response difference"),
+          source = source, legend = "Response difference"),
         map(needed[3L], "Engine agreement: current background", limits = c(0, 1),
-          source = data$attribution_display, legend = "Agreement fraction"),
+          source = source, legend = "Agreement fraction"),
         map(needed[4L], "Engine agreement: future background", limits = c(0, 1),
-          source = data$attribution_display, legend = "Agreement fraction"))
+          source = source, legend = "Agreement fraction"))
       patchwork::wrap_plots(plots, ncol = 2) + .cast_figure_annotation(
         paste("Environmental response consistency:", .cast_var_label(v)),
-        "The same factor is compared in current and future backgrounds. Both-background range support is required for display. Sign reversals indicate background dependence; engine agreement is descriptive, not confidence or causal identification. Counts and denominators are in response_consistency.csv.")
-    }, 165, all(needed %in% names(terra::rast(data$attribution_display))),
-      "Background consistency requires attribution diagnostics = TRUE.")
+        "The same factor is compared in current and future backgrounds. Both-background range support is applied on the native grid before display aggregation. Sign reversals indicate background dependence; engine agreement is descriptive, not confidence or causal identification. Counts and denominators are in response_consistency.csv.")
+    }, 165, !is.null(data$attribution_supported_display) &&
+      all(needed %in% names(terra::rast(data$attribution_supported_display))),
+      "Background consistency requires diagnostics = TRUE and rebuilt native-masked figure data.")
   })
   registry
 }

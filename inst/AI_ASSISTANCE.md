@@ -177,3 +177,13 @@ regression at the workflow table-construction boundary. The earlier validation
 had tested date derivation and matching separately, missing this connection.
 0.38.1 adds a real-data end-to-end temporal regression; no statistical selection
 rule, ecological observation, coordinate or sampling date was changed.
+
+On 16 November 2026, Codex corrected the coarse-support masking regression
+introduced in 0.38.0. Native common-support and per-driver paired-support masks
+now precede display aggregation; full-domain driver maps remain available.
+Display audits cover those masked scopes, and coarse support maps explicitly
+identify mixed cells. Display-only reuse avoids repeated baseline projection,
+footprint scans and colour-limit calculations. Verification uses saved actual
+case rasters/models and independent mask-first oracles, including the original
+national response footprint; it does not rerun the full study, fabricate data,
+expand the declared river/locality domain or assert causal identification.
