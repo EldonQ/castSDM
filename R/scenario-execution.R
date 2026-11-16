@@ -83,10 +83,8 @@
 }
 
 .cast_fit_identity <- function(fit) {
-  package <- as.character(utils::packageVersion("castSDM"))
-  # Reviewed maintenance/interface releases keep 0.28.0 prediction/cache
-  # semantics. Later releases invalidate conservatively unless reviewed here.
-  if (package %in% c("0.28.1", "0.28.2", "0.28.3", "0.29.0", "0.29.1", "0.29.2")) package <- "0.28.0"
+  memo <- getOption("castSDM.fit_identity_cache")
+  if (is.environment(memo) && identical(memo$fit, fit)) return(memo$key)
   models <- lapply(fit$models, function(m) {
     m$fit_elapsed_s <- NULL
     m$warnings <- NULL
@@ -97,12 +95,15 @@
   versions <- vapply(engines[nzchar(engines)], function(p) {
     if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "missing"
   }, character(1))
-  .cast_digest(list(package = package,
+  key <- .cast_digest(list(
     models = models, env_vars = fit$env_vars, scaling = fit$scaling,
-    calibration = fit$calibration, engines = versions, predictor = .cast_code_identity(predict_single_model),
-    contrast = .cast_code_identity(.cast_factorial_values), context = .cast_code_identity(.cast_prediction_context),
-    gam = .cast_code_identity(.cast_gam_terms), gam_prediction = .cast_code_identity(.cast_predict_gam), offset = .cast_code_identity(.cast_apply_offset),
-    clamp = .cast_code_identity(.cast_clamp), schema = "paired_scenarios/1"))
+    calibration = fit$calibration, engines = versions,
+    code = .cast_code_dependencies(c("predict_single_model", ".cast_prediction_context", ".cast_factorial_values")),
+    schema = "paired_scenarios/2"))
+  # Scoped by the public operation. Mutation is checked with identical(),
+  # never with object size, a user-supplied ID or a stale saved digest.
+  if (is.environment(memo)) { memo$fit <- fit; memo$key <- key }
+  key
 }
 
 .cast_data_identity <- function(x, memo = new.env(parent = emptyenv())) {

@@ -577,7 +577,10 @@ cast_cv <- function(data,
   # (or failed) fold contributes zero rather than silently shrinking the
   # denominator and inflating frequency.
   selections_all <- do.call(c, lapply(reps, `[[`, "selections"))
-  all_vars <- unique(unlist(selections_all))
+  # Zero-frequency candidates belong in the diagnostic too. Omitting them
+  # made a plot of the most frequently selected variables look uniformly stable.
+  all_vars <- unique(c(select_args$env_vars %||% get_env_vars(data, response),
+    unlist(selections_all)))
   selection_freq <- data.frame(variable = character(0), freq = numeric(0),
                                stringsAsFactors = FALSE)
   if (length(all_vars)) {

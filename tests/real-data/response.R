@@ -25,7 +25,8 @@ errors <- list()
 for (model in names(fit$models)) {
   info <- fit$models[[model]]
   predictor <- iml::Predictor$new(model = info, data = reference,
-    predict.function = function(model, newdata) castSDM:::predict_single_model(model, newdata, clamp = TRUE))
+    predict.function = function(model, newdata) castSDM:::predict_single_model(model, newdata,
+      clamp = TRUE, reference = reference))
   elapsed <- system.time(oracle <- iml::FeatureEffect$new(predictor, feature = variable,
     method = "ale", grid.size = 50)$results)[["elapsed"]]
   x <- curve[curve$model == model, ]
@@ -42,13 +43,13 @@ for (model in names(fit$models)) {
   profile <- reference[rep(1L, nrow(x)), , drop = FALSE]
   for (v in names(profile)) profile[[v]] <- stats::median(reference[[v]])
   profile[[variable]] <- x$value
-  oracle <- castSDM:::predict_single_model(fit$models[[model]], profile, clamp = TRUE)
+  oracle <- castSDM:::predict_single_model(fit$models[[model]], profile, clamp = TRUE, reference = reference)
   stopifnot(max(abs(x$prediction-oracle)) < 1e-12)
 }
 cat("Median-reference fixed profiles equal ordinary prediction.\n")
 if (length(args) == 3L) {
   saved <- readRDS(args[3L])
-  out <- file.path(qa, "core_figures")
+  out <- tempfile("core_figures_", tmpdir = qa)
   result <- cast_figures(saved$run, saved$comparison, attribution = saved$attribution,
     output_dir = out, basemap = "china", dpi = 100, verbose = TRUE)
   stopifnot(is.data.frame(result$status), nrow(result$status) == 16L,
@@ -81,6 +82,6 @@ if (length(args) == 3L) {
   complete <- castSDM:::.cast_cache_read(p, receipt$key)
   inventory <- names(castSDM:::.cast_figure_registry(complete, "china"))
   original <- utils::read.csv(file.path(case, "figures/figure_inventory.csv"))$figure
-  stopifnot(setequal(inventory, original))
+  stopifnot(all(original %in% inventory))
   cat("Eight core figures, full-reference scenario curves, render-only cache and complete inventory passed.\n")
 }

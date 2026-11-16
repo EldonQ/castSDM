@@ -351,14 +351,15 @@
       ggplot2::geom_text(ggplot2::aes(label = .data$n), vjust = -.3, size = 3) +
       ggplot2::labs(title = "Screening summary", x = NULL, y = "Predictors",
         subtitle = paste("Method:", data$screen$method)) + .cast_figure_theme()
-    freq <- utils::head(data$cv$selection_freq, 15L)
-    b <- ggplot2::ggplot(freq, ggplot2::aes(.data$freq,
-      stats::reorder(.data$variable, .data$freq))) + ggplot2::geom_col(fill = "#256E92", width = .72) +
-      ggplot2::labs(title = "Spatial-fold selection stability", x = "Selection frequency", y = NULL) +
-      ggplot2::scale_y_discrete(labels = .cast_figure_variable_labels) +
+    freq <- data$cv$selection_freq
+    counts <- stats::aggregate(list(n = freq$variable), list(frequency = freq$freq), length)
+    b <- ggplot2::ggplot(counts, ggplot2::aes(factor(.data$frequency), .data$n)) +
+      ggplot2::geom_col(fill = "#256E92", width = .72) +
+      ggplot2::geom_text(ggplot2::aes(label = .data$n), vjust = -.3, size = 3) +
+      ggplot2::labs(title = "Spatial-fold selection stability", x = "Selection frequency", y = "Predictors") +
       .cast_figure_theme()
     patchwork::wrap_plots(a, b, ncol = 2) + .cast_figure_annotation(
-      "Variable screening and selection stability", "Overview shows screening counts and up to 15 fold frequencies. Every predictor and every fold-selected variable remains in the paginated S_selection and S_stability catalogues and source tables. VIF and inclusion frequency are not ecological importance.")
+      "Variable screening and selection stability", "Overview counts every predictor in the saved fold-frequency table, including zero-frequency candidates in current runs. Per-variable results remain in the S_selection and S_stability catalogues and source tables. VIF and inclusion frequency are not ecological importance.")
   }, 190,
     !is.null(data$screen) && !is.null(data$cv$selection_freq))
   add("12_threshold_sensitivity", function() {

@@ -1,3 +1,26 @@
+# castSDM 0.40.0
+
+- Apply one raw-input training-range clamp across response curves, ordinary
+  engines, scenario contrasts and tiled prediction. Fix GAM response-cache
+  clamping and prevent MaxEnt-only feature clamping. Preserve native offsets.
+- Reuse the paired scenario kernel in shift effects. Shifts now require an
+  explicit value; multiple drivers require named changes in declared units.
+  Missing model predictions cannot silently change an effect's ensemble.
+- Scope fit-identity reuse to one operation, detect changed fit values, and
+  invalidate numerical caches from code dependencies rather than package version.
+  Remove the obsolete release-specific cache-compatibility list.
+- Retain every saved CV location in exploration by default and label the
+  ranking population. Remove the interface's hidden 5,000-location limit.
+  Show the complete fold-frequency distribution, including zero selections
+  in current CV runs, rather than only the most frequent variables.
+- Keep VIF and the ecological analysis domain; report predictor source/scale
+  context, GAM substitutability and native map coverage explicitly.
+- Replace simulated tests with portable regressions using all 11,817 actual
+  Schizothoracinae presence/background rows and actual CHELSA future values.
+  CI now executes tests. Add full saved-case prediction parity and timings.
+- Derive one workflow run ID for the scripts and interface. New runs use
+  cast040_chelsa_ensmean; existing results remain in their original directories.
+
 # castSDM 0.39.0
 
 - Focus the default figure collection on eight main validation, scenario and

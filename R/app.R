@@ -1,5 +1,23 @@
 # AI-assisted development (2026-11-11); see inst/AI_ASSISTANCE.md.
 
+.cast_app_bundle <- function(directory, state, file) {
+  check_suggested("zip", "for the downloadable analysis bundle")
+  if (!is.list(state$request) || length(state$request$operation) != 1L ||
+      !state$request$operation %in% c("view", "response"))
+    cli::cli_abort("A completed view or response request is required for export.")
+  files <- list.files(directory, full.names = FALSE)
+  files <- files[!grepl("\\.lock$|^\\.", files)]
+  bundle <- tempfile("cast-view-export-"); dir.create(bundle)
+  if (length(files) && any(!file.copy(file.path(directory, files), bundle, recursive = TRUE)))
+    cli::cli_abort("Cannot copy analysis artifacts into the export bundle.")
+  saveRDS(state, file.path(bundle, "view_state.rds"))
+  writeLines(c("# Run from the extracted bundle; original real-case inputs must remain available.",
+    "library(castSDM)", "state <- readRDS('view_state.rds')",
+    "cast_app(state$request$case_dir, state = state)"), file.path(bundle, "reproduce_view.R"))
+  zip::zipr(file, files = list.files(bundle, full.names = TRUE), root = bundle)
+  invisible(file)
+}
+
 .cast_app_identity <- function() {
   functions <- c(".cast_app_task", "cast_explore", "cast_attribution", "cast_response_groups")
   list(version = as.character(utils::packageVersion("castSDM")),
@@ -174,7 +192,6 @@
           if (!is.null(request$shifts)) shiny::updateNumericInput(session, "shift", value = unname(request$shifts[1L]))
           shiny::updateSelectInput(session, "profile_driver", selected = restore_state$profile_driver)
           shiny::updateCheckboxInput(session, "supported_only", value = isTRUE(restore_state$supported_only))
-          if (!is.null(request$sample_n)) shiny::updateNumericInput(session, "sample_n", value = request$sample_n)
           if (!is.null(request$grouping)) shiny::updateCheckboxInput(session, "grouping", value = request$grouping)
           if (!is.null(request$maxdepth)) shiny::updateNumericInput(session, "maxdepth", value = request$maxdepth)
           if (!is.null(request$maps)) shiny::updateCheckboxInput(session, "maps", value = request$maps)
@@ -214,7 +231,7 @@
           stop("\u6a21\u578b\u6ca1\u6709\u4f7f\u7528\u672c\u7ec4\u60c5\u666f\u4e2d\u53d1\u751f\u53d8\u5316\u7684\u56e0\u5b50\uff0c\u65e0\u6cd5\u8bc4\u4f30\u6c14\u5019\u54cd\u5e94\u3002\u53ef\u9009\u62e9\u4e00\u4e2a\u5165\u6a21\u6307\u6807\uff0c\u663e\u5f0f\u8bbe\u7f6e\u5047\u8bbe\u6539\u53d8\u6765\u67e5\u770b\u6a21\u578b\u654f\u611f\u6027\u3002")
         start(list(operation = "response", case_dir = p$directory, scenario = input$scenario,
           variables = variables, shifts = shifts, context = input$context,
-          sample_n = input$sample_n, maxdepth = input$maxdepth, maps = input$maps, grouping = isTRUE(input$grouping),
+          maxdepth = input$maxdepth, maps = input$maps, grouping = isTRUE(input$grouping),
           resources = list(cores = input$cores, workers = 1L, memory_mb = 2048)))
       }, error = notify_error)
     })
@@ -267,7 +284,7 @@
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
       if (identical(pending$operation, "setup") && isTRUE(pending$run)) {
-        directory <- file.path(pending$path, "output", "cast039_chelsa_ensmean", pending$species, "comparison", "progress")
+        directory <- file.path(pending$path, "output", .cast_workflow_run_id(), pending$species, "comparison", "progress")
         files <- if (dir.exists(directory)) list.files(directory, pattern = "[.]rds$", full.names = TRUE) else character()
         states <- lapply(files, function(f) tryCatch(readRDS(f), error = function(e) NULL))
         states <- Filter(Negate(is.null), states)
@@ -495,7 +512,7 @@
     output$evidence_note <- shiny::renderUI({
       shiny::req(active()$evidence)
       p <- active()$evidence$population
-      shiny::tags$p(class = "cast-note", paste("\u5171\u540c\u652f\u6301\u6837\u70b9", p$n_common, "/", p$n_input,
+      shiny::tags$p(class = "cast-note", paste("\u8bad\u7ec3\u53c2\u8003\u4f4d\u7f6e\u4e2d\u7684\u5171\u540c\u652f\u6301\u6837\u70b9", p$n_common, "/", p$n_input,
         "\u00b7 \u54cd\u5e94\u548c\u53cd\u53f7\u7387\u4f7f\u7528\u540c\u4e00\u6279\u4f4d\u7f6e\uff0c\u540c\u5411\u7387\u4ec5\u9488\u5bf9\u5b9e\u9645\u53d8\u5316\u6837\u70b9\u3002\u6bd4\u4f8b\u4e0d\u4ee3\u8868\u9762\u79ef\u3002"))
     })
     output$model_response <- shiny::renderTable({
@@ -597,20 +614,11 @@
     output$download_bundle <- shiny::downloadHandler(filename = function() "castSDM_exploration.zip",
       content = function(file) {
         shiny::req(active()); directory <- active()$directory
-        files <- list.files(directory, full.names = FALSE)
-        files <- files[!grepl("\\.lock$|^\\.", files)]
-        check_suggested("zip", "for the downloadable analysis bundle")
-        bundle <- tempfile("cast-view-export-"); dir.create(bundle)
-        file.copy(file.path(directory, files), bundle, recursive = TRUE)
         state <- list(schema = "cast_app_state/1", package_version = as.character(utils::packageVersion("castSDM")), request = active_request(), layer = input$layer,
           supported_only = input$supported_only, center = input$map_center, zoom = input$map_zoom,
           click = if (!is.null(point())) list(lng = point()$longitude, lat = point()$latitude),
           profile_driver = input$profile_driver)
-        saveRDS(state, file.path(bundle, "view_state.rds"))
-        writeLines(c("# Run from the extracted bundle; original real-case inputs must remain available.",
-          "library(castSDM)", "state <- readRDS('view_state.rds')",
-          "cast_app(state$request$case_dir, state = state)"), file.path(bundle, "reproduce_view.R"))
-        zip::zipr(file, files = list.files(bundle, full.names = TRUE), root = bundle)
+        .cast_app_bundle(directory, state, file)
       })
   }
 }
@@ -646,7 +654,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast039_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", .cast_workflow_run_id(), "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

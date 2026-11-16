@@ -24,6 +24,5 @@
 ^tools$
 ^examples$
 ^benchmarks$
-^MEE_READINESS\.md$
 
 ^\.local-checks$

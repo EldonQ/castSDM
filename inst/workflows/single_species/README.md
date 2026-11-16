@@ -1,8 +1,8 @@
 # CHELSA 裂腹鱼亚科工作流
 
-0.39.0 聚焦“环境变化后的栖息地响应地图”。默认导出 8 张主要验证、情景和环境响应图，不再自动导出 88 张图。ALE 默认只计算本次情景实际改变的拟合变量，使用全部真实参考记录，取消隐藏的 2,000 行截断。GAM 复用精确的单变量项贡献；VIF、背景点、空间验证、模型和原生预测规则不变。
+0.40.0 聚焦“环境变化后的栖息地响应地图”。默认导出 8 张主要验证、情景和环境响应图，不再自动导出 88 张图。ALE 默认只计算本次情景实际改变的拟合变量，使用全部真实参考记录，取消隐藏的 2,000 行截断。GAM 复用精确的单变量项贡献；修复响应计算在训练范围外的 clamp 不一致；VIF、背景点、空间验证和拟合设置保持原有政策。
 
-需要完整图集时，在运行 04_REPLOT.R 前设置 `Sys.setenv(CAST_FIGURES = "all")`；或用 `CAST_FIGURES = "responses"` 导出全部变量的 ALE 与固定剖面。设置回 `core` 恢复主要图件。完整输出可能耗时较长。`figures/phase_timings.csv` 分别记录数值产品准备和图件导出耗时。新运行写入 `output/cast039_chelsa_ensmean`。
+需要完整图集时，在运行 04_REPLOT.R 前设置 `Sys.setenv(CAST_FIGURES = "all")`；或用 `CAST_FIGURES = "responses"` 导出全部变量的 ALE 与固定剖面。设置回 `core` 恢复主要图件。完整输出可能耗时较长。`figures/phase_timings.csv` 分别记录数值产品准备和图件导出耗时。新运行写入 `output/cast040_chelsa_ensmean`。
 
 本例明确为**裂腹鱼亚科的河流局地分析**：保留原河网条件和记录周边 10 km 范围，不代表整个亚科的完整河湖分布。域外空白没有预测；适宜网格覆盖面积不是实际河道水域面积。spatial_output_qc.csv 记录原生预测范围，figures/source_data/display_coverage.csv 记录显示网格对原生足迹的保留情况。
 
@@ -16,15 +16,17 @@ SchiSOFT 官方原始记录可放在 occurrence_file 同目录的 SchiSOFT_occur
 
 当前 GAM 分项贡献跨未来情景复用，预测仍采用常规、分批稳定的路径。逐模型响应见 comparison/tables/model_summary.csv 和 figures/source_data/environmental_driver_by_model.csv；Shiny 的逐模型表使用同批抽取位置，不代表面积。共有当前基线地图各绘一幅，未来情景及其他图件照常保留。
 
-从头运行写入 `output/cast039_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
+从头运行写入 `output/cast040_chelsa_ensmean`。保留简单 VIF 和模型拟合规则；GAM 统一采用分批稳定的常规预测，因此必须重新计算验证分数和阈值。
 当前有效环境数据按块缓存一次，供各情景复用。读取失败会重开同一数据块一次，持续失败则记录情景、变量、文件和行号。
 比较未完成时不生成完成标记；已成功的情景缓存保留。查看 `comparison/tables/scenario_status.csv`、`comparison/progress` 和 `comparison/failures`。
-同配置重跑会校验并复用成功情景。旧格式缓存失效，不把旧结果改名为0.38。
+同配置重跑会校验并复用成功情景。旧结果保留原目录，新版本按计算规则校验缓存，不通过重命名旧结果恢复。
 `support_scope.csv` 区分变化因子和静态背景的边际范围支持；`gam_concurvity.csv` 报告保存GAM的响应替代性。两者都不证明因果效应。
 
 全部响应曲线可通过完整导出保存为 `R_` 分页图集，每页最多12个面板；默认主图展示本次情景实际变化的因子。图件请求和分页均不改变拟合变量数量。
 `workflow_timings.csv`、`figures/phase_timings.csv` 与 `comparison/tables/events.csv` 分别记录工作流、图件阶段及当前数据块准备耗时。
 `temporal_layer_matching.csv` 明确标记没有过去时间片而保留较晚来源年份的指标；`predictor_pool_summary.csv` 记录各类指标的保留数量。缺失值不自动填零，指标类别和 VIF 也不等于生态重要性。
+
+0.40 的 Shiny 默认使用全部已保存训练参考位置，排名只解释这些位置，不表示栖息地面积。`predictor_semantics.csv` 记录指标构念、尺度与空间含义；VIF 不自动证明生态相关性。效应接口不再默认给不同单位的变量统一增加 1。
 
 默认流程：输入质控 → 训练折内 VIF≤10 → RF/MaxEnt/GAM → 空间验证 → CHELSA 气候情景 → 环境响应地图。
 不规定变量数量；MaxEnt 使用标准 lq 特征，GAM 使用 bam。
@@ -55,7 +57,7 @@ source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-默认新目录：`output/cast039_chelsa_ensmean/Schizothoracinae`。
+默认新目录：`output/cast040_chelsa_ensmean/Schizothoracinae`。
 当前气候源更换后必须重新筛选、训练与验证；不迁移旧 CNClim 模型。
 科学配置不同而运行目录相同会明确停止。请使用新工作目录，或脚本设置新的 `CAST_RUN_ID`。
 界面设置保存在 `workflow_settings.rds`；从脚本启动也会使用这些设置。

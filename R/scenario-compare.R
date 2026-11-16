@@ -527,6 +527,10 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     threshold = NULL, mask = NULL, support_probs = c(.01, .99), clamp = FALSE,
     domain = c("common", "scenario"), output_dir = NULL, resources = list(),
     resume = TRUE, overwrite = FALSE, verbose = TRUE, thresholds = NULL) {
+  if (!is.environment(getOption("castSDM.fit_identity_cache"))) {
+    identity_options <- options(castSDM.fit_identity_cache = new.env(parent = emptyenv()))
+    on.exit(options(identity_options), add = TRUE)
+  }
   domain <- match.arg(domain)
   wall_start <- Sys.time()
   thresholds <- .cast_check_thresholds(thresholds)

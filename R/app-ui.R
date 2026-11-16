@@ -104,7 +104,7 @@
               shiny::tags$p(class = "cast-note", "\u6d3e\u751f\u6307\u6807\u6539\u53d8\u5c5e\u4e8e\u6a21\u578b\u654f\u611f\u6027\u5206\u6790\u3002\u571f\u5730\u5229\u7528\u6539\u53d8\u4f18\u5148\u4f7f\u7528\u4e00\u81f4\u7684\u60c5\u666f\u56fe\u5c42\u3002")),
             shiny::conditionalPanel("input.mode == 'shift'", shiny::selectInput("context", "\u5176\u4f59\u56e0\u5b50\u7684\u73af\u5883", choices = stats::setNames(c("current", "future"), c("\u4fdd\u6301\u5f53\u524d\u503c", "\u4f7f\u7528\u672a\u6765\u60c5\u666f\u503c")))),
             shiny::tags$p(class = "cast-section-label", "\u8ba1\u7b97"),
-            shiny::numericInput("sample_n", "\u6837\u70b9\u4e0a\u9650", 5000L, min = 4L, step = 100L),
+            shiny::tags$p(class = "cast-note", "\u4f7f\u7528\u5168\u90e8\u4fdd\u5b58\u7684\u8bad\u7ec3\u53c2\u8003\u4f4d\u7f6e\u3002\u54cd\u5e94\u6392\u5e8f\u63cf\u8ff0\u8fd9\u4e9b\u4f4d\u7f6e\uff0c\u4e0d\u4ee3\u8868\u5168\u57df\u9762\u79ef\u3002"),
             shiny::checkboxInput("grouping", "\u53ef\u9009\uff1a\u63cf\u8ff0\u6027\u5206\u533a", FALSE),
             shiny::conditionalPanel("input.grouping", shiny::numericInput("maxdepth", "\u5206\u7ec4\u6df1\u5ea6\u4e0a\u9650", 3L, min = 1L, max = 8L)),
             shiny::numericInput("cores", "\u8ba1\u7b97\u7ebf\u7a0b", 4L, min = 1L),

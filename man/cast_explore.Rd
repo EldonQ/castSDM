@@ -10,7 +10,7 @@ cast_explore(
   variables = NULL,
   shifts = NULL,
   context = c("current", "future"),
-  sample_n = 5000L,
+  sample_n = NULL,
   maxdepth = 3L,
   maps = TRUE,
   output_dir = NULL,
@@ -40,8 +40,10 @@ omitted: \code{variables} is inferred from \code{names(shifts)}.}
 \item{context}{For hypothetical shifts only, \code{"current"} keeps other predictors current. \code{"future"} keeps
 other predictors at the selected future values in both members of the pair.}
 
-\item{sample_n}{Maximum number of saved CV locations used for descriptive
-grouping. Default 5000, selected deterministically from real saved rows.}
+\item{sample_n}{Optional maximum number of saved training-CV locations used
+for response summaries, driver ranking and optional grouping. Default
+\code{NULL} retains every saved location. A supplied limit selects deterministic
+existing rows; these summaries are not area-weighted raster summaries.}
 
 \item{maxdepth}{Maximum response tree depth. See \code{\link[=cast_response_groups]{cast_response_groups()}}.}
 
@@ -57,7 +59,7 @@ the real-location response table and grouping; it never predicts a full grid.}
 
 \item{focus}{Optional selected driver for detailed maps. \code{NULL} automatically
 uses the largest mean absolute driver-only response on the shared support
-domain. Only this driver's two background responses, model sign agreement
+subset of the saved training-CV locations. Only this driver's two background responses, model sign agreement
 and background diagnostics are mapped, avoiding full maps for every driver.}
 
 \item{grouping}{Optional descriptive tree grouping, default \code{FALSE}.}

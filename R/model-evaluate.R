@@ -178,19 +178,21 @@ cast_evaluate <- function(fit, test_data, response = "presence",
 #'
 #' @param mdl_info Model info list from cast_fit.
 #' @param X_raw Raw (unscaled) test data.
-#' @param clamp Logical. Explicitly controls the MaxEnt engine's internal
-#'   clamping of predictors to the training range. Default `FALSE`: engine
-#'   clamping is off so that every engine (RF, GAM, MaxEnt) extrapolates
-#'   identically outside the training envelope, and clamping is decided once,
-#'   at the package level (`.cast_clamp()` on the inputs), never silently
-#'   inside one engine. Default `FALSE` keeps predictions comparable across
-#'   engines and keeps MESS extrapolation flags meaningful.
+#' @param clamp Apply the common raw-input training-range clamp. Requires
+#'   `reference` when TRUE; native engine feature clamping remains disabled.
+#' @param reference Fitted training predictors used by the common clamp.
 #' @return Numeric vector of predictions.
 #' @keywords internal
 #' @noRd
 predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
-                                 output = c("score", "native", "both")) {
+                                 output = c("score", "native", "both"), reference = NULL) {
   output <- match.arg(output)
+  # Every engine receives the same raw-input policy. Native maxnet clamping
+  # also clips feature values and is deliberately disabled below.
+  if (isTRUE(clamp)) {
+    if (is.null(reference)) cli::cli_abort("Clamping requires the fitted training reference.")
+    X_raw <- .cast_clamp(X_raw, reference)
+  }
   offset <- mdl_info$offset %||% 0
   if (identical(mdl_info$type, "external")) {
     p <- mdl_info$predict_function(mdl_info$model, X_raw)
@@ -221,12 +223,8 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
     stats::predict(mdl_info$model, data = X_raw, seed = 42L,
       num.threads = getOption("castSDM.predict_threads"))$predictions[, "1"]
   } else if (nm == "maxent") {
-    # clamp is passed explicitly: maxnet::predict.maxnet defaults to
-    # clamp = TRUE, which would silently freeze MaxEnt to the training
-    # range while RF/GAM extrapolate - an engine inconsistency the
-    # package never asked for.
     as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic",
-                              clamp = isTRUE(clamp)))
+                              clamp = FALSE))
   } else if (nm == "gam") {
     as.numeric(.cast_predict_gam(mdl_info$model, X_raw))
   } else {

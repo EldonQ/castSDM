@@ -8,7 +8,7 @@ cast_effect_map(
   fit,
   current_stack,
   drivers = NULL,
-  shift = 1,
+  shift = NULL,
   shift_type = "raw",
   block_rows = 512L,
   filename = NULL,
@@ -16,7 +16,8 @@ cast_effect_map(
   verbose = TRUE,
   support_probs = c(0.01, 0.99),
   min_support = 0.5,
-  weights = NULL
+  weights = NULL,
+  clamp = FALSE
 )
 }
 \arguments{
@@ -27,9 +28,8 @@ cast_effect_map(
 
 \item{drivers}{Drivers to map. Default: every fitted predictor.}
 
-\item{shift}{Single raw-unit shift per driver. Either one unnamed numeric
-value applied to every driver, or a named numeric vector / named list
-with one value per driver. Default \code{1}.}
+\item{shift}{Explicit raw-unit shift, as in \code{\link[=cast_effect_table]{cast_effect_table()}}. Required;
+multiple drivers require a named vector or list. No default change is assumed.}
 
 \item{shift_type}{\code{"raw"} (default) or \code{"sd"}.}
 
@@ -50,6 +50,9 @@ row blocks; an existing filename requires \code{overwrite = TRUE}.}
 this threshold report \code{NA} in the attached table. Default \code{0.5}.}
 
 \item{weights}{Optional named model weights, as in \code{\link[=cast_effect_table]{cast_effect_table()}}.}
+
+\item{clamp}{Clamp raw predictors to fitted training ranges, as in
+\code{\link[=cast_effect_table]{cast_effect_table()}}. Default \code{FALSE}.}
 }
 \value{
 A \code{SpatRaster} with three layers per driver (NA where any fitted

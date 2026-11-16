@@ -13,7 +13,11 @@ case_file_manifest <- function(stacks) {
 
 case_preparation_source <- function(cfg) {
   paths <- file.path(cfg$example_root, c("prepare_data.R", "data_adapter.R"))
-  list(files = unname(tools::md5sum(paths)), package = as.character(utils::packageVersion("castSDM")))
+  packages <- c("terra", "sf", "data.table", "FNN")
+  list(files = unname(tools::md5sum(paths)),
+    code = castSDM:::.cast_code_dependencies(c("cast_thin", "cast_background")),
+    versions = vapply(packages, function(p) if (requireNamespace(p, quietly = TRUE))
+      as.character(utils::packageVersion(p)) else "not_installed", character(1)))
 }
 
 ensure_workflow_tempdir <- function() {

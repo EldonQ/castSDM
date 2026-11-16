@@ -233,6 +233,10 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
                              filename = NULL, mask = NULL, overwrite = FALSE,
                              verbose = TRUE, resources = list(), resume = TRUE,
                              shifts = NULL, diagnostics = FALSE, prepared = NULL) {
+  if (!is.environment(getOption("castSDM.fit_identity_cache"))) {
+    identity_options <- options(castSDM.fit_identity_cache = new.env(parent = emptyenv()))
+    on.exit(options(identity_options), add = TRUE)
+  }
   .cast_check_fit(fit)
   budget <- .cast_resources(resources)
   old_options <- options(castSDM.predict_threads = budget$cores)

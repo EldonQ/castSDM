@@ -76,13 +76,13 @@ counts. These are model-conditional diagnostics, not a new causal estimator.
 The optional descriptive tree (`grouping = TRUE`) remains available separately;
 it is off by default.
 
-The default driver overview now compares the same range-supported locations
+The driver overview now compares the same range-supported locations
 for every factor. It shows responses in both backgrounds of the configured
 comparison pair, their sign reversals and active-model sign agreement.
 Predictors unchanged in the supplied scenario are labelled and not ranked.
 Detailed native maps focus on one automatically selected or user-chosen
 factor, avoiding national predictions for every factor on each interaction.
-Tied first ranks do not trigger an arbitrary automatic choice.
+Tied first ranks do not trigger an arbitrary automatic choice. Exploration uses every saved training-CV location by default. Its rankings describe that reference population; they are not area-weighted native-map rankings.
 SHAP contributions, CATE, ecological causal effects, actual occupancy and
 probability changes are different quantities. The current presence/background
 case does not identify them merely by changing the estimator or adding a GUI.
@@ -276,52 +276,11 @@ the receipt. Schema-1 caches are preserved and recomputed under schema 2.
 See `vignette("castSDM")` and `vignette("castSDM-advanced")` for executable
 examples and the detailed contracts.
 Bounded performance observations are documented in [benchmarks](benchmarks/README.md);
-submission evidence and limits are assessed in [MEE_READINESS.md](MEE_READINESS.md).
+the matched real-case prediction check is `tests/real-data/prediction.R`.
 The [AI-assisted maintenance record](inst/AI_ASSISTANCE.md) identifies its scope.
 
 ## License
 
 GPL (>= 3).
 
-
-Version 0.32 keeps the elastic-net selector and uses the source raster CRS for
-physical spatial blocks. Failed designs stop rather than changing strategy
-inside a fold. Native scores are the default; the previous weighted-mean shift
-is opt-in. GAM uses threaded mgcv::bam discrete fREML by default; gam_backend =
-"gam" retains the previous fit. These policies require a fresh analysis.
-
-Figure export is progressive: basic diagnostics, saved maps, response curves,
-driver maps, then novelty checks. `cast_figures(..., include = "basic")` never
-predicts; `include = "maps"` uses completed projections. `include = "responses"`
-uses published ALE from iml by default; response_method = "pdp" retains the
-original PDP. Full driver maps are optional via include = "drivers" and resume
-completed native-grid batches after interruption. All established map layouts
-and complete exports remain available via include = "all".
-
-Version 0.33 checks predictor coverage on the actual analysis mask and corrects
-continuous basin-distance/elevation roles. The freshwater preset intersects
-river-containing grid cells (native minimum-distance aggregation) with the
-observed-locality scope. It never relocates coordinates or expands habitat to
-retain a record. This scope limits the projection; grid area is not wetted river
-area, and all-record domain construction does not provide external validation.
-The explicit case budget defaults to 10,000 background cells; it is configurable
-in Shiny. `tests/real-data/background.R` compares actual saved budgets without
-changing evaluation locations/folds, conditional on a frozen predictor set.
-Scientific changes require a fresh `cast033_chelsa_ensmean` run.
-
-Version 0.35 keeps the 0.34 VIF and engine policies. It reuses content-verified
-blocks of actual current inputs, preserves successful scenario caches on a
-partial failure, and records exact read contexts and per-scenario progress.
-`support_scope.csv` separates changing-factor and static-background marginal
-range checks; none of these flags establishes joint support or causal effects.
-Saved-GAM concurvity is descriptive and does not trigger another feature selector.
-Cache encoding changed in 0.35; start the currently declared analysis rather than relabel
-old numerical products.
-
-Version 0.36 retains BAM fitting and uses regular prediction for batch-invariant
-scores. Old 0.35 predictions and OOF thresholds must be recomputed through the
-new cast036 workflow. Frozen model coefficients can still be inspected. Current
-blocks and paired model predictions are shared with response maps; MESS references
-are prepared once. All response curves remain available in bounded-height R_
-atlas pages; the main panels focus on actual scenario-changing factors.
-Workflow and figure-phase timing CSVs expose preparation and explanation costs.
+Portable tests use the attributed real fixture in `inst/extdata/schizothoracinae`; CI runs them. Package checks do not establish independent ecological or causal validity.

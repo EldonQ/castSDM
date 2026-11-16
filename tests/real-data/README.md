@@ -12,10 +12,16 @@ Run with the installed package and its dependencies on the R library path:
 # In a shell: Rscript tests/real-data/selection.R <actual-case-directory> 3000
 ```
 
-The input data must be obtained lawfully. This is opt-in: CI has no authorised
-copy of the author's environmental/occurrence library. A passing engineering
-check is not an independent ecological validation or a completed case study.
-Legacy simulated unit fixtures in other test files are not run for this release.
+These large-case checks are opt-in and use the author's completed analysis.
+Portable CI tests in `tests/testthat` use the bundled, attributed SchiSOFT/CHELSA
+fixture instead. Historical simulated fixtures have been removed. A passing
+engineering check is not independent ecological validation.
+
+`prediction.R <actual-case> <QA-dir>` checks ordinary, paired and response API
+predictions on every saved hold-out location, including actual future values
+outside training ranges. Both clamp policies and all driver-only/driver-removed
+combinations are checked against ordinary engine predictions. Matched timings
+are recorded separately from full-workflow performance.
 
 `response.R <actual-case> <QA-dir> [scenario-io-bundle]` compares accelerated ALE
 with official iml and ordinary predictions on every saved reference row. No
@@ -68,3 +74,5 @@ Comparison-cache parity remains bounded to an actual raster crop in either mode.
 checks the complete reported-year -> layer-matching -> CSV boundary using real
 saved rows, original labels and original raster time slices. It also replays
 legacy attributed-year input. It performs no fitting or national projection.
+
+`interface.R <actual-case> <QA-dir>` opens an isolated shadow of actual completed artifacts, uses real installed background jobs, checks all saved reference locations and a real point query, then exports and replays the numeric request. The original case is read-only; this does not run national predictions or refit the case.

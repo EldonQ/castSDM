@@ -81,7 +81,8 @@
     cli::cli_abort("Response groups require the saved spatial CV fold_info (lon, lat, fold).")
   # Evenly spaced row indices are a deterministic subset of existing records,
   # not new observations or manufactured absence labels.
-  at <- unique(as.integer(round(seq(1L, nrow(info), length.out = min(n, nrow(info))))))
+  at <- if (is.null(n)) seq_len(nrow(info)) else
+    unique(as.integer(round(seq(1L, nrow(info), length.out = min(n, nrow(info))))))
   xy <- as.matrix(info[at, c("lon", "lat"), drop = FALSE])
   # The case workflow records these coordinates in the environmental grid CRS.
   current <- terra::extract(a, xy)
@@ -151,15 +152,17 @@
 #'   omitted: `variables` is inferred from `names(shifts)`.
 #' @param context For hypothetical shifts only, `"current"` keeps other predictors current. `"future"` keeps
 #'   other predictors at the selected future values in both members of the pair.
-#' @param sample_n Maximum number of saved CV locations used for descriptive
-#'   grouping. Default 5000, selected deterministically from real saved rows.
+#' @param sample_n Optional maximum number of saved training-CV locations used
+#'   for response summaries, driver ranking and optional grouping. Default
+#'   `NULL` retains every saved location. A supplied limit selects deterministic
+#'   existing rows; these summaries are not area-weighted raster summaries.
 #' @param grouping Optional descriptive tree grouping, default `FALSE`.
 #' @param maxdepth Maximum response tree depth. See [cast_response_groups()].
 #' @param maps Compute native-grid response/group rasters. `FALSE` only computes
 #'   the real-location response table and grouping; it never predicts a full grid.
 #' @param focus Optional selected driver for detailed maps. `NULL` automatically
 #'   uses the largest mean absolute driver-only response on the shared support
-#'   domain. Only this driver's two background responses, model sign agreement
+#'   subset of the saved training-CV locations. Only this driver's two background responses, model sign agreement
 #'   and background diagnostics are mapped, avoiding full maps for every driver.
 #' @param output_dir Separate directory for exploration artifacts. Default
 #'   `interactive/` within the case. Research fits and existing figures are not overwritten.
@@ -170,9 +173,13 @@
 #'   causal effect. Raster previews are separate from native-grid outputs.
 #' @export
 cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = NULL,
-                         context = c("current", "future"), sample_n = 5000L,
+                         context = c("current", "future"), sample_n = NULL,
                          maxdepth = 3L, maps = TRUE, output_dir = NULL,
                          resources = list(), resume = TRUE, focus = NULL, grouping = FALSE) {
+  if (!is.environment(getOption("castSDM.fit_identity_cache"))) {
+    identity_options <- options(castSDM.fit_identity_cache = new.env(parent = emptyenv()))
+    on.exit(options(identity_options), add = TRUE)
+  }
   check_suggested("terra", "for saved-case exploration")
   if (!is.logical(grouping) || length(grouping) != 1L || is.na(grouping)) cli::cli_abort("grouping must be TRUE or FALSE.")
   if (grouping) check_suggested("rpart", "for descriptive response grouping")
@@ -180,8 +187,9 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     cli::cli_abort("{.arg maps} must be TRUE or FALSE.")
   if (maps) check_suggested("leaflet", "for interactive display rasters")
   context <- match.arg(context)
-  .cast_check_scalar(sample_n, "sample_n", lower = 4, integer = TRUE)
-  .cast_check_scalar(maxdepth, "maxdepth", lower = 1, upper = 30, integer = TRUE)
+  if (!is.null(sample_n)) .cast_check_scalar(sample_n, "sample_n", lower = 4, integer = TRUE)
+  if (grouping) .cast_check_scalar(maxdepth, "maxdepth", lower = 1, upper = 30, integer = TRUE)
+  if (!grouping) maxdepth <- NULL
   case_lock <- .cast_lock(file.path(case_dir, ".case.lock"))
   on.exit(filelock::unlock(case_lock), add = TRUE)
   project <- .cast_explore_project(case_dir)
@@ -219,6 +227,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     clamp = project$run$protocol$clamp %||% FALSE,
     support_probs = project$comparison$support_probs,
     group_population = "Saved training-CV presence/background locations; not an area-weighted ecological population",
+    ranking_population = "Range-supported saved training-CV locations; not all native raster cells",
     interpretation = "Paired fitted-suitability response; not ecological causal effects or occurrence probability change")
   mask_file <- file.path(project$case$preparation, "analysis_domain_mask.tif")
   if (!file.exists(mask_file)) cli::cli_abort("Missing recorded analysis domain: {.path {mask_file}}.")
@@ -253,7 +262,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
       return(cached)
     }
   }
-  cli::cli_inform("Reading real saved CV locations and aligned scenario values.")
+  cli::cli_inform("Reading saved training-CV locations and aligned scenario values; rankings describe these locations, not habitat area.")
   sample <- .cast_explore_sample(project, a, b, sample_n)
   response <- cast_attribution(project$fit, sample$current, sample$future,
     drivers = variables, weights = settings$weights, shifts = shifts,

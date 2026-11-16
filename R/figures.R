@@ -123,6 +123,10 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     display_resolution = .02, width_mm = 183, dpi = 600,
     resources = list(), verbose = TRUE, formats = c("png", "pdf"),
     response_method = c("ale", "pdp")) {
+  if (!is.environment(getOption("castSDM.fit_identity_cache"))) {
+    identity_options <- options(castSDM.fit_identity_cache = new.env(parent = emptyenv()))
+    on.exit(options(identity_options), add = TRUE)
+  }
   response_method <- match.arg(response_method)
 
   products <- .cast_figure_products(include)

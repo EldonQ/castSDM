@@ -5,6 +5,24 @@
     `03_fit` = "cast_fit", `04_cv` = "cast_cv",
     `05_evaluate` = "cast_evaluate", `06_refit` = "cast_fit",
     cli::cli_abort("Unknown training stage {.val {stage}}."))
+  code <- .cast_code_dependencies(roots)
+  packages <- switch(stage,
+    `01_prepare` = c("blockCV", "sf"), `02_select` = character(),
+    `04_cv` = c("blockCV", "sf", "FNN", "pROC"),
+    `05_evaluate` = "pROC", character())
+  if (stage %in% c("03_fit", "04_cv", "06_refit"))
+    packages <- c(packages, vapply(models, .cast_engine_package, character(1)))
+  if (stage %in% c("03_fit", "04_cv", "06_refit") && "maxent" %in% models)
+    packages <- c(packages, "glmnet")
+  versions <- vapply(unique(packages), function(p) {
+    if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "not_installed"
+  }, character(1))
+  list(code = code, versions = versions, R = as.character(getRversion()))
+}
+
+# Reuse the same dependency walk for preparation and prediction identities.
+# Presentation-only releases do not invalidate numerical work.
+.cast_code_dependencies <- function(roots) {
   ns <- asNamespace("castSDM")
   seen <- character(); code <- list()
   visit <- function(name) {
@@ -17,18 +35,7 @@
     invisible(NULL)
   }
   for (root in roots) visit(root)
-  packages <- switch(stage,
-    `01_prepare` = c("blockCV", "sf"), `02_select` = character(),
-    `04_cv` = c("blockCV", "sf", "FNN", "pROC"),
-    `05_evaluate` = "pROC", character())
-  if (stage %in% c("03_fit", "04_cv", "06_refit"))
-    packages <- c(packages, vapply(models, .cast_engine_package, character(1)))
-  if (stage %in% c("03_fit", "04_cv", "06_refit") && "maxent" %in% models)
-    packages <- c(packages, "glmnet")
-  versions <- vapply(unique(packages), function(p) {
-    if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "not_installed"
-  }, character(1))
-  list(code = code[sort(names(code))], versions = versions, R = as.character(getRversion()))
+  code[sort(names(code))]
 }
 
 .cast_verify_prepared <- function(data, prepared) {

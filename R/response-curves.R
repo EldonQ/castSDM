@@ -1,15 +1,17 @@
 # Exact additive GAM evaluation reuses one-variable term values. Other engines
 # and unsupported GAM formulas use their ordinary prediction methods.
-.cast_response_predictor <- function(info, reference, clamp) {
+.cast_response_predictor <- function(info, reference, clamp, training_reference = reference) {
   terms <- .cast_gam_terms(info)
   if (is.null(terms)) return(function(newdata)
-    predict_single_model(info, newdata, clamp = isTRUE(clamp)))
+    predict_single_model(info, newdata, clamp = isTRUE(clamp), reference = training_reference))
+  if (isTRUE(clamp)) reference <- .cast_clamp(reference, training_reference)
   a <- .cast_predict_gam(info$model, reference, type = "terms")
   constant <- attr(a, "constant") %||% 0
   lookup <- lapply(names(terms), function(v) list(value = reference[[v]],
     contribution = a[, terms[[v]]]))
   names(lookup) <- names(terms)
   function(newdata) {
+    if (isTRUE(clamp)) newdata <- .cast_clamp(newdata, training_reference)
     eta <- rep(constant, nrow(newdata))
     for (v in names(terms)) {
       item <- lookup[[v]]
@@ -147,7 +149,8 @@ cast_response_curves <- function(fit,
   # A fixed profile needs only one median row to initialise its term cache.
   reference <- if (type == "fixed") as.data.frame(lapply(bg, stats::median, na.rm = TRUE)) else bg
   predictors <- stats::setNames(lapply(models, function(m)
-    .cast_response_predictor(fit$models[[m]], reference, clamp)), models)
+    .cast_response_predictor(fit$models[[m]], reference, clamp,
+      training_reference = fit$scaling$reference)), models)
 
   .predict_mean_or_vec <- function(m, X) {
     value <- tryCatch(

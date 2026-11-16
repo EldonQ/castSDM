@@ -22,7 +22,7 @@
 .cast_app_setup_ui <- function(defaults) {
   shiny::tabPanel("\u5f00\u59cb", value = "setup",
     shiny::div(class = "cast-view-heading", shiny::tags$h2("\u4ece\u6570\u636e\u5230\u73af\u5883\u54cd\u5e94"),
-      shiny::tags$p(class = "cast-subtitle", "\u68c0\u67e5\u6570\u636e \u2192 \u8bad\u7ec3\u4e0e\u7a7a\u95f4\u9a8c\u8bc1 \u2192 \u672a\u6765\u9884\u6d4b \u2192 \u56fe\u4ef6\u4e0e\u73af\u5883\u54cd\u5e94")),
+      shiny::tags$p(class = "cast-subtitle", "\u4e2d\u56fd\u73af\u5883\u5e93\u4e0e CHELSA \u6848\u4f8b\uff1a\u68c0\u67e5\u6570\u636e \u2192 \u7a7a\u95f4\u9a8c\u8bc1 \u2192 \u60c5\u666f\u9884\u6d4b \u2192 \u73af\u5883\u54cd\u5e94")),
     shiny::div(class = "cast-setup-form",
       shiny::textInput("setup_data", "\u73af\u5883\u6570\u636e\u76ee\u5f55", defaults$data_dir),
       shiny::textInput("setup_occurrence", "\u7269\u79cd\u8bb0\u5f55\u6587\u4ef6", defaults$occurrence_file),

@@ -3,19 +3,22 @@
 # Single-shift contrast: one raw-unit shift per driver, signed delta, paired
 # model averaging BEFORE any absolute value (per-engine abs would measure
 # disagreement, not the ensemble effect).
-.effect_predictions <- function(fit, X, driver, step, base = NULL, weights = NULL) {
+.effect_predictions <- function(fit, X, driver, step, base = NULL, weights = NULL, clamp = FALSE) {
   models <- if (is.null(weights)) names(fit$models) else names(weights)
   if (!length(models)) cli::cli_abort("No fitted models available.")
   if (length(step) != 1L || !is.finite(step) || step == 0) {
     cli::cli_abort("{.arg step} must be one non-zero finite raw-unit shift.")
   }
-  if (is.null(base)) base <- .cast_predict_matrix(fit, X, models)
   shifted <- X
   shifted[[driver]] <- shifted[[driver]] + step
-  cf <- .cast_predict_matrix(fit, shifted, models)
+  if (is.null(weights)) weights <- stats::setNames(rep(1/length(models), length(models)), models)
+  context <- .cast_prediction_context(fit, weights, X, shifted, clamp)
+  if (is.null(base)) base <- context$predict()
+  cf <- context$predict(driver)
   delta <- cf - base
-  delta[!is.finite(cf) | !is.finite(base)] <- NA_real_
-  if (is.null(weights)) rowMeans(delta, na.rm = TRUE) else .ensemble_rowmean(delta, weights)
+  value <- as.numeric(delta %*% weights)
+  value[rowSums(!is.finite(delta)) > 0L] <- NA_real_
+  value
 }
 
 # Resolve one raw-unit shift per driver. Accepts a single unnamed numeric
@@ -24,6 +27,9 @@
 # through the fit's stored training SDs.
 .shift_from_fit <- function(fit, drivers, shift, shift_type) {
   shift_type <- match.arg(shift_type, c("raw", "sd"))
+  if (is.null(shift)) cli::cli_abort(c(
+    "Supply an explicit {.arg shift} in declared units; no environmental change is assumed.",
+    "i" = "Use cast_attribution() to compare actual current and future inputs directly."))
   if (is.list(shift)) {
     miss <- setdiff(drivers, names(shift))
     if (length(miss)) cli::cli_abort("{.arg shift} lacks entries for: {.val {miss}}.")
@@ -47,6 +53,7 @@
       out <- lapply(drivers, function(v) shift[match(v, nm)])
       names(out) <- drivers
     } else {
+      if (length(drivers) > 1L) cli::cli_abort("Supply named shifts for multiple drivers; their units may differ.")
       if (length(shift) != 1L) {
         cli::cli_abort(c(
           "Unnamed {.arg shift} must be length 1 (applied to every driver).",
@@ -108,8 +115,9 @@
 #' @param drivers Character vector of drivers to intervene on. Default:
 #'   every fitted predictor.
 #' @param shift Single raw-unit shift per driver (e.g. `list(bio01 = 2)` for
-#'   +2C). Either one unnamed numeric value applied to every driver, or a
-#'   named numeric vector / named list with one value per driver. Default `1`.
+#'   +2C). A single driver accepts one numeric value; multiple drivers require
+#'   a named vector or list with one value per driver. Required; no default
+#'   environmental change is assumed.
 #' @param shift_type `"raw"` (default, predictor units) or `"sd"` (training
 #'   standard deviations, converted through the fit).
 #' @param support_probs Length-2 numeric. Increasing training quantiles in
@@ -124,6 +132,8 @@
 #' @param verbose Print progress. Default `TRUE`.
 #' @param weights Optional named model weights, frozen across both predictions.
 #'   Default `NULL` retains the equally weighted comparison.
+#' @param clamp Clamp raw predictors to the fitted training ranges for every
+#'   engine. Default `FALSE`. Support is always checked on the unclamped inputs.
 #'
 #' @return A `cast_effect_table` data.frame, one row per driver:
 #'   `shift_raw` (applied raw-unit shift), `mean_abs_dHSS` (magnitude: mean
@@ -134,10 +144,10 @@
 #'   `mean_abs_dHSS`; read `mean_signed_dHSS` for the sign.
 #' @export
 cast_effect_table <- function(fit, newdata, drivers = NULL,
-                              shift = 1, shift_type = "raw",
+                              shift = NULL, shift_type = "raw",
                               support_probs = c(0.01, 0.99),
                               min_support = 0.5,
-                              verbose = TRUE, weights = NULL) {
+                              verbose = TRUE, weights = NULL, clamp = FALSE) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
@@ -164,7 +174,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
   ok <- rowSums(!is.finite(as.matrix(X))) == 0L
   X <- X[ok, , drop = FALSE]
   if (!nrow(X)) cli::cli_abort("No complete finite predictor rows in {.arg newdata}.")
-  base <- .cast_predict_matrix(fit, X, if (is.null(weights)) names(fit$models) else names(weights))
+  base <- .cast_predict_matrix(fit, X, if (is.null(weights)) names(fit$models) else names(weights), clamp = clamp)
   ref <- tryCatch(.cast_reference(fit, env_vars), error = function(e) NULL)
   bounds <- if (!is.null(ref)) .cast_support_bounds(ref, support_probs) else NULL
   out <- vector("list", length(drivers))
@@ -173,7 +183,7 @@ cast_effect_table <- function(fit, newdata, drivers = NULL,
     st <- steps[[v]]
     .cast_check_shift_reachable(ref, v, st)
     if (verbose) cli::cli_inform("Intervening on {.val {v}} ({.val {st}} raw units)...")
-    delta <- .effect_predictions(fit, X, v, st, base, weights)
+    delta <- .effect_predictions(fit, X, v, st, base, weights, clamp)
     covered <- if (!is.null(bounds)) {
       as.logical(.cast_support_rows(X, v, st, bounds)[, 1L])
     } else {
@@ -246,9 +256,8 @@ print.cast_effect_table <- function(x, ...) {
 #'   `current_stack`.
 #' @param current_stack A `SpatRaster` containing every fitted predictor.
 #' @param drivers Drivers to map. Default: every fitted predictor.
-#' @param shift Single raw-unit shift per driver. Either one unnamed numeric
-#'   value applied to every driver, or a named numeric vector / named list
-#'   with one value per driver. Default `1`.
+#' @param shift Explicit raw-unit shift, as in [cast_effect_table()]. Required;
+#'   multiple drivers require a named vector or list. No default change is assumed.
 #' @param shift_type `"raw"` (default) or `"sd"`.
 #' @param block_rows Integer rows per processing block. Default 512.
 #' @param filename Optional GeoTIFF path for the effect and coverage stack (LZW).
@@ -261,6 +270,8 @@ print.cast_effect_table <- function(x, ...) {
 #'   `[0, 1]` defining a box across all predictors. Default `c(0.01, 0.99)`.
 #' @param min_support Numeric in `[0, 1]`. Drivers with grid coverage below
 #'   this threshold report `NA` in the attached table. Default `0.5`.
+#' @param clamp Clamp raw predictors to fitted training ranges, as in
+#'   [cast_effect_table()]. Default `FALSE`.
 #'
 #' @return A `SpatRaster` with three layers per driver (NA where any fitted
 #'   predictor is missing or non-finite, or where the cell is masked):
@@ -276,11 +287,11 @@ print.cast_effect_table <- function(x, ...) {
 #'   detected.
 #' @export
 cast_effect_map <- function(fit, current_stack, drivers = NULL,
-                            shift = 1, shift_type = "raw",
+                            shift = NULL, shift_type = "raw",
                             block_rows = 512L, filename = NULL,
                             overwrite = FALSE, verbose = TRUE,
                             support_probs = c(0.01, 0.99),
-                            min_support = 0.5, weights = NULL) {
+                            min_support = 0.5, weights = NULL, clamp = FALSE) {
   if (!inherits(fit, "cast_fit")) {
     cli::cli_abort("{.arg fit} must be a {.cls cast_fit} object.")
   }
@@ -361,13 +372,13 @@ cast_effect_map <- function(fit, current_stack, drivers = NULL,
     models <- if (is.null(weights)) names(fit$models) else names(weights)
     base <- matrix(NA_real_, nrow(Xi), length(models))
     if (any(needed)) base[needed, ] <- .cast_predict_matrix(fit,
-      Xi[needed, , drop = FALSE], models)
+      Xi[needed, , drop = FALSE], models, clamp = clamp)
     for (v in drivers) {
       covered <- coverage[[v]]
       k <- !is.na(covered) & covered
       delta <- rep(NA_real_, nrow(Xi))
       if (any(k)) delta[k] <- .effect_predictions(fit, Xi[k, , drop = FALSE], v,
-        steps[[v]], base[k, , drop = FALSE], weights)
+        steps[[v]], base[k, , drop = FALSE], weights, clamp)
       covered[!is.finite(delta) & !is.na(covered)] <- FALSE
       s <- rep(NA_real_, nrow(block))
       a <- rep(NA_real_, nrow(block))

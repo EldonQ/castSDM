@@ -1,3 +1,9 @@
+.cast_workflow_run_id <- function() {
+  parts <- strsplit(as.character(utils::packageVersion("castSDM")), ".", fixed = TRUE)[[1L]]
+  if (length(parts) > 2L && utils::tail(parts, 1L) == "0") parts <- utils::head(parts, -1L)
+  paste0("cast", paste(parts, collapse = ""), "_chelsa_ensmean")
+}
+
 #' Initialise, Check or Run the CHELSA Workflow
 #'
 #' Creates a workspace from the installed, versioned workflow. Checks the real
@@ -70,11 +76,12 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   old <- Sys.getenv(variables, unset = NA_character_)
   on.exit({ Sys.unsetenv(variables); present <- !is.na(old)
     if (any(present)) do.call(Sys.setenv, as.list(stats::setNames(old[present], variables[present]))) }, add = TRUE)
+  run_id <- .cast_workflow_run_id()
   Sys.setenv(CAST_EXAMPLE_ROOT = path, CAST_DATA_ROOT = data_dir, CAST_SPECIES = species,
-    CAST_RUN_ID = "cast039_chelsa_ensmean", CAST_OUTPUT_ROOT = file.path(path, "output"),
+    CAST_RUN_ID = run_id, CAST_OUTPUT_ROOT = file.path(path, "output"),
     CAST_DRY_RUN = if (isTRUE(run)) "0" else "1")
   entry <- file.path(path, "00_RUN_ALL.R")
   sys.source(entry, envir = new.env(parent = globalenv()), keep.source = FALSE)
-  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", "cast039_chelsa_ensmean", species),
+  invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", run_id, species),
     checked = TRUE, run = isTRUE(run), settings = settings))
 }

@@ -12,7 +12,8 @@ cast_predict_tiled(
   models = NULL,
   overwrite = FALSE,
   compression = "LZW",
-  verbose = TRUE
+  verbose = TRUE,
+  clamp = FALSE
 )
 }
 \arguments{
@@ -38,6 +39,9 @@ input content and output file. Stale or unverified outputs cause an error.}
 \item{compression}{Character. GeoTIFF compression. Default \code{"LZW"}.}
 
 \item{verbose}{Logical. Default \code{TRUE}.}
+
+\item{clamp}{Apply the common raw-input training-range clamp to every
+engine. Default \code{FALSE}, retaining unclamped tiled prediction.}
 }
 \value{
 A list of class \code{cast_predict_tiled} with components:
@@ -54,6 +58,8 @@ covariate raster stack tile by tile, applies a fitted model, and writes
 the per-model habitat-suitability surface (HSS) to disk via
 streamed row-block writing. Output buffers are bounded by tile height
 times grid width, not total grid size. Model/GDAL memory is additional.
+GeoTIFF scores use float32 storage; their rounding differs from double
+precision table scores by at most float32 numerical precision.
 }
 \details{
 Per-tile checkpoints are written eagerly under a per-fit directory

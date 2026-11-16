@@ -8,12 +8,13 @@ cast_effect_table(
   fit,
   newdata,
   drivers = NULL,
-  shift = 1,
+  shift = NULL,
   shift_type = "raw",
   support_probs = c(0.01, 0.99),
   min_support = 0.5,
   verbose = TRUE,
-  weights = NULL
+  weights = NULL,
+  clamp = FALSE
 )
 }
 \arguments{
@@ -26,8 +27,9 @@ predictors are dropped. Coordinates are not required.}
 every fitted predictor.}
 
 \item{shift}{Single raw-unit shift per driver (e.g. \code{list(bio01 = 2)} for
-+2C). Either one unnamed numeric value applied to every driver, or a
-named numeric vector / named list with one value per driver. Default \code{1}.}
++2C). A single driver accepts one numeric value; multiple drivers require
+a named vector or list with one value per driver. Required; no default
+environmental change is assumed.}
 
 \item{shift_type}{\code{"raw"} (default, predictor units) or \code{"sd"} (training
 standard deviations, converted through the fit).}
@@ -47,6 +49,9 @@ rate and the lowest observed support so the effect is visible.}
 
 \item{weights}{Optional named model weights, frozen across both predictions.
 Default \code{NULL} retains the equally weighted comparison.}
+
+\item{clamp}{Clamp raw predictors to the fitted training ranges for every
+engine. Default \code{FALSE}. Support is always checked on the unclamped inputs.}
 }
 \value{
 A \code{cast_effect_table} data.frame, one row per driver:

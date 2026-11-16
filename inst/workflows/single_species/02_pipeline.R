@@ -51,7 +51,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast039_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", castSDM:::.cast_workflow_run_id())
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -64,7 +64,7 @@ run_species <- function(cfg) {
     "figure_response_method", "figure_response_grid", "figure_display_resolution"))]
   scientific_cfg$protocol$num_threads <- NULL
   claim <- list(schema = "cast_case_claim/1", config = scientific_cfg,
-    package = as.character(utils::packageVersion("castSDM")),
+    prediction = castSDM:::.cast_code_dependencies(c("cast_compare", "cast_attribution")),
     sources = unname(tools::md5sum(file.path(cfg$example_root,
       c("02_pipeline.R", "prepare_data.R", "data_adapter.R", "scenario_case.R")))))
   claim$key <- digest::digest(claim, algo = "sha256")
@@ -150,6 +150,16 @@ run_species <- function(cfg) {
     report_meta = list(taxon = cfg$species_name,
       purpose = "CHELSA ensemble-mean climate projections; nonclimate predictors held current")))
   selected <- result$screen$selected
+  # Preserve the meaning of repeated library layers without inventing an
+  # ecological ranking or silently choosing a depth/scale for the user.
+  semantics <- meta[, intersect(c("layer", "group", "product", "construct_id", "scale", "stat", "year", "role"), names(meta)), drop = FALSE]
+  semantics$selected <- semantics$layer %in% selected
+  semantics$construct_variants <- as.integer(table(meta$construct_id)[meta$construct_id])
+  semantics$spatial_context <- ifelse(semantics$group == "soil",
+    "Terrestrial grid property; not a measured in-stream condition",
+    ifelse(semantics$group == "bioclim", "Gridded atmospheric climate; not measured water temperature",
+      "See source definition for grid, neighbourhood or upstream aggregation"))
+  utils::write.csv(semantics, file.path(out, "predictor_semantics.csv"), row.names = FALSE)
   groups <- sort(unique(prepared_meta$group))
   pool_summary <- data.frame(group = groups,
     prepared = vapply(groups, function(g) sum(prepared_meta$group == g), integer(1)),
@@ -158,6 +168,8 @@ run_species <- function(cfg) {
   utils::write.csv(pool_summary, file.path(out, "predictor_pool_summary.csv"), row.names = FALSE)
   message("Retained predictor categories: ", paste(paste0(pool_summary$group, "=", pool_summary$selected), collapse = ", "),
     ". VIF is a collinearity check, not ecological or causal relevance selection.")
+  message("Predictor context: ", sum(semantics$selected & semantics$construct_variants > 1L),
+    " retained layers share a construct with another candidate; see predictor_semantics.csv for scale and source context. No fixed predictor quota is imposed.")
   current <- timed("selected_environment", wf_load_current_stack(cfg, varnames = selected))
   scenarios <- timed("scenario_inputs", case_scenarios(cfg, selected, current, out))
   mask <- terra::rast(file.path(preparation, "analysis_domain_mask.tif"))
@@ -173,8 +185,18 @@ run_species <- function(cfg) {
   footprint$n_inside_domain_without_paired_prediction <- footprint$domain_cells-footprint$n_valid
   footprint$scope <- "Declared analysis domain; continuous maps do not discard values below the binary threshold."
   utils::write.csv(footprint, file.path(out, "spatial_output_qc.csv"), row.names = FALSE)
-  timed("diagnostics", castSDM::cast_diagnose(result, comparison = comparison,
+  diagnostic <- timed("diagnostics", castSDM::cast_diagnose(result, comparison = comparison,
     output_dir = file.path(out, "diagnostics")))
+  terms <- diagnostic$gam_concurvity
+  if (is.data.frame(terms) && nrow(terms)) {
+    terms <- terms[terms$term != "para", ]
+    message("GAM response diagnostics: ", nrow(terms), " smooths; ",
+      sum(terms$estimate > .9, na.rm = TRUE), " with concurvity estimate > 0.9; ",
+      sum(terms$edf < .1, na.rm = TRUE), " with EDF < 0.1. These summaries do not remove predictors or identify causal effects.")
+  }
+  report_scope <- footprint[footprint$scenario == scenarios$report, ]
+  message("Reporting map scope: ", report_scope$n_valid, " paired valid cells; ",
+    report_scope$n_supported, " inside the declared marginal range envelope. National blank areas are outside this local analysis or have no paired prediction; grid area is not aquatic surface area.")
   case <- list(schema = "cast_single_species/1", species = cfg$species_name,
     cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
     training = "training/result.rds", comparison = "comparison/comparison.rds",

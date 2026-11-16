@@ -6,6 +6,8 @@
 #' the per-model habitat-suitability surface (HSS) to disk via
 #' streamed row-block writing. Output buffers are bounded by tile height
 #' times grid width, not total grid size. Model/GDAL memory is additional.
+#' GeoTIFF scores use float32 storage; their rounding differs from double
+#' precision table scores by at most float32 numerical precision.
 #'
 #' Per-tile checkpoints are written eagerly under a per-fit directory
 #' (`<output_dir>/.cast_tiles_<fingerprint>/`) so an interrupted run can be
@@ -35,6 +37,8 @@
 #'   input content and output file. Stale or unverified outputs cause an error.
 #' @param compression Character. GeoTIFF compression. Default `"LZW"`.
 #' @param verbose Logical. Default `TRUE`.
+#' @param clamp Apply the common raw-input training-range clamp to every
+#'   engine. Default `FALSE`, retaining unclamped tiled prediction.
 #'
 #' @return A list of class `cast_predict_tiled` with components:
 #' \describe{
@@ -51,7 +55,7 @@ cast_predict_tiled <- function(fit, raster,
                                models    = NULL,
                                overwrite = FALSE,
                                compression = "LZW",
-                               verbose   = TRUE) {
+                               verbose   = TRUE, clamp = FALSE) {
   check_suggested("terra", "for tile-based raster prediction")
   .cast_check_fit(fit)
   if (is.character(raster)) raster <- terra::rast(raster)
@@ -81,8 +85,9 @@ cast_predict_tiled <- function(fit, raster,
   signatures <- stats::setNames(vapply(mdl_names, function(m) {
     info <- fit$models[[m]]
     if (is.function(info$predict_function)) info$predict_function <- .cast_callback_identity(info$predict_function)
-    .cast_digest(list(algorithm = "streamed_tiles_v1", grid = grid, model = info,
-      scaling = fit$scaling, predictor = .cast_code_identity(predict_single_model)))
+    .cast_digest(list(algorithm = "streamed_tiles_v2", grid = grid, model = info,
+      scaling = fit$scaling, clamp = clamp,
+      predictor = .cast_code_dependencies("predict_single_model")))
   }, character(1)), mdl_names)
   receipt_path <- function(m) paste0(paths[[m]], ".receipt.rds")
   todo <- mdl_names
@@ -125,7 +130,8 @@ cast_predict_tiled <- function(fit, raster,
             any(is.infinite(vals)) || any(!is.na(vals[!ok]))) {
           vals <- rep(NA_real_, nrow(tile))
           if (any(ok)) {
-            pred <- tryCatch(predict_single_model(fit$models[[m]], tile[ok, , drop = FALSE]),
+            pred <- tryCatch(predict_single_model(fit$models[[m]], tile[ok, , drop = FALSE],
+              clamp = clamp, reference = fit$scaling$reference),
               error = function(e) cli::cli_abort("Prediction failed for {.val {m}} in tile {row}/{col}: {conditionMessage(e)}"))
             if (!is.numeric(pred) || length(pred) != sum(ok)) cli::cli_abort("Invalid prediction vector for {.val {m}}.")
             pred[!is.finite(pred)] <- NA_real_

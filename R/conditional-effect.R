@@ -43,12 +43,16 @@ cast_importance <- function(object) {
 
 #' @keywords internal
 #' @noRd
-.cast_predict_matrix <- function(fit, X_raw, models, chunk_size = 200000L) {
+.cast_predict_matrix <- function(fit, X_raw, models, chunk_size = 200000L, clamp = FALSE) {
   n <- nrow(X_raw)
   predict_block <- function(Xi) {
     preds <- lapply(models, function(m) {
-      tryCatch(predict_single_model(fit$models[[m]], Xi),
-               error = function(e) rep(NA_real_, nrow(Xi)))
+      value <- tryCatch(predict_single_model(fit$models[[m]], Xi, clamp = clamp,
+        reference = fit$scaling$reference), error = function(e)
+          cli::cli_abort("Prediction failed for {.val {m}}: {conditionMessage(e)}"))
+      if (!is.numeric(value) || length(value) != nrow(Xi) || any(!is.finite(value)))
+        cli::cli_abort("Model {.val {m}} returned missing or invalid scores on complete inputs.")
+      value
     })
     do.call(cbind, preds)
   }
