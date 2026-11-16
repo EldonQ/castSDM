@@ -267,7 +267,7 @@
       if (!is.null(logfile) && file.exists(logfile))
         log_text(paste(utils::tail(readLines(logfile, warn = FALSE, encoding = "UTF-8"), 60L), collapse = "\n"))
       if (identical(pending$operation, "setup") && isTRUE(pending$run)) {
-        directory <- file.path(pending$path, "output", "cast038_chelsa_ensmean", pending$species, "comparison", "progress")
+        directory <- file.path(pending$path, "output", "cast0381_chelsa_ensmean", pending$species, "comparison", "progress")
         files <- if (dir.exists(directory)) list.files(directory, pattern = "[.]rds$", full.names = TRUE) else character()
         states <- lapply(files, function(f) tryCatch(readRDS(f), error = function(e) NULL))
         states <- Filter(Negate(is.null), states)
@@ -646,7 +646,7 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast038_chelsa_ensmean", "Schizothoracinae")
+  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", "cast0381_chelsa_ensmean", "Schizothoracinae")
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

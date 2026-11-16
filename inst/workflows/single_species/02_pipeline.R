@@ -11,12 +11,16 @@ case_training_year <- function(preparation, split) {
   year <- suppressWarnings(as.numeric(qc[[column]][idx]))
   year <- year[is.finite(year) & year > 1500 & year < 2100]
   if (!length(year)) return(NULL)
-  result <- stats::median(year)
-  attr(result, "source") <- if (column == "sampling_year_verified") "reported_unambiguous_sampling_years_in_training_presences" else "unverified_record_years_in_training_presences"
-  result
+  list(year = stats::median(year), source = if (column == "sampling_year_verified")
+    "reported_unambiguous_sampling_years_in_training_presences" else "unverified_record_years_in_training_presences")
 }
 
 case_match_training_layers <- function(data, split, meta, reference_year, mode) {
+  if (!is.null(reference_year)) {
+    if (!is.numeric(reference_year) || length(reference_year) != 1L || !is.finite(reference_year))
+      stop("reference_year must be NULL or one finite numeric year.")
+    reference_year <- as.numeric(reference_year)
+  }
   keep <- rep(TRUE, nrow(meta)); rule <- rep("no_single_year_in_inventory", nrow(meta))
   if (!is.null(reference_year) && mode %in% c("npts", "nts")) {
     for (id in unique(meta$construct_id)) {
@@ -32,7 +36,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
     }
   } else rule[is.finite(meta$year)] <- "no_reference_year_or_matching_disabled"
   matching <- data.frame(layer = meta$layer, construct = meta$construct_id,
-    source_year = meta$year, reference_year = reference_year %||% NA_real_,
+    source_year = meta$year, reference_year = rep(reference_year %||% NA_real_, nrow(meta)),
     retained = keep, rule = rule, stringsAsFactors = FALSE)
   before <- nrow(meta); meta <- meta[keep, , drop = FALSE]
   message("Temporal layers: ", before, " -> ", nrow(meta), "; method=", mode,
@@ -47,7 +51,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast038_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast0381_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -126,15 +130,16 @@ run_species <- function(cfg) {
     n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed,
     coords_crs = p$coords_crs, block_size = p$block_size))
   meta <- case_pool_metadata(cfg, split$env_vars)
-  year <- case_training_year(preparation, split)
+  temporal_reference <- case_training_year(preparation, split)
+  year <- temporal_reference$year
   if (is.null(year)) message("Usable training sampling years unavailable: temporal matching skipped.") else
-    message("Temporal reference source: ", attr(year, "source"), ". A reference year is not record-wise environmental matching.")
-  matched <- case_match_training_layers(data, split, meta, year, cfg$select_temporal_match)
+    message("Temporal reference source: ", temporal_reference$source, ". A reference year is not record-wise environmental matching.")
+  matched <- timed("temporal_matching", case_match_training_layers(data, split, meta, year, cfg$select_temporal_match))
   utils::write.csv(matched$matching, file.path(out, "temporal_layer_matching.csv"), row.names = FALSE)
   prepared_meta <- meta
   meta <- matched$meta
   utils::write.csv(data.frame(reference_year = year %||% NA_real_,
-    source = if (is.null(year)) "unavailable" else attr(year, "source"),
+    source = if (is.null(year)) "unavailable" else temporal_reference$source,
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
   result <- timed("training_validation", castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,

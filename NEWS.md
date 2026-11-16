@@ -1,3 +1,15 @@
+# castSDM 0.38.1
+
+- Fix workflow temporal matching after audited source dates are restored.
+  Return the reference year and its provenance as separate fields, normalise
+  the numeric scalar at the matcher boundary and construct an explicitly
+  aligned reference-year column. Preserve all scientific selection rules.
+- Record temporal_matching as its own timed workflow stage. Add a real-data
+  regression spanning reference-year derivation, 335-layer metadata matching
+  and output-table serialization, including legacy attributed-year input.
+- Start the maintained example in cast0381_chelsa_ensmean to avoid mixing a
+  failed 0.38.0 claim with the repaired implementation.
+
 # castSDM 0.38.0
 
 - Preserve the declared river/locality analysis domain. Report native prediction

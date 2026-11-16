@@ -171,3 +171,9 @@ matching. The user retained the existing river/locality domain. The official
 source CSV was retrieved from figshare v1 and its published MD5 was verified;
 no coordinates, measurements or sampling dates were manufactured. Verification
 uses saved real models, records and raster windows, not a full case rerun.
+
+On 16 November 2026, Codex corrected the 0.38.0 attributed-reference-year
+regression at the workflow table-construction boundary. The earlier validation
+had tested date derivation and matching separately, missing this connection.
+0.38.1 adds a real-data end-to-end temporal regression; no statistical selection
+rule, ecological observation, coordinate or sampling date was changed.

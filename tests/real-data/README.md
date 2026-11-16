@@ -43,3 +43,8 @@ IDs/names/coordinates and distinguishes reported sampling years from ambiguous
 intervals and source-date substitutes. It changes no record coordinates or years.
 `scenario-io.R` also checks equal-domain driver summaries and display-only
 resampling, including native-file integrity and binary support flags.
+
+`temporal.R <prepare_stage.rds> <occurrence_qc.csv> <eligible_pool.csv> <QA_dir>`
+checks the complete reported-year -> layer-matching -> CSV boundary using real
+saved rows, original labels and original raster time slices. It also replays
+legacy attributed-year input. It performs no fitting or national projection.
