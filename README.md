@@ -1,6 +1,15 @@
 # castSDM
 
-**Environmental response maps with explicit background consistency diagnostics for SDMs.**
+**Map how an environmental scenario changes predicted habitat suitability.**
+
+The central output is a native-grid, predictor-specific response map from frozen
+SDMs, paired current/scenario environments and declared support conditions.
+Standard preparation, VIF screening and spatial validation support that one
+workflow. Its contrasts explain fitted-model responses, not identified ecological
+causal effects. Response curves and counterfactual SDM maps are established
+methods ([biomod2](https://biomodhub.github.io/biomod2/reference/bm_PlotResponseCurves.html),
+[Glidden et al. 2024](https://doi.org/10.1038/s41467-024-48335-9)); castSDM does
+not claim their first invention.
 
 `cast_compare()` directly compares current and future environments with one
 changing predictor group. Two groups additionally enable factorial contrasts. Fixed positive model weights and an
@@ -26,8 +35,8 @@ cast_app()
 
 The **Start** tab configures real data paths, occurrence records, analysis domain,
 models and resources. **Check data** checks physical inputs without fitting;
-**Run analysis** submits preparation, spatial validation, projections and the
-complete available figure collection to an isolated process. A new workspace
+**Run analysis** submits preparation, spatial validation, projections and eight
+main result figures to an isolated process. A new workspace
 uses the workflow shipped inside the installed package, with no source checkout.
 Paths/settings remain explicit and replayable. The current national-library
 adapter supports the documented CHELSA recipe; it is not a universal file importer.
@@ -41,13 +50,12 @@ require a fresh model run and separate output directory.
 ## Open a completed real case
 
 The optional Shiny interface queries native-grid results, compares actual
-scenario rasters or explicit hypothetical predictor shifts, and displays
-descriptive environmental response groups. Set `case_dir` to your completed
+scenario rasters or explicit hypothetical predictor shifts. Set `case_dir` to your completed
 [single-species workflow](inst/workflows/single_species/README.md) output.
 
 ```r
 library(castSDM)
-install.packages(c("shiny", "bslib", "leaflet", "callr", "rpart", "zip"))
+install.packages(c("shiny", "bslib", "leaflet", "callr", "zip"))
 cast_app(case_dir)
 
 # Real saved locations only; no full-grid prediction or model refitting:
@@ -141,7 +149,12 @@ The [single-species example](inst/workflows/single_species/README.md) supplies
 occurrence QC, domain masks, exact future-file mapping and saved-output plots.
 Training and comparison use public package functions.
 
-## Complete publication figures
+## Main results and optional complete figures
+
+The default `include = "core"` exports eight main figures. ALE covers only the
+fitted predictors that change in the supplied scenarios, using every saved
+reference row. No hidden 2,000-row cap is used. Fixed profiles and complete
+atlases require an explicit request; figure requests never select fit variables.
 
 The complete numbered collection uses the established cartography, palettes,
 province borders and South China Sea inset. It includes validation, habitat
@@ -152,10 +165,10 @@ scenario, plus the available supplementary layer/driver atlases.
 ```r
 figures <- cast_figures(run, comparison, "results/figures",
   current = current_raster, future = reporting_future_raster, basemap = "china",
-  resources = list(cores = 8, memory_mb = 4096))
+  resources = list(cores = 8, memory_mb = 4096), include = "all")
 # Change only rendering: no model refit, diagnostic prediction or PDP work.
 figures <- cast_figures(run, comparison, "results/figures",
-  basemap = "china", render_only = TRUE)
+  basemap = "china", include = "all", render_only = TRUE)
 ```
 
 The first complete export computes missing frozen-model driver, PDP and MESS

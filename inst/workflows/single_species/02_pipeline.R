@@ -51,7 +51,7 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
 }
 
 run_species <- function(cfg) {
-  run_id <- Sys.getenv("CAST_RUN_ID", "cast0382_chelsa_ensmean")
+  run_id <- Sys.getenv("CAST_RUN_ID", "cast039_chelsa_ensmean")
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
   out <- file.path(cfg$output_root, run_id, cfg$species_name)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -184,8 +184,8 @@ run_species <- function(cfg) {
   file.copy(file.path(cfg$example_root, "config", "predictor_metadata.csv"),
     file.path(out, "predictor_metadata.csv"), overwrite = TRUE)
   saveRDS(case, file.path(out, "case.rds"))
-  # Every available figure is exported. Driver/PDP/MESS products are computed
-  # once from frozen fits, then cached independently of style and rendering.
+  # Main figures use scenario responses and frozen fits. Complete atlases and
+  # extra diagnostics remain available through 04_REPLOT.R.
   timed("figures", case_figures(comparison, out, scenarios$report, result = result, cfg = cfg,
     current = current, future = scenarios$future[[scenarios$report]]))
   sensitivity <- summary(comparison, thresholds = cfg$diagnostic_thresholds)

@@ -184,7 +184,8 @@
 .cast_figure_data <- function(object, comparison, scenario, directory,
     current = NULL, future = NULL, attribution = NULL, render_only = FALSE,
     response_grid = 50L, display_resolution = .02, resources = list(), verbose = TRUE,
-    products = c("maps", "responses", "attribution", "mess"), response_method = "ale") {
+    products = c("maps", "responses", "attribution", "mess"), response_method = "ale",
+    response_variables = NULL, response_types = c(response_method, "fixed")) {
   fit <- object$fit_full %||% object$fit
   .cast_check_fit(fit)
   if (!render_only && any(products %in% c("responses", "attribution", "mess")) &&
@@ -194,11 +195,13 @@
   bundle_path <- file.path(directory, "figure_data.rds")
   provenance <- comparison$provenance
   provenance$session <- NULL
-  base_key <- .cast_digest(list(schema = "cast_figure_data/5", .cast_fit_identity(fit), provenance,
+  if (is.null(response_variables)) response_variables <- fit$env_vars
+  base_key <- .cast_digest(list(schema = "cast_figure_data/7", .cast_fit_identity(fit), provenance,
+    comparison[c("groups", "design", "static", "domain", "clamp", "support_probs")],
     object[c("screen", "cv", "eval")], object$protocol$clamp,
     comparison$weights, comparison$threshold, comparison$threshold_sensitivity,
     scenario, response_grid, display_resolution, response_method,
-    .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_mess),
+    .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_response_predictor), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
     .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision),
     .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_figure_driver_display),
@@ -207,12 +210,16 @@
   valid_old <- !is.null(old)
   verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
     !is.null(current) && !is.null(future)
-  products <- union(products, if (valid_old) old$products)
-  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products)) {
+  curves_ready <- !"responses" %in% products || (valid_old &&
+    all(vapply(response_types, function(type) !is.null(old$responses[[type]]) &&
+      all(response_variables %in% old$responses[[type]]$variable), logical(1))))
+  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products) && curves_ready) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
     return(old)
   }
-  if (valid_old && is.null(attribution) && !verify_raw && "attribution" %in% old$products)
+  if (!"attribution" %in% products) attribution <- if (valid_old) old$attribution else NULL
+  if (valid_old && is.null(attribution) && !verify_raw && "attribution" %in% products &&
+      "attribution" %in% old$products)
     attribution <- old$attribution
   if (render_only) cli::cli_abort("A matching figure-data cache is missing. Run once with render_only = FALSE to compute frozen-model diagnostic products.")
   budget <- .cast_resources(resources)
@@ -261,21 +268,22 @@
     .cast_cache_write(value, path, key, artifact)
     value
   }
-  responses <- NULL
-  if ("responses" %in% products) {
+  responses <- if (valid_old) old$responses else NULL
+  if ("responses" %in% products && length(response_variables)) {
     response_key <- .cast_digest(list(.cast_fit_identity(fit), response_grid,
-      object$protocol$clamp, .cast_code_identity(cast_response_curves)))
-    response_key <- .cast_digest(list(response_key, response_method))
-    if (verbose) cli::cli_inform("Response curves: fixed profiles and {toupper(response_method)}; checking verified cache.")
-    responses <- cached(paste0("responses_", response_method), response_key, {
-      value <- list(fixed = cast_response_curves(fit, type = "fixed", grid_size = response_grid,
-        clamp = object$protocol$clamp %||% TRUE))
-      value[[response_method]] <- cast_response_curves(fit, type = response_method,
-        grid_size = response_grid, clamp = object$protocol$clamp %||% TRUE)
-      value
-    })
+      response_variables, object$protocol$clamp, .cast_code_identity(cast_response_curves),
+      .cast_code_identity(.cast_response_predictor)))
+    if (verbose) cli::cli_inform("Response curves: {length(response_variables)} requested predictors; {nrow(fit$scaling$reference)} reference rows; {paste(toupper(response_types), collapse = ', ')}.")
+    for (type in response_types) if (is.null(responses[[type]]) ||
+        !all(response_variables %in% responses[[type]]$variable))
+      responses[[type]] <- cached(paste0("responses_", type), .cast_digest(list(response_key, type)),
+        cast_response_curves(fit, variables = response_variables, type = type,
+          grid_size = response_grid, clamp = object$protocol$clamp %||% TRUE))
   }
-  outputs <- character(); displays <- list(); classes <- list(); notes <- list()
+  outputs <- if (valid_old) old$artifact_files else character()
+  displays <- if (valid_old) old$displays else list()
+  classes <- if (valid_old) old$range_files else list()
+  notes <- list()
   note <- function(product, reason) notes[[length(notes)+1L]] <<-
     data.frame(product = product, reason = reason)
   if (!is.null(current)) {
@@ -308,7 +316,7 @@
   if ("attribution" %in% products && is.null(attribution)) note("03_environmental_driver",
     if (!length(unlist(comparison$groups, use.names = FALSE))) "No fitted predictor changes; scenario driver maps are inapplicable." else
       "Current/future predictor inputs or an existing cast_attribution object are required.")
-  mess <- NULL
+  mess <- if (valid_old) old$mess_native else NULL
   if ("mess" %in% products && !is.null(current) && !is.null(future) && !is.null(report$raster_file)) {
     path <- file.path(directory, "mess_native.tif")
     memo <- new.env(parent = emptyenv())
@@ -344,8 +352,8 @@
     outputs <- c(outputs, displays[[s]])
     invisible(gc(FALSE))
   }
-  mess_display <- NULL
-  if (!is.null(mess)) {
+  mess_display <- if (valid_old) old$mess_display else NULL
+  if ("mess" %in% products && !is.null(mess)) {
     path <- file.path(directory, "display_mess.tif")
     key <- .cast_digest(list(unname(tools::md5sum(mess)), display_resolution,
       .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
@@ -353,8 +361,9 @@
       .cast_figure_display(mess, path, display_resolution), c(path, paste0(path, ".csv")))
     outputs <- c(outputs, mess_display)
   }
-  attribution_display <- attribution_supported_display <- NULL
-  if (!is.null(attribution$raster_file)) {
+  attribution_display <- if (valid_old) old$attribution_display else NULL
+  attribution_supported_display <- if (valid_old) old$attribution_supported_display else NULL
+  if ("attribution" %in% products && !is.null(attribution$raster_file)) {
     outputs <- c(outputs, attribution$raster_file)
     layers <- c(paste0("effect_", attribution$drivers), paste0("retained_", attribution$drivers))
     path <- file.path(directory, "display_drivers.tif")
@@ -392,7 +401,9 @@
   completed <- products
   if (is.null(attribution)) completed <- setdiff(completed, "attribution")
   if (is.null(mess)) completed <- setdiff(completed, "mess")
+  if (is.null(responses)) completed <- setdiff(completed, "responses")
   if (!length(displays)) completed <- setdiff(completed, "maps")
+  if (valid_old) completed <- union(old$products, completed)
   coverage_files <- paste0(c(unlist(displays, use.names = FALSE), attribution_display,
     attribution_supported_display, mess_display), ".csv")
   coverage_files <- unique(coverage_files[file.exists(coverage_files)])
@@ -400,19 +411,20 @@
     value <- utils::read.csv(p); value$product <- basename(sub("[.]csv$", "", p)); value
   }))
   outputs <- c(outputs, coverage_files)
-  data <- list(schema = "cast_figure_data/5", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
+  data <- list(schema = "cast_figure_data/7", display_coverage = display_coverage, analysis_key = base_key, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
     comparison = comparison, attribution = attribution, attribution_display = attribution_display,
     attribution_supported_display = attribution_supported_display,
-    displays = displays, mess_display = mess_display, range_files = classes, thresholds = thresholds,
+    displays = displays, mess_native = mess, mess_display = mess_display, range_files = classes, thresholds = thresholds,
     scenario = scenario, variables = fit$env_vars, model_names = names(fit$models),
-    response_reference_n = nrow(fit$scaling$reference), pdp_reference_n = min(2000L, nrow(fit$scaling$reference)),
+    response_reference_n = nrow(fit$scaling$reference),
     notes = if (length(notes)) do.call(rbind, notes), display_resolution = display_resolution,
     source_version = as.character(utils::packageVersion("castSDM")),
     training_version = origin$cast_version %||% NA_character_)
   # Receipt file verification is restricted to sibling products, by design.
   sibling <- outputs[file.exists(outputs) & dirname(outputs) == directory]
+  data$artifact_files <- unique(sibling)
   .cast_cache_write(data, bundle_path, base_key, unique(sibling))
   data
 }
@@ -422,6 +434,9 @@
   if (!is.character(include) || !length(include) || anyNA(include))
     cli::cli_abort("include must name figure presets or individual figures.")
   unique(unlist(lapply(include, function(x) {
+    if (x == "core") return(intersect(inventory, c("01_model_validation", "02_habitat_change",
+      "03_environmental_driver", "04_support_and_disagreement", "06_response_curves",
+      "07_model_performance", "10_future_suitability", "11_variable_selection")))
     if (x == "all") return(inventory)
     pattern <- switch(x,
       basic = "^(01_|07_|11_|12_|13_|15_|S_selection_|S_stability_)",
@@ -438,6 +453,7 @@
   if ("all" %in% include) return(c("maps", "responses", "attribution", "mess"))
   out <- character()
   for (x in include) {
+    if (x == "core") out <- c(out, "maps", "responses", "attribution")
     if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
         (startsWith(x, "S_") && !grepl("^S_(selection|stability)", x)) || x == "S") out <- c(out, "maps")
     if (x == "responses" || startsWith(x, "R_") || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
@@ -445,4 +461,14 @@
     if (x == "novelty" || grepl("^09(_|$)", x)) out <- c(out, "mess")
   }
   unique(out)
+}
+
+# Figure selection controls computation; it never changes fitted predictors.
+.cast_figure_response_request <- function(include, comparison, variables, method) {
+  complete <- any(include %in% c("all", "responses") | startsWith(include, "R_"))
+  vars <- if (complete) variables else intersect(unlist(comparison$groups, use.names = FALSE), variables)
+  both <- any(include %in% c("all", "responses"))
+  types <- c(if (both || any(include %in% "core" | grepl("^06(_|$)|^R_(ale|pdp)", include))) method,
+    if (both || any(grepl("^14(_|$)|^R_fixed", include))) "fixed")
+  list(variables = vars, types = unique(types))
 }

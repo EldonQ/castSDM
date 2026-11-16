@@ -21,7 +21,7 @@ case_figure_stacks <- function(out_dir, result, scenario) {
 
 case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NULL,
                          current = NULL, future = NULL, attribution = NULL,
-                         render_only = FALSE, include = "all") {
+                         render_only = FALSE, include = "core") {
   if (is.null(result)) result <- readRDS(file.path(out_dir, "training", "result.rds"))
   result$output_dir <- file.path(out_dir, "training")
   if (is.null(cfg)) {

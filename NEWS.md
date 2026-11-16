@@ -1,3 +1,23 @@
+# castSDM 0.39.0
+
+- Focus the default figure collection on eight main validation, scenario and
+  environmental-response figures. Compute ALE only for fitted predictors that
+  actually change in the supplied scenarios. Fixed profiles, complete response
+  atlases, MESS and supplementary diagnostics remain explicitly requestable.
+- Prepare requested numerical products once, then render exports once. Remove
+  recursive figure phases and avoid revisiting unrelated products; time numerical
+  preparation and export separately. Preserve all native scientific products,
+  full-data fitting, spatial validation, map style and complete export options.
+- Remove the hidden 2,000-row ALE/PDP reference cap. Reuse exact additive GAM
+  term values while retaining ordinary prediction for unsupported formulas.
+  Record the full reference count and verify against published iml ALE on real
+  saved reference data. No ecological measurements or labels are manufactured.
+- Add real-case conditional response sensitivity across saved training and full
+  refits on every original hold-out location, with one paired support denominator.
+  This diagnostic neither refits models nor identifies ecological causal effects.
+- Start the maintained example in cast039_chelsa_ensmean. This release does not
+  introduce another selector, estimator, dependency or causal-identification claim.
+
 # castSDM 0.38.2
 
 - Fix lost supported-response footprints: mask effects on the native grid,

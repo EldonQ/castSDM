@@ -48,7 +48,7 @@
   grob
 }
 
-#' Export the Complete Saved-Result Figure Collection
+#' Export Saved-Result Figures
 #'
 #' Restores the numbered validation, habitat, driver, support, factorial,
 #' response, performance, range, novelty and future-scenario figures, plus
@@ -74,17 +74,18 @@
 #'   scenario, avoiding repeat driver predictions. It must use the same frozen
 #'   models/weights and extrapolation policy.
 #' @param basemap `"world"`, `"china"` or `"none"`.
-#' @param include `"all"` (default), exact figure names, or numbered prefixes
+#' @param include `"core"` (default) exports eight main validation, scenario and
+#'   environmental-response figures. `"all"`, exact figure names, or numbered prefixes
 #'   such as `c("01", "02", "07")`. All available raster layers and all
-#'   requested futures are included in the default supplementary atlases.
+#'   requested futures are included when complete supplementary atlases are requested.
 #' Presets `basic`, `maps`, `responses`, `drivers`, and `novelty` compute only
-#' required products. `all` exports these phases progressively.
+#' required products. Complete atlases and fixed profiles require an explicit request.
 #' @param render_only Require an existing matching numerical figure-data
 #'   bundle. No fitting, diagnostic prediction or response calculation occurs.
 #' @param response_method Published ALE (default, iml) or the original PDP.
 #' @param response_grid Response-curve grid size, default `50`. Partial
-#'   dependence uses [cast_response_curves()]' declared deterministic reference
-#'   cap of 2,000 rows; every fitted predictor and engine is retained.
+#'   dependence and ALE use all supplied reference rows. Core responses cover
+#'   scenario-changing fitted predictors; complete atlases cover every fitted predictor.
 #' @param display_resolution WGS84 display grid resolution in degrees, default
 #'   `0.02`. Original scientific rasters and native-grid range counts are
 #'   unchanged. Display rasters use overlapping valid-cell averages, categorical modes,
@@ -118,7 +119,7 @@
 cast_figures <- function(object, comparison, output_dir = NULL,
     scenario = utils::tail(names(comparison$results), 1L), current = NULL,
     future = NULL, attribution = NULL, basemap = c("world", "china", "none"),
-    include = "all", render_only = FALSE, response_grid = 50L,
+    include = "core", render_only = FALSE, response_grid = 50L,
     display_resolution = .02, width_mm = 183, dpi = 600,
     resources = list(), verbose = TRUE, formats = c("png", "pdf"),
     response_method = c("ale", "pdp")) {
@@ -166,37 +167,6 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     old_display <- options(castSDM.figure_display_cache = new.env(parent = emptyenv()))
     on.exit(options(old_display), add = TRUE)
   }
-  if (identical(include, "all") && !render_only) {
-    phase_errors <- character(); phase_times <- list()
-    for (phase in c("basic", "maps", "responses", "drivers", "novelty")) {
-      if (verbose) cli::cli_inform("Figure phase: {phase}; earlier exports remain available.")
-      phase_start <- Sys.time(); phase_clock <- proc.time()[["elapsed"]]
-      value <- tryCatch(cast_figures(object, comparison, output_dir, scenario, current, future,
-        attribution, basemap, include = phase, render_only = FALSE,
-        response_grid = response_grid, display_resolution = display_resolution,
-        width_mm = width_mm, dpi = dpi, resources = resources, verbose = verbose,
-        formats = formats, response_method = response_method), error = identity)
-      seconds <- proc.time()[["elapsed"]]-phase_clock
-      phase_times[[phase]] <- data.frame(phase = phase,
-        started = format(phase_start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-        elapsed_s = seconds, status = if (inherits(value, "error")) "failed" else "completed")
-      if (dir.exists(output_dir)) utils::write.csv(do.call(rbind, phase_times),
-        file.path(output_dir, "phase_timings.csv"), row.names = FALSE)
-      if (verbose) cli::cli_inform("Figure phase {phase}: {round(seconds, 1)} s.")
-      if (inherits(value, "error")) {
-        phase_errors <- c(phase_errors, paste0(phase, ": ", conditionMessage(value)))
-        if (verbose) cli::cli_inform("Figure phase {phase} failed; other available products will still be exported.")
-      } else result <- value
-    }
-    if (length(phase_errors)) cli::cli_abort(c(
-      "Figure phases failed: {paste(phase_errors, collapse = '; ')}",
-      i = "Successful exports and numerical checkpoints are retained."))
-    result$requested <- result$inventory$figure
-    lock <- .cast_lock(file.path(result$output_dir, ".figures.lock"))
-    tryCatch(.cast_atomic_rds(result, file.path(result$output_dir, "figure_manifest.rds")),
-      finally = filelock::unlock(lock))
-    return(invisible(result))
-  }
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
   lock <- .cast_lock(file.path(output_dir, ".figures.lock"))
@@ -207,9 +177,22 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     castSDM.figure_pdf_device = pdf_device)
   on.exit(options(old_options), add = TRUE)
   data_dir <- file.path(output_dir, ".data")
+  response_request <- .cast_figure_response_request(include, comparison,
+    (object$fit_full %||% object$fit)$env_vars, response_method)
+  if (!length(response_request$variables)) products <- setdiff(products, "responses")
+  timing_path <- file.path(output_dir, "phase_timings.csv")
+  earlier_times <- if (file.exists(timing_path))
+    tryCatch(utils::read.csv(timing_path), error = function(e) NULL)
+  phase_start <- Sys.time(); phase_clock <- proc.time()[["elapsed"]]
   data <- .cast_figure_data(object, comparison, scenario, data_dir,
     current, future, attribution, render_only, response_grid,
-    display_resolution, resources, verbose, products = products, response_method = response_method)
+    display_resolution, resources, verbose, products = products, response_method = response_method,
+    response_variables = response_request$variables, response_types = response_request$types)
+  phase_times <- data.frame(phase = "numerical_products",
+    started = format(phase_start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    elapsed_s = proc.time()[["elapsed"]]-phase_clock, status = "completed")
+  utils::write.csv(rbind(earlier_times, phase_times), timing_path, row.names = FALSE)
+  phase_start <- Sys.time(); phase_clock <- proc.time()[["elapsed"]]
   registry <- .cast_figure_registry(data, basemap)
   if (!is.character(include) || !length(include) || anyNA(include))
     cli::cli_abort("include must be 'all', figure names or numbered prefixes.")
@@ -244,14 +227,14 @@ cast_figures <- function(object, comparison, output_dir = NULL,
       value = c(data$training_version, data$source_version, scenario,
         comparison$threshold %||% NA_real_, display_resolution,
         "native support masks before aggregation; continuous area-weighted average; categorical mode; outside/inside/mixed support; novelty maximum; native scientific rasters unchanged",
-        response_grid, data$pdp_reference_n, data$response_reference_n, response_method)),
+        response_grid, data$response_reference_n, data$response_reference_n, response_method)),
     unavailable_products = data$notes %||% data.frame(product = character(), reason = character()))
   if (identical(comparison$design, "paired")) {
     names(tables)[match(c("factorial_summary", "factorial_binary", "factorial_binary_supported"), names(tables))] <-
       c("scenario_summary", "range_change", "range_change_supported")
   }
   table_rows <- list()
-  for (name in names(tables)) if (is.data.frame(tables[[name]])) {
+  for (name in names(tables)) if (is.data.frame(tables[[name]]) && ncol(tables[[name]]) > 0L) {
     path <- file.path(table_dir, paste0(name, ".csv"))
     utils::write.csv(tables[[name]], path, row.names = FALSE)
     table_rows[[name]] <- data.frame(path = file.path("source_data", basename(path)),
@@ -370,6 +353,11 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     interpretation = "Frozen-model diagnostics; source scientific rasters are unchanged.",
     visual_QA = "not performed automatically"), class = "cast_figures")
   .cast_atomic_rds(result, manifest_path)
+  phase_times <- rbind(phase_times, data.frame(phase = "figure_exports",
+    started = format(phase_start, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    elapsed_s = proc.time()[["elapsed"]]-phase_clock,
+    status = if (any(status$status == "failed")) "failed" else "completed"))
+  utils::write.csv(rbind(earlier_times, phase_times), timing_path, row.names = FALSE)
   if (any(status$status == "failed")) {
     failed <- status[status$status == "failed", ]
     details <- unique(paste0(failed$path, ": ", failed$reason))

@@ -119,3 +119,5 @@ stopifnot(identical(before, tools::md5sum(response$raster_file)), file.exists(pa
 flags <- terra::values(terra::rast(display)[["support_total"]], mat = FALSE)
 stopifnot(all(flags[is.finite(flags)] %in% c(0, 1, 2)))
 cat("Common-domain response means preserve native data; coarse support explicitly distinguishes mixed cells.\n")
+saveRDS(list(run = p$run, comparison = a, attribution = response),
+  file.path(qa, "verified_figure_inputs.rds"))

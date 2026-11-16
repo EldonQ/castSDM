@@ -187,3 +187,14 @@ footprint scans and colour-limit calculations. Verification uses saved actual
 case rasters/models and independent mask-first oracles, including the original
 national response footprint; it does not rerun the full study, fabricate data,
 expand the declared river/locality domain or assert causal identification.
+
+On 16 November 2026, Codex assisted a focused 0.39.0 response workflow. The
+default exports eight main figures and computes only scenario-changing ALE
+responses; complete diagnostics remain explicitly requestable. The hidden
+2,000-row reference cap and recursive export phases were removed. Exact
+additive GAM term reuse is checked against ordinary prediction and official
+iml ALE on all saved real reference rows. Conditional response sensitivity uses
+every original held-out location and actual CHELSA futures with existing fits;
+it is not external validation or causal identification. Prior work already
+uses response curves and counterfactual SDM maps, so no first-use or new causal
+estimator claim is made. Verification does not rerun the full national workflow.

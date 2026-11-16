@@ -1,7 +1,7 @@
 Package: castSDM
 Type: Package
 Title: Environmental Response Maps for Species Distribution Models
-Version: 0.38.2
+Version: 0.39.0
 Authors@R: c(
     person(
             "Liqiang", "Q",
@@ -20,7 +20,7 @@ Description: Auditable model-conditional comparisons of environmental scenarios
     engines support variable screening, spatial cross-validation and full-data
     refitting. Content-verified stage caches and execution receipts support
     reproducible workflows. A local Shiny interface explores finite environmental
-    changes and descriptive response groups selected using spatial folds.
+    changes with explicit prediction domains and extrapolation diagnostics.
     Contrasts describe fitted suitability responses;
     they do not establish real-world causal effects or occurrence probabilities.
 License: GPL (>= 3)

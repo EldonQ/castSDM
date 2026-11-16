@@ -1,3 +1,35 @@
+# Exact additive GAM evaluation reuses one-variable term values. Other engines
+# and unsupported GAM formulas use their ordinary prediction methods.
+.cast_response_predictor <- function(info, reference, clamp) {
+  terms <- .cast_gam_terms(info)
+  if (is.null(terms)) return(function(newdata)
+    predict_single_model(info, newdata, clamp = isTRUE(clamp)))
+  a <- .cast_predict_gam(info$model, reference, type = "terms")
+  constant <- attr(a, "constant") %||% 0
+  lookup <- lapply(names(terms), function(v) list(value = reference[[v]],
+    contribution = a[, terms[[v]]]))
+  names(lookup) <- names(terms)
+  function(newdata) {
+    eta <- rep(constant, nrow(newdata))
+    for (v in names(terms)) {
+      item <- lookup[[v]]
+      at <- match(newdata[[v]], item$value)
+      missing <- which(is.na(at))
+      if (length(missing)) {
+        rows <- missing[!duplicated(newdata[[v]][missing])]
+        added <- .cast_predict_gam(info$model, newdata[rows, , drop = FALSE],
+          type = "terms", terms = terms[[v]])
+        item$value <- c(item$value, newdata[[v]][rows])
+        item$contribution <- c(item$contribution, added[, terms[[v]]])
+        at[missing] <- match(newdata[[v]][missing], item$value)
+        lookup[[v]] <<- item
+      }
+      eta <- eta+item$contribution[at]
+    }
+    .cast_apply_offset(info$model$family$linkinv(eta), info$offset)
+  }
+}
+
 #' Response Curves and Partial Dependence for Fitted SDMs
 #'
 #' Single-variable response curves for a fitted [cast_fit()] object, either
@@ -35,6 +67,7 @@
 #'
 #' @details
 #' Grids span each predictor's marginal range in the supplied background.
+#' All supplied reference rows are used; no hidden subsampling is applied.
 #' Clamping to training ranges does not guarantee joint environmental support.
 #' Partial dependence replaces the profiled predictor while retaining the
 #' background values of the others, which can create unsupported combinations
@@ -72,7 +105,8 @@ cast_response_curves <- function(fit,
 
   env_vars <- fit$env_vars
   if (is.null(variables)) variables <- env_vars
-  if (!is.character(variables) || !all(variables %in% env_vars)) {
+  if (!is.character(variables) || !length(variables) || anyNA(variables) ||
+      anyDuplicated(variables) || !all(variables %in% env_vars)) {
     cli::cli_abort(c(
       "All {.arg variables} must be predictors of the fitted model.",
       x = "Unknown: {.val {setdiff(variables, env_vars)}}."
@@ -97,14 +131,6 @@ cast_response_curves <- function(fit,
     for (col in names(X)) X[[col]] <- as.numeric(X[[col]])
     .cast_impute(X, fit$scaling$impute)
   }
-  # Deterministic cap on the pdp marginalization sample: equidistant rows
-  # keep the average reproducible without a seed.
-  pdp_cap <- 2000L
-  if (type %in% c("ale", "pdp") && nrow(bg) > pdp_cap) {
-    idx <- unique(floor(seq(1, nrow(bg), length.out = pdp_cap)))
-    bg <- bg[idx, , drop = FALSE]
-  }
-
   available <- names(fit$models)
   if (is.null(models)) models <- available
   bad_m <- setdiff(models, available)
@@ -117,10 +143,15 @@ cast_response_curves <- function(fit,
   models <- models[vapply(models, function(m) {
     !is.null(fit$models[[m]]$model)
   }, logical(1))]
+  if (!length(models)) cli::cli_abort("No fitted model is available for response curves.")
+  # A fixed profile needs only one median row to initialise its term cache.
+  reference <- if (type == "fixed") as.data.frame(lapply(bg, stats::median, na.rm = TRUE)) else bg
+  predictors <- stats::setNames(lapply(models, function(m)
+    .cast_response_predictor(fit$models[[m]], reference, clamp)), models)
 
   .predict_mean_or_vec <- function(m, X) {
     value <- tryCatch(
-      predict_single_model(fit$models[[m]], X, clamp = isTRUE(clamp)),
+      predictors[[m]](X),
       error = function(e) cli::cli_abort("Response prediction failed for {.val {m}}: {conditionMessage(e)}")
     )
     if (length(value) != nrow(X) || any(!is.finite(value)))
@@ -131,15 +162,15 @@ cast_response_curves <- function(fit,
   if (type == "ale" && !is.null(pair)) cli::cli_abort("ALE currently supports one-variable curves; pair grids use fixed profiles.")
   if (type == "ale") {
     check_suggested("iml", "for the published accumulated local effects implementation")
-    predictors <- lapply(models, function(m) iml::Predictor$new(
+    ale_predictors <- lapply(models, function(m) iml::Predictor$new(
       model = fit$models[[m]], data = bg,
-      predict.function = function(model, newdata) predict_single_model(model, newdata, clamp = isTRUE(clamp))))
-    names(predictors) <- models
+      predict.function = function(model, newdata) .predict_mean_or_vec(m, newdata)))
+    names(ale_predictors) <- models
     out_list <- lapply(variables, function(v) {
       do.call(rbind, lapply(models, function(m) {
         if (!.cast_is_varying(bg[[v]])) return(data.frame(variable = v,
           value = bg[[v]][1L], model = m, prediction = NA_real_))
-        effect <- iml::FeatureEffect$new(predictors[[m]], feature = v,
+        effect <- iml::FeatureEffect$new(ale_predictors[[m]], feature = v,
           method = "ale", grid.size = grid_size)$results
         data.frame(variable = v, value = effect[[v]], model = m,
           prediction = effect$.value, stringsAsFactors = FALSE)
@@ -205,6 +236,7 @@ cast_response_curves <- function(fit,
   rownames(out) <- NULL
   class(out) <- c("cast_response", "data.frame")
   attr(out, "response_type") <- type
+  attr(out, "reference_n") <- nrow(bg)
   out
 }
 

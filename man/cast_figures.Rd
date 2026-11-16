@@ -2,7 +2,7 @@
 % Please edit documentation in R/figures.R
 \name{cast_figures}
 \alias{cast_figures}
-\title{Export the Complete Saved-Result Figure Collection}
+\title{Export Saved-Result Figures}
 \usage{
 cast_figures(
   object,
@@ -13,7 +13,7 @@ cast_figures(
   future = NULL,
   attribution = NULL,
   basemap = c("world", "china", "none"),
-  include = "all",
+  include = "core",
   render_only = FALSE,
   response_grid = 50L,
   display_resolution = 0.02,
@@ -45,18 +45,19 @@ models/weights and extrapolation policy.}
 
 \item{basemap}{\code{"world"}, \code{"china"} or \code{"none"}.}
 
-\item{include}{\code{"all"} (default), exact figure names, or numbered prefixes
+\item{include}{\code{"core"} (default) exports eight main validation, scenario and
+environmental-response figures. \code{"all"}, exact figure names, or numbered prefixes
 such as \code{c("01", "02", "07")}. All available raster layers and all
-requested futures are included in the default supplementary atlases.
+requested futures are included when complete supplementary atlases are requested.
 Presets \code{basic}, \code{maps}, \code{responses}, \code{drivers}, and \code{novelty} compute only
-required products. \code{all} exports these phases progressively.}
+required products. Complete atlases and fixed profiles require an explicit request.}
 
 \item{render_only}{Require an existing matching numerical figure-data
 bundle. No fitting, diagnostic prediction or response calculation occurs.}
 
 \item{response_grid}{Response-curve grid size, default \code{50}. Partial
-dependence uses \code{\link[=cast_response_curves]{cast_response_curves()}}' declared deterministic reference
-cap of 2,000 rows; every fitted predictor and engine is retained.}
+dependence and ALE use all supplied reference rows. Core responses cover
+scenario-changing fitted predictors; complete atlases cover every fitted predictor.}
 
 \item{display_resolution}{WGS84 display grid resolution in degrees, default
 \code{0.02}. Original scientific rasters and native-grid range counts are

@@ -17,6 +17,19 @@ copy of the author's environmental/occurrence library. A passing engineering
 check is not an independent ecological validation or a completed case study.
 Legacy simulated unit fixtures in other test files are not run for this release.
 
+`response.R <actual-case> <QA-dir> [scenario-io-bundle]` compares accelerated ALE
+with official iml and ordinary predictions on every saved reference row. No
+hidden reference cap is used. The optional verified real-crop bundle written
+by `scenario-io.R` also checks the eight-figure default, requested curve scope,
+PNG/PDF exports, complete inventory and render-only reuse.
+
+`stability.R <actual-case> <QA-dir>` evaluates conditional sensitivity to the
+saved training versus full-data refits at every original hold-out location.
+Actual future predictor values come from the declared reporting scenario.
+One shared paired marginal-support subset is used for every driver and engine;
+the table reports coverage, effect means, sign agreement and rank correlation.
+It does not refit, subsample, estimate habitat area or prove ecological causality.
+
 
 `maintenance.R <actual-case> <QA-directory>` verifies a real native-grid crop,
 frozen GAM shortcut parity, controlled cancellation/resume, prediction-free

@@ -13,7 +13,7 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, c("castSDM", "terra", "sf", "ggplot2", "patchwork", "scales", "ragg"),
-    minimum_cast = "0.38.2")
+    minimum_cast = "0.39.0")
   args <- commandArgs(TRUE)
   positional <- args[!startsWith(args, "--")]
   directory <- Sys.getenv("CAST_CASE_DIR", if (length(positional) == 1L) positional[1L] else "")
@@ -33,7 +33,7 @@ local({
   })
   run <- readRDS(file.path(out, case$training))
   render_only <- identical(Sys.getenv("CAST_RENDER_ONLY"), "1") || "--render-only" %in% args
-  include <- strsplit(Sys.getenv("CAST_FIGURES", "all"), ",", fixed = TRUE)[[1L]]
+  include <- strsplit(Sys.getenv("CAST_FIGURES", "core"), ",", fixed = TRUE)[[1L]]
   case_figures(comparison, out, case$report_scenario, result = run, cfg = case$cfg,
     render_only = render_only, include = include)
 })

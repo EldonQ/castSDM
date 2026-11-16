@@ -62,6 +62,7 @@ The result is a tidy long-format data frame with a \code{\link[=plot]{plot()}} m
 }
 \details{
 Grids span each predictor's marginal range in the supplied background.
+All supplied reference rows are used; no hidden subsampling is applied.
 Clamping to training ranges does not guarantee joint environmental support.
 Partial dependence replaces the profiled predictor while retaining the
 background values of the others, which can create unsupported combinations

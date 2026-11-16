@@ -313,7 +313,8 @@
   curve_type <- if (!is.null(data$responses$ale)) "ALE" else "PDP"
   add("06_response_curves", function() .cast_figure_response_panel(curve, main_variables,
     if (curve_type == "ALE") "Accumulated local effects" else "Partial dependence",
-    "Scenario-changing predictors shown when available; all fitted predictors are in the paginated R_ atlas. Curves describe fitted score responses, not causal effects."),
+    paste("Reference rows:", data$response_reference_n,
+      ". Scenario-changing predictors shown when available. Curves describe centred fitted-score responses, not causal effects.")),
     max(110, ceiling(length(main_variables)/3)*39), !is.null(curve))
   add("07_model_performance", function() .cast_figure_performance(data), 100,
     !is.null(data$curves) && !is.null(data$reliability))
@@ -385,11 +386,12 @@
   }, 100, length(cmp$weights) > 0 && !is.null(data$diagnostics$holdout))
   add("14_fixed_response_profiles", function() .cast_figure_response_panel(data$responses$fixed,
     main_variables, "Fixed response profiles",
-    "Other predictors are held at training medians. Full fitted-predictor profiles are in the R_fixed atlas; neither fixed profiles nor ALE identify causal effects."),
+    "Other predictors are held at training medians. Fixed profiles and ALE describe fitted responses; they do not identify causal effects."),
     max(110, ceiling(length(main_variables)/3)*39), !is.null(data$responses$fixed))
   for (kind in c(tolower(curve_type), "fixed")) {
     response <- if (kind == "fixed") data$responses$fixed else curve
     if (is.null(response)) next
+    if (!all(data$variables %in% unique(response$variable))) next
     variables <- intersect(data$variables, unique(response$variable))
     pages <- split(variables, ceiling(seq_along(variables)/12L))
     for (page in seq_along(pages)) local({

@@ -237,7 +237,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     sample = .cast_code_identity(.cast_explore_sample), pair = .cast_code_identity(.cast_explore_pair),
     group_map = .cast_code_identity(.cast_explore_group_map),
     preview = .cast_code_identity(.cast_explore_preview),
-    rpart = as.character(utils::packageVersion("rpart"))))
+    rpart = if (grouping) as.character(utils::packageVersion("rpart"))))
   root <- output_dir %||% file.path(project$directory, "interactive")
   directory <- file.path(root, key)
   dir.create(directory, recursive = TRUE, showWarnings = FALSE)
