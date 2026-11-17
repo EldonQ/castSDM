@@ -76,7 +76,7 @@ log. Stage files live under \code{output_dir} when supplied.
 }
 \description{
 The single production workflow: spatial hold-out split, variable
-selection, model fitting, nested spatial cross-validation, a one-shot
+selection, model fitting, spatial cross-validation with fold-local screening, a one-shot
 hold-out evaluation, full-data refit, spatial prediction/ensemble (and
 optional raster projection), and an ODMAP-aligned report -- all driven by
 one \code{\link[=cast_protocol]{cast_protocol()}}. Every scientific setting is declared once in the

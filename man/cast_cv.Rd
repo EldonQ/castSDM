@@ -2,7 +2,7 @@
 % Please edit documentation in R/spatial-cv.R
 \name{cast_cv}
 \alias{cast_cv}
-\title{Nested Spatial Cross-Validation for SDMs}
+\title{Spatial Cross-Validation with Training-Fold Screening for SDMs}
 \usage{
 cast_cv(
   data,
@@ -34,14 +34,16 @@ cast_cv(
   clamp = FALSE,
   coords_crs = NULL,
   gam_backend = c("bam", "gam"),
-  response_data = NULL
+  response_data = NULL,
+  cache_dir = NULL,
+  resume = TRUE
 )
 }
 \arguments{
 \item{data}{Data frame with \code{lon}, \code{lat}, binary response, and predictors.}
 
 \item{screen}{Optional final-data screen. It is used only when
-\code{select_method = NULL}; it is never re-used as a nested screen. Because
+\code{select_method = NULL}; it is never re-used for fold-local screening. Because
 such a screen was fitted on the full data set, evaluating it here leaks
 selection into the CV metrics (a warning is issued); treat those metrics
 as optimistic.}
@@ -64,7 +66,7 @@ the range of spatial autocorrelation estimated by
 \code{\link[blockCV:cv_spatial_autocor]{blockCV::cv_spatial_autocor()}} (Roberts et al. 2017), or the
 user-supplied \code{block_size}. Projected coordinates require their real
 \code{coords_crs}. An unavailable range/design stops explicitly: no different
-blocking strategy is substituted within nested folds.
+blocking strategy is substituted within folds.
 \item \code{"grid"}: grid cells grouped into spatially contiguous folds via
 k-means on cell centroids (dependency-free fallback).
 \item \code{"env"}: k-means on the scaled predictor matrix, so every fold is
@@ -150,7 +152,7 @@ settings as in \code{\link[=cast_fit]{cast_fit()}}, applied in every outer train
 
 \item{fold_ids}{Optional integer fold assignments from an external design
 such as \code{blockCV}, aligned with data rows. Values must cover \code{1:k}.
-Use \code{n_repeat = 1} for a fixed external design. This allows physical block
+Supply a list of \code{n_repeat} such vectors for repeated designs. This allows physical block
 sizes or basin groups to be chosen independently of castSDM's automatic
 blocking; supplied assignments are returned unchanged.}
 
@@ -168,14 +170,21 @@ tables at fixed external locations, every candidate predictor, unique
 training fit predicts these same locations before it is discarded. No
 response labels are used. Saved contrasts allow descriptive explanation
 sensitivity checks without additional fits. \code{NULL} skips these predictions.}
+
+\item{cache_dir}{Optional directory for content-verified fold checkpoints.
+Completed folds can be reused after interruption; failed folds are saved
+for diagnosis and retried. No fitted model objects are retained here.}
+
+\item{resume}{Reuse matching completed fold checkpoints. Default TRUE.}
 }
 \value{
 A \code{cast_cv} object including fold-level selections and \code{fold_status}.
 Metrics include \code{auc_n_folds}, \code{tss_n_folds}, and \code{cbi_n_folds} counting
 finite values separately; \code{n_folds} counts model result rows.
-Empty or failed folds do not contribute predictive metrics. When no fold
-is evaluable, the \code{cast_cv_no_evaluable_folds} error carries \code{screens} and
-\code{fold_status} for inspection. With \code{aoa = TRUE} the \code{aoa} component
+Single-class test folds retain predictions and proper losses, with
+undefined discrimination metrics reported as NA. Incomplete predictions
+return \code{complete = FALSE} and NA thresholds; they must not be used for
+hold-out evaluation or projection. With \code{aoa = TRUE} the \code{aoa} component
 carries the calibrated \code{threshold} (NA when fewer than 10 finite
 training-side DI values were collected), \code{di_oof}, \code{di_train} and
 \code{share_outside_oof}.

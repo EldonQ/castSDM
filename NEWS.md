@@ -1,3 +1,22 @@
+# castSDM 0.43.0
+
+- Inspect and save all spatial fold designs before fitting, including actual
+  block scales, buffered training counts and per-metric class availability.
+  Reuse the declared designs without changing their scale or fold count.
+- Predict single-class test folds; retain Brier/log loss and report undefined
+  discrimination metrics as NA with explicit valid fold counts. Single-class
+  training folds fail preflight. Incomplete OOF predictions retain diagnostics
+  and cannot supply thresholds, evaluation or publication projections.
+- Checkpoint completed CV folds with input, design, code and dependency
+  verification. Interrupted runs reuse valid compact fold products; failed
+  folds are diagnosed and retried. Save GAM concurvity with the initial fit.
+- Reuse exact raster coverage counts across matching masks and source files.
+  Report predictor coverage at occurrence locations and reuse extraction QC;
+  preserve observations and the declared missing-data policy.
+- Accept explicit aligned custom study masks in scripts and Shiny. Study
+  regions, background designs and model settings remain user declarations;
+  no taxon-specific optimisation or automatic ecological scope is introduced.
+
 # castSDM 0.42.0
 
 - Require an explicit taxon when creating a workspace. Script and Shiny entries

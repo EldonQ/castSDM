@@ -272,7 +272,9 @@
     setup_request <- function(run) {
       list(operation = "setup", path = input$setup_path, data_dir = input$setup_data,
         occurrence_file = input$setup_occurrence, species = input$setup_species,
-        settings = list(domain = input$setup_domain, input_type = input$setup_input,
+        settings = list(domain = input$setup_domain,
+          domain_mask = if (identical(input$setup_domain, "custom_mask")) input$setup_domain_mask else NULL,
+          input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
           block_size = if (length(input$setup_block_size) == 1L && is.finite(input$setup_block_size)) input$setup_block_size else NULL,
           thin_km = input$setup_thin %||% 1, predictor_min_coverage = input$setup_coverage %||% .95,

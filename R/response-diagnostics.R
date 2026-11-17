@@ -6,7 +6,7 @@
       !requireNamespace("mgcv", quietly = TRUE)) return(NULL)
   key <- .cast_digest(list(model$coefficients, model$sp, model$R, model$smooth, model$model,
     as.character(utils::packageVersion("mgcv"))))
-  old <- object$diagnostics$gam_concurvity
+  old <- object$diagnostics$gam_concurvity %||% fit$diagnostics$gam_concurvity
   if (is.data.frame(old) && identical(attr(old, "fit_identity"), key)) return(old)
   value <- tryCatch({
     concurvity <- mgcv::concurvity(model, full = TRUE)

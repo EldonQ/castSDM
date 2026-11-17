@@ -2,7 +2,7 @@
 # cast_run(): the single production pipeline ---------------------------------
 #
 # One orchestration driven by a cast_protocol(): prepare -> select -> fit ->
-# nested spatial CV -> one-shot hold-out evaluation -> full-data refit ->
+# spatial CV with fold-local screening -> hold-out evaluation -> full-data refit ->
 # prediction/ensemble -> report. When output_dir is supplied, every stage
 # lands on disk with content digests (receipts) in manifest.rds.
 #
@@ -19,7 +19,7 @@
 #' Run the castSDM Pipeline
 #'
 #' The single production workflow: spatial hold-out split, variable
-#' selection, model fitting, nested spatial cross-validation, a one-shot
+#' selection, model fitting, spatial cross-validation with fold-local screening, a one-shot
 #' hold-out evaluation, full-data refit, spatial prediction/ensemble (and
 #' optional raster projection), and an ODMAP-aligned report -- all driven by
 #' one [cast_protocol()]. Every scientific setting is declared once in the
@@ -130,7 +130,8 @@ cast_run <- function(species_data,
       cache_hits[[name]] <<- !is.null(value)
       if (is.null(value)) {
         value <- force(expr)
-        .cast_cache_write(value, path, key)
+        if (name != "04_cv" || isTRUE(value$complete))
+          .cast_cache_write(value, path, key)
       }
     } else if (verbose) cli::cli_inform("{name}: verified training cache")
     value
@@ -196,6 +197,20 @@ cast_run <- function(species_data,
       split$test[, split$env_vars, drop = FALSE], check.attributes = FALSE)))
     cli::cli_abort("cast_run response_data$current must match the prepared hold-out predictors in row order; hold-out labels are never used for explanation fitting.")
 
+  # Freeze and inspect every spatial split before any model is fitted.
+  stage_started <- Sys.time()
+  design_inputs <- list(split$train, protocol$cv_k, protocol$block_method,
+    protocol$block_size, protocol$coords_crs, protocol$buffer,
+    protocol$buffer_unit, protocol$n_repeat, protocol$seed)
+  cv_plan <- stage("01_cv_design", design_inputs, .cast_cv_plan(split$train,
+    k = protocol$cv_k, block_method = protocol$block_method,
+    block_size = protocol$block_size, coords_crs = protocol$coords_crs,
+    buffer = protocol$buffer, buffer_unit = protocol$buffer_unit,
+    n_repeat = protocol$n_repeat, seed = protocol$seed))
+  add_receipt("01_cv_design", .cast_digest(design_inputs), cv_plan,
+    tables = list(cv_fold_design = cv_plan$balance))
+  .cast_cv_check_plan(cv_plan, verbose)
+
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")
   stage_started <- Sys.time()
@@ -242,6 +257,12 @@ cast_run <- function(species_data,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
   ))
   fit$screen <- screen
+  gam_terms <- .cast_gam_response_diagnostics(list(fit = fit))
+  fit$diagnostics$gam_concurvity <- gam_terms
+  if (verbose && is.data.frame(gam_terms)) {
+    smooths <- gam_terms[gam_terms$term != "para", , drop = FALSE]
+    cli::cli_inform("GAM: {nrow(smooths)} smooth terms; {sum(smooths$estimate > .9, na.rm = TRUE)} with concurvity estimate > 0.9. VIF screens linear redundancy; these are interpretation diagnostics, not automatic removal rules.")
+  }
   add_receipt("03_fit",
     .cast_digest(list(split$train, screen$selected, protocol$models,
                       protocol$rf_ntree, protocol$rf_mtry,
@@ -249,16 +270,17 @@ cast_run <- function(species_data,
                       protocol$maxent_regmult, protocol$gam_backend, protocol$tune,
                       protocol$tune_folds, protocol$prevalence_target,
                       protocol$seed)),
-    fit, tables = list(engine_fits = .cast_fit_table(fit)))
+    fit, tables = list(engine_fits = .cast_fit_table(fit),
+      gam_concurvity = gam_terms))
 
-  # ---- 4. Nested spatial cross-validation (training split only) -----------
+  # ---- 4. Spatial cross-validation (training-fold screening) --------------
   if (verbose) cli::cli_h2("CV: spatial cross-validation with fold-local screening (k = {protocol$cv_k})")
   stage_started <- Sys.time()
   select_args <- list(
     vif_threshold = protocol$select_vif_threshold,
     roles = select_roles,
     var_id = select_var_id, category = select_category)
-  cv_inputs <- list(response_data, split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
+  cv_inputs <- list(cv_plan$folds, response_data, split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
     protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$coords_crs, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
     protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
@@ -278,11 +300,13 @@ cast_run <- function(species_data,
     maxent_classes = protocol$maxent_classes,
     maxent_regmult = protocol$maxent_regmult,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose,
-    clamp = protocol$clamp, response_data = response_data
+    clamp = protocol$clamp, response_data = response_data,
+    fold_ids = cv_plan$folds, cache_dir = if (!is.null(cache_dir)) file.path(cache_dir, "cv_folds"),
+    resume = resume
   ))
   cv_tables <- list(
     cv_metrics = cv$metrics, cv_fold_timings = cv$timings, cv_engine_fits = cv$engine_fits,
-    cv_fold_metrics = cv$fold_metrics,
+    cv_fold_metrics = cv$fold_metrics, cv_fold_design = cv$fold_balance,
     cv_selection_frequency = cv$selection_freq,
     cv_oof_predictions = cv$oof,
     cv_native_oof_predictions = cv$native_oof,
@@ -296,7 +320,7 @@ cast_run <- function(species_data,
   )
   add_receipt("04_cv", .cast_digest(cv_inputs), cv, tables = cv_tables)
 
-  if (any(cv$repeat_status$status != "evaluated") ||
+  if (!isTRUE(cv$complete) || any(cv$repeat_status$status != "evaluated") ||
       any(!is.finite(as.matrix(cv$oof[, paste0("HSS_", protocol$models), drop = FALSE]))))
     cli::cli_abort("Spatial CV is incomplete. Fold diagnostics were saved; repair the declared design/model failures before hold-out evaluation or projection. No synthetic threshold or replacement fold is used.")
 

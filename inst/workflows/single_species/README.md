@@ -1,4 +1,10 @@
-# CHELSA 单物种工作流（castSDM 0.42.0）
+# CHELSA 单物种工作流（castSDM 0.43.0）
+
+模型协议不按物种名调参：物种标识用于区分输入和输出，研究域、记录格式和统计设置由项目显式声明。变量筛选保持训练侧 VIF，并在每个空间折内重复，不规定保留数量。
+
+支持 `settings = list(domain = "custom_mask", domain_mask = "研究域栅格完整路径")`。掩膜需与环境库网格对齐，正值为域内；仅使用该域内记录。程序不会为了提高指标而自动缩小研究域或修改空间块长。
+
+拟合前保存 `training/tables/cv_fold_design.csv`。单类测试折保留预测和 Brier/log loss，AUC/TSS 为 NA，各指标分别报告有效折数；训练侧缺类则提前停止。经过校验的完整折结果可在中断后复用。数据准备同时保存 `occurrence_environment_qc.csv` 和观测位置覆盖率；全域覆盖率不代表每个观测地区都有覆盖。
 
 规范源码在 `cast/inst/workflows/single_species`；外部工作目录是部署副本。
 请在重启的 R 会话运行。入口检查并使用对应版本的隔离 R 库；环境库仅被读取。
@@ -27,7 +33,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 物种名不决定坐标格式或分析域；应按实际数据明确指定。
 
 该文件按环境网格 CRS 的 `lon,lat,year` 读取；来源、采样努力和年份含义未经独立核实，不自动标记为审核后的 GBIF 记录。松鼠默认使用全国陆地掩膜，与鱼类的河流局地范围不同；两者不能仅按 AUC 排名。两例均使用 GLU 当前土地利用指标。
-新结果写入 `output/cast042_chelsa_ensmean/<物种>`，不覆盖既有研究结果。
+新结果写入 `output/cast043_chelsa_ensmean/<物种>`，不覆盖既有研究结果。
 `CAST_DRY_RUN=1` 只做输入检查；正常运行前应取消该环境变量。
 
 ## 流程与解释

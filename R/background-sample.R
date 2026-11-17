@@ -113,7 +113,9 @@
 #' @param missing `"complete_cases"` (default) filters incomplete rows. With
 #'   `"drop_predictors"`, random/distance-based sampling retains the sampled
 #'   locations and excludes any indicator missing there, before model splitting.
-#'   The `missing_qc` attribute records counts and exclusions. This declared
+#'   The `missing_qc` attribute records counts and observed-location coverage;
+#'   `presence_qc` retains the sampled occurrence coordinates, native cells,
+#'   exclusion flags and missing predictor names. This declared
 #'   study-input QC uses covariate availability, never response ranking; no
 #'   measurements are filled in. Validation is conditional on this input QC.
 #' @export
@@ -457,6 +459,17 @@ cast_background <- function(occurrences,
     stringsAsFactors = FALSE)
   missing_qc$policy <- missing
   missing_qc$excluded <- missing == "drop_predictors" & missing_qc$n_missing > 0L
+  missing_qc$n_presence <- n_pres
+  missing_qc$presence_coverage <- 1 - missing_qc$n_presence_missing/n_pres
+  # Preserve sampled locations before complete-case deletion. The workflow
+  # reuses this audit instead of extracting the same raster values again.
+  pres_missing <- !is.finite(as.matrix(env_df[seq_len(n_pres), , drop = FALSE]))
+  retained <- if (missing == "drop_predictors") !missing_qc$excluded else rep(TRUE, ncol(pres_missing))
+  used_missing <- pres_missing[, retained, drop = FALSE]
+  presence_qc <- data.frame(lon = occ_xy[, 1], lat = occ_xy[, 2], cell = occ_cells,
+    used_in_model = rowSums(used_missing) == 0L,
+    missing_predictors = apply(used_missing, 1L, function(z)
+      paste(names(env_df)[retained][z], collapse = ";")), stringsAsFactors = FALSE)
   if (missing == "drop_predictors") {
     dropped <- missing_qc$variable[missing_qc$excluded]
     out_df[dropped] <- NULL
@@ -470,7 +483,7 @@ cast_background <- function(occurrences,
   used_cells <- bg_cells
   topup_rounds <- 0L
   while (missing == "complete_cases" && topup_rounds < 5L) {
-    complete <- stats::complete.cases(out_df)
+    complete <- rowSums(!is.finite(as.matrix(out_df))) == 0L
     n_bg_ok <- sum(complete & out_df$presence == 0)
     if (n_bg_ok >= n_bg) break
     pool <- setdiff(valid_cells, used_cells)
@@ -499,7 +512,7 @@ cast_background <- function(occurrences,
     )
     out_df <- rbind(out_df, add_df)
   }
-  keep_rows <- stats::complete.cases(out_df)
+  keep_rows <- rowSums(!is.finite(as.matrix(out_df))) == 0L
   out_df <- out_df[keep_rows, , drop = FALSE]
   rownames(out_df) <- NULL
 
@@ -535,6 +548,7 @@ cast_background <- function(occurrences,
     ))
   }
   attr(out_df, "missing_qc") <- missing_qc
+  attr(out_df, "presence_qc") <- presence_qc
     out_df
   }
 

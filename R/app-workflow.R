@@ -8,7 +8,8 @@
     cfg <- tryCatch(env$castsdm_species_configs(root)[[selection$species]], error = function(e) NULL)
     if (!is.null(cfg)) settings <- list(data_dir = cfg$nsdm_data_root,
       occurrence_file = cfg$occurrence_file, species = cfg$species_name,
-      domain = cfg$domain_mode, input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
+      domain = cfg$domain_mode, domain_mask = cfg$analysis_domain_mask_file,
+      input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
       models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, vif_threshold = cfg$protocol$select_vif_threshold,
       thin_km = cfg$occurrence_thin_km, predictor_min_coverage = cfg$predictor_min_coverage,
       block_size = cfg$protocol$block_size, predictor_missing = cfg$predictor_missing, resources = cfg$resources)
@@ -29,7 +30,9 @@
       shiny::textInput("setup_occurrence", "\u7269\u79cd\u8bb0\u5f55\u6587\u4ef6", defaults$occurrence_file),
       shiny::div(class = "cast-setup-grid",
         shiny::textInput("setup_species", "\u5206\u6790\u7c7b\u7fa4\uff08\u82f1\u6587\u6807\u8bc6\uff09", defaults$species),
-        shiny::selectInput("setup_domain", "\u5206\u6790\u57df", stats::setNames(c("freshwater_river", "national"), c("\u6cb3\u7f51\u4e0e\u8bb0\u5f55\u9644\u8fd1", "\u5168\u56fd\u9646\u57df")), defaults$domain)),
+        shiny::selectInput("setup_domain", "\u5206\u6790\u57df", stats::setNames(c("national", "freshwater_river", "custom_mask"), c("\u5168\u56fd\u9646\u57df", "\u6cb3\u7f51\u4e0e\u8bb0\u5f55\u9644\u8fd1", "\u81ea\u5b9a\u4e49\u7814\u7a76\u57df")), defaults$domain)),
+      shiny::conditionalPanel("input.setup_domain == 'custom_mask'",
+        shiny::textInput("setup_domain_mask", "\u7814\u7a76\u57df\u6805\u683c\u8def\u5f84\uff08\u6b63\u503c\u7f51\u683c\u6709\u6548\uff09", defaults$domain_mask %||% "")),
       shiny::textInput("setup_path", "\u5de5\u4f5c\u4e0e\u8f93\u51fa\u76ee\u5f55", defaults$path),
       shiny::tags$details(class = "cast-detail", shiny::tags$summary("\u5206\u6790\u8bbe\u7f6e"),
         shiny::checkboxGroupInput("setup_models", "\u6a21\u578b", choices = stats::setNames(c("rf", "maxent", "gam"), c("Random forest", "MaxEnt", "GAM")), selected = defaults$models, inline = TRUE),

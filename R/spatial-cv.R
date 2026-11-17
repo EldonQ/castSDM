@@ -1,12 +1,12 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
-#' Nested Spatial Cross-Validation for SDMs
+#' Spatial Cross-Validation with Training-Fold Screening for SDMs
 #'
 #' Variable selection is re-fitted inside every outer training fold. This
 #' prevents the held-out fold from influencing predictor choice.
 #'
 #' @param data Data frame with `lon`, `lat`, binary response, and predictors.
 #' @param screen Optional final-data screen. It is used only when
-#'   `select_method = NULL`; it is never re-used as a nested screen. Because
+#'   `select_method = NULL`; it is never re-used for fold-local screening. Because
 #'   such a screen was fitted on the full data set, evaluating it here leaks
 #'   selection into the CV metrics (a warning is issued); treat those metrics
 #'   as optimistic.
@@ -23,7 +23,7 @@
 #'     [blockCV::cv_spatial_autocor()] (Roberts et al. 2017), or the
 #'     user-supplied `block_size`. Projected coordinates require their real
 #'     `coords_crs`. An unavailable range/design stops explicitly: no different
-#'     blocking strategy is substituted within nested folds.
+#'     blocking strategy is substituted within folds.
 #'   - `"grid"`: grid cells grouped into spatially contiguous folds via
 #'     k-means on cell centroids (dependency-free fallback).
 #'   - `"env"`: k-means on the scaled predictor matrix, so every fold is
@@ -102,16 +102,17 @@
 #' @return A `cast_cv` object including fold-level selections and `fold_status`.
 #'   Metrics include `auc_n_folds`, `tss_n_folds`, and `cbi_n_folds` counting
 #'   finite values separately; `n_folds` counts model result rows.
-#'   Empty or failed folds do not contribute predictive metrics. When no fold
-#'   is evaluable, the `cast_cv_no_evaluable_folds` error carries `screens` and
-#'   `fold_status` for inspection. With `aoa = TRUE` the `aoa` component
+#'   Single-class test folds retain predictions and proper losses, with
+#'   undefined discrimination metrics reported as NA. Incomplete predictions
+#'   return `complete = FALSE` and NA thresholds; they must not be used for
+#'   hold-out evaluation or projection. With `aoa = TRUE` the `aoa` component
 #'   carries the calibrated `threshold` (NA when fewer than 10 finite
 #'   training-side DI values were collected), `di_oof`, `di_train` and
 #'   `share_outside_oof`.
 #' @export
 #' @param fold_ids Optional integer fold assignments from an external design
 #'   such as `blockCV`, aligned with data rows. Values must cover `1:k`.
-#'   Use `n_repeat = 1` for a fixed external design. This allows physical block
+#'   Supply a list of `n_repeat` such vectors for repeated designs. This allows physical block
 #'   sizes or basin groups to be chosen independently of castSDM's automatic
 #'   blocking; supplied assignments are returned unchanged.
 #' @param coords_crs Coordinate CRS, required for projected coordinates.
@@ -125,6 +126,10 @@
 #' @param clamp Clamp each fold's test predictors to that fold's training
 #'   range for all engines. Default `FALSE`; [cast_run()] supplies its protocol.
 #'   AOA continues to use original predictors.
+#' @param cache_dir Optional directory for content-verified fold checkpoints.
+#'   Completed folds can be reused after interruption; failed folds are saved
+#'   for diagnosis and retried. No fitted model objects are retained here.
+#' @param resume Reuse matching completed fold checkpoints. Default TRUE.
 cast_cv <- function(data,
                     screen = NULL,
                     select_method = "vif",
@@ -149,7 +154,8 @@ cast_cv <- function(data,
                     rf_mtry = NULL,
                     maxent_classes = NULL, maxent_regmult = NULL,
                     num_threads = 1L, fold_ids = NULL, clamp = FALSE, coords_crs = NULL,
-                    gam_backend = c("bam", "gam"), response_data = NULL) {
+                    gam_backend = c("bam", "gam"), response_data = NULL,
+                    cache_dir = NULL, resume = TRUE) {
   block_method <- match.arg(block_method)
   if (!is.logical(clamp) || length(clamp) != 1L || is.na(clamp))
     cli::cli_abort("clamp must be TRUE or FALSE.")
@@ -169,6 +175,7 @@ cast_cv <- function(data,
   gam_backend <- match.arg(gam_backend)
   check_suggested("pROC", "for fold evaluation metrics")
   k <- .cast_check_scalar(k, "k", lower = 2, integer = TRUE)
+  num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
   if (!is.numeric(buffer) || length(buffer) != 1L || buffer < 0) {
     cli::cli_abort("{.arg buffer} must be a single non-negative number.")
   }
@@ -200,16 +207,8 @@ cast_cv <- function(data,
   n_repeat <- .cast_check_scalar(n_repeat, "n_repeat", lower = 1, integer = TRUE)
   validate_species_data(data, required_cols = c("lon", "lat", response),
                         response = response)
-  if (!is.null(fold_ids)) {
-    if (!is.numeric(fold_ids) || length(fold_ids) != nrow(data) ||
-        any(!is.finite(fold_ids)) || any(fold_ids != as.integer(fold_ids)) ||
-        !setequal(unique(fold_ids), seq_len(k))) {
-      cli::cli_abort("{.arg fold_ids} must assign every data row to an integer in 1:k, with all folds present.")
-    }
-    if (n_repeat != 1L) cli::cli_abort("Fixed {.arg fold_ids} require n_repeat = 1; evaluate different external designs separately.")
-    fold_ids <- as.integer(fold_ids)
-    block_method <- "external"
-  }
+  if (!is.logical(resume) || length(resume) != 1L || is.na(resume))
+    cli::cli_abort("resume must be TRUE or FALSE.")
   if (is.null(select_method) && !is.null(screen)) {
     cli::cli_warn(c(
       "{.code select_method = NULL} reuses the supplied {.arg screen} in every fold.",
@@ -220,27 +219,34 @@ cast_cv <- function(data,
   candidates <- setdiff(names(data), c("lon", "lat", response))
   response_data <- .cast_response_validation_data(response_data, candidates)
 
-  # Environmental blocking needs the numeric predictor matrix (coordinates
-  # and the response excluded); computed once, reused by every repeat.
-  env_block <- if (identical(block_method, "env")) {
-    cand <- setdiff(names(data), c("lon", "lat", response))
-    cand <- cand[vapply(data[cand], is.numeric, logical(1))]
-    if (length(cand) < 2L) {
-      cli::cli_abort("{.code block_method = \"env\"} needs at least two numeric predictor columns.")
-    }
-    as.matrix(data[, cand, drop = FALSE])
-  } else NULL
+  plan <- .cast_cv_plan(data, k, block_method, block_size, coords_crs,
+    buffer, buffer_unit, n_repeat, seed, response, fold_ids)
+  if (!is.null(fold_ids) && all(vapply(plan$folds, function(x)
+      identical(attr(x, "design")$method, "external"), logical(1)))) block_method <- "external"
+  checkpoint <- NULL
+  if (!is.null(cache_dir)) {
+    if (!is.character(cache_dir) || length(cache_dir) != 1L || is.na(cache_dir) || !nzchar(cache_dir))
+      cli::cli_abort("cache_dir must be NULL or one directory path.")
+    # Inputs include every candidate, row, fold, model setting and external
+    # response contrast. A different species/data set cannot share these fits.
+    key <- .cast_digest(list(data, screen, select_method, select_args, models,
+      plan, response_data, response, rf_ntree, rf_mtry, maxent_classes,
+      maxent_regmult, gam_backend, tune, tune_folds, prevalence_target,
+      aoa, clamp, seed, .cast_run_stage_identity("04_cv", models)))
+    checkpoint <- file.path(cache_dir, key)
+    dir.create(checkpoint, recursive = TRUE, showWarnings = FALSE)
+    .cast_atomic_rds(plan, file.path(checkpoint, "design.rds"))
+    utils::write.csv(plan$balance, file.path(checkpoint, "fold_design.csv"), row.names = FALSE)
+  }
+  .cast_cv_check_plan(plan, verbose)
 
-  cv_one <- function(folds, fold_i) {
+  cv_one <- function(folds, fold_i, rep_i) {
     test_idx <- which(folds == fold_i)
-    train_idx <- .cast_buffer_train_idx(data$lon, data$lat, test_idx, buffer,
-                                        buffer_unit = buffer_unit)
+    train_idx <- plan$train_indices[[rep_i]][[fold_i]]
     train <- data[train_idx, , drop = FALSE]
     test <- data[test_idx, , drop = FALSE]
-    if (length(unique(train[[response]])) < 2L ||
-        length(unique(test[[response]])) < 2L) {
-      return(list(skipped_single_class = TRUE, n_train = nrow(train)))
-    }
+    if (length(unique(train[[response]])) < 2L)
+      return(list(status = "single_class_training", n_train = nrow(train)))
 
     selection_started <- proc.time()[["elapsed"]]
     fold_screen <- if (!is.null(select_method)) {
@@ -350,7 +356,7 @@ cast_cv <- function(data,
         }
       )
       pred <- pair$score
-      pred_ok[[mdl]] <- length(pred) == nrow(test) && any(is.finite(pred))
+      pred_ok[[mdl]] <- length(pred) == nrow(test) && all(is.finite(pred))
       updates[[mdl]] <- list(idx = test_idx, pred = pred,
                             native = pair$native, offset = info$offset %||% 0)
     }
@@ -365,11 +371,24 @@ cast_cv <- function(data,
          status = if (any(unlist(pred_ok))) "evaluated" else "no_predictions")
   }
 
-  run_fold <- function(folds, i) {
+  run_fold <- function(folds, i, rep_i) {
     started <- proc.time()[["elapsed"]]
+    path <- if (!is.null(checkpoint)) file.path(checkpoint,
+      paste0("repeat-", rep_i, "-fold-", i, ".rds"))
+    fold_key <- .cast_digest(list(rep_i, i, folds))
+    lock <- if (!is.null(path)) .cast_lock(paste0(path, ".lock"), timeout = Inf)
+    on.exit(if (!is.null(lock)) filelock::unlock(lock), add = TRUE)
+    old <- if (resume) .cast_cache_read(path, fold_key) else NULL
+    if (!is.null(old) && .cast_cv_fold_complete(old, models)) {
+      old$timing$cache_hit <- TRUE
+      old$timing$execution_elapsed_s <- proc.time()[["elapsed"]] - started
+      if (verbose) cli::cli_inform("Spatial CV fold {i}/{k}: verified completed fold cache.")
+      return(old)
+    }
     if (verbose) cli::cli_inform("Spatial CV fold {i}/{k}: selection and fitting started.")
     notes <- character()
-    value <- withCallingHandlers(cv_one(folds, i), warning = function(w) {
+    value <- withCallingHandlers(tryCatch(cv_one(folds, i, rep_i), error = function(e)
+      list(status = "fold_error", error = conditionMessage(e))), warning = function(w) {
       notes <<- unique(c(notes, conditionMessage(w))); invokeRestart("muffleWarning")
     })
     engines <- value$engine_fits
@@ -377,14 +396,21 @@ cast_cv <- function(data,
       warned <- which(!is.na(engines$warnings) & nzchar(trimws(engines$warnings)))
       if (length(warned)) notes <- unique(c(notes, paste0(engines$model[warned], ": ", engines$warnings[warned])))
     }
+    notes <- c(notes, value$error %||% character())
     notes <- notes[!is.na(notes) & nzchar(trimws(notes))]
     elapsed <- proc.time()[["elapsed"]] - started
-    value$timing <- data.frame(fold = i, status = value$status %||% "single_class",
-      n_train = value$n_train %||% NA_integer_,
+    value$timing <- data.frame(fold = i, status = value$status %||% "failed",
+      n_train = length(plan$train_indices[[rep_i]][[i]]),
       n_test = sum(folds == i), n_selected = length(value$selected),
       selection_elapsed_s = value$selection_elapsed_s %||% NA_real_,
       response_elapsed_s = value$response_elapsed_s %||% 0, elapsed_s = elapsed,
+      execution_elapsed_s = elapsed, cache_hit = FALSE,
       warnings = paste(notes, collapse = "; "))
+    # Persist each compact fold result before another fold starts. Errors and
+    # timings survive interruption, but only fully predicted folds are reused.
+    .cast_cache_write(value, path, fold_key)
+    if (!is.null(path)) utils::write.csv(value$timing,
+      sub("[.]rds$", ".csv", path), row.names = FALSE)
     if (verbose) {
       cli::cli_inform("Spatial CV fold {i}/{k}: {value$timing$status}; {length(value$selected)} predictors; {round(elapsed, 1)} s.")
       if (length(notes)) cli::cli_warn("Spatial CV fold {i}: {paste(notes, collapse = '; ')}")
@@ -393,14 +419,7 @@ cast_cv <- function(data,
   }
 
   run_once <- function(rep_i) {
-    # Per-repeat fold assignment: seeds separated by a prime so distinct
-    # repeats draw unrelated blockings under the same user seed.
-    rep_seed <- if (!is.null(seed)) seed + (rep_i - 1L) * 7919L else NULL
-    folds <- if (is.null(fold_ids)) {
-      make_spatial_folds(data$lon, data$lat, k, block_method, rep_seed,
-                         env = env_block, y = data[[response]],
-                         block_size = block_size, coords_crs = coords_crs)
-    } else fold_ids
+    folds <- plan$folds[[rep_i]]
     if (verbose && n_repeat > 1L) {
       cli::cli_inform("Spatial CV repeat {rep_i}/{n_repeat}.")
     }
@@ -413,10 +432,10 @@ cast_cv <- function(data,
         ))
       }
       results <- future.apply::future_lapply(
-        seq_len(k), function(i) run_fold(folds, i), future.seed = TRUE
+        seq_len(k), function(i) run_fold(folds, i, rep_i), future.seed = TRUE
       )
     } else {
-      results <- lapply(seq_len(k), function(i) run_fold(folds, i))
+      results <- lapply(seq_len(k), function(i) run_fold(folds, i, rep_i))
     }
 
     oof <- stats::setNames(lapply(models, function(x) rep(NA_real_, nrow(data))), models)
@@ -427,7 +446,6 @@ cast_cv <- function(data,
     selections <- vector("list", k)
     screens <- vector("list", k)
     fold_status <- rep("failed", k)
-    skipped_single <- integer(0)
     # How many folds actually produced usable predictions per model. A model
     # can be present in every fold's result list and still have failed to
     # predict in some of them; without this counter the threshold guard below
@@ -437,11 +455,6 @@ cast_cv <- function(data,
     for (i in seq_along(results)) {
       res <- results[[i]]
       if (is.null(res)) next
-      if (isTRUE(res$skipped_single_class)) {
-        skipped_single <- c(skipped_single, i)
-        fold_status[i] <- "single_class"
-        next
-      }
       selections[i] <- list(res$selected)
       screens[i] <- list(res$screen)
       fold_status[i] <- res$status
@@ -473,13 +486,9 @@ cast_cv <- function(data,
       # not silently define the operating threshold for a complete study.
       n_folds_ok <- pred_folds[[mdl]]
       min_folds_ok <- k
-      if (n_folds_ok < min_folds_ok) {
-        cli::cli_abort("{mdl} predicted only {n_folds_ok}/{k} spatial folds; no defensible OOF threshold is available. Inspect fold warnings and rerun after fixing the failed fits.",
-          class = "cast_cv_insufficient_predictions")
-      }
+      if (n_folds_ok < min_folds_ok || !all(ok)) return(NA_real_)
       if (sum(ok) < 10L || length(unique(data[[response]][ok])) < 2L)
-        cli::cli_abort("Insufficient usable OOF predictions for {mdl}; no threshold is substituted.",
-          class = "cast_cv_insufficient_predictions")
+        return(NA_real_)
       cast_threshold(pred[ok], data[[response]][ok], method = threshold_method)
     }, numeric(1))
 
@@ -492,7 +501,7 @@ cast_cv <- function(data,
     row_list <- list()
     for (i in seq_along(results)) {
       res <- results[[i]]
-      if (is.null(res) || isTRUE(res$skipped_single_class)) next
+      if (is.null(res)) next
       for (mdl in names(res$updates %||% list())) {
         upd <- res$updates[[mdl]]
         met <- tryCatch(
@@ -531,7 +540,7 @@ cast_cv <- function(data,
          offsets = if (length(offsets)) do.call(rbind, offsets) else NULL,
          thresholds = thresholds, selections = selections,
          screens = screens, fold_status = fold_status,
-         skipped_single = skipped_single, di = oof_di,
+         di = oof_di,
          di_train = train_di, pred_folds = pred_folds)
   }
 
@@ -541,14 +550,6 @@ cast_cv <- function(data,
     )
   }
   reps <- lapply(seq_len(n_repeat), run_once)
-
-  total_skipped <- sum(vapply(reps, function(rp) length(rp$skipped_single),
-                              integer(1)))
-  if (total_skipped) {
-    cli::cli_warn(
-      "Skipped {total_skipped} fold run{?s} across {n_repeat} repeat{?s} x {k} folds: a single response class in the train or test split."
-    )
-  }
 
   # Fold status per fold position across repeats: identical states pass
   # through; disagreement is surfaced as "mixed" rather than hidden.
@@ -596,14 +597,7 @@ cast_cv <- function(data,
     rownames(selection_freq) <- NULL
   }
 
-  if (!nrow(fold_df_all)) {
-    cli::cli_abort("All spatial CV folds failed.",
-                   class = "cast_cv_no_evaluable_folds",
-                   screens = reps[[1]]$screens,
-                   fold_status = fold_status_final)
-  }
-
-  metrics <- if (n_repeat == 1L) {
+  metrics <- if (!nrow(fold_df_all)) data.frame() else if (n_repeat == 1L) {
     .cast_fold_metrics(reps[[1]]$fold_df, models)
   } else {
     per_rep <- lapply(reps, function(rp) .cast_fold_metrics(rp$fold_df, models))
@@ -656,7 +650,7 @@ cast_cv <- function(data,
     n_repeat = n_repeat, aoa = aoa_info,
     pred_folds = if (length(reps)) reps[[1]]$pred_folds else NULL,
     native_oof = reps[[1]]$native_oof,
-    fold_info = data.frame(row = seq_len(nrow(data)), fold = reps[[1]]$folds,
+    fold_info = data.frame(row = seq_len(nrow(data)), fold = as.integer(reps[[1]]$folds),
                            obs = data[[response]], lon = data$lon, lat = data$lat),
     offsets = reps[[1]]$offsets
   )
@@ -665,6 +659,11 @@ cast_cv <- function(data,
     support_probs = response_data$support_probs,
     runs = do.call(c, lapply(reps, `[[`, "response_checks")))
   result$fold_design <- lapply(reps, `[[`, "fold_design")
+  result$fold_balance <- plan$balance
+  result$complete <- all(vapply(reps, function(rp)
+    all(rp$fold_status == "evaluated") && all(is.finite(rp$thresholds)) &&
+      all(is.finite(as.matrix(rp$oof_df[, paste0("HSS_", models), drop = FALSE]))), logical(1)))
+  result$metric_scope <- "CV thresholds are selected on pooled OOF labels; threshold-dependent CV metrics are descriptive. Independent hold-out evaluation uses the frozen thresholds."
   result$clamp <- clamp
   for (field in c("timings", "engine_fits")) result[[field]] <- do.call(rbind, lapply(seq_along(reps), function(i) {
     x <- reps[[i]][[field]]
@@ -675,6 +674,9 @@ cast_cv <- function(data,
     data.frame(replicate = i, fold = seq_len(k), status = rp$fold_status,
       selected = vapply(rp$selections, paste, character(1), collapse = ";"))
   }))
+  if (!is.null(checkpoint)) .cast_atomic_rds(result, file.path(checkpoint, "cv_result.rds"))
+  if (!result$complete) cli::cli_warn(
+    "Spatial CV predictions are incomplete. Fold diagnostics were retained; unavailable thresholds remain NA. Repair failed fits before hold-out evaluation or projection.")
   result
 }
 
@@ -728,9 +730,10 @@ cast_cv <- function(data,
     for (metric in metric_names) {
       means <- vapply(rows, function(z) z[[paste0(metric, "_mean")]][1],
                       numeric(1))
-      out[[paste0(metric, "_mean")]] <- mean(means)
-      out[[paste0(metric, "_sd")]] <- if (length(means) >= 2L) {
-        stats::sd(means)
+      valid <- means[is.finite(means)]
+      out[[paste0(metric, "_mean")]] <- if (length(valid)) mean(valid) else NA_real_
+      out[[paste0(metric, "_sd")]] <- if (length(valid) >= 2L) {
+        stats::sd(valid)
       } else NA_real_
       out[[paste0(metric, "_n_folds")]] <-
         sum(vapply(rows, function(z) z[[paste0(metric, "_n_folds")]][1],
@@ -857,13 +860,17 @@ make_spatial_folds <- function(lon, lat, k,
   column <- if (!is.null(y)) ".response" else NULL
   size <- block_size
   range_error <- NULL
+  range_warnings <- character()
   if (is.null(size)) {
     size <- tryCatch({
-      ac <- suppressWarnings(blockCV::cv_spatial_autocor(
+      ac <- withCallingHandlers(blockCV::cv_spatial_autocor(
         x = pts, column = column,
         num_sample = min(5000L, nrow(pts)),
         plot = FALSE, progress = FALSE
-      ))
+      ), warning = function(w) {
+        range_warnings <<- unique(c(range_warnings, conditionMessage(w)))
+        invokeRestart("muffleWarning")
+      })
       rng <- as.numeric(ac$range %||% NA_real_)
       if (is.finite(rng) && rng > 0) rng else {
         range_error <- "No positive finite autocorrelation range was returned."
@@ -892,6 +899,8 @@ make_spatial_folds <- function(lon, lat, k,
   block_ids <- vapply(membership, `[`, integer(1), 1L)
   out <- .cast_fold_design(ids, "blockcv", "blockcv", size)
   attr(out, "design")$size_source <- if (!is.null(block_size)) "caller" else "response_autocorrelation_range"
+  attr(out, "design")$range_warnings <- range_warnings
+  attr(out, "design")$scale_interpretation <- "Response autocorrelation is an exploratory scale guide, not a validated residual range or a species dispersal distance."
   attr(out, "design")$coords_crs <- sf::st_crs(pts)$wkt
   attr(out, "design")$blocks <- blk$blocks
   attr(out, "design")$block_ids <- block_ids

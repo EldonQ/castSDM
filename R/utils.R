@@ -372,14 +372,19 @@ evaluate_model_full <- function(pred, obs, threshold = NULL,
   ok <- is.finite(pred) & !is.na(obs) & obs %in% c(0L, 1L)
   pred <- pred[ok]
   obs <- obs[ok]
-  if (!length(pred) || !all(c(0L, 1L) %in% unique(obs))) {
-    return(c(auc = NA_real_, pr_auc = NA_real_, tss = NA_real_,
-             sedi = NA_real_, brier = NA_real_, logloss = NA_real_,
-             boyce = NA_real_, cbi = NA_real_, kappa = NA_real_,
-             omission_5 = NA_real_, omission_10 = NA_real_, mpa = NA_real_,
-             tss_threshold = NA_real_))
-  }
+  if (!length(pred)) return(.cast_na_full_metrics())
   pred <- pmin(pmax(pred, 1e-7), 1 - 1e-7)
+  if (!all(c(0L, 1L) %in% unique(obs))) {
+    # A single-class test fold can still be predicted and scored by proper
+    # losses. Discrimination metrics require both classes; no substitute AUC
+    # or threshold is manufactured for this fold.
+    out <- .cast_na_full_metrics()
+    out["brier"] <- mean((pred - obs)^2)
+    out["logloss"] <- -mean(obs * log(pred) + (1 - obs) * log1p(-pred))
+    if (length(threshold) == 1L && is.finite(threshold))
+      out["tss_threshold"] <- threshold
+    return(out)
+  }
 
   # Fixed direction keeps worse-than-random AUC below 0.5.
   roc_obj <- tryCatch(
@@ -515,7 +520,10 @@ compute_cbi <- function(pred, obs, n_bins = 101L) {
 #' @keywords internal
 #' @noRd
 .cast_oof_fold_coverage <- function(cv, mdl_names) {
-n_folds <- cv$pred_folds
+  if (identical(cv$complete, FALSE)) return(list(
+    ok = stats::setNames(rep(FALSE, length(mdl_names)), mdl_names),
+    n_folds = cv$pred_folds[mdl_names]))
+  n_folds <- cv$pred_folds
   if (is.null(n_folds) || !length(n_folds)) {
     return(list(ok = stats::setNames(rep(TRUE, length(mdl_names)), mdl_names),
                 n_folds = stats::setNames(rep(NA_integer_, length(mdl_names)), mdl_names)))
@@ -528,9 +536,8 @@ n_folds <- cv$pred_folds
   # threshold. The same guard in cast_cv() uses the real k.
   k <- length(cv$fold_status)
   if (!is.finite(k) || k < 1L) k <- max(as.integer(n_folds), na.rm = TRUE)
-  min_ok <- max(2L, ceiling(k * 0.8))
   n <- stats::setNames(as.integer(n_folds[mdl_names]), mdl_names)
-  list(ok = stats::setNames(n >= min_ok, mdl_names), n_folds = n)
+  list(ok = stats::setNames(!is.na(n) & n == k, mdl_names), n_folds = n)
 }
 
 

@@ -1,13 +1,13 @@
 # Training dependencies are tracked independently of projection and plotting.
 .cast_run_stage_identity <- function(stage, models = character()) {
   roots <- switch(stage,
-    `01_prepare` = c("cast_prepare", ".cast_verify_prepared"), `02_select` = "cast_select",
+    `01_prepare` = c("cast_prepare", ".cast_verify_prepared"), `01_cv_design` = ".cast_cv_plan", `02_select` = "cast_select",
     `03_fit` = "cast_fit", `04_cv` = "cast_cv",
     `05_evaluate` = "cast_evaluate", `06_refit` = "cast_fit",
     cli::cli_abort("Unknown training stage {.val {stage}}."))
   code <- .cast_code_dependencies(roots)
   packages <- switch(stage,
-    `01_prepare` = c("blockCV", "sf"), `02_select` = character(),
+    `01_prepare` = c("blockCV", "sf"), `01_cv_design` = c("blockCV", "sf"), `02_select` = character(),
     `04_cv` = c("blockCV", "sf", "FNN", "pROC"),
     `05_evaluate` = "pROC", character())
   if (stage %in% c("03_fit", "04_cv", "06_refit"))

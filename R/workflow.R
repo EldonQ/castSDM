@@ -36,7 +36,9 @@
 #' @param species Explicit taxon identifier. Required; no species is inferred
 #'   from a filename or a previous case. Input format and domain are separate
 #'   settings and are never inferred from the taxon name.
-#' @param settings Named list: `domain` (`national` or `freshwater_river`),
+#' @param settings Named list: `domain` (`national`, `freshwater_river` or
+#'   `custom_mask`), `domain_mask` (path to an aligned study-domain raster;
+#'   positive cells are active),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
 #'   `models`, `cv_k`, `block_size` (metres; NULL estimates the range), `background_points`, `thin_km` (distance thinning in km),
 #'   `predictor_min_coverage` (actual-domain coverage), `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
@@ -65,7 +67,7 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   occurrence_file <- normalizePath(occurrence_file, winslash = "/", mustWork = TRUE)
   if (startsWith(tolower(paste0(path, "/")), tolower(paste0(data_dir, "/"))))
     cli::cli_abort("Keep the workspace outside the environmental data library.")
-  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
+  allowed <- c("domain", "domain_mask", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
@@ -74,9 +76,19 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
     cv_k = 5L, background_points = 10000L, thin_km = 1, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
   for (n in c("domain", "input_type", "lulc_product")) {
-    choices <- switch(n, domain = c("national", "freshwater_river"),
+    choices <- switch(n, domain = c("national", "freshwater_river", "custom_mask"),
       input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"))
     if (length(settings[[n]]) != 1L || !settings[[n]] %in% choices) cli::cli_abort("Invalid workflow {.val {n}} setting.")
+  }
+  if (identical(settings$domain, "custom_mask")) {
+    if (!is.character(settings$domain_mask) || length(settings$domain_mask) != 1L ||
+        is.na(settings$domain_mask) || !file.exists(settings$domain_mask))
+      cli::cli_abort("custom_mask requires an existing domain_mask raster.")
+    settings$domain_mask <- normalizePath(settings$domain_mask, winslash = "/", mustWork = TRUE)
+    mask <- terra::rast(settings$domain_mask)
+    reference <- terra::rast(file.path(data_dir, "mask_china.tif"))
+    if (terra::nlyr(mask) != 1L || !isTRUE(terra::compareGeom(mask, reference, stopOnError = FALSE)))
+      cli::cli_abort("domain_mask must be one raster layer aligned with the environmental library; no resampling is applied automatically.")
   }
   # Reuse package validation rather than maintain a second numerical contract.
   cast_protocol(models = settings$models, cv_k = settings$cv_k,

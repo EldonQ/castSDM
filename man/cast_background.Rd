@@ -125,7 +125,9 @@ replicate to propagate PA-selection uncertainty). With \code{n_rep = 1}
 \item{missing}{\code{"complete_cases"} (default) filters incomplete rows. With
 \code{"drop_predictors"}, random/distance-based sampling retains the sampled
 locations and excludes any indicator missing there, before model splitting.
-The \code{missing_qc} attribute records counts and exclusions. This declared
+The \code{missing_qc} attribute records counts and observed-location coverage;
+\code{presence_qc} retains the sampled occurrence coordinates, native cells,
+exclusion flags and missing predictor names. This declared
 study-input QC uses covariate availability, never response ranking; no
 measurements are filled in. Validation is conditional on this input QC.}
 }

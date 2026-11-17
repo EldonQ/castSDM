@@ -172,8 +172,7 @@ new_cast_cv <- function(metrics, fold_metrics, folds,
       n_repeat     = n_repeat,
       aoa          = aoa,
       # Per-model count of folds that actually produced predictions. Carried
-      # so a caller can see WHY a threshold fell back to 0.5 instead of
-      # having to infer it from a missing value.
+      # so missing OOF coverage is explicit. No threshold is substituted.
       pred_folds   = pred_folds,
       native_oof = native_oof, fold_info = fold_info, offsets = offsets
     ),
@@ -207,7 +206,7 @@ new_cast_predict <- function(predictions, models) {
 #' @param screen A `cast_select` object.
 #' @param fit A `cast_fit` object (training split).
 #' @param eval A `cast_eval` object (one-shot hold-out evaluation).
-#' @param cv A `cast_cv` object (nested spatial CV), or `NULL`.
+#' @param cv A `cast_cv` object (spatial CV), or `NULL`.
 #' @param predict A `cast_predict` object (or `NULL`).
 #' @param ensemble A `cast_ensemble` object (or `NULL`).
 #' @param fit_full A `cast_fit` object refitted on the full data set for

@@ -26,7 +26,7 @@ new_cast_result(
 
 \item{eval}{A \code{cast_eval} object (one-shot hold-out evaluation).}
 
-\item{cv}{A \code{cast_cv} object (nested spatial CV), or \code{NULL}.}
+\item{cv}{A \code{cast_cv} object (spatial CV), or \code{NULL}.}
 
 \item{predict}{A \code{cast_predict} object (or \code{NULL}).}
 

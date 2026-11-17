@@ -123,9 +123,7 @@ cast_fit <- function(data,
       "Unknown model(s): {.val {bad}}. Use one or more of: {.val {valid_models}}."
     )
   }
-  if (!is.null(num_threads)) {
-    num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
-  }
+  num_threads <- .cast_check_scalar(num_threads, "num_threads", lower = 1, integer = TRUE)
   rf_ntree <- .cast_check_scalar(rf_ntree, "rf_ntree", lower = 1, integer = TRUE)
   if (!is.null(rf_mtry)) {
     rf_mtry <- .cast_check_scalar(rf_mtry, "rf_mtry", lower = 1, integer = TRUE)

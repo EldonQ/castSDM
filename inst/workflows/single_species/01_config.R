@@ -77,6 +77,7 @@ castsdm_species_configs <- function(root) {
     base$occurrence_file <- settings$occurrence_file
     base$nsdm_data_root <- data_root
     base$domain_mode <- settings$domain %||% base$domain_mode
+    base$analysis_domain_mask_file <- settings$domain_mask
     base$input_type <- settings$input_type %||% base$input_type
     base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
     base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))

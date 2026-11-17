@@ -341,7 +341,7 @@ prepare_species <- function(cfg) {
   old <- if (file.exists(manifest_file)) tryCatch(readRDS(manifest_file), error = function(e) NULL) else NULL
   artifacts <- c(data_file, domain_file, file.path(out_dir,
     c("occurrence_qc.csv", "occurrence_qc_counts.csv", "analysis_domain_summary.csv",
-      "predictor_qualification.csv", "predictor_missing_qc.csv", "background_summary.csv")))
+      "predictor_qualification.csv", "predictor_missing_qc.csv", "occurrence_environment_qc.csv", "background_summary.csv")))
   if (!is.null(old) && identical(old$fingerprint, prep_fp) && all(file.exists(artifacts)) &&
       identical(unname(tools::md5sum(artifacts)), old$artifacts)) {
     message("Verified preparation cache: ", cfg$species_name)
@@ -406,7 +406,8 @@ prepare_species <- function(cfg) {
   in_domain <- is.finite(in_domain) & in_domain == 1L
   occurrence_coverage_input <- mean(in_domain)
   if (!is.finite(occurrence_coverage_input) ||
-      occurrence_coverage_input < cfg$domain_min_presence_coverage) {
+      (occurrence_coverage_input < cfg$domain_min_presence_coverage &&
+       !identical(cfg$domain_mode, "custom_mask"))) {
     stop(sprintf(
       paste0("Analysis domain covers only %.1f%% of occurrence cells (%d/%d); ",
              "minimum is %.1f%%. Use a broader domain mask or fix the occurrence ",
@@ -426,7 +427,8 @@ prepare_species <- function(cfg) {
   if (nrow(occ) < 10L) {
     stop("Fewer than 10 occurrence cells remain inside the analysis domain.")
   }
-  qualification <- case_domain_qualification(current, domain, cfg$predictor_min_coverage %||% .95)
+  qualification <- case_domain_qualification(current, domain, cfg$predictor_min_coverage %||% .95,
+    manifest = prep_inputs$rasters, cache_dir = file.path(cfg$preparation_root, ".coverage"))
   data.table::fwrite(qualification, file.path(out_dir, "predictor_qualification.csv"))
   kept <- qualification$layer[qualification$eligible]
   if (!length(kept)) stop("No predictor meets declared coverage on the actual analysis mask.")
@@ -485,6 +487,14 @@ prepare_species <- function(cfg) {
     cell_thin = TRUE, exclude_presence = TRUE, seed = cfg$seed, verbose = TRUE
   )
   data.table::fwrite(attr(model_data, "missing_qc"), file.path(out_dir, "predictor_missing_qc.csv"))
+  location_qc <- attr(model_data, "presence_qc")
+  data.table::fwrite(location_qc, file.path(out_dir, "occurrence_environment_qc.csv"))
+  observed <- attr(model_data, "missing_qc")
+  at <- match(qualification$layer, observed$variable)
+  qualification$n_presence_checked <- observed$n_presence[at]
+  qualification$n_presence_missing <- observed$n_presence_missing[at]
+  qualification$presence_coverage <- observed$presence_coverage[at]
+  data.table::fwrite(qualification, file.path(out_dir, "predictor_qualification.csv"))
   current <- current[[intersect(names(current), names(model_data))]]
   data.table::fwrite(data.frame(requested_background = cfg$bg_n,
     actual_background = sum(model_data$presence == 0L),
@@ -514,12 +524,10 @@ prepare_species <- function(cfg) {
   }
   if (!is.null(occurrence_audit)) {
     eligible <- which(occurrence_audit$qc_reason == "kept")
-    env <- as.matrix(terra::extract(current, as.matrix(occ[, c("lon", "lat")])))
-    missing <- !is.finite(env)
+    idx <- match(terra::cellFromXY(current[[1]], as.matrix(occ[, c("lon", "lat")])), location_qc$cell)
+    if (anyNA(idx)) stop("Occurrence QC does not match the sampled grid cells.")
     occurrence_audit$missing_predictors <- ""
-    occurrence_audit$missing_predictors[eligible] <- apply(missing, 1L, function(z) {
-      paste(names(current)[z], collapse = ";")
-    })
+    occurrence_audit$missing_predictors[eligible] <- location_qc$missing_predictors[idx]
     pres_cells <- terra::cellFromXY(current,
       as.matrix(model_data[model_data$presence == 1L, c("lon", "lat")]))
     if (!"grid_cell" %in% names(occurrence_audit) ||
@@ -529,7 +537,7 @@ prepare_species <- function(cfg) {
     }
     occurrence_audit$used_in_model <- FALSE
     occurrence_audit$used_in_model[eligible] <- occurrence_audit$grid_cell[eligible] %in% pres_cells
-    occurrence_audit$qc_reason[eligible[rowSums(missing) > 0L]] <- "missing_environment"
+    occurrence_audit$qc_reason[eligible[!location_qc$used_in_model[idx]]] <- "missing_environment"
     data.table::fwrite(occurrence_audit, file.path(out_dir, "occurrence_qc.csv"))
     data.table::fwrite(as.data.frame(table(occurrence_audit$qc_reason)),
                       file.path(out_dir, "occurrence_qc_counts.csv"))
@@ -559,7 +567,7 @@ prepare_species <- function(cfg) {
     domain_mask_md5 = unname(tools::md5sum(domain_file)),
     domain_cells = domain_cells_value,
     national_mask_cells = national_cells, domain_share_national = domain_cells_value/national_cells,
-    area_interpretation = "Coverage of native grid cells, not river-water surface area or occupancy.",
+    area_interpretation = "Coverage of native grid cells within the declared study domain; not species occupancy or physical habitat surface area.",
     occurrence_coverage_input = occurrence_coverage_input,
     occurrence_excluded_outside_domain = n_outside_domain,
     pool_layers = as.integer(n_layers),
@@ -572,7 +580,7 @@ prepare_species <- function(cfg) {
   data.table::fwrite(domain_summary,
                      file.path(out_dir, "analysis_domain_summary.csv"))
   message("Analysis domain covers ", sprintf("%.2f%%", 100*domain_cells_value/national_cells),
-    " of national-mask cells. Blank map areas outside this domain were not predicted; coloured grid area is not aquatic surface area.")
+    " of national-mask cells. Blank areas outside this domain were not predicted; coloured grid area is not occupied habitat area.")
   if (!is.finite(presence_coverage) ||
       presence_coverage < cfg$domain_min_presence_coverage) {
     stop(sprintf(
@@ -592,12 +600,21 @@ prepare_species <- function(cfg) {
 }
 
 # Exact coverage on the actual analysis mask; no national-coverage proxy or imputation.
-case_domain_qualification <- function(current, domain, minimum) {
+case_domain_qualification <- function(current, domain, minimum, manifest = NULL, cache_dir = NULL) {
   if (length(minimum) != 1L || !is.finite(minimum) || minimum <= 0 || minimum > 1)
     stop("predictor_min_coverage must be in (0, 1].")
   mask <- terra::values(domain, mat = FALSE)
   cells <- which(is.finite(mask) & mask != 0)
   if (!length(cells)) stop("The analysis mask has no active cells.")
+  path <- NULL; counts <- NULL
+  if (!is.null(cache_dir)) {
+    if (is.null(manifest)) manifest <- case_file_manifest(current)
+    key <- digest::digest(list(names(current), manifest, cells,
+      terra::crs(domain), as.vector(terra::ext(domain)), terra::res(domain),
+      castSDM:::.cast_code_identity(case_domain_qualification)), algo = "sha256")
+    path <- file.path(cache_dir, paste0(key, ".rds"))
+    counts <- castSDM:::.cast_cache_read(path, key)
+  }
   nc <- terra::ncol(current)
   # Open each source once. Repeated 100,000-cell extraction reopened a national
   # raster up to 95 times per layer. Sequential bounded windows count exactly
@@ -613,7 +630,8 @@ case_domain_qualification <- function(current, domain, minimum) {
       index=((at-1L) %/% nc)*width + col-left+1L)
   })
   windows <- Filter(Negate(is.null), windows)
-  counts <- vapply(seq_len(terra::nlyr(current)), function(i) {
+  if (is.null(counts)) {
+    counts <- vapply(seq_len(terra::nlyr(current)), function(i) {
     layer <- current[[i]]
     terra::readStart(layer)
     n <- tryCatch(sum(vapply(windows, function(w) {
@@ -624,7 +642,9 @@ case_domain_qualification <- function(current, domain, minimum) {
     if (i %% 25L == 0L || i == terra::nlyr(current))
       message("Analysis-mask coverage: ", i, "/", terra::nlyr(current), " layers checked.")
     n
-  }, numeric(1))
+    }, numeric(1))
+    if (!is.null(path)) castSDM:::.cast_cache_write(counts, path, key)
+  } else message("Verified exact analysis-mask coverage cache: ", length(counts), " layers.")
   coverage <- counts/length(cells)
   data.frame(layer = names(current), n_domain = length(cells), n_finite = counts,
     coverage = coverage, minimum = minimum, eligible = coverage >= minimum,
