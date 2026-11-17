@@ -8,7 +8,7 @@ cast_workflow(
   path,
   data_dir,
   occurrence_file,
-  species = "Schizothoracinae",
+  species = NULL,
   settings = list(),
   run = FALSE
 )
@@ -20,11 +20,14 @@ cast_workflow(
 
 \item{occurrence_file}{Real occurrence CSV/PSV file supported by the data adapter.}
 
-\item{species}{Taxon identifier. The Schizothoracinae preset is a pooled subfamily.}
+\item{species}{Explicit taxon identifier. Required; no species is inferred
+from a filename or a previous case. Input format and domain are separate
+settings and are never inferred from the taxon name.}
 
 \item{settings}{Named list: \code{domain} (\code{national} or \code{freshwater_river}),
 \code{input_type} (\code{gbif} or \code{nsdm_occ}), \code{lulc_product} (\code{glu} or \code{hlu}),
-\code{models}, \code{cv_k}, \code{block_size} (metres; NULL estimates the range), \code{background_points}, \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).}
+\code{models}, \code{cv_k}, \code{block_size} (metres; NULL estimates the range), \code{background_points}, \code{thin_km} (distance thinning in km),
+\code{predictor_min_coverage} (actual-domain coverage), \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).}
 
 \item{run}{Execute preparation, fitting, projections and figures after checks.
 Default \code{FALSE} only indexes and checks physical inputs.}

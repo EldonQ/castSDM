@@ -16,15 +16,21 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "iml", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.41.0")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.42.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
-  settings_file <- file.path(root, "workflow_settings.rds")
-  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
-  taxon <- Sys.getenv("CAST_SPECIES", settings$species %||% "Schizothoracinae")
+  selection <- castSDM:::.cast_workflow_selection(root)
+  taxon <- selection$species
   cfg <- castsdm_species_configs(root)[[taxon]]
-  if (is.null(cfg)) stop("Unknown CAST_SPECIES: ", taxon)
+  if (is.null(cfg)) stop("No input configuration for ", taxon, "; use cast_workflow() to specify its records and data.")
+  message("Selected case: ", taxon, " [", selection$source, "]")
+  message("Occurrence file: ", cfg$occurrence_file)
+  message("Input: ", cfg$input_type, "; domain: ", cfg$domain_mode, "; current product: ", cfg$current_lulc_product)
+  message("Declared settings: thinning=", cfg$occurrence_thin_km, " km; backgrounds=", cfg$bg_n,
+    "; coverage>=", cfg$predictor_min_coverage, "; VIF<=", cfg$protocol$select_vif_threshold,
+    "; spatial CV=", cfg$protocol$cv_k, "; models=", paste(cfg$protocol$models, collapse=","))
+  message("Species training cache: ", cfg$cache_root)
   case_inventory_ensure(root, cfg$nsdm_data_root)
   cfg$runtime <- runtime
   cfg$runtime$script_hashes <- tools::md5sum(list.files(root, pattern = "\\.R$", full.names = TRUE))

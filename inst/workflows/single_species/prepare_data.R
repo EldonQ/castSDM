@@ -261,6 +261,7 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
     NA_character_
   }
   list(
+    species = cfg$species_name,
     occurrence = tools::md5sum(cfg$occurrence_file),
     occurrence_metadata = if (!is.null(cfg$occurrence_metadata_file) && file.exists(cfg$occurrence_metadata_file))
       tools::md5sum(cfg$occurrence_metadata_file),

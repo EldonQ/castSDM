@@ -15,19 +15,18 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, packages = c("castSDM", "terra", "ranger", "maxnet", "mgcv",
-    "shiny", "bslib", "leaflet", "callr", "zip"), minimum_cast = "0.41.0")
+    "shiny", "bslib", "leaflet", "callr", "zip"), minimum_cast = "0.42.0")
   sys.source(file.path(root, "01_config.R"), envir = environment())
   sys.source(file.path(root, "inventory.R"), envir = environment())
   configs <- castsdm_species_configs(root)
-  settings_file <- file.path(root, "workflow_settings.rds")
-  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
-  taxon <- Sys.getenv("CAST_SPECIES", settings$species %||% "Schizothoracinae")
-  cfg <- configs[[taxon]]
-  if (is.null(cfg)) stop("Unknown CAST_SPECIES: ", taxon)
+  selection <- castSDM:::.cast_workflow_selection(root, allow_unconfigured = TRUE)
+  taxon <- selection$species
+  cfg <- if (!is.null(taxon)) configs[[taxon]] else NULL
+  if (!is.null(taxon) && is.null(cfg)) stop("No configuration for selected species: ", taxon)
   args <- commandArgs(TRUE)
   positional <- args[!startsWith(args, "--")]
   directory <- Sys.getenv("CAST_CASE_DIR", if (length(positional)) positional[1L] else
-    file.path(cfg$output_root, Sys.getenv("CAST_RUN_ID", castSDM:::.cast_workflow_run_id()), taxon))
+    if (is.null(cfg)) root else file.path(cfg$output_root, Sys.getenv("CAST_RUN_ID", castSDM:::.cast_workflow_run_id()), taxon))
   dry <- identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% args
   app <- castSDM::cast_app(directory, workflow = file.path(root, "00_RUN_ALL.R"), run = !dry)
   if (dry) message("Shiny entry ready; no server, training or scenario computation started.")

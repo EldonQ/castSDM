@@ -241,6 +241,7 @@ cast_run <- function(species_data,
     prevalence_target = protocol$prevalence_target,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
   ))
+  fit$screen <- screen
   add_receipt("03_fit",
     .cast_digest(list(split$train, screen$selected, protocol$models,
                       protocol$rf_ntree, protocol$rf_mtry,
@@ -258,7 +259,7 @@ cast_run <- function(species_data,
     roles = select_roles,
     var_id = select_var_id, category = select_category)
   cv_inputs <- list(response_data, split$train, protocol$select_method, select_args, protocol$models, protocol$cv_k,
-    protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$buffer,
+    protocol$n_repeat, protocol$block_method, protocol$block_size, protocol$coords_crs, protocol$buffer,
     protocol$buffer_unit, protocol$threshold_method, protocol$aoa,
     protocol$rf_ntree, protocol$rf_mtry, protocol$maxent_classes, protocol$maxent_regmult, protocol$gam_backend,
     protocol$tune, protocol$tune_folds, protocol$prevalence_target, protocol$seed,
@@ -293,15 +294,7 @@ cast_run <- function(species_data,
                         paste, character(1), collapse = ";"),
       stringsAsFactors = FALSE)
   )
-  add_receipt("04_cv",
-    .cast_digest(list(split$train, screen$selected, select_args,
-                      protocol$cv_k, protocol$n_repeat, protocol$block_method,
-                      protocol$block_size, protocol$buffer, protocol$buffer_unit,
-                      protocol$tune, protocol$tune_folds,
-                      protocol$threshold_method, protocol$aoa,
-                      protocol$prevalence_target, protocol$gam_backend,
-                      protocol$seed, protocol$clamp)),
-    cv, tables = cv_tables)
+  add_receipt("04_cv", .cast_digest(cv_inputs), cv, tables = cv_tables)
 
   if (any(cv$repeat_status$status != "evaluated") ||
       any(!is.finite(as.matrix(cv$oof[, paste0("HSS_", protocol$models), drop = FALSE]))))
@@ -337,6 +330,7 @@ cast_run <- function(species_data,
     prevalence_target = protocol$prevalence_target,
     num_threads = protocol$num_threads, seed = protocol$seed, verbose = verbose
   ))
+  fit_full$screen <- screen
   add_receipt("06_refit",
     .cast_digest(list(species_data, screen$selected, tuned, protocol$models,
                       protocol$prevalence_target, protocol$gam_backend, protocol$seed)),

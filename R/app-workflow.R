@@ -1,20 +1,21 @@
 .cast_app_setup_defaults <- function(case_dir, workflow) {
   root <- if (!is.null(workflow)) dirname(workflow) else file.path(getwd(), "castSDM_analysis")
-  settings_file <- file.path(root, "workflow_settings.rds")
-  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
-  if (is.null(settings) && !is.null(workflow)) {
+  selection <- .cast_workflow_selection(root, allow_unconfigured = TRUE)
+  settings <- selection$settings
+  if (is.null(settings) && !is.null(selection$species) && !is.null(workflow)) {
     env <- new.env(parent = environment())
     for (f in c("inventory.R", "01_config.R")) sys.source(file.path(root, f), env)
-    cfg <- tryCatch(env$castsdm_species_configs(root)[[Sys.getenv("CAST_SPECIES", "Schizothoracinae")]], error = function(e) NULL)
+    cfg <- tryCatch(env$castsdm_species_configs(root)[[selection$species]], error = function(e) NULL)
     if (!is.null(cfg)) settings <- list(data_dir = cfg$nsdm_data_root,
       occurrence_file = cfg$occurrence_file, species = cfg$species_name,
       domain = cfg$domain_mode, input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
       models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, vif_threshold = cfg$protocol$select_vif_threshold,
-      predictor_missing = cfg$predictor_missing, resources = cfg$resources)
+      thin_km = cfg$occurrence_thin_km, predictor_min_coverage = cfg$predictor_min_coverage,
+      block_size = cfg$protocol$block_size, predictor_missing = cfg$predictor_missing, resources = cfg$resources)
   }
   settings <- settings %||% list()
   utils::modifyList(list(path = root, data_dir = Sys.getenv("CAST_DATA_ROOT", ""),
-    occurrence_file = "", species = "Schizothoracinae", domain = "freshwater_river",
+    occurrence_file = "", species = "", domain = "national",
     input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"), cv_k = 5L,
     resources = list(cores = 4L, workers = 1L, memory_mb = 4096)), settings)
 }
@@ -34,6 +35,8 @@
         shiny::checkboxGroupInput("setup_models", "\u6a21\u578b", choices = stats::setNames(c("rf", "maxent", "gam"), c("Random forest", "MaxEnt", "GAM")), selected = defaults$models, inline = TRUE),
         shiny::div(class = "cast-setup-grid",
           shiny::numericInput("setup_background", "\u80cc\u666f\u70b9\u6570\u91cf", defaults$background_points %||% 10000L, min = 1L, step = 1000L),
+          shiny::numericInput("setup_thin", "\u8ddd\u79bb\u7a00\u758f\u5316\uff08km\uff1b0 \u4e3a\u4e0d\u7a00\u758f\uff09", defaults$thin_km %||% 1, min = 0),
+          shiny::numericInput("setup_coverage", "\u5019\u9009\u53d8\u91cf\u6700\u4f4e\u57df\u5185\u8986\u76d6\u7387\uff080\u20131\uff09", defaults$predictor_min_coverage %||% .95, min = 0, max = 1),
           shiny::numericInput("setup_vif", "VIF \u9608\u503c", defaults$vif_threshold %||% 10, min = 1, step = 1),
           shiny::selectInput("setup_missing", "\u7f3a\u5931\u73af\u5883\u6307\u6807", stats::setNames(c("complete_cases", "drop_predictors"), c("\u4fdd\u7559\u6307\u6807\uff0c\u53ea\u7528\u5b8c\u6574\u6837\u672c", "\u4e25\u683c\u5254\u9664\u7f3a\u5931\u6307\u6807\uff0c\u4fdd\u7559\u4f4d\u7f6e")), defaults$predictor_missing %||% "complete_cases"),
           shiny::numericInput("setup_block_size", "\u7a7a\u95f4\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u7559\u7a7a\u81ea\u52a8\uff09", defaults$block_size %||% NA_real_, min = 1),

@@ -1,8 +1,7 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # Scientific settings live in one cast_protocol(); paths and data QC stay here.
 castsdm_species_configs <- function(root) {
-  settings_file <- file.path(root, "workflow_settings.rds")
-  settings <- if (file.exists(settings_file)) readRDS(settings_file) else NULL
+  settings <- castSDM:::.cast_workflow_selection(root, allow_unconfigured = TRUE)$settings
   data_root <- Sys.getenv("CAST_DATA_ROOT", settings$data_dir %||% "E:/CHECO26/N-SDM/data")
   scope <- case_covariate_scope(data_root)
   occurrence_root <- Sys.getenv("CAST_OCCURRENCE_ROOT",
@@ -71,25 +70,31 @@ castsdm_species_configs <- function(root) {
       occurrence_file = file.path(occurrence_root, "Callosciurus_erythraeus.csv"),
       nsdm_pool_csv = file.path(root, "config", "pool_current_eligible_glu.csv"),
       current_lulc_product = "glu")))
-  if (is.null(settings)) return(presets)
-  taxon <- settings$species
-  base <- presets[[taxon]] %||% utils::modifyList(common, list(
-    species_name = taxon, taxon_level = "user-declared taxon", current_lulc_product = "glu"))
-  base$occurrence_file <- settings$occurrence_file
-  base$nsdm_data_root <- data_root
-  base$domain_mode <- settings$domain %||% base$domain_mode
-  base$input_type <- settings$input_type %||% base$input_type
-  base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
-  base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
-  base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates/reg/dist/h90m/stream-dist-proximity/reg_dist_h90m_stream-dist-proximity_min.tif")
-  base$predictor_missing <- settings$predictor_missing %||% base$predictor_missing
-  base$protocol$select_vif_threshold <- settings$vif_threshold %||% base$protocol$select_vif_threshold
-  base$bg_n <- settings$background_points %||% base$bg_n
-  base$resources <- settings$resources %||% base$resources
-  base$protocol$models <- settings$models %||% base$protocol$models
-  base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
-  if (!is.null(settings$block_size)) base$protocol$block_size <- settings$block_size
-  base$protocol$num_threads <- base$resources$cores
-  presets[[taxon]] <- base
+  if (!is.null(settings)) {
+    taxon <- settings$species
+    base <- presets[[taxon]] %||% utils::modifyList(common, list(
+      species_name = taxon, taxon_level = "user-declared taxon", current_lulc_product = "glu"))
+    base$occurrence_file <- settings$occurrence_file
+    base$nsdm_data_root <- data_root
+    base$domain_mode <- settings$domain %||% base$domain_mode
+    base$input_type <- settings$input_type %||% base$input_type
+    base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
+    base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
+    base$freshwater_river_distance_raster <- file.path(base$nsdm_data_root, "covariates", scope, "dist/h90m/stream-dist-proximity",
+      paste0(scope, "_dist_h90m_stream-dist-proximity_min.tif"))
+    base$predictor_missing <- settings$predictor_missing %||% base$predictor_missing
+    base$protocol$select_vif_threshold <- settings$vif_threshold %||% base$protocol$select_vif_threshold
+    base$bg_n <- settings$background_points %||% base$bg_n
+    base$occurrence_thin_km <- settings$thin_km %||% base$occurrence_thin_km
+    base$predictor_min_coverage <- settings$predictor_min_coverage %||% base$predictor_min_coverage
+    base$resources <- settings$resources %||% base$resources
+    base$protocol$models <- settings$models %||% base$protocol$models
+    base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
+    if (!is.null(settings$block_size)) base$protocol$block_size <- settings$block_size
+    base$protocol$num_threads <- base$resources$cores
+    presets[[taxon]] <- base
+  }
+  for (taxon in names(presets))
+    presets[[taxon]]$cache_root <- file.path(common$cache_root, taxon)
   presets
 }

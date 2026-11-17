@@ -1,26 +1,33 @@
-# CHELSA 单物种工作流（castSDM 0.41.0）
+# CHELSA 单物种工作流（castSDM 0.42.0）
 
 规范源码在 `cast/inst/workflows/single_species`；外部工作目录是部署副本。
 请在重启的 R 会话运行。入口检查并使用对应版本的隔离 R 库；环境库仅被读取。
 
 ## 运行
 
-默认保留裂腹鱼亚科的河流局地案例：
+工作目录的 `workflow_settings.rds` 持久保存明确选择的物种及记录文件，重启 R 不会丢失。入口和 Shiny 使用同一个选择；未配置时不会默认运行裂腹鱼。若旧的 `CAST_SPECIES` 与已保存物种冲突，入口在准备数据前停止并说明冲突。
+
+配置或切换物种只需调用一次（`run=FALSE` 只检查输入，不训练）：
 
 ```r
-Sys.unsetenv("CAST_SPECIES")
+castSDM::cast_workflow(
+  "E:/Package/castSDM_workflows/single_species",
+  "E:/CHECO26/N-SDM/data",
+  "E:/Package/castSDM_workflows/species_occ/Callosciurus_erythraeus.csv",
+  species = "Callosciurus_erythraeus",
+  settings = list(input_type = "nsdm_occ", domain = "national"), run = FALSE)
+```
+
+之后每次都使用同一入口，无需额外环境变量：
+
+```r
 source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
 ```
 
-赤腹松鼠对照使用真实的投影坐标文件 `species_occ/Callosciurus_erythraeus.csv`：
-
-```r
-Sys.setenv(CAST_SPECIES = "Callosciurus_erythraeus")
-source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
-```
+物种名不决定坐标格式或分析域；应按实际数据明确指定。
 
 该文件按环境网格 CRS 的 `lon,lat,year` 读取；来源、采样努力和年份含义未经独立核实，不自动标记为审核后的 GBIF 记录。松鼠默认使用全国陆地掩膜，与鱼类的河流局地范围不同；两者不能仅按 AUC 排名。两例均使用 GLU 当前土地利用指标。
-新结果写入 `output/cast041_chelsa_ensmean/<物种>`，不覆盖既有研究结果。
+新结果写入 `output/cast042_chelsa_ensmean/<物种>`，不覆盖既有研究结果。
 `CAST_DRY_RUN=1` 只做输入检查；正常运行前应取消该环境变量。
 
 ## 流程与解释
@@ -52,3 +59,5 @@ source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UT
 未完成比较不生成完成标记；同配置重跑校验并复用成功阶段。不要通过改名旧结果假装兼容新分析。
 
 裂腹鱼来源为 [SchiSOFT v1](https://doi.org/10.6084/m9.figshare.24638538.v1)，CC BY 4.0。保留原始年份并审计采样日期、区间及替代值，不将不明确日期转换成精确采样年。
+
+原始环境栅格目录和输入清单可以共用；准备数据目录和训练缓存按物种隔离，并继续核对记录文件、分析域、数据内容及计算规则。1 km 稀疏、10,000 背景、95% 覆盖和 VIF 10 是声明的默认设置，不是从物种自动学习的生态最优值；入口会打印，主要设置可在 Shiny 或 cast_workflow() 中修改。

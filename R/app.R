@@ -275,6 +275,7 @@
         settings = list(domain = input$setup_domain, input_type = input$setup_input,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
           block_size = if (length(input$setup_block_size) == 1L && is.finite(input$setup_block_size)) input$setup_block_size else NULL,
+          thin_km = input$setup_thin %||% 1, predictor_min_coverage = input$setup_coverage %||% .95,
           background_points = input$setup_background, vif_threshold = input$setup_vif %||% 10,
           predictor_missing = input$setup_missing %||% "complete_cases",
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
@@ -721,7 +722,11 @@ cast_app <- function(case_dir = NULL, workflow = NULL, run = TRUE,
                       state = NULL) {
   for (pkg in c("shiny", "bslib", "leaflet", "callr", "terra"))
     check_suggested(pkg, "for the environmental response application")
-  if (is.null(case_dir)) case_dir <- file.path(getwd(), "castSDM_analysis", "output", .cast_workflow_run_id(), "Schizothoracinae")
+  if (is.null(case_dir)) {
+    root <- if (!is.null(workflow)) dirname(workflow) else file.path(getwd(), "castSDM_analysis")
+    selected <- .cast_workflow_selection(root, allow_unconfigured = TRUE)$species
+    case_dir <- if (!is.null(selected)) file.path(root, "output", .cast_workflow_run_id(), selected) else root
+  }
   if (!is.character(case_dir) || length(case_dir) != 1L || is.na(case_dir) || !nzchar(case_dir))
     cli::cli_abort("Supply a case directory.")
   case_dir <- normalizePath(case_dir, winslash = "/", mustWork = FALSE)

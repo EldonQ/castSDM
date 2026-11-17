@@ -4,6 +4,27 @@
   paste0("cast", paste(parts, collapse = ""), "_chelsa_ensmean")
 }
 
+# One selection contract for script entry points and Shiny. Configuration
+# survives R restarts; a stale session override must not switch the data set.
+.cast_workflow_selection <- function(path, allow_unconfigured = FALSE) {
+  file <- file.path(path, "workflow_settings.rds")
+  settings <- if (file.exists(file)) tryCatch(readRDS(file), error = function(e)
+    cli::cli_abort("Cannot read workflow settings {.path {file}}: {conditionMessage(e)}")) else NULL
+  valid <- function(x) is.character(x) && length(x) == 1L && !is.na(x) &&
+    grepl("^[A-Za-z][A-Za-z0-9_-]*$", x)
+  if (!is.null(settings) && (!is.list(settings) || !valid(settings$species)))
+    cli::cli_abort("The saved workflow settings need one explicit species identifier. Configure the workspace with cast_workflow().")
+  override <- trimws(Sys.getenv("CAST_SPECIES", ""))
+  if (nzchar(override) && !valid(override)) cli::cli_abort("Invalid CAST_SPECIES identifier.")
+  if (!is.null(settings) && nzchar(override) && !identical(override, settings$species))
+    cli::cli_abort("CAST_SPECIES ({override}) conflicts with the saved species ({settings$species}). Unset CAST_SPECIES or reconfigure this workspace with cast_workflow(); no other species will be run.")
+  species <- settings$species %||% if (nzchar(override)) override else NULL
+  if (is.null(species) && !allow_unconfigured)
+    cli::cli_abort("No species is configured. Use cast_workflow(path, data_dir, occurrence_file, species, run = FALSE) or the Shiny setup form. There is no default fish or squirrel analysis.")
+  list(species = species, settings = settings,
+    source = if (!is.null(settings)) "saved project settings" else if (!is.null(species)) "session override (not persistent)" else "unconfigured")
+}
+
 #' Initialise, Check or Run the CHELSA Workflow
 #'
 #' Creates a workspace from the installed, versioned workflow. Checks the real
@@ -12,10 +33,13 @@
 #' @param path Writable workflow workspace, separate from the environmental library.
 #' @param data_dir Environmental library containing `covariates/reg` and `mask_china.tif`.
 #' @param occurrence_file Real occurrence CSV/PSV file supported by the data adapter.
-#' @param species Taxon identifier. The Schizothoracinae preset is a pooled subfamily.
+#' @param species Explicit taxon identifier. Required; no species is inferred
+#'   from a filename or a previous case. Input format and domain are separate
+#'   settings and are never inferred from the taxon name.
 #' @param settings Named list: `domain` (`national` or `freshwater_river`),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
-#'   `models`, `cv_k`, `block_size` (metres; NULL estimates the range), `background_points`, `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
+#'   `models`, `cv_k`, `block_size` (metres; NULL estimates the range), `background_points`, `thin_km` (distance thinning in km),
+#'   `predictor_min_coverage` (actual-domain coverage), `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
 #' @param run Execute preparation, fitting, projections and figures after checks.
 #'   Default `FALSE` only indexes and checks physical inputs.
 #' @return Workspace, entry, case directory and checked settings, invisibly.
@@ -26,8 +50,10 @@
 #'   Existing helper scripts must match this installed version; settings and
 #'   outputs are preserved. Source inputs are read only.
 #' @export
-cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothoracinae",
+cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
                           settings = list(), run = FALSE) {
+  if (!is.character(species) || length(species) != 1L || is.na(species) || !grepl("^[A-Za-z][A-Za-z0-9_-]*$", species))
+    cli::cli_abort("Use a taxon identifier with letters, digits, underscores or hyphens.")
   for (p in c("terra", "data.table", "sf", "blockCV", "ranger", "maxnet", "mgcv",
               "iml", "pROC", "FNN", "ggplot2", "patchwork", "scales", "ragg"))
     check_suggested(p, "for the CHELSA workflow")
@@ -39,15 +65,13 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
   occurrence_file <- normalizePath(occurrence_file, winslash = "/", mustWork = TRUE)
   if (startsWith(tolower(paste0(path, "/")), tolower(paste0(data_dir, "/"))))
     cli::cli_abort("Keep the workspace outside the environmental data library.")
-  if (length(species) != 1L || is.na(species) || !grepl("^[A-Za-z][A-Za-z0-9_-]*$", species))
-    cli::cli_abort("Use a taxon identifier with letters, digits, underscores or hyphens.")
-  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "vif_threshold", "predictor_missing", "resources")
+  allowed <- c("domain", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
-  defaults <- list(domain = if (species == "Schizothoracinae") "freshwater_river" else "national",
-    input_type = if (species == "Callosciurus_erythraeus") "nsdm_occ" else "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
-    cv_k = 5L, background_points = 10000L, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
+  defaults <- list(domain = "national",
+    input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
+    cv_k = 5L, background_points = 10000L, thin_km = 1, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
   for (n in c("domain", "input_type", "lulc_product")) {
     choices <- switch(n, domain = c("national", "freshwater_river"),
@@ -59,6 +83,8 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = "Schizothor
     block_size = settings$block_size, num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
   if (length(settings$predictor_missing) != 1L || is.na(settings$predictor_missing) || !settings$predictor_missing %in% c("drop_predictors", "complete_cases")) cli::cli_abort("Invalid predictor_missing policy.")
   settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
+  settings$thin_km <- .cast_check_scalar(settings$thin_km, "thin_km", lower = 0)
+  settings$predictor_min_coverage <- .cast_check_scalar(settings$predictor_min_coverage, "predictor_min_coverage", lower = 0, upper = 1, min_inclusive = FALSE)
   .cast_resources(settings$resources)
   settings <- c(list(species = species, data_dir = data_dir, occurrence_file = occurrence_file), settings)
   template <- system.file("workflows", "single_species", package = "castSDM", mustWork = TRUE)

@@ -211,3 +211,14 @@ new occurrence records, ecological effects, labels or synthetic fixtures were
 created. Local QA receipts, source hashes, package tests and R CMD check record
 what was executed; successful engineering checks do not establish ecological
 causality, explanation truth or journal acceptance.
+
+
+The 0.42.0 maintenance corrects persistent case selection and removes implicit
+fish defaults from generic workflow/app entry points. Raw environmental data
+remain shareable, while the example namespaces preparation/training caches by
+species and checks actual input contents. CV cache identity now includes CRS;
+reused numerical fits receive the current screening audit. Verification varies
+control metadata and uses the attributed real fixture and the supplied actual
+fish/squirrel files. It does not create ecological records or claim a national
+squirrel-background design is scientifically justified by a passing software
+check. Full research workflows remain user-run.

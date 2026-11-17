@@ -1,3 +1,22 @@
+# castSDM 0.42.0
+
+- Require an explicit taxon when creating a workspace. Script and Shiny entries
+  now resolve the same persisted project selection; remove silent fish defaults
+  and reject conflicting session overrides before reading the environmental pool.
+- Keep input format and analysis domain independent of the taxon name. Report
+  the selected species, occurrence file, domain, effective numerical settings
+  and species-specific training cache before inventory/preparation.
+- Namespace workflow training caches by species as well as input/code hashes;
+  add the taxon identifier to preparation fingerprints. The raw environmental
+  inventory remains reusable across species; occurrence/background preparations,
+  selections, fits and validation are not shared by species name alone.
+- Include the declared coordinate CRS in CV cache identity and use the same
+  complete inputs for its receipt. Attach the current selection audit to reused
+  numerical fits instead of retaining earlier screen metadata.
+- Expose thinning distance and actual-domain predictor coverage in workflow
+  settings and the Shiny setup form. Retain the simple VIF/model protocol and
+  data-driven selected predictor counts; do not alter ecological observations.
+
 # castSDM 0.41.0
 
 - Check explanation sensitivity using the existing spatial training fits at
