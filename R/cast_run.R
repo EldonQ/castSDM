@@ -319,6 +319,10 @@ cast_run <- function(species_data,
       stringsAsFactors = FALSE)
   )
   add_receipt("04_cv", .cast_digest(cv_inputs), cv, tables = cv_tables)
+  # Labels describe evidence coverage only, after every fold has fitted and
+  # predicted. They never enter the environmental response calculations.
+  if (!is.null(cv$response_validation))
+    cv$response_validation$observations <- split$test$presence
 
   if (!isTRUE(cv$complete) || any(cv$repeat_status$status != "evaluated") ||
       any(!is.finite(as.matrix(cv$oof[, paste0("HSS_", protocol$models), drop = FALSE]))))

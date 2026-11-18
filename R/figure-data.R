@@ -209,12 +209,15 @@
     .cast_code_identity(.cast_display_coverage)))
   old <- .cast_cache_read(bundle_path, base_key)
   valid_old <- !is.null(old)
+  required_products <- products
+  if (!length(unlist(comparison$groups, use.names = FALSE)))
+    required_products <- setdiff(required_products, "attribution")
   verify_raw <- !render_only && any(products %in% c("attribution", "mess")) &&
     !is.null(current) && !is.null(future)
   curves_ready <- !"responses" %in% products || (valid_old &&
     all(vapply(response_types, function(type) !is.null(old$responses[[type]]) &&
       all(response_variables %in% old$responses[[type]]$variable), logical(1))))
-  if (valid_old && is.null(attribution) && !verify_raw && all(products %in% old$products) && curves_ready &&
+  if (valid_old && is.null(attribution) && !verify_raw && all(required_products %in% old$products) && curves_ready &&
       identical(old$display_request, display_request)) {
     if (verbose) cli::cli_inform("Verified figure data: no fitting or diagnostic prediction required.")
     return(old)

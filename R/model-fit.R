@@ -421,7 +421,8 @@ fit_traditional <- function(name, X, Y, rf_ntree, seed,
           sprintf("s(%s, k = 5)", nm) else nm
       }, character(1))
       f <- stats::as.formula(
-        paste("presence ~", paste(pred_terms, collapse = " + "))
+        paste("presence ~", paste(pred_terms, collapse = " + ")),
+        env = asNamespace("mgcv")
       )
       # The declared GAM policy is an unweighted binomial likelihood followed
       # by an optional weighted training-score shift. The shift changes the

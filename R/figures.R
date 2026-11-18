@@ -82,6 +82,9 @@
 #' required products. Complete atlases and fixed profiles require an explicit request.
 #' @param render_only Require an existing matching numerical figure-data
 #'   bundle. No fitting, diagnostic prediction or response calculation occurs.
+#' @param prepare_only Prepare verified numerical products and source tables
+#'   without exporting figures. Follow with `render_only = TRUE` to separate
+#'   environmental response computation from visual rendering.
 #' @param response_method Published ALE (default, iml) or the original PDP.
 #' @param response_grid Response-curve grid size, default `50`. Partial
 #'   dependence and ALE use all supplied reference rows. Core responses cover
@@ -122,12 +125,15 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     include = "core", render_only = FALSE, response_grid = 50L,
     display_resolution = .02, width_mm = 183, dpi = 600,
     resources = list(), verbose = TRUE, formats = c("png", "pdf"),
-    response_method = c("ale", "pdp")) {
+    response_method = c("ale", "pdp"), prepare_only = FALSE) {
   if (!is.environment(getOption("castSDM.fit_identity_cache"))) {
     identity_options <- options(castSDM.fit_identity_cache = new.env(parent = emptyenv()))
     on.exit(options(identity_options), add = TRUE)
   }
   response_method <- match.arg(response_method)
+  if (!is.logical(prepare_only) || length(prepare_only) != 1L || is.na(prepare_only) ||
+      (prepare_only && isTRUE(render_only)))
+    cli::cli_abort("prepare_only must be TRUE or FALSE and cannot be combined with render_only.")
 
   products <- .cast_figure_products(include)
   if (!inherits(object, "cast_result") || !inherits(comparison, "cast_comparison"))
@@ -222,6 +228,7 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     environmental_driver_common = data$attribution$common_summary,
     environmental_driver_by_model = data$attribution$model_summary,
     response_consistency = data$attribution$consistency,
+    response_spatial_sensitivity = data$diagnostics$response_spatial_sensitivity,
     display_coverage = data$display_coverage,
     support_scope = comparison$support_scope,
     gam_concurvity = data$diagnostics$gam_concurvity,
@@ -244,6 +251,18 @@ cast_figures <- function(object, comparison, output_dir = NULL,
     utils::write.csv(tables[[name]], path, row.names = FALSE)
     table_rows[[name]] <- data.frame(path = file.path("source_data", basename(path)),
       rows = nrow(tables[[name]]), columns = ncol(tables[[name]]), md5 = unname(tools::md5sum(path)))
+  }
+  if (prepare_only) {
+    if (verbose) cli::cli_inform("Environmental response products and source tables ready; no figure export requested.")
+    return(invisible(structure(list(prepared_only = TRUE, requested = selected,
+      status = data.frame(figure = selected, path = "",
+        status = vapply(selected, function(name) if (registry[[name]]$available)
+          "prepared" else "unavailable", character(1)),
+        reason = vapply(selected, function(name) if (registry[[name]]$available)
+          "" else registry[[name]]$reason, character(1))),
+      tables = if (length(table_rows)) do.call(rbind, table_rows) else data.frame(),
+      data_file = file.path(data_dir, "figure_data.rds"),
+      output_dir = output_dir), class = "cast_figures")))
   }
   manifest_path <- file.path(output_dir, "figure_manifest.rds")
   previous_manifest <- if (file.exists(manifest_path))

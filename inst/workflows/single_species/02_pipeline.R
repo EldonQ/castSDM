@@ -207,7 +207,9 @@ run_species <- function(cfg) {
   if (is.data.frame(sensitivity) && "n_common" %in% names(sensitivity))
     message("Spatial-refit explanation check: ", sensitivity$n_available[1L], " fits on ",
       sensitivity$n_locations[1L], " unchanged hold-out locations; ", sensitivity$n_common[1L],
-      " common marginal-support locations. See diagnostics/response_spatial_sensitivity.csv; these are descriptive sensitivities, not confidence intervals.")
+      " common central-quantile locations (", sensitivity$n_common_presence[1L],
+      " presences; ", sensitivity$n_common_background[1L],
+      " backgrounds). Observed-range counts are reported separately in diagnostics/response_spatial_sensitivity.csv; neither criterion establishes joint support or confidence.")
   terms <- diagnostic$gam_concurvity
   if (is.data.frame(terms) && nrow(terms)) {
     terms <- terms[terms$term != "para", ]
@@ -217,7 +219,7 @@ run_species <- function(cfg) {
   }
   report_scope <- footprint[footprint$scenario == scenarios$report, ]
   message("Reporting map scope: ", report_scope$n_valid, " paired valid cells; ",
-    report_scope$n_supported, " inside the declared marginal range envelope. Blank areas are outside the declared analysis domain or lack paired predictions. Grid area must be interpreted according to this domain.")
+    report_scope$n_supported, " inside the declared central marginal-quantile envelope. Outside this envelope does not necessarily mean outside the observed training range. Blank areas are outside the declared analysis domain or lack paired predictions. Grid area must be interpreted according to this domain.")
   case <- list(schema = "cast_single_species/1", species = cfg$species_name,
     cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
     training = "training/result.rds", comparison = "comparison/comparison.rds",
@@ -229,8 +231,11 @@ run_species <- function(cfg) {
   saveRDS(case, file.path(out, "case.rds"))
   # Main figures use scenario responses and frozen fits. Complete atlases and
   # extra diagnostics remain available through 04_REPLOT.R.
-  timed("figures", case_figures(comparison, out, scenarios$report, result = result, cfg = cfg,
-    current = current, future = scenarios$future[[scenarios$report]]))
+  timed("environmental_response_products", case_figures(comparison, out, scenarios$report,
+    result = result, cfg = cfg, current = current,
+    future = scenarios$future[[scenarios$report]], prepare_only = TRUE))
+  timed("figure_exports", case_figures(comparison, out, scenarios$report,
+    result = result, cfg = cfg, render_only = TRUE))
   sensitivity <- summary(comparison, thresholds = cfg$diagnostic_thresholds)
   utils::write.csv(sensitivity, file.path(out, "threshold_sensitivity.csv"), row.names = FALSE)
   saveRDS(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),

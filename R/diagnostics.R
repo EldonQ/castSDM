@@ -107,7 +107,7 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
     "Presence omission below the top 5/10 percent cutoff of all evaluation scores; not training-presence omission.",
     "Fraction of evaluation sample above its presence-score 10th percentile; not geographic area.",
     "Same fitted engine before score shift; fitting weights and variables are unchanged.",
-    "Finite and within marginal training bounds in current and ALL requested futures; not multivariate AOA.",
+    "Finite and within the declared marginal training-quantile envelope in current and ALL futures. Central tails are not necessarily outside observed ranges; neither box establishes multivariate AOA.",
     "Sample SD of paired model contrasts; not SE, confidence interval or significance."))
   notes <- data.frame(code = c("sampled_response", "holdout_policy", "oof_scope", "support_scope", "score_shift"),
     detail = c("Background labels are not verified absences; sampled prevalence changes probability losses and PR-AUC.",

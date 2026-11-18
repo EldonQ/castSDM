@@ -222,3 +222,14 @@ control metadata and uses the attributed real fixture and the supplied actual
 fish/squirrel files. It does not create ecological records or claim a national
 squirrel-background design is scientifically justified by a passing software
 check. Full research workflows remain user-run.
+
+The 0.43.0 maintenance added preflight spatial-fold checks, single-class test
+predictions, verified fold checkpoints, occurrence coverage QC and explicit
+custom study masks. The 0.44.0 maintenance repairs the scenario-to-explanation
+cache contract and generated-GAM formula identity, parallelises ordered current
+prediction blocks, separates numerical response products from exports, and
+reports central-quantile versus observed-range evidence coverage. Verification
+uses the attributed real fixture and saved actual squirrel results/native
+blocks; no ecological data, effects or labels are manufactured. The full
+national analysis remains user-run. Passing engineering checks does not
+establish ecological causality, explanation stability or journal acceptance.

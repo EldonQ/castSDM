@@ -71,4 +71,34 @@ test_that("changing a declared real CRS representation cannot reuse the previous
   expect_identical(second$fit$screen,second$screen)
   expect_identical(second$fit_full$screen,second$screen)
   expect_identical(data,x$data)
+  for (pkg in c("ggplot2", "patchwork", "ragg", "scales")) skip_if_not_installed(pkg)
+  grids <- real_grids()
+  comparison <- cast_compare(first, grids$current, list(actual = grids$future),
+    groups = list(environment = first$fit_full$env_vars), resources = list(cores = 1L),
+    output_dir = tempfile("actual-figure-comparison-"), verbose = FALSE)
+  directory <- tempfile("actual-figure-preparation-")
+  prepared_figures <- cast_figures(first, comparison, directory, include = c("07", "11"),
+    basemap = "none", formats = "png", dpi = 72L, prepare_only = TRUE, verbose = FALSE)
+  expect_true(prepared_figures$prepared_only)
+  expect_length(list.files(directory, pattern = "[.]png$"), 0L)
+  expect_true(file.exists(file.path(directory, "source_data/holdout_metrics.csv")))
+  before <- unname(tools::md5sum(prepared_figures$data_file))
+  rendered <- cast_figures(first, comparison, directory, include = c("07", "11"),
+    basemap = "none", formats = "png", dpi = 72L, render_only = TRUE, verbose = FALSE)
+  expect_true(all(rendered$status$status == "written_not_visually_checked"))
+  expect_identical(unname(tools::md5sum(prepared_figures$data_file)), before)
+  expect_true(all(file.exists(file.path(directory, rendered$status$path))))
+  # An actual unchanged environment has no driver contrast. Preparing then
+  # rendering must retain that honest unavailable status, not force a model
+  # response or fail because a scientifically inapplicable product is absent.
+  unchanged <- cast_compare(first, grids$current, list(actual = grids$current),
+    groups = list(environment = character()), resources = list(cores = 1L),
+    output_dir = tempfile("actual-unchanged-comparison-"), verbose = FALSE)
+  directory <- tempfile("actual-unavailable-driver-")
+  unavailable <- cast_figures(first, unchanged, directory, include = "03",
+    basemap = "none", formats = "png", dpi = 72L, prepare_only = TRUE, verbose = FALSE)
+  expect_identical(unname(unavailable$status$status), "unavailable")
+  rendered <- cast_figures(first, unchanged, directory, include = "03",
+    basemap = "none", formats = "png", dpi = 72L, render_only = TRUE, verbose = FALSE)
+  expect_identical(unname(rendered$status$status), "unavailable")
 })

@@ -22,7 +22,8 @@ cast_figures(
   resources = list(),
   verbose = TRUE,
   formats = c("png", "pdf"),
-  response_method = c("ale", "pdp")
+  response_method = c("ale", "pdp"),
+  prepare_only = FALSE
 )
 }
 \arguments{
@@ -80,6 +81,10 @@ established collection. Optional \code{"svg"} (requires \code{svglite}) and \cod
 reuse the same layout; no duplicate diagnostic calculations are needed.}
 
 \item{response_method}{Published ALE (default, iml) or the original PDP.}
+
+\item{prepare_only}{Prepare verified numerical products and source tables
+without exporting figures. Follow with \code{render_only = TRUE} to separate
+environmental response computation from visual rendering.}
 }
 \value{
 A \code{cast_figures} list with \code{status}, \code{requested}, \code{tables}, \code{data_file}, output

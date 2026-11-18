@@ -1,3 +1,23 @@
+# castSDM 0.44.0
+
+- Share one current-block cache contract between scenario projection and
+  environmental response maps. Verify the prediction receipt against the
+  scenario's saved key, including after another run overwrites an output.
+- Stabilise package-generated GAM formula environments and model identities
+  without dropping model coefficients, basis information or input checks.
+- Parallelise independent current-prediction blocks within the existing
+  worker/memory budget, reuse the worker pool for scenarios and write native
+  predictions in their original order. Regular GAM prediction is unchanged.
+- Distinguish the central marginal-quantile envelope from the full observed
+  training range in scenario and spatial-fit diagnostics. Report presence
+  and background counts for common explanation locations, without claiming
+  confidence or ecological causal identification.
+- Separate numerical response preparation from figure export in the example
+  workflow. `cast_figures(prepare_only = TRUE)` saves products/source tables;
+  `render_only = TRUE` exports them without repeating predictions.
+- All model/selection defaults remain general. No species-specific parameter
+  search, predictor quota, spatial-design adjustment or fabricated data is used.
+
 # castSDM 0.43.0
 
 - Inspect and save all spatial fold designs before fitting, including actual

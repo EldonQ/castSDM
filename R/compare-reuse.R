@@ -15,8 +15,8 @@
   if (!is.null(blocks)) {
     directory <- file.path(comparison$output_dir, ".cache", "current_blocks")
     manifest <- .cast_cache_read(file.path(directory, "manifest.rds"), blocks$key)
-    expected <- .cast_digest(list(list(current_key, comparison$provenance$mask),
-      blocks$rows, fit$env_vars, "current_blocks/1", .cast_code_identity(.cast_raster_block)))
+    expected <- .cast_current_blocks_key(list(current_key, comparison$provenance$mask),
+      blocks$rows, fit$env_vars)
     if (is.null(manifest) || !identical(blocks$key, expected)) blocks <- NULL else {
       blocks <- manifest; blocks$directory <- directory
     }
@@ -27,8 +27,8 @@
       !all(layers %in% names(terra::rast(prediction)))) prediction <- NULL
   if (!is.null(prediction)) {
     receipt <- sub("[.]tif$", ".rds", prediction)
-    saved <- tryCatch(readRDS(receipt), error = function(e) NULL)
-    if (is.null(saved) || is.null(.cast_cache_read(receipt, saved$key))) prediction <- NULL
+    expected <- comparison$results[[scenario]]$cache_key
+    if (is.null(expected) || is.null(.cast_cache_read(receipt, expected))) prediction <- NULL
   }
   gam <- if (!is.null(blocks) && !is.null(comparison$gam_current))
     .cast_gam_current_cache(fit, weights, comparison$changing_predictors, blocks,

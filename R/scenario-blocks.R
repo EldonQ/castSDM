@@ -1,10 +1,13 @@
 # One content-verified, bounded-memory copy of the observed current inputs.
+.cast_current_blocks_key <- function(inputs, rows, variables) {
+  .cast_digest(list(inputs, rows, variables, "current_blocks/2",
+    .cast_code_identity(.cast_raster_cells), .cast_code_identity(.cast_raster_block)))
+}
+
 .cast_compare_current_blocks <- function(plan, block_size, directory, key, verbose) {
   rows <- max(1L, as.integer(block_size/terra::ncol(plan$current)))
   starts <- seq.int(1L, terra::nrow(plan$current), by = rows)
-  key <- .cast_digest(list(key, rows, plan$vars, "current_blocks/2",
-    .cast_code_identity(.cast_raster_cells),
-    .cast_code_identity(.cast_raster_block)))
+  key <- .cast_current_blocks_key(key, rows, plan$vars)
   receipt <- file.path(directory, "manifest.rds")
   old <- .cast_cache_read(receipt, key)
   if (!is.null(old)) {

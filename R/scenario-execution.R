@@ -82,6 +82,21 @@
   invisible(value)
 }
 
+# Package-generated GAM formulae contain only data columns and mgcv::s.
+# Their fitting-frame environments capture mutable bookkeeping (including
+# the fitted object itself), not prediction inputs. Canonicalise only this
+# restricted grammar; external/custom formula dependencies remain hashed.
+.cast_gam_identity <- function(x, variables) {
+  if (inherits(x, "formula") || inherits(x, "terms")) {
+    allowed <- c(variables, "presence", "~", "+", "s")
+    if (all(all.names(x, functions = TRUE) %in% allowed))
+      attr(x, ".Environment") <- asNamespace("mgcv")
+  } else if (is.list(x)) {
+    for (i in seq_along(x)) x[i] <- list(.cast_gam_identity(x[[i]], variables))
+  }
+  x
+}
+
 .cast_fit_identity <- function(fit) {
   memo <- getOption("castSDM.fit_identity_cache")
   if (is.environment(memo) && identical(memo$fit, fit)) return(memo$key)
@@ -89,6 +104,8 @@
     m$fit_elapsed_s <- NULL
     m$warnings <- NULL
     if (is.function(m$predict_function)) m$predict_function <- .cast_callback_identity(m$predict_function)
+    if (identical(m$type, "traditional") && identical(m$name, "gam"))
+      m$model <- .cast_gam_identity(m$model, fit$env_vars)
     m
   })
   engines <- unique(vapply(names(models), function(m) .cast_engine_package(m) %||% "", character(1)))
@@ -98,8 +115,9 @@
   key <- .cast_digest(list(
     models = models, env_vars = fit$env_vars, scaling = fit$scaling,
     calibration = fit$calibration, engines = versions,
+    formula_identity = .cast_code_identity(.cast_gam_identity),
     code = .cast_code_dependencies(c("predict_single_model", ".cast_prediction_context", ".cast_factorial_values")),
-    schema = "paired_scenarios/2"))
+    schema = "paired_scenarios/3"))
   # Scoped by the public operation. Mutation is checked with identical(),
   # never with object size, a user-supplied ID or a stale saved digest.
   if (is.environment(memo)) { memo$fit <- fit; memo$key <- key }

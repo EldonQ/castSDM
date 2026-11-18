@@ -476,7 +476,7 @@
       proxy <- leaflet::addRasterImage(proxy, r, colors = palette, project = FALSE,
         opacity = .85, layerId = "response", maxBytes = 8 * 1024 * 1024)
       if (layer == "support_total") leaflet::addLegend(proxy,
-        colors = palette(c(0, 1, 2)), labels = c("Outside", "Inside", "Mixed native support"), title = "Range support", opacity = .85) else
+        colors = palette(c(0, 1, 2)), labels = c("Outside quantile box", "Inside quantile box", "Mixed native cells"), title = "Quantile envelope", opacity = .85) else
       if (direction) leaflet::addLegend(proxy,
         colors = palette(ids), labels = c("Both negative", "Both zero", "Both positive", "Opposite signs", "Zero in one background"),
         title = "Background directions", opacity = .85) else
@@ -504,7 +504,7 @@
       shiny::validate(shiny::need(point(), "\u8bf7\u5728\u5206\u6790\u57df\u5185\u70b9\u51fb\u5730\u56fe\u3002"))
       p <- point(); z <- unlist(p$values)
       data.frame(item = c("Longitude", "Latitude", "Suitability before", "Suitability after", "Change",
-        "Range support (1/0)", "Model disagreement", "Response group"),
+        "Quantile envelope (1/0)", "Model disagreement", "Response group"),
         value = c(p$longitude, p$latitude, z, p$group))
     }, digits = 5)
     output$point_summary <- shiny::renderUI({
@@ -519,8 +519,8 @@
           .cast_app_metric(labels[1L], sprintf("%.3f", v$before)),
           .cast_app_metric(labels[2L], sprintf("%.3f", v$after)),
           .cast_app_metric(labels[3L], sprintf("%+.3f", v$change))),
-        shiny::tags$p(class = "cast-note", if (isTRUE(v$supported)) "\u8be5\u4f4d\u7f6e\u901a\u8fc7\u8303\u56f4\u68c0\u67e5\u3002" else
-          "\u8be5\u4f4d\u7f6e\u8d85\u51fa\u8bad\u7ec3\u8303\u56f4\uff0c\u4ec5\u4f9b\u67e5\u770b\u6a21\u578b\u8f93\u51fa\u3002"))
+        shiny::tags$p(class = "cast-note", if (isTRUE(v$supported)) "\u8be5\u4f4d\u7f6e\u4f4d\u4e8e\u8bad\u7ec3\u5206\u4f4d\u6570\u5305\u7edc\u5185\uff1b\u4e0d\u4ee3\u8868\u8054\u5408\u652f\u6301\u6216\u56e0\u679c\u8bc6\u522b\u3002" else
+          "\u8be5\u4f4d\u7f6e\u4e0d\u5728\u8bad\u7ec3\u5206\u4f4d\u6570\u5305\u7edc\u5185\uff1b\u4e0d\u7b49\u4e8e\u8d85\u51fa\u5b9e\u9645\u89c2\u6d4b\u8303\u56f4\uff0c\u9700\u5ba1\u614e\u89e3\u91ca\u3002"))
     })
     output$environment <- shiny::renderTable({ shiny::req(point()); point()$environment }, digits = 5)
     output$metadata <- shiny::renderTable({ shiny::req(project()); project()$metadata })
@@ -581,9 +581,13 @@
       if (!"model" %in% names(d)) return(d)
       focus <- input$focus_driver %||% active()$settings$focus
       d <- d[d$model == "ensemble" & (d$contrast == "total" | d$driver %in% focus), , drop = FALSE]
-      d <- d[, c("driver", "contrast", "n_locations", "n_common", "n_driver_selected",
+      d$criterion <- ifelse(d$criterion == "observed_training_range",
+        "\u5b9e\u9645\u89c2\u6d4b\u8303\u56f4", "\u4e2d\u592e\u5206\u4f4d\u6570\u5305\u7edc")
+      d <- d[, c("driver", "contrast", "criterion", "n_locations", "n_common",
+        "n_common_presence", "n_common_background", "n_driver_selected",
         "mean_response_min", "mean_response_max", "direction_unanimous_fraction", "all_zero_fraction")]
-      names(d) <- c("\u56e0\u5b50", "\u5bf9\u6bd4", "\u7559\u51fa\u4f4d\u7f6e\u6570", "\u5171\u540c\u652f\u6301\u4f4d\u7f6e", "\u5165\u9009\u6298\u6570", "\u5e73\u5747\u54cd\u5e94\u6700\u5c0f\u503c", "\u5e73\u5747\u54cd\u5e94\u6700\u5927\u503c", "\u65b9\u5411\u4e00\u81f4\u6bd4\u4f8b", "\u5168\u96f6\u6bd4\u4f8b")
+      names(d) <- c("\u56e0\u5b50", "\u5bf9\u6bd4", "\u8303\u56f4\u53e3\u5f84", "\u7559\u51fa\u4f4d\u7f6e\u6570", "\u5171\u540c\u4f4d\u7f6e",
+        "\u5b58\u5728\u70b9", "\u80cc\u666f\u70b9", "\u5165\u9009\u6298\u6570", "\u5e73\u5747\u54cd\u5e94\u6700\u5c0f\u503c", "\u5e73\u5747\u54cd\u5e94\u6700\u5927\u503c", "\u65b9\u5411\u4e00\u81f4\u6bd4\u4f8b", "\u5168\u96f6\u6bd4\u4f8b")
       d
     }, digits = 5)
     output$native_response <- shiny::renderTable({

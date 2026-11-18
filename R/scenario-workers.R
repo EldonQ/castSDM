@@ -5,7 +5,7 @@
   list(version = as.character(getNamespaceVersion(ns)),
     path = normalizePath(getNamespaceInfo(ns, "path"), winslash = "/", mustWork = TRUE),
     R = as.character(getRversion()),
-    code = .cast_code_identity(get(".cast_compare_one", envir = ns, inherits = FALSE)))
+    code = .cast_code_dependencies(c(".cast_compare_one", ".cast_compare_baseline_block")))
 }
 
 .cast_check_compare_worker <- function(expected, actual, worker) {
@@ -35,9 +35,9 @@
     library <- dirname(package_path)
     .libPaths(unique(c(library, libs)))
     ns <- loadNamespace("castSDM", lib.loc = library)
-    functions <- c(".cast_code_identity", ".cast_compare_one")
+    functions <- c(".cast_code_dependencies", ".cast_compare_one", ".cast_compare_baseline_block")
     available <- all(vapply(functions, exists, logical(1), envir = ns, inherits = FALSE))
-    code <- if (available) get(functions[1L], envir = ns)(get(functions[2L], envir = ns)) else NULL
+    code <- if (available) get(functions[1L], envir = ns)(functions[-1L]) else NULL
     list(version = as.character(getNamespaceVersion(ns)),
       path = normalizePath(getNamespaceInfo(ns, "path"), winslash = "/", mustWork = TRUE),
       R = as.character(getRversion()), code = code, preloaded = preloaded)

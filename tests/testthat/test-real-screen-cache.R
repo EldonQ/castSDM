@@ -33,3 +33,24 @@ test_that("cached actual data are verified before deserialization", {
   saveRDS(receipt, path)
   expect_null(castSDM:::.cast_cache_read(path, key))
 })
+
+test_that("GAM identity excludes temporary formula frames but keeps actual model values", {
+  fit <- real_fit()
+  frame <- new.env(parent = asNamespace("mgcv"))
+  frame$execution_note <- "before save"
+  model <- fit$models$gam$model
+  # Change runtime metadata only; actual observations, formula and fit remain.
+  environment(model$formula) <- frame
+  fit$models$gam$model <- model
+  key <- castSDM:::.cast_fit_identity(fit)
+  frame$execution_note <- "after save"
+  expect_identical(castSDM:::.cast_fit_identity(fit), key)
+  restored <- unserialize(serialize(fit, NULL, version = 3L))
+  expect_identical(castSDM:::.cast_fit_identity(restored), key)
+  expect_identical(environment(real_fit()$models$gam$model$dinfo$gp$pf), asNamespace("mgcv"))
+  actual <- real_case()$data[, fit$env_vars, drop = FALSE]
+  expect_equal(castSDM:::predict_single_model(restored$models$gam, actual),
+    castSDM:::predict_single_model(fit$models$gam, actual), tolerance = 1e-12)
+  fit$scaling$reference <- actual
+  expect_false(identical(castSDM:::.cast_fit_identity(fit), key))
+})

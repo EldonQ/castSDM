@@ -17,6 +17,9 @@ explicit finite domain make the comparisons auditable. Results contain
 continuous contrasts, optional thresholded range counts, training-support
 diagnostics, model sign disagreement and paired model SD. `cast_diagnose()`
 connects independent ensemble evaluation to the scenario diagnostics.
+Central quantile-envelope coverage and full observed-range coverage are reported
+separately. Spatial-fit explanation checks retain their location, presence and
+background denominators; agreement alone is not evidence of reliable transfer.
 
 ## Installation
 

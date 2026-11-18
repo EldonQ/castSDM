@@ -126,7 +126,25 @@
   list(domain = path, support = if (!is.null(bounds)) support_path)
 }
 
-.cast_compare_baseline <- function(fit, plan, weights, clamp, block_size, path = NULL, blocks = NULL, gam_current = NULL) {
+.cast_compare_baseline_block <- function(fit, saved, weights, clamp, gam_current, row, count) {
+  x <- saved$values
+  if (clamp && !is.null(fit$scaling$reference)) x <- .cast_clamp(x, fit$scaling$reference)
+  prepared <- .cast_gam_current_read(gam_current, row, count, saved$indices, required = FALSE)
+  if (!is.null(gam_current) && is.null(prepared)) {
+    prepared <- .cast_gam_current_values(fit, x, gam_current$models, gam_current$variables)
+    .cast_gam_current_write(gam_current, row, count, saved$indices, prepared)
+  }
+  p <- matrix(NA_real_, length(saved$indices), length(weights))
+  if (length(saved$indices)) for (j in seq_along(weights)) {
+    m <- names(weights)[j]; info <- fit$models[[m]]
+    p[, j] <- if (!is.null(prepared[[m]]))
+      .cast_apply_offset(info$model$family$linkinv(prepared[[m]]$eta), info$offset) else predict_single_model(info, x)
+  }
+  list(indices = saved$indices, predictions = p)
+}
+
+.cast_compare_baseline <- function(fit, plan, weights, clamp, block_size, path = NULL, blocks = NULL, gam_current = NULL,
+    cluster = NULL, threads = 1L, verbose = FALSE) {
   current <- plan$current
   old <- options(castSDM.predict_threads = getOption("castSDM.compare_threads", 1L))
   on.exit(options(old), add = TRUE)
@@ -145,25 +163,51 @@
   writer <- .cast_raster_writer(current, path, names(weights), datatype = "FLT8S", overwrite = TRUE)
   on.exit(.cast_writer_abort(writer), add = TRUE)
   rows <- max(1L, as.integer(block_size/terra::ncol(current)))
-  for (row in seq.int(1L, terra::nrow(current), by = rows)) {
-    count <- min(rows, terra::nrow(current)-row+1L)
-    saved <- .cast_compare_current_block(blocks, row, count, current, plan$mask)
-    p <- matrix(NA_real_, count*terra::ncol(current), length(weights))
-    x <- saved$values
-    if (clamp && !is.null(fit$scaling$reference)) x <- .cast_clamp(x, fit$scaling$reference)
-    prepared <- .cast_gam_current_read(gam_current, row, count, saved$indices, required = FALSE)
-    if (!is.null(gam_current) && is.null(prepared)) {
-      prepared <- .cast_gam_current_values(fit, x, gam_current$models, gam_current$variables)
-      .cast_gam_current_write(gam_current, row, count, saved$indices, prepared)
+  starts <- seq.int(1L, terra::nrow(current), by = rows)
+  # Workers receive the fit once, then read disjoint verified blocks. Only
+  # one writer in the caller owns the output raster; at most one batch per
+  # worker is resident. No scientific input or prediction policy changes.
+  if (!is.null(cluster) && !is.null(blocks)) {
+    initialize <- function(state) {
+      assign(".cast_baseline_state", state, envir = .GlobalEnv)
+      NULL
     }
-    if (length(saved$indices)) {
-      for (j in seq_along(weights)) {
-        m <- names(weights)[j]; info <- fit$models[[m]]
-        p[saved$indices, j] <- if (!is.null(prepared[[m]]))
-          .cast_apply_offset(info$model$family$linkinv(prepared[[m]]$eta), info$offset) else predict_single_model(info, x)
-      }
+    environment(initialize) <- baseenv()
+    worker_fit <- fit
+    worker_fit$models <- lapply(worker_fit$models, function(m) {
+      if (is.function(m$predict_function)) m$predict_function <- .cast_seal_callback(m$predict_function)
+      m
+    })
+    parallel::clusterCall(cluster, initialize, list(fit = worker_fit, blocks = blocks,
+      weights = weights, clamp = clamp, gam_current = gam_current, threads = threads))
+    cleanup <- function() rm(list = ".cast_baseline_state", envir = .GlobalEnv)
+    environment(cleanup) <- baseenv()
+    on.exit(parallel::clusterCall(cluster, cleanup), add = TRUE)
+    task <- function(job) {
+      state <- get(".cast_baseline_state", envir = .GlobalEnv)
+      options(castSDM.predict_threads = state$threads)
+      saved <- utils::getFromNamespace(".cast_compare_current_block", "castSDM")(
+        state$blocks, job$row, job$count)
+      utils::getFromNamespace(".cast_compare_baseline_block", "castSDM")(
+        state$fit, saved, state$weights, state$clamp, state$gam_current, job$row, job$count)
     }
-    .cast_writer_block(writer, p, row, count)
+    environment(task) <- baseenv()
+  } else cluster <- NULL
+  width <- if (is.null(cluster)) 1L else length(cluster)
+  for (i in seq.int(1L, length(starts), by = width)) {
+    indices <- seq.int(i, min(length(starts), i+width-1L))
+    jobs <- lapply(starts[indices], function(row)
+      list(row = row, count = min(rows, terra::nrow(current)-row+1L)))
+    answers <- if (is.null(cluster)) lapply(jobs, function(job) {
+      saved <- .cast_compare_current_block(blocks, job$row, job$count, current, plan$mask)
+      .cast_compare_baseline_block(fit, saved, weights, clamp, gam_current, job$row, job$count)
+    }) else parallel::parLapply(cluster, jobs, task)
+    for (j in seq_along(jobs)) {
+      p <- matrix(NA_real_, jobs[[j]]$count*terra::ncol(current), length(weights))
+      p[answers[[j]]$indices, ] <- answers[[j]]$predictions
+      .cast_writer_block(writer, p, jobs[[j]]$row, jobs[[j]]$count)
+    }
+    if (verbose) cli::cli_inform("Current predictions: raster batches {max(indices)}/{length(starts)} ({width} worker{?s}).")
   }
   .cast_writer_finish(writer)
   .cast_gam_current_finish(gam_current)
@@ -244,15 +288,27 @@
   common_acc <- .cast_factorial_accumulator(components, length(faces))
   cuts <- .cast_threshold_accumulator(unique(c(threshold, thresholds)), length(faces))
   sign_acc <- .cast_sign_accumulator(length(weights), components)
-  scope_counts <- stats::setNames(numeric(5), c("current_all", "static_background", "changing_current", "changing_future", "changing_both"))
-  if (!length(changing)) scope_counts[3:5] <- NA_real_
+  scope_names <- c("current_all", "static_background", "changing_current", "changing_future", "changing_both", "paired_all")
+  scope_counts <- range_counts <- stats::setNames(numeric(6), scope_names)
+  if (!length(changing)) { scope_counts[3:5] <- NA_real_; range_counts[3:5] <- NA_real_ }
+  range_bounds <- if (!is.null(bounds)) .cast_support_bounds(fit$scaling$reference, c(0, 1))
+  scope_values <- function(a, b, limits) {
+    now <- .cast_attribution_inside(a, limits[changing])
+    later <- .cast_attribution_inside(b, limits[changing])
+    current_all <- .cast_attribution_inside(a, limits)
+    c(sum(current_all), sum(.cast_attribution_inside(a, limits[plan$static])),
+      if (length(changing)) sum(now) else NA_real_,
+      if (length(changing)) sum(later) else NA_real_,
+      if (length(changing)) sum(now & later) else NA_real_,
+      sum(current_all & .cast_attribution_inside(b, limits)))
+  }
   scope_n <- 0L
   model_sums <- NULL
   previous_context <- options(castSDM.read_context = scenario)
   on.exit(options(previous_context), add = TRUE)
   last_progress <- 0
   seconds <- c(read_current = 0, read_future = 0, read_baseline = 0,
-    predict = 0, write = 0)
+    read_gam_cache = 0, predict = 0, support_diagnostics = 0, write = 0)
   timed <- function(phase, expr) {
     start <- proc.time()[["elapsed"]]
     prior <- options(castSDM.read_context = paste(scenario, phase, sep = " / "))
@@ -301,7 +357,8 @@
       keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {
         aa <- a[keep, , drop = FALSE]; bb <- b[keep, , drop = FALSE]
-        gam <- if (plan$raster) .cast_gam_current_read(gam_current, first, count, positions[keep])
+        gam <- timed("read_gam_cache", if (plan$raster)
+          .cast_gam_current_read(gam_current, first, count, positions[keep]))
         p <- timed("predict", .cast_compare_block(fit, aa, bb,
           plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp, gam))
         model_sums <- .cast_model_response_add(model_sums, p$model_sums)
@@ -316,10 +373,10 @@
         .cast_threshold_accumulate(cuts, p$faces, p$support, cs)
         .cast_sign_accumulate(sign_acc, p$sign, p$support, cs)
         if (!is.null(bounds)) {
-          now <- .cast_attribution_inside(aa, bounds[changing])
-          later <- .cast_attribution_inside(bb, bounds[changing])
-          scope_counts <- scope_counts + c(sum(.cast_attribution_inside(aa, bounds)),
-            sum(.cast_attribution_inside(aa, bounds[plan$static])), sum(now), sum(later), sum(now & later))
+          counts <- timed("support_diagnostics", list(
+            quantile = scope_values(aa, bb, bounds), range = scope_values(aa, bb, range_bounds)))
+          scope_counts <- scope_counts + counts$quantile
+          range_counts <- range_counts + counts$range
           scope_n <- scope_n + nrow(aa)
         }
         z[positions[keep], ] <- cbind(p$faces, p$effects, p$sd, as.numeric(p$support),
@@ -336,9 +393,11 @@
   if (plan$raster) timed("write", .cast_writer_finish(writer))
   list(design = plan$design, model_summary = .cast_model_response_summary(model_sums, weights),
     support_scope = if (!is.null(bounds)) data.frame(
-    scope = names(scope_counts), n_valid = scope_n, n_supported = unname(scope_counts),
-    share = if (scope_n) unname(scope_counts)/scope_n else NA_real_,
-    criterion = "marginal_training_quantiles"), summary = .cast_factorial_summary(acc, !is.null(bounds)),
+    scope = rep(names(scope_counts), 2L), n_valid = scope_n,
+    n_supported = unname(c(scope_counts, range_counts)),
+    share = if (scope_n) unname(c(scope_counts, range_counts))/scope_n else NA_real_,
+    criterion = rep(c("marginal_training_quantiles", "observed_training_range"), each = length(scope_counts))),
+    summary = .cast_factorial_summary(acc, !is.null(bounds)),
     binary = if (!is.null(threshold)) .cast_factorial_binary(acc$binary, acc$n_binary),
     binary_supported = if (!is.null(threshold) && !is.null(bounds))
       .cast_factorial_binary(acc$binary_supported, acc$n_binary_supported),
@@ -619,14 +678,23 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   start <- Sys.time()
   gam_current <- if (plan$raster) .cast_gam_current_cache(fit, weights,
     unlist(plan$groups, use.names = FALSE), blocks, file.path(cache_dir, "gam_current"), clamp)
-  base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, gam_current$key, .cast_code_identity(.cast_compare_baseline)))
+  base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, gam_current$key,
+    .cast_code_identity(.cast_compare_baseline), .cast_code_identity(.cast_compare_baseline_block)))
   base_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "current.rds")
   baseline <- if (resume) .cast_cache_read(base_receipt, base_key) else NULL
   reused <- !is.null(baseline) && (is.null(gam_current) || isTRUE(attr(gam_current, "ready")))
   if (reused && plan$raster) baseline <- file.path(cache_dir, baseline)
   if (!reused) {
+    if (plan$raster && budget$workers > 1L && length(blocks$starts) > 1L) {
+      worker_start <- Sys.time()
+      cluster <- .cast_start_compare_cluster(min(budget$workers, length(blocks$starts)))
+      on.exit(parallel::stopCluster(cluster), add = TRUE)
+      worker_elapsed <- as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
+      if (verbose) cli::cli_inform("Verified {length(cluster)} prediction workers; the same pool will process scenarios.")
+    }
     baseline <- .cast_compare_input_stage(.cast_compare_baseline(fit, plan, weights, clamp, block_size,
-      if (plan$raster) file.path(cache_dir, "current_models.tif"), blocks, gam_current), "current_prediction", output_dir)
+      if (plan$raster) file.path(cache_dir, "current_models.tif"), blocks, gam_current,
+      cluster, budget$threads, verbose), "current_prediction", output_dir)
     .cast_cache_write(if (plan$raster) basename(baseline) else baseline, base_receipt, base_key,
       if (plan$raster) baseline else character())
   }
@@ -687,17 +755,18 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
       .cast_cache_write(saved, receipt, key, if (plan$raster) file else character())
     }
     x$scenario <- scenario
+    x$cache_key <- key
     results[[scenario]] <- x
     event("scenario", start, reused, scenario)
     if (verbose) cli::cli_inform("{scenario}: {if (reused) 'verified cache' else 'computed'}")
   }
   worker_start <- Sys.time()
-  if (budget$workers > 1L && length(jobs) > 1L) {
+  if (is.null(cluster) && budget$workers > 1L && length(jobs) > 1L) {
     cluster <- .cast_start_compare_cluster(min(budget$workers, length(jobs)))
     on.exit(parallel::stopCluster(cluster), add = TRUE)
     if (verbose) cli::cli_inform("Verified {length(cluster)} scenario workers against the calling installation.")
   }
-  worker_elapsed <- as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
+  worker_elapsed <- worker_elapsed + as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
   if (verbose && length(jobs) && !is.null(output_dir))
     cli::cli_inform("Scenario progress records: {.path {file.path(output_dir, 'progress')}}.")
   dispatch_start <- Sys.time()
@@ -709,6 +778,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     x <- computed[[scenario]]$value
     x$raster_file <- if (plan$raster) jobs[[scenario]]$file else NULL
     x$scenario <- scenario
+    x$cache_key <- jobs[[scenario]]$key
     results[[scenario]] <- x
     events[[length(events)+1L]] <- data.frame(stage = "scenario", scenario = scenario,
       cache_hit = FALSE, elapsed_s = computed[[scenario]]$elapsed,

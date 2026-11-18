@@ -40,6 +40,9 @@ test_that("real spatial folds retain all OOF locations and report every candidat
   first <- result$response_validation$runs[[1L]]
   expect_equal(as.numeric(first$values[, "rf", "total"]), direct$data$total_change)
   expect_equal(first$supported, direct$data$support_total == 1)
+  expect_true(all(first$observed_range[first$supported]))
+  expect_setequal(sensitivity$criterion, c("marginal_training_quantiles", "observed_training_range"))
+  expect_true(all(sensitivity$status == "descriptive_sensitivity"))
   for (v in intersect(x$variables, screen$selected))
     expect_equal(as.numeric(first$values[, "rf", paste0("only:", v)]), direct$data[[paste0("effect_", v)]])
   incomplete <- result; incomplete$response_validation$runs[1L] <- list(NULL)

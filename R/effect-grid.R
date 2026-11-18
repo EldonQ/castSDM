@@ -1,4 +1,4 @@
-# Quantile-box coverage diagnoses range extrapolation, not joint positivity.
+# A central quantile box flags marginal tails, not necessarily extrapolation.
 
 .cast_check_fit <- function(fit) {
   if (!inherits(fit, "cast_fit")) {
@@ -10,7 +10,8 @@
   invisible(fit)
 }
 
-# A marginal-quantile box detects extrapolation, not holes in joint support.
+# Only the full observed range distinguishes marginal range extrapolation;
+# neither a range box nor a central quantile box diagnoses joint support.
 .cast_check_support_probs <- function(probs) {
   if (!is.numeric(probs) || length(probs) != 2L || any(!is.finite(probs)) ||
       probs[1] < 0 || probs[2] > 1 || probs[1] >= probs[2]) {

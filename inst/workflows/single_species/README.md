@@ -1,4 +1,4 @@
-# CHELSA 单物种工作流（castSDM 0.43.0）
+# CHELSA 单物种工作流（castSDM 0.44.0）
 
 模型协议不按物种名调参：物种标识用于区分输入和输出，研究域、记录格式和统计设置由项目显式声明。变量筛选保持训练侧 VIF，并在每个空间折内重复，不规定保留数量。
 
@@ -60,7 +60,8 @@ Sys.setenv(CAST_FIGURES = "all") # 或 responses、maps、drivers
 source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
 ```
 
-`workflow_timings.csv`、`figures/phase_timings.csv` 分别记录流程、图件数值准备和渲染时间。
+`workflow_timings.csv` 将 `environmental_response_products`（响应计算与显示数据准备）和 `figure_exports`（仅出图）分开；`figures/phase_timings.csv` 保留更细的计时。两阶段使用同一份内容校验后的数值产品，不重新拟合。
+`comparison/tables/support_scope.csv` 和 `diagnostics/response_spatial_sensitivity.csv` 分别列出中央分位数包络与实际观测范围；包络外不必然是范围外推，两者都不证明联合支持。跨空间拟合的共同解释位置同时报告存在点和背景点数量，不能只看方向一致比例。
 `predictor_qualification.csv`、`predictor_missing_qc.csv`、`predictor_semantics.csv` 保留覆盖、记录损失和来源尺度依据；`gam_concurvity.csv` 报告 GAM 响应替代性。
 未完成比较不生成完成标记；同配置重跑校验并复用成功阶段。不要通过改名旧结果假装兼容新分析。
 

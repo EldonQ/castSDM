@@ -21,7 +21,7 @@ case_figure_stacks <- function(out_dir, result, scenario) {
 
 case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NULL,
                          current = NULL, future = NULL, attribution = NULL,
-                         render_only = FALSE, include = "core") {
+                         render_only = FALSE, include = "core", prepare_only = FALSE) {
   if (is.null(result)) result <- readRDS(file.path(out_dir, "training", "result.rds"))
   result$output_dir <- file.path(out_dir, "training")
   if (is.null(cfg)) {
@@ -38,6 +38,7 @@ case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NUL
     output_dir = file.path(out_dir, "figures"), scenario = scenario,
     current = current, future = future, attribution = attribution,
     basemap = "china", include = include, render_only = render_only,
+    prepare_only = prepare_only,
     response_method = cfg$figure_response_method %||% "ale",
     response_grid = cfg$figure_response_grid %||% 50L,
     display_resolution = cfg$figure_display_resolution %||% .02,

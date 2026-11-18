@@ -90,7 +90,7 @@
     levels <- if (kind == "range") c(-1, 0, 1, 2) else if (kind == "context") c(-1, 0, 1, 2, 3) else
       if (kind == "support") c(0, 1, 2) else c(0, 1)
     labels <- switch(kind, context = c("Consistent decrease", "No response", "Consistent increase", "Opposite signs", "One background zero"), range = c("Loss", "Stable absent", "Gain", "Stable present"),
-      support = c("Outside support", "Inside support", "Mixed native support"), novelty = c("Within envelope", "Novel (MESS < 0)"),
+      support = c("Outside quantile box", "Inside quantile box", "Mixed native cells"), novelty = c("Within observed range", "Novel (MESS < 0)"),
       conflict = c("No opposite signs", "Positive/negative conflict"))
     colors <- switch(kind, context = c("#B35806", "#EDF2F4", "#2166AC", "#7B3294", "#999999"), range = c("#CB4335", "#F2F2F2", "#2E9E5B", "#2E86C1"),
       support = c("#F4A582", "#0B3D5C", "#999999"), novelty = c("#EDF2F4", "#0B3D5C"),
@@ -280,22 +280,30 @@
       map(paste0("retained_", top), paste("Retained-driver:", .cast_var_label(top)),
         "signed", limits, source = source, legend = "Suitability change"))
     plots <- c(maps, list(patchwork::wrap_plots(bars("only"), bars("retained"), ncol = 2)))
+    sensitivity <- data$diagnostics$response_spatial_sensitivity
+    evidence <- if (is.data.frame(sensitivity) && "criterion" %in% names(sensitivity)) {
+      s <- sensitivity[sensitivity$criterion == "marginal_training_quantiles" &
+        sensitivity$contrast == "total" & sensitivity$model == "ensemble", , drop = FALSE]
+      if (nrow(s)) sprintf("Spatial-fit sensitivity: %s/%s external locations share this envelope across all %s fits (%s presences, %s backgrounds); descriptive evidence only.",
+        s$n_common[1L], s$n_locations[1L], s$n_available[1L],
+        s$n_common_presence[1L], s$n_common_background[1L]) else ""
+    } else "Spatial-fit sensitivity evidence is unavailable in this saved result."
     patchwork::wrap_plots(plots, ncol = 1, heights = c(1, 1, 1.15)) + .cast_figure_annotation(
       "Environmental explanation under frozen fitted models",
       paste(if (common) "Maps and means use the same all-predictor paired support across drivers; full-domain maps remain in D_ atlases." else
         "Full-domain legacy responses; common-support summaries require recomputation.",
-        "Non-additive predictive explanations; static predictors remain fixed. These contrasts do not identify ecological causal effects."))
+        "Non-additive predictive explanations; static predictors remain fixed. These contrasts do not identify ecological causal effects.", evidence))
   }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&
       (is.null(att$common_summary) || !is.null(data$attribution_supported_display)) &&
       (is.null(att$common_summary) || any(att$common_summary$n > 0)),
     if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
       "Driver attribution requires raw scenario predictors and at least one common supported cell; full-domain D_ maps remain available.")
   add("04_support_and_disagreement", function() {
-    patchwork::wrap_plots(map("support", "Training marginal support", "support", legend = "Training range"),
+    patchwork::wrap_plots(map("support", "Training quantile envelope", "support", legend = "Quantile envelope"),
       map("sd_joint_change", "Paired cross-model disagreement", limits = .cast_figure_bound(path, "sd_joint_change"),
         legend = "SD of change"), ncol = 2) + .cast_figure_annotation(
         "Where scenario interpretation needs caution",
-        "Support is the marginal training-quantile envelope on raw inputs; grey display cells contain both supported and unsupported native cells. SD is calculated after paired within-model changes, not a confidence interval. Uncoloured basemap areas are unpredicted geographic context.")
+        "The central marginal-quantile envelope screens tails on raw inputs; outside it need not mean outside observed training ranges. Grey cells mix native envelope classes. SD of paired model changes is not a confidence interval. Uncoloured basemap areas are unpredicted geographic context.")
   }, 115, !is.null(path))
   if (!paired) add("05_factorial_attribution", function() {
     plots <- list(.cast_figure_trend(cmp$binary, c("climate_main", "lulc_main", "joint_change", "interaction"),
