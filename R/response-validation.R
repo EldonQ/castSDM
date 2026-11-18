@@ -72,6 +72,9 @@
   contrasts <- dimnames(runs[[1L]]$values)[[3L]]
   rows <- list()
   for (criterion in names(scopes)) for (contrast in contrasts) {
+    driver <- if (contrast == "total") NA_character_ else sub("^(only|retained):", "", contrast)
+    selected <- if (is.na(driver)) rep(TRUE, length(runs)) else
+      vapply(runs, function(r) isTRUE(r$selected[match(driver, validation$drivers)]), logical(1))
     matrices <- lapply(runs, function(run) {
       p <- matrix(run$values[, models, contrast, drop = FALSE], ncol = length(models))
       cbind(p, ensemble = as.numeric(p %*% weights))
@@ -83,7 +86,11 @@
       means <- if (nrow(y)) colMeans(y) else rep(NA_real_, expected)
       signs <- .cast_response_sign(y)
       unanimous <- if (nrow(y)) apply(signs, 1L, function(s) length(unique(s)) == 1L) else logical()
-      driver <- sub("^(only|retained):", "", contrast)
+      selected_agree <- if (!is.na(driver) && sum(selected) >= 2L && nrow(y)) {
+        selected_signs <- signs[, selected, drop = FALSE]
+        sum(rowSums(selected_signs > 0) == sum(selected) |
+          rowSums(selected_signs < 0) == sum(selected))
+      } else NA_integer_
       rows[[length(rows)+1L]] <- data.frame(scenario = validation$scenario,
         status = if (any(keep)) "descriptive_sensitivity" else "no_common_supported_locations",
         criterion = criterion,
@@ -96,14 +103,15 @@
           sum(keep & validation$observations == 1L) else NA_integer_,
         n_common_background = if (length(validation$observations) == length(keep))
           sum(keep & validation$observations == 0L) else NA_integer_,
-        n_driver_selected = if (contrast == "total") NA_integer_ else
-          sum(vapply(runs, function(r) r$selected[match(driver, validation$drivers)], logical(1))),
+        n_driver_selected = if (!is.na(driver)) sum(selected) else NA_integer_,
+        n_direction_agree_when_selected = selected_agree,
+        direction_agree_when_selected = if (!is.na(selected_agree)) selected_agree/nrow(y) else NA_real_,
         mean_response_min = if (nrow(y)) min(means) else NA_real_,
         mean_response_max = if (nrow(y)) max(means) else NA_real_,
         mean_response_sd = if (nrow(y)) stats::sd(means) else NA_real_,
         direction_unanimous_fraction = if (nrow(y)) mean(unanimous) else NA_real_,
         all_zero_fraction = if (nrow(y)) mean(rowSums(signs != 0) == 0) else NA_real_,
-        interpretation = "Intersection across all spatial training fits at the same locations; range/quantile boxes do not establish joint support. Small or background-only intersections limit inference. Descriptive sensitivity, not independent replicates, confidence intervals or causal effects")
+        interpretation = "Common locations across all spatial fits. Selected-fit agreement counts a shared positive or negative sign in at least two fits retaining the driver. Range/quantile boxes describe marginal coverage. Small or background-only intersections limit inference.")
     }
   }
   do.call(rbind, rows)

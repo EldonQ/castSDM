@@ -214,7 +214,8 @@
   path
 }
 
-.cast_compare_block <- function(fit, a, b, groups, static, weights, base, bounds, clamp, gam_current = NULL) {
+.cast_compare_block <- function(fit, a, b, groups, static, weights, base, bounds, clamp,
+    gam_current = NULL, supported = NULL) {
   if (length(static)) for (v in static) {
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
@@ -227,7 +228,7 @@
     faces <- cbind(current = as.numeric(base %*% weights), joint = as.numeric(future %*% weights))
     effects <- matrix(as.numeric(change %*% weights), ncol = 1L, dimnames = list(NULL, "joint_change"))
     sd <- matrix(.ensemble_rowsd(change), ncol = 1L, dimnames = list(NULL, "joint_change"))
-    supported <- if (is.null(bounds)) rep(NA, nrow(a)) else
+    supported <- supported %||% if (is.null(bounds)) rep(NA, nrow(a)) else
       .cast_attribution_inside(a, bounds) & .cast_attribution_inside(b, bounds)
     members <- cbind(base, future, change)
     colnames(members) <- unlist(lapply(c("current_", "future_", "change_"), paste0, names(weights)))
@@ -263,13 +264,26 @@
     sd[, k] <- .ensemble_rowsd(matrix(vapply(per_model, function(x) x[, k], numeric(nrow(a))), nrow(a)))
   }
   sd[!ok, ] <- NA_real_
-  supported <- if (is.null(bounds)) rep(NA, nrow(a)) else
+  supported <- supported %||% if (is.null(bounds)) rep(NA, nrow(a)) else
     .cast_attribution_inside(a, bounds) & .cast_attribution_inside(b, bounds)
   list(faces = faces, effects = effects, sd = sd, support = supported,
        sign = .cast_sign_values(per_model),
        model_sums = do.call(rbind, lapply(seq_len(ncol(effects)), function(k)
          .cast_model_response_sums(do.call(cbind, lapply(per_model, function(x) x[, k])),
            supported, weights, NA_character_, .cast_factorial_names()[k]))))
+}
+
+.cast_compare_support <- function(a, b, limits, changing, static, shared_static) {
+  now <- .cast_attribution_inside(a, limits[changing])
+  later <- .cast_attribution_inside(b, limits[changing])
+  background <- .cast_attribution_inside(a, limits[static])
+  future_background <- if (shared_static) background else .cast_attribution_inside(b, limits[static])
+  current_all <- background & now
+  paired <- current_all & future_background & later
+  list(paired = paired, counts = c(sum(current_all), sum(background),
+    if (length(changing)) sum(now) else NA_real_,
+    if (length(changing)) sum(later) else NA_real_,
+    if (length(changing)) sum(now & later) else NA_real_, sum(paired)))
 }
 
 .cast_compare_one <- function(fit, plan, scenario, weights, threshold, bounds, clamp,
@@ -292,16 +306,6 @@
   scope_counts <- range_counts <- stats::setNames(numeric(6), scope_names)
   if (!length(changing)) { scope_counts[3:5] <- NA_real_; range_counts[3:5] <- NA_real_ }
   range_bounds <- if (!is.null(bounds)) .cast_support_bounds(fit$scaling$reference, c(0, 1))
-  scope_values <- function(a, b, limits) {
-    now <- .cast_attribution_inside(a, limits[changing])
-    later <- .cast_attribution_inside(b, limits[changing])
-    current_all <- .cast_attribution_inside(a, limits)
-    c(sum(current_all), sum(.cast_attribution_inside(a, limits[plan$static])),
-      if (length(changing)) sum(now) else NA_real_,
-      if (length(changing)) sum(later) else NA_real_,
-      if (length(changing)) sum(now & later) else NA_real_,
-      sum(current_all & .cast_attribution_inside(b, limits)))
-  }
   scope_n <- 0L
   model_sums <- NULL
   previous_context <- options(castSDM.read_context = scenario)
@@ -354,13 +358,23 @@
         value
       } else if (plan$raster) .cast_raster_cells(future, first, count, positions) else future[idx[positions], , drop = FALSE])
       base <- timed("read_baseline", if (plan$raster) as.matrix(.cast_raster_block(base_r, first, count))[positions, , drop = FALSE] else baseline[idx[positions], , drop = FALSE])
-      keep <- .cast_finite_rows(a) & .cast_finite_rows(b)
+      keep <- if (shared_static) .cast_finite_rows(b[, changing, drop = FALSE]) else
+        .cast_finite_rows(a) & .cast_finite_rows(b)
       if (any(keep)) {
         aa <- a[keep, , drop = FALSE]; bb <- b[keep, , drop = FALSE]
         gam <- timed("read_gam_cache", if (plan$raster)
           .cast_gam_current_read(gam_current, first, count, positions[keep]))
+        support <- if (!is.null(bounds)) timed("support_diagnostics", {
+          quantile <- .cast_compare_support(aa, bb, bounds, changing, plan$static, shared_static)
+          observed <- .cast_compare_support(aa, bb, range_bounds, changing, plan$static, shared_static)
+          scope_counts <- scope_counts + quantile$counts
+          range_counts <- range_counts + observed$counts
+          scope_n <- scope_n + nrow(aa)
+          quantile$paired
+        })
         p <- timed("predict", .cast_compare_block(fit, aa, bb,
-          plan$groups, plan$static, weights, base[keep, , drop = FALSE], bounds, clamp, gam))
+          plan$groups, if (!shared_static) plan$static, weights, base[keep, , drop = FALSE],
+          bounds, clamp, gam, support))
         model_sums <- .cast_model_response_add(model_sums, p$model_sums)
         .cast_factorial_accumulate(acc, p$faces, p$effects, p$support,
           if (!is.null(threshold)) (p$faces >= threshold)*1, model_sd = p$sd)
@@ -372,13 +386,6 @@
           model_sd = p$sd[cs, , drop = FALSE])
         .cast_threshold_accumulate(cuts, p$faces, p$support, cs)
         .cast_sign_accumulate(sign_acc, p$sign, p$support, cs)
-        if (!is.null(bounds)) {
-          counts <- timed("support_diagnostics", list(
-            quantile = scope_values(aa, bb, bounds), range = scope_values(aa, bb, range_bounds)))
-          scope_counts <- scope_counts + counts$quantile
-          range_counts <- range_counts + counts$range
-          scope_n <- scope_n + nrow(aa)
-        }
         z[positions[keep], ] <- cbind(p$faces, p$effects, p$sd, as.numeric(p$support),
           if (is.null(cs)) rep(NA_real_, sum(keep)) else as.numeric(cs),
           p$sign$agreement[, if (paired) 1L else 3L], p$sign$conflict[, if (paired) 1L else 3L], p$model_layers)
@@ -412,7 +419,8 @@
     agreement = .cast_sign_summary(sign_acc, !is.null(bounds), !is.null(common_support)),
     threshold_sensitivity = .cast_threshold_summary(cuts, !is.null(bounds), !is.null(common_support)),
     timings = data.frame(phase = names(seconds), elapsed_s = as.numeric(seconds)),
-    data = if (!plan$raster) as.data.frame(data), artifact = if (plan$raster) basename(filename))
+    data = if (!plan$raster) as.data.frame(data), artifact = if (plan$raster) basename(filename),
+    raster_verified = plan$raster)
 }
 
 .cast_compare_task <- function(job) {
@@ -718,20 +726,28 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   event("common_domain", start, reused)
   results <- list()
   jobs <- list(); aliases <- list()
+  legacy <- if (resume && plan$raster) .cast_legacy_scenarios(file.path(output_dir, "comparison.rds"),
+    fit_key, current_key, future_keys, mask_key, plan$groups, weights, threshold,
+    support_probs, clamp, domain, gam_current$key)
   for (scenario in names(plan$future)) {
     first <- names(plan$future)[match(future_keys[[scenario]], future_keys)]
     if (first != scenario) { aliases[[scenario]] <- first; next }
     start <- Sys.time()
     key <- .cast_digest(list(fit_key, current_key, future_keys[[scenario]], mask_key,
-      if (needs_common) common_key, gam_current$key, plan$groups, weights, threshold, support_probs, clamp,
-      .cast_code_identity(.cast_compare_one), .cast_code_identity(.cast_compare_block), .cast_code_identity(.cast_factorial_accumulate)))
+      if (needs_common) common_key, gam_current$key, plan$groups, weights, threshold, support_probs, clamp, domain,
+      .cast_code_identity(.cast_compare_one), .cast_code_identity(.cast_compare_block),
+      .cast_code_identity(.cast_compare_support), .cast_code_identity(.cast_factorial_accumulate)))
     receipt <- if (!is.null(raster_dir)) file.path(raster_dir, paste0(scenario, ".rds"))
-    x <- if (resume) .cast_cache_read(receipt, key) else NULL
-    reused <- !is.null(x)
     file <- if (plan$raster) file.path(raster_dir, paste0(scenario, ".tif"))
+    cached <- if (resume) .cast_scenario_resume(receipt, key, file,
+      plan$current, names(weights), legacy[[scenario]]$cache_key)
+    x <- cached$value
+    reused <- !is.null(x)
     if (!reused) {
-      if (!is.null(file) && file.exists(file) && !overwrite)
+      if (!is.null(file) && file.exists(file) && !overwrite && !isTRUE(cached$repair))
         cli::cli_abort("Stale/unverified scenario {.val {scenario}} exists. Use a new output_dir or overwrite = TRUE.")
+      if (isTRUE(cached$repair) && verbose)
+        cli::cli_inform("Rebuilding {.val {scenario}}: cached raster failed verification.")
       job_plan <- plan
       job_plan$future <- plan$future[scenario]
       jobs[[scenario]] <- list(fit = fit, plan = job_plan, scenario = scenario,

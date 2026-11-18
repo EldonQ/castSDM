@@ -74,7 +74,7 @@
 #'   scenario, avoiding repeat driver predictions. It must use the same frozen
 #'   models/weights and extrapolation policy.
 #' @param basemap `"world"`, `"china"` or `"none"`.
-#' @param include `"core"` (default) exports eight main validation, scenario and
+#' @param include `"core"` (default) exports four validation, scenario and
 #'   environmental-response figures. `"all"`, exact figure names, or numbered prefixes
 #'   such as `c("01", "02", "07")`. All available raster layers and all
 #'   requested futures are included when complete supplementary atlases are requested.

@@ -204,6 +204,7 @@
     scenario, response_grid, display_resolution, response_method,
     .cast_code_identity(cast_response_curves), .cast_code_identity(.cast_response_predictor), .cast_code_identity(.cast_mess),
     .cast_code_identity(.cast_figure_classes), .cast_code_identity(cast_diagnose),
+    .cast_code_identity(.cast_response_validation_summary),
     .cast_code_identity(.cast_diagnostic_metrics), .cast_code_identity(compute_average_precision),
     .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_figure_driver_display),
     .cast_code_identity(.cast_display_coverage)))
@@ -461,8 +462,7 @@
     cli::cli_abort("include must name figure presets or individual figures.")
   unique(unlist(lapply(include, function(x) {
     if (x == "core") return(intersect(inventory, c("01_model_validation", "02_habitat_change",
-      "03_environmental_driver", "04_support_and_disagreement", "06_response_curves",
-      "07_model_performance", "10_future_suitability", "11_variable_selection")))
+      "03_environmental_driver", "04_support_and_disagreement")))
     if (x == "all") return(inventory)
     pattern <- switch(x,
       basic = "^(01_|07_|11_|12_|13_|15_|S_selection_|S_stability_)",
@@ -479,7 +479,7 @@
   if ("all" %in% include) return(c("maps", "responses", "attribution", "mess"))
   out <- character()
   for (x in include) {
-    if (x == "core") out <- c(out, "maps", "responses", "attribution")
+    if (x == "core") out <- c(out, "maps", "attribution")
     if (x %in% c("maps", "novelty") || grepl("^(02|04|05|08|09|10)(_|$)", x) ||
         (startsWith(x, "S_") && !grepl("^S_(selection|stability)", x)) || x == "S") out <- c(out, "maps")
     if (x == "responses" || startsWith(x, "R_") || grepl("^(06|14)(_|$)", x)) out <- c(out, "responses")
@@ -494,23 +494,22 @@
   complete <- any(include %in% c("all", "responses") | startsWith(include, "R_"))
   vars <- if (complete) variables else intersect(unlist(comparison$groups, use.names = FALSE), variables)
   both <- any(include %in% c("all", "responses"))
-  types <- c(if (both || any(include %in% "core" | grepl("^06(_|$)|^R_(ale|pdp)", include))) method,
+  types <- c(if (both || any(grepl("^06(_|$)|^R_(ale|pdp)", include))) method,
     if (both || any(grepl("^14(_|$)|^R_fixed", include))) "fixed")
   list(variables = vars, types = unique(types))
 }
 
-# The core collection needs one future band per scenario, a few reporting
-# bands and only the leading driver's maps. Full atlases remain explicit.
+# Core maps use the reporting scenario. Full atlases remain explicit.
 .cast_figure_display_request <- function(include) {
   if (any(include %in% c("all", "maps", "S", "drivers")) ||
       any(grepl("^[SDE]_", include))) return(NULL)
   has <- function(id) any(grepl(paste0("^", id, "(_|$)"), include))
   report <- character()
   if ("core" %in% include || has("02")) report <- c(report, "current", "joint", "joint_change")
-  if ("core" %in% include || has("04")) report <- c(report, "support", "sd_joint_change", "sign_conflict_joint")
+  if ("core" %in% include || has("04")) report <- c(report, "support", "sd_joint_change")
   if (has("05")) report <- c(report, "climate_main", "lulc_main", "interaction")
   if (has("08")) report <- c(report, "range_class", "range_class_supported", "range_class_common_support")
-  future <- if ("core" %in% include || has("10")) "joint" else character()
+  future <- if (has("10")) "joint" else character()
   list(report_layers = unique(c(report, future)), other_layers = future,
     range = has("08"), driver_mode = "focus")
 }

@@ -248,12 +248,11 @@
   }, 100, !is.null(data$cv))
   add("02_habitat_change", function() {
     plots <- list(map("current", limits = suitability_limits()), map("joint", limits = suitability_limits()),
-      map("joint_change", kind = "signed", legend = "Future - current"),
-      .cast_figure_trend(cmp$binary, group_labels = group_labels))
-    patchwork::wrap_plots(plots, ncol = 2) + .cast_figure_annotation(
+      map("joint_change", kind = "signed", legend = "Future - current"))
+    patchwork::wrap_plots(plots, ncol = 3) + .cast_figure_annotation(
       if (!length(unlist(cmp$groups, use.names = FALSE))) "No changing predictor in the fitted model" else "Predicted environmental suitability change",
-      paste("Reporting scenario:", report, ". Shared suitability scale. Range trends use the frozen training OOF threshold; continuous maps retain sub-threshold values. Maps are display-only reprojections."))
-  }, 155, !is.null(path) && !is.null(cmp$binary))
+      paste("Reporting scenario:", report, ". Current and future share a suitability scale. Native values are retained in the scientific raster."))
+  }, 100, !is.null(path))
   add("03_environmental_driver", function() {
     common <- !is.null(att$common_summary)
     source <- if (common) data$attribution_supported_display else data$attribution_display
@@ -261,39 +260,30 @@
     only <- scope_summary[scope_summary$contrast == "only", ]
     changing <- only$driver[is.finite(only$mean_abs) & only$mean_abs > 0]
     top <- if (length(changing)) changing[which.max(only$mean_abs[match(changing, only$driver)])] else att$drivers[1L]
-    limits <- .cast_figure_bound(data$attribution_display,
-      paste0(c("effect_", "retained_"), top), signed = TRUE)
-    bars <- function(contrast) {
-      values <- scope_summary$mean_signed[scope_summary$contrast %in% c("only", "retained")]
-      values <- values[is.finite(values)]
-      hi <- if (length(values)) max(.01, ceiling(max(abs(values))*100)/100) else .01
-      plot(att, contrast = contrast, supported_only = common) + .cast_figure_theme() +
-        ggplot2::labs(title = if (contrast == "only") "Driver-only future effects" else "Retained-driver contributions",
-          caption = NULL) +
-        ggplot2::scale_x_continuous(limits = c(-hi, hi), breaks = pretty(c(-hi, hi), 3),
-          labels = scales::label_number(accuracy = .001)) +
-        ggplot2::scale_y_discrete(labels = function(x) vapply(x, function(label)
-          paste(strwrap(label, 27), collapse = "\n"), character(1)))
+    limits <- .cast_figure_bound(data$attribution_display, paste0("effect_", top), signed = TRUE)
+    response <- map(paste0("effect_", top), paste("Only", .cast_var_label(top), "changes"),
+      "signed", limits, source = source, legend = "Suitability change")
+    d <- data$diagnostics$response_spatial_sensitivity
+    evidence <- "Spatial refit evidence is unavailable for this scenario."
+    if (is.data.frame(d) && "n_direction_agree_when_selected" %in% names(d)) {
+      d <- d[which(d$scenario == data$scenario & d$contrast == "only" &
+        d$driver == top & d$model == "ensemble"), , drop = FALSE]
+      if (nrow(d)) {
+        agreement <- ifelse(is.na(d$n_direction_agree_when_selected), "unavailable",
+          paste0(d$n_direction_agree_when_selected, "/", d$n_common))
+        evidence <- paste0("Selected in ", d$n_driver_selected[1L], "/", d$n_available[1L],
+          " spatial fits. ", paste0(ifelse(d$criterion == "observed_training_range",
+            "Observed range", "Quantile envelope"), ": ", d$n_common, " common locations (",
+            d$n_common_presence, " presences), same nonzero direction in selected fits ", agreement,
+            ".", collapse = " "))
+      }
     }
-    maps <- list(map(paste0("effect_", top), paste("Driver-only:", .cast_var_label(top)),
-      "signed", limits, source = source, legend = "Suitability change"),
-      map(paste0("retained_", top), paste("Retained-driver:", .cast_var_label(top)),
-        "signed", limits, source = source, legend = "Suitability change"))
-    plots <- c(maps, list(patchwork::wrap_plots(bars("only"), bars("retained"), ncol = 2)))
-    sensitivity <- data$diagnostics$response_spatial_sensitivity
-    evidence <- if (is.data.frame(sensitivity) && "criterion" %in% names(sensitivity)) {
-      s <- sensitivity[sensitivity$criterion == "marginal_training_quantiles" &
-        sensitivity$contrast == "total" & sensitivity$model == "ensemble", , drop = FALSE]
-      if (nrow(s)) sprintf("Spatial-fit sensitivity: %s/%s external locations share this envelope across all %s fits (%s presences, %s backgrounds); descriptive evidence only.",
-        s$n_common[1L], s$n_locations[1L], s$n_available[1L],
-        s$n_common_presence[1L], s$n_common_background[1L]) else ""
-    } else "Spatial-fit sensitivity evidence is unavailable in this saved result."
-    patchwork::wrap_plots(plots, ncol = 1, heights = c(1, 1, 1.15)) + .cast_figure_annotation(
-      "Environmental explanation under frozen fitted models",
-      paste(if (common) "Maps and means use the same all-predictor paired support across drivers; full-domain maps remain in D_ atlases." else
-        "Full-domain legacy responses; common-support summaries require recomputation.",
-        "Non-additive predictive explanations; static predictors remain fixed. These contrasts do not identify ecological causal effects.", evidence))
-  }, 220, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&
+    patchwork::wrap_plots(response) + .cast_figure_annotation("Where the fitted model responds",
+      paste(if (common) sprintf("Displayed within paired quantile coverage (%s native cells).",
+        format(only$n[match(top, only$driver)], big.mark = ",")) else "Displayed across the full paired domain.",
+        sprintf("Mean suitability change: %+.4f.", only$mean_signed[match(top, only$driver)]),
+        evidence, "These contrasts describe model responses to the supplied environment."))
+  }, 125, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&
       (is.null(att$common_summary) || !is.null(data$attribution_supported_display)) &&
       (is.null(att$common_summary) || any(att$common_summary$n > 0)),
     if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
@@ -332,10 +322,13 @@
     titles <- c(range_class = "Full domain", range_class_supported = "Scenario-supported domain",
       range_class_common_support = "All-scenario common support")
     plots <- lapply(use, function(layer) map(layer, titles[[layer]], "range", legend = "Range change"))
-    patchwork::wrap_plots(plots, ncol = length(plots)) + .cast_figure_annotation(
+    maps <- patchwork::wrap_plots(plots, ncol = length(plots))
+    panel <- patchwork::wrap_plots(maps, .cast_figure_trend(cmp$binary, group_labels = group_labels),
+      ncol = 1, heights = c(1, .7))
+    panel + .cast_figure_annotation(
       "Thresholded range loss, gain and persistence",
       sprintf("Classification uses native-grid current/future scores >= %.6g before any display reprojection. Supported-domain panels exclude unsupported cells; the full domain retains them.", cmp$threshold))
-  }, 105, !is.null(path) && "range_class" %in% names(terra::rast(path)))
+  }, 145, !is.null(path) && "range_class" %in% names(terra::rast(path)))
   add("09_extrapolation_mess", function() {
     patchwork::wrap_plots(map("novel_current", "Current environmental novelty", "novelty", legend = "MESS < 0", source = data$mess_display),
       map("novel_future", "Future environmental novelty", "novelty", legend = "MESS < 0", source = data$mess_display), ncol = 2) +

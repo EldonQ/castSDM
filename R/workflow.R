@@ -1,6 +1,7 @@
 .cast_workflow_run_id <- function() {
   parts <- strsplit(as.character(utils::packageVersion("castSDM")), ".", fixed = TRUE)[[1L]]
-  if (length(parts) > 2L && utils::tail(parts, 1L) == "0") parts <- utils::head(parts, -1L)
+  # Patch releases resume the same user workspace; artifact keys check inputs.
+  parts <- utils::head(parts, 2L)
   paste0("cast", paste(parts, collapse = ""), "_chelsa_ensmean")
 }
 

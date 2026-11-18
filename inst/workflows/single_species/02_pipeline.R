@@ -63,16 +63,19 @@ run_species <- function(cfg) {
     "output_root", "cache_root", "preparation_root", "diagnostic_thresholds",
     "figure_response_method", "figure_response_grid", "figure_display_resolution"))]
   scientific_cfg$protocol$num_threads <- NULL
-  claim <- list(schema = "cast_case_claim/1", config = scientific_cfg,
-    prediction = castSDM:::.cast_code_dependencies(c("cast_compare", "cast_attribution")),
+  # Numerical stages check their own code and content. Pin the declared inputs
+  # and data adapter here so a repair to execution can resume the same case.
+  claim <- list(schema = "cast_case_claim/2", config = scientific_cfg,
     sources = unname(tools::md5sum(file.path(cfg$example_root,
-      c("02_pipeline.R", "prepare_data.R", "data_adapter.R", "scenario_case.R")))))
+      c("prepare_data.R", "data_adapter.R", "scenario_case.R")))))
   claim$key <- digest::digest(claim, algo = "sha256")
   previous <- if (file.exists(claim_file)) readRDS(claim_file) else NULL
-  if ((!is.null(previous) && !identical(previous$key, claim$key)) ||
+  compatible_previous <- identical(previous$schema, "cast_case_claim/1") &&
+    identical(previous$config, claim$config) && identical(previous$sources[-1L], claim$sources)
+  if ((!is.null(previous) && !identical(previous$key, claim$key) && !compatible_previous) ||
       (is.null(previous) && file.exists(file.path(out, "case.rds"))))
     stop("This output belongs to a different/older analysis. Set a new CAST_RUN_ID: ", out)
-  if (is.null(previous)) saveRDS(claim, claim_file)
+  if (is.null(previous) || compatible_previous) castSDM:::.cast_atomic_rds(claim, claim_file)
   # A failed rerun must never leave a previous completion marker.
   completion <- file.path(out, "completion.rds")
   if (file.exists(completion)) unlink(completion)

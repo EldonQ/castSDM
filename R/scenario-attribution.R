@@ -79,8 +79,9 @@
     identical(current[[v]], future[[v]]), logical(1))]
   for (j in seq_along(drivers)) {
     v <- drivers[j]
-    only <- current; only[[v]] <- future[[v]]
-    held <- future; held[[v]] <- current[[v]]
+    # All other predictors already pass the respective background check.
+    only_supported <- bc & .cast_attribution_inside(future, bounds[v])
+    retained_supported <- fc & .cast_attribution_inside(current, bounds[v])
     # Unchanged drivers avoid two redundant model evaluations.
     if (identical(current[[v]], future[[v]])) {
       po <- base; ph <- fut
@@ -95,21 +96,19 @@
     retained <- fut - ph
     only_sum <- only_sum + effect
     model_sums <- rbind(model_sums,
-      .cast_model_response_sums(effect, bc & .cast_attribution_inside(only, bounds), weights, v, "only"),
-      .cast_model_response_sums(retained, fc & .cast_attribution_inside(held, bounds), weights, v, "retained"))
+      .cast_model_response_sums(effect, only_supported, weights, v, "only"),
+      .cast_model_response_sums(retained, retained_supported, weights, v, "retained"))
     common_models <- rbind(common_models, common_sum(effect, v, "only"),
       common_sum(retained, v, "retained"))
     effects[, j] <- average(effect)
-    z <- cbind(average(effect), average(retained),
-               as.numeric(bc & .cast_attribution_inside(only, bounds)),
-               as.numeric(fc & .cast_attribution_inside(held, bounds)),
-               spread(effect), spread(retained))
+    oe <- effects[, j]; re <- average(retained)
+    z <- cbind(oe, re, as.numeric(only_supported), as.numeric(retained_supported),
+      spread(effect), spread(retained))
     colnames(z) <- paste0(c("effect_", "retained_", "support_effect_",
                            "support_retained_", "effect_sd_", "retained_sd_"), v)
     out <- cbind(out, z)
     if (diagnostics) {
       # Existing per-model predictions suffice: no extra fitted-model calls.
-      oe <- average(effect); re <- average(retained)
       agree <- function(p, mean) {
         value <- rowMeans(.cast_response_sign(p) == .cast_response_sign(mean))
         value[rowSums(!is.finite(p)) > 0L] <- NA_real_

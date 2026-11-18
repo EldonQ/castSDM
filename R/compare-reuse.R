@@ -1,5 +1,57 @@
 # Reuse is optional and strictly tied to the frozen model and physical inputs.
 # This is internal plumbing; public attribution calls need no cache settings.
+.cast_scenario_readback <- function(value, path, template, models) {
+  paired <- identical(value$design, "paired")
+  layers <- c(if (paired) c("current", "joint") else c("current", "joint", "climate", "lulc"),
+    if (paired) "joint_change" else .cast_factorial_names())
+  effects <- if (paired) "joint_change" else .cast_factorial_names()
+  valid <- c(layers, if (paired)
+    unlist(lapply(c("current_", "future_", "change_"), paste0, models)))
+  expected <- c(layers, paste0("sd_", effects), "support", "common_support",
+    "sign_agreement_joint", "sign_conflict_joint", setdiff(valid, layers))
+  n <- unique(value$summary$n_valid)
+  if (length(n) != 1L || !is.finite(n)) cli::cli_abort("Saved scenario lacks valid-cell counts.")
+  .cast_raster_validate(path, template, expected, valid_layers = valid, n_valid = n)
+}
+
+.cast_legacy_scenarios <- function(path, model, current, future, mask, groups, weights,
+    threshold, support_probs, clamp, domain, gam_key) {
+  if (!file.exists(path)) return(NULL)
+  old <- tryCatch(readRDS(path), error = function(e) NULL)
+  proven <- old$provenance
+  if (!inherits(old, "cast_comparison") || !identical(proven$schema, "cast_comparison/2") ||
+      !any(grepl("castSDM_0[.]44[.]0([^0-9.]|$)", proven$session)) ||
+      !identical(old$prediction_policy, "regular_gam/1") ||
+      !identical(proven$model, model) || !identical(proven$current, current) ||
+      !identical(proven$future, future) || !identical(proven$mask, mask) ||
+      !identical(old$groups, groups) || !identical(old$weights, weights) ||
+      !identical(old$threshold, threshold) || !identical(old$support_probs, support_probs) ||
+      !identical(old$clamp, clamp) || !identical(old$domain, domain) ||
+      !identical(old$gam_current$key, gam_key)) return(NULL)
+  old$results
+}
+
+.cast_scenario_resume <- function(receipt, key, file, template, models, legacy_key = NULL) {
+  value <- .cast_cache_read(receipt, key)
+  if (is.null(file)) return(list(value = value, repair = FALSE))
+  if (!file.exists(receipt)) return(list(value = NULL, repair = FALSE))
+  if (is.null(value) && !is.null(legacy_key)) value <- .cast_cache_read(receipt, legacy_key)
+  owner <- tryCatch(readRDS(receipt)$key, error = function(e) NULL)
+  if (is.null(value) || !identical(value$artifact, basename(file))) {
+    # Authorize replacement only when a receipt identifies this exact run.
+    return(list(value = NULL, repair = !is.null(owner) && owner %in% c(key, legacy_key)))
+  }
+  needs_validation <- !isTRUE(value$raster_verified)
+  if (needs_validation) {
+    error <- tryCatch({ .cast_scenario_readback(value, file, template, models); NULL },
+      error = conditionMessage)
+    if (!is.null(error)) return(list(value = NULL, repair = TRUE, reason = error))
+    value$raster_verified <- TRUE
+  }
+  if (needs_validation || !identical(owner, key)) .cast_cache_write(value, receipt, key, file)
+  list(value = value, repair = FALSE)
+}
+
 .cast_compare_reuse <- function(fit, current, future, comparison, weights, clamp) {
   if (!inherits(comparison, "cast_comparison") || !inherits(current, "SpatRaster") ||
       !inherits(future, "SpatRaster") || !identical(comparison$clamp, clamp) ||
@@ -28,7 +80,9 @@
   if (!is.null(prediction)) {
     receipt <- sub("[.]tif$", ".rds", prediction)
     expected <- comparison$results[[scenario]]$cache_key
-    if (is.null(expected) || is.null(.cast_cache_read(receipt, expected))) prediction <- NULL
+    result <- if (!is.null(expected)) .cast_cache_read(receipt, expected)
+    if (is.null(result)) prediction <- NULL else if (!isTRUE(result$raster_verified))
+      .cast_scenario_readback(result, prediction, current, names(weights))
   }
   gam <- if (!is.null(blocks) && !is.null(comparison$gam_current))
     .cast_gam_current_cache(fit, weights, comparison$changing_predictors, blocks,

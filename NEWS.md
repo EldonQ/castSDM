@@ -1,3 +1,15 @@
+# castSDM 0.44.1
+
+- Verify the written raster before publication, checking every band and valid-cell
+  counts. Recheck verified-input legacy scenarios before reuse and rebuild only
+  corrupt outputs in the same patch-release workspace.
+- Eliminate repeated static-predictor coverage checks. Keep the same cells,
+  fitted models and numerical response definitions.
+- Report direction agreement among spatial fits retaining a driver separately
+  from its selection frequency. Default figures focus on validation, paired
+  suitability, driver response and range/disagreement; supplementary work is
+  available on demand.
+
 # castSDM 0.44.0
 
 - Share one current-block cache contract between scenario projection and

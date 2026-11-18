@@ -134,10 +134,12 @@
   names(writer$raster) <- layers
   writer$open <- FALSE
   writer$overwrite <- overwrite
+  writer$next_row <- 1L
+  writer$finite <- numeric(length(layers))
   tryCatch({
-    terra::writeStart(writer$raster, writer$temp, overwrite = TRUE,
+    .cast_raster_write_checked(terra::writeStart(writer$raster, writer$temp, overwrite = TRUE,
       wopt = list(datatype = datatype, gdal = c(paste0("COMPRESS=", compression),
-        "TILED=YES", "INTERLEAVE=BAND")))
+        "TILED=YES", "INTERLEAVE=BAND"))), path)
     writer$open <- TRUE
   }, error = function(e) {
     unlink(writer$temp)
@@ -147,15 +149,53 @@
 }
 
 .cast_writer_block <- function(writer, values, row, nrows) {
-  terra::writeValues(writer$raster, values, row, nrows)
+  if (row != writer$next_row) cli::cli_abort("Raster output blocks must cover rows in order.")
+  success <- .cast_raster_write_checked(terra::writeValues(writer$raster, values, row, nrows), writer$path)
+  if (!isTRUE(success)) cli::cli_abort("Raster write failed at row {row}: {.path {writer$path}}.")
+  cells <- nrows * terra::ncol(writer$raster)
+  writer$finite <- writer$finite + colSums(matrix(is.finite(values), nrow = cells))
+  writer$next_row <- row + nrows
   invisible(NULL)
 }
 
+.cast_raster_write_checked <- function(expr, path) {
+  withCallingHandlers(force(expr), warning = function(w)
+    cli::cli_abort("Raster I/O failed for {.path {path}}: {conditionMessage(w)}"))
+}
+
+.cast_raster_validate <- function(path, template, layers, expected = NULL, valid_layers = character(), n_valid = NULL) {
+  r <- .cast_raster_write_checked(terra::rast(path), path)
+  if (!identical(names(r), layers) ||
+      !isTRUE(terra::compareGeom(template, r, lyrs = FALSE, stopOnError = FALSE)))
+    cli::cli_abort("Raster grid or bands do not match the output contract: {.path {path}}.")
+  .cast_raster_write_checked(terra::readStart(r), path)
+  on.exit(terra::readStop(r), add = TRUE)
+  rows <- max(1L, floor(64e6 / (16 * terra::ncol(r) * terra::nlyr(r))))
+  finite <- numeric(length(layers))
+  for (row in seq.int(1L, terra::nrow(r), by = rows)) {
+    count <- min(rows, terra::nrow(r)-row+1L)
+    values <- .cast_raster_write_checked(terra::readValues(r, row = row, nrows = count, mat = TRUE), path)
+    if (nrow(values) != count * terra::ncol(r) || ncol(values) != length(layers))
+      cli::cli_abort("Raster read-back returned an incomplete block at row {row}: {.path {path}}.")
+    finite <- finite + colSums(is.finite(values))
+  }
+  if ((!is.null(expected) && any(finite != expected)) ||
+      (length(valid_layers) && (!all(valid_layers %in% layers) ||
+        any(finite[match(valid_layers, layers)] != n_valid))))
+    cli::cli_abort("Raster read-back found different valid-cell counts: {.path {path}}.")
+  invisible(TRUE)
+}
+
 .cast_writer_finish <- function(writer) {
-  terra::writeStop(writer$raster)
+  if (writer$next_row != terra::nrow(writer$raster)+1L)
+    cli::cli_abort("Raster output is missing rows: {.path {writer$path}}.")
+  template <- terra::rast(writer$raster, nlyrs = 1L)
+  layers <- names(writer$raster)
+  .cast_raster_write_checked(terra::writeStop(writer$raster), writer$path)
   writer$open <- FALSE
   # Release the temporary dataset before renaming it on Windows.
   writer$raster <- NULL
+  .cast_raster_validate(writer$temp, template, layers, expected = writer$finite)
   .cast_publish_raster(writer$temp, writer$path, writer$overwrite)
   invisible(writer$path)
 }

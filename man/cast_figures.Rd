@@ -46,7 +46,7 @@ models/weights and extrapolation policy.}
 
 \item{basemap}{\code{"world"}, \code{"china"} or \code{"none"}.}
 
-\item{include}{\code{"core"} (default) exports eight main validation, scenario and
+\item{include}{\code{"core"} (default) exports four validation, scenario and
 environmental-response figures. \code{"all"}, exact figure names, or numbered prefixes
 such as \code{c("01", "02", "07")}. All available raster layers and all
 requested futures are included when complete supplementary atlases are requested.

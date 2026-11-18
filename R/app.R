@@ -580,14 +580,20 @@
       shiny::req(d)
       if (!"model" %in% names(d)) return(d)
       focus <- input$focus_driver %||% active()$settings$focus
+      scenario <- input$scenario %||% project()$case$report_scenario
+      shiny::validate(shiny::need(scenario %in% d$scenario,
+        "Spatial refit evidence is available for the reporting scenario only."))
       d <- d[d$model == "ensemble" & (d$contrast == "total" | d$driver %in% focus), , drop = FALSE]
       d$criterion <- ifelse(d$criterion == "observed_training_range",
         "\u5b9e\u9645\u89c2\u6d4b\u8303\u56f4", "\u4e2d\u592e\u5206\u4f4d\u6570\u5305\u7edc")
       d <- d[, c("driver", "contrast", "criterion", "n_locations", "n_common",
         "n_common_presence", "n_common_background", "n_driver_selected",
-        "mean_response_min", "mean_response_max", "direction_unanimous_fraction", "all_zero_fraction")]
+        "n_direction_agree_when_selected", "direction_agree_when_selected",
+        "direction_unanimous_fraction")]
       names(d) <- c("\u56e0\u5b50", "\u5bf9\u6bd4", "\u8303\u56f4\u53e3\u5f84", "\u7559\u51fa\u4f4d\u7f6e\u6570", "\u5171\u540c\u4f4d\u7f6e",
-        "\u5b58\u5728\u70b9", "\u80cc\u666f\u70b9", "\u5165\u9009\u6298\u6570", "\u5e73\u5747\u54cd\u5e94\u6700\u5c0f\u503c", "\u5e73\u5747\u54cd\u5e94\u6700\u5927\u503c", "\u65b9\u5411\u4e00\u81f4\u6bd4\u4f8b", "\u5168\u96f6\u6bd4\u4f8b")
+        "\u5b58\u5728\u70b9", "\u80cc\u666f\u70b9", "\u5165\u9009\u6298\u6570",
+        "\u5165\u9009\u540e\u540c\u5411\u4f4d\u7f6e", "\u5165\u9009\u540e\u540c\u5411\u6bd4\u4f8b",
+        "\u6240\u6709\u6298\u540c\u65b9\u5411\u6bd4\u4f8b")
       d
     }, digits = 5)
     output$native_response <- shiny::renderTable({

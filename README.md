@@ -38,7 +38,7 @@ cast_app()
 
 The **Start** tab configures real data paths, occurrence records, analysis domain,
 models and resources. **Check data** checks physical inputs without fitting;
-**Run analysis** submits preparation, spatial validation, projections and eight
+**Run analysis** submits preparation, spatial validation, projections and four
 main result figures to an isolated process. A new workspace
 uses the workflow shipped inside the installed package, with no source checkout.
 Paths/settings remain explicit and replayable. The current national-library
@@ -162,10 +162,11 @@ Training and comparison use public package functions.
 
 ## Main results and optional complete figures
 
-The default `include = "core"` exports eight main figures. ALE covers only the
-fitted predictors that change in the supplied scenarios, using every saved
-reference row. No hidden 2,000-row cap is used. Fixed profiles and complete
-atlases require an explicit request; figure requests never select fit variables.
+The default `include = "core"` exports four figures: spatial validation,
+continuous suitability change, a focal driver with spatial refit evidence,
+and coverage/model disagreement. Request `include = "06"` for scenario
+response curves or `include = "all"` for the full collection. ALE uses all
+saved reference rows.
 
 The complete numbered collection uses the established cartography, palettes,
 province borders and South China Sea inset. It includes validation, habitat
