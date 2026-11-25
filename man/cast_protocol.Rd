@@ -34,7 +34,8 @@ cast_protocol(
   seed = NULL,
   holdout_blocks = 20L,
   coords_crs = NULL,
-  gam_backend = c("bam", "gam")
+  gam_backend = c("bam", "gam"),
+  holdout_block_size = NULL
 )
 }
 \arguments{
@@ -76,6 +77,9 @@ autocorrelation-range sizing), \code{"grid"} or \code{"env"} (see \code{\link[=c
 Missing CRS or failed designs stop instead of silently changing strategy.}
 
 \item{block_size}{Optional block edge length in metres for \code{"blockcv"}.}
+
+\item{holdout_block_size}{Optional separate outer hold-out block edge length
+in metres. Defaults to \code{block_size}; inner CV always uses \code{block_size}.}
 
 \item{buffer, buffer_unit}{Fold-boundary exclusion band for training rows
 (see \code{\link[=cast_cv]{cast_cv()}}). Default \code{0}.}

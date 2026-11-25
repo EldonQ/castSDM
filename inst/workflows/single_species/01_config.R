@@ -91,7 +91,9 @@ castsdm_species_configs <- function(root) {
     base$resources <- settings$resources %||% base$resources
     base$protocol$models <- settings$models %||% base$protocol$models
     base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
+    base$protocol$block_method <- settings$block_method %||% base$protocol$block_method
     if (!is.null(settings$block_size)) base$protocol$block_size <- settings$block_size
+    if (!is.null(settings$holdout_block_size)) base$protocol$holdout_block_size <- settings$holdout_block_size
     base$protocol$num_threads <- base$resources$cores
     presets[[taxon]] <- base
   }

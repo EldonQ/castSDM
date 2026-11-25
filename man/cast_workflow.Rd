@@ -28,7 +28,9 @@ settings and are never inferred from the taxon name.}
 \code{custom_mask}), \code{domain_mask} (path to an aligned study-domain raster;
 positive cells are active),
 \code{input_type} (\code{gbif} or \code{nsdm_occ}), \code{lulc_product} (\code{glu} or \code{hlu}),
-\code{models}, \code{cv_k}, \code{block_size} (metres; NULL estimates the range), \code{background_points}, \code{thin_km} (distance thinning in km),
+\code{models}, \code{cv_k}, \code{block_method} (\code{blockcv} or \code{grid}), \code{block_size}
+(metres for \code{blockcv}; NULL estimates the range), \code{holdout_block_size}
+(optional distinct outer scale), \code{background_points}, \code{thin_km} (distance thinning in km),
 \code{predictor_min_coverage} (actual-domain coverage), \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).}
 
 \item{run}{Execute preparation, fitting, projections and figures after checks.

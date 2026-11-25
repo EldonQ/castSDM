@@ -46,6 +46,8 @@
 #'   autocorrelation-range sizing), `"grid"` or `"env"` (see [cast_cv()]).
 #'   Missing CRS or failed designs stop instead of silently changing strategy.
 #' @param block_size Optional block edge length in metres for `"blockcv"`.
+#' @param holdout_block_size Optional separate outer hold-out block edge length
+#'   in metres. Defaults to `block_size`; inner CV always uses `block_size`.
 #' @param buffer,buffer_unit Fold-boundary exclusion band for training rows
 #'   (see [cast_cv()]). Default `0`.
 #' @param aoa Calibrate and report the area of applicability. Default `TRUE`.
@@ -97,7 +99,8 @@ cast_protocol <- function(
   seed = NULL,
   holdout_blocks = 20L,
   coords_crs = NULL,
-  gam_backend = c("bam", "gam")
+  gam_backend = c("bam", "gam"),
+  holdout_block_size = NULL
 ) {
   # Multi-value defaults document the allowed choices; the first element is
   # the effective default (match.arg semantics).
@@ -108,6 +111,7 @@ cast_protocol <- function(
     select_method = first(select_method),
     select_vif_threshold = select_vif_threshold,
     holdout_blocks = holdout_blocks,
+    holdout_block_size = holdout_block_size,
     coords_crs = coords_crs,
     gam_backend = first(gam_backend),
     rf_ntree = rf_ntree,
@@ -235,6 +239,9 @@ cast_protocol <- function(
     p$block_size <- .cast_check_scalar(p$block_size, "protocol$block_size",
       lower = 0, min_inclusive = FALSE)
   }
+  if (!is.null(p$holdout_block_size))
+    p$holdout_block_size <- .cast_check_scalar(p$holdout_block_size,
+      "protocol$holdout_block_size", lower = 0, min_inclusive = FALSE)
   p$buffer <- .cast_check_scalar(p$buffer, "protocol$buffer", lower = 0)
   p$buffer_unit <- enum_value(p$buffer_unit, "buffer_unit", c("deg", "km"))
   if (!is.logical(p$aoa) || length(p$aoa) != 1L || is.na(p$aoa)) {

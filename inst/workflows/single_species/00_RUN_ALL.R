@@ -16,7 +16,7 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
     "digest", "filelock", "ranger", "maxnet", "mgcv", "iml", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.44.1")
+    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.45.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -29,7 +29,8 @@ local({
   message("Input: ", cfg$input_type, "; domain: ", cfg$domain_mode, "; current product: ", cfg$current_lulc_product)
   message("Declared settings: thinning=", cfg$occurrence_thin_km, " km; backgrounds=", cfg$bg_n,
     "; coverage>=", cfg$predictor_min_coverage, "; VIF<=", cfg$protocol$select_vif_threshold,
-    "; spatial CV=", cfg$protocol$cv_k, "; models=", paste(cfg$protocol$models, collapse=","))
+    "; spatial CV=", cfg$protocol$cv_k, " (", cfg$protocol$block_method,
+    "); models=", paste(cfg$protocol$models, collapse=","))
   message("Species training cache: ", cfg$cache_root)
   case_inventory_ensure(root, cfg$nsdm_data_root)
   cfg$runtime <- runtime

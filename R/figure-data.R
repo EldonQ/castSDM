@@ -142,7 +142,8 @@
 .cast_figure_driver_display <- function(attribution, output, resolution, drivers = attribution$drivers, include_diagnostics = TRUE) {
   r <- terra::rast(attribution$raster_file)
   contrasts <- c("total_change", paste0("effect_", drivers), paste0("retained_", drivers), "remainder")
-  layers <- c(paste0("effect_", drivers), paste0("retained_", drivers))
+  layers <- c(paste0("effect_", drivers), if (include_diagnostics) paste0("retained_", drivers))
+  n_contrasts <- length(layers)
   references <- stats::setNames("all_driver_paired_support", layers[1L])
   diagnostics <- list()
   for (v in if (include_diagnostics) drivers else character()) {
@@ -170,7 +171,7 @@
     x <- as.data.frame(terra::readValues(r, row = first, nrows = nr, mat = TRUE), check.names = FALSE)
     common <- x$support_total == 1 & .cast_finite_rows(x[, contrasts, drop = FALSE])
     z <- as.matrix(x[, layers, drop = FALSE])
-    z[which(is.na(common) | !common), seq_len(2L*length(drivers))] <- NA_real_
+    z[which(is.na(common) | !common), seq_len(n_contrasts)] <- NA_real_
     for (v in names(diagnostics)) {
       ok <- x[[paste0("support_effect_", v)]] == 1 & x[[paste0("support_retained_", v)]] == 1
       z[which(is.na(ok) | !ok), diagnostics[[v]]] <- NA_real_
@@ -382,16 +383,19 @@
   }
   attribution_display <- if (valid_old) old$attribution_display else NULL
   attribution_supported_display <- if (valid_old) old$attribution_supported_display else NULL
+  focus_driver <- NULL
   if ("attribution" %in% products && !is.null(attribution$raster_file)) {
     outputs <- c(outputs, attribution$raster_file)
     drivers <- attribution$drivers
-    if (identical(display_request$driver_mode, "focus") && length(drivers)) {
-      z <- attribution$common_summary
+    focus_only <- identical(display_request$driver_mode, "focus")
+    if (length(drivers)) {
+      z <- attribution$common_summary %||% attribution$summary
       z <- z[z$contrast == "only", , drop = FALSE]
-      drivers <- if (any(is.finite(z$mean_abs) & z$mean_abs > 0))
+      focus_driver <- if (any(is.finite(z$mean_abs) & z$mean_abs > 0))
         z$driver[which.max(replace(z$mean_abs, !is.finite(z$mean_abs), -Inf))] else drivers[1L]
+      if (focus_only) drivers <- focus_driver
     }
-    layers <- c(paste0("effect_", drivers), paste0("retained_", drivers))
+    layers <- c(paste0("effect_", drivers), if (!focus_only) paste0("retained_", drivers))
     path <- file.path(directory, "display_drivers.tif")
     key <- .cast_digest(list(unname(tools::md5sum(attribution$raster_file)),
       layers, display_resolution, .cast_code_identity(.cast_figure_display), .cast_code_identity(.cast_display_coverage)))
@@ -404,7 +408,7 @@
       key <- .cast_digest(list(key, .cast_code_identity(.cast_figure_driver_display)))
       attribution_supported_display <- cached("display_drivers_supported", key,
         .cast_figure_driver_display(attribution, path, display_resolution, drivers = drivers,
-          include_diagnostics = !identical(display_request$driver_mode, "focus")), c(path, paste0(path, ".csv")))
+          include_diagnostics = !focus_only), c(path, paste0(path, ".csv")))
       outputs <- c(outputs, attribution_supported_display)
       if (verbose) {
         coverage <- utils::read.csv(paste0(path, ".csv"))[1L, ]
@@ -441,7 +445,8 @@
   data <- list(schema = "cast_figure_data/7", display_coverage = display_coverage, analysis_key = base_key, display_request = display_request, products = completed, screen = object$screen, cv = object$cv,
     evaluation = ev, diagnostics = diagnostic, folds = info, responses = responses,
     curves = curves, reliability = if (length(reliability)) do.call(rbind, reliability),
-    comparison = comparison, attribution = attribution, attribution_display = attribution_display,
+    comparison = comparison, attribution = attribution, focus_driver = focus_driver %||% old$focus_driver,
+    attribution_display = attribution_display,
     attribution_supported_display = attribution_supported_display,
     displays = displays, mess_native = mess, mess_display = mess_display, range_files = classes, thresholds = thresholds,
     scenario = scenario, variables = fit$env_vars, model_names = names(fit$models),

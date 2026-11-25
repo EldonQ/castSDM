@@ -63,23 +63,27 @@ run_species <- function(cfg) {
     "output_root", "cache_root", "preparation_root", "diagnostic_thresholds",
     "figure_response_method", "figure_response_grid", "figure_display_resolution"))]
   scientific_cfg$protocol$num_threads <- NULL
-  # Numerical stages check their own code and content. Pin the declared inputs
-  # and data adapter here so a repair to execution can resume the same case.
-  claim <- list(schema = "cast_case_claim/2", config = scientific_cfg,
+  case_start <- Sys.time()
+  input_clock <- proc.time()[["elapsed"]]
+  current_pool <- wf_load_current_stack(cfg, verbose = TRUE)
+  prep_inputs <- case_preparation_inputs(cfg, current_pool)
+  future <- case_inventory_read_future(cfg)
+  future_files <- future$path[future$product == "chelsa21-ensmean" &
+    future$ssp %in% cfg$scenario_ssps & future$period %in% cfg$scenario_periods]
+  claim <- list(schema = "cast_case_claim/3", config = scientific_cfg,
+    preparation = prep_inputs, future = case_file_manifest(future_files),
+    future_inventory = tools::md5sum(cfg$future_layers_csv),
     sources = unname(tools::md5sum(file.path(cfg$example_root,
       c("prepare_data.R", "data_adapter.R", "scenario_case.R")))))
   claim$key <- digest::digest(claim, algo = "sha256")
   previous <- if (file.exists(claim_file)) readRDS(claim_file) else NULL
-  compatible_previous <- identical(previous$schema, "cast_case_claim/1") &&
-    identical(previous$config, claim$config) && identical(previous$sources[-1L], claim$sources)
-  if ((!is.null(previous) && !identical(previous$key, claim$key) && !compatible_previous) ||
+  if ((!is.null(previous) && !identical(previous$key, claim$key)) ||
       (is.null(previous) && file.exists(file.path(out, "case.rds"))))
-    stop("This output belongs to a different/older analysis. Set a new CAST_RUN_ID: ", out)
-  if (is.null(previous) || compatible_previous) castSDM:::.cast_atomic_rds(claim, claim_file)
+    stop("The declared analysis or input files changed. Choose a new CAST_RUN_ID. Prior results are preserved at ", out)
+  if (is.null(previous)) castSDM:::.cast_atomic_rds(claim, claim_file)
   # A failed rerun must never leave a previous completion marker.
   completion <- file.path(out, "completion.rds")
   if (file.exists(completion)) unlink(completion)
-  case_start <- Sys.time(); case_clock <- proc.time()[["elapsed"]]
   timings <- list()
   record_time <- function(stage, start, seconds, status) {
     timings[[length(timings)+1L]] <<- data.frame(stage = stage,
@@ -96,12 +100,15 @@ run_species <- function(cfg) {
     }, add = TRUE)
     value <- force(expr); status <- "completed"; value
   }
+  input_elapsed <- proc.time()[["elapsed"]] - input_clock
+  record_time("input_identity", case_start, input_elapsed, "completed")
+  message("Exact input identity verified in ", round(input_elapsed, 1), " s.")
   on.exit(try(record_time("workflow_wall", case_start,
-    proc.time()[["elapsed"]]-case_clock, if (file.exists(completion)) "completed" else "incomplete"),
+    proc.time()[["elapsed"]]-input_clock, if (file.exists(completion)) "completed" else "incomplete"),
     silent = TRUE), add = TRUE, after = FALSE)
   message("Record-year interpretation: ", cfg$occurrence_year_semantics,
     "; spatial validation remains conditional on the declared preprocessing domain.")
-  preparation <- timed("preparation", prepare_species(cfg))
+  preparation <- timed("preparation", prepare_species(cfg, current_pool, prep_inputs))
   qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
   used <- qc$used_in_model %in% TRUE
   taxon_names <- if ("species" %in% names(qc)) qc$species else rep(cfg$species_name, nrow(qc))
@@ -131,7 +138,7 @@ run_species <- function(cfg) {
   p <- cfg$protocol
   split <- timed("spatial_split", castSDM::cast_prepare(data, train_fraction = p$train_fraction,
     n_blocks = p$holdout_blocks, block_method = p$block_method, seed = p$seed,
-    coords_crs = p$coords_crs, block_size = p$block_size))
+    coords_crs = p$coords_crs, block_size = p$holdout_block_size %||% p$block_size))
   if (is.data.frame(split$fold_design$class_balance))
     utils::write.csv(split$fold_design$class_balance, file.path(out,"split_class_balance.csv"), row.names=FALSE)
   meta <- case_pool_metadata(cfg, split$env_vars)
@@ -147,13 +154,11 @@ run_species <- function(cfg) {
     source = if (is.null(year)) "unavailable" else temporal_reference$source,
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
-  response_data <- timed("response_validation_inputs",
-    case_response_validation(cfg, matched$split, meta))
   result <- timed("training_validation", castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
     select_var_id = stats::setNames(meta$construct_id, meta$layer),
     select_category = stats::setNames(meta$group, meta$layer),
     select_roles = stats::setNames(meta$role, meta$layer),
-    response_data = response_data,
+    response_data = case_response_validation(cfg, matched$split, meta),
     cache_dir = cfg$cache_root, output_dir = file.path(out, "training"),
     report_meta = list(taxon = cfg$species_name,
       purpose = "CHELSA ensemble-mean climate projections; nonclimate predictors held current")))
@@ -223,7 +228,7 @@ run_species <- function(cfg) {
   report_scope <- footprint[footprint$scenario == scenarios$report, ]
   message("Reporting map scope: ", report_scope$n_valid, " paired valid cells; ",
     report_scope$n_supported, " inside the declared central marginal-quantile envelope. Outside this envelope does not necessarily mean outside the observed training range. Blank areas are outside the declared analysis domain or lack paired predictions. Grid area must be interpreted according to this domain.")
-  case <- list(schema = "cast_single_species/1", species = cfg$species_name,
+  case <- list(schema = "cast_single_species/1", analysis_key = claim$key, species = cfg$species_name,
     cfg = cfg, report_scenario = scenarios$report, preparation = preparation,
     training = "training/result.rds", comparison = "comparison/comparison.rds",
     script_hashes = cfg$runtime$script_hashes %||%
@@ -231,18 +236,19 @@ run_species <- function(cfg) {
     session = utils::capture.output(utils::sessionInfo()))
   file.copy(file.path(cfg$example_root, "config", "predictor_metadata.csv"),
     file.path(out, "predictor_metadata.csv"), overwrite = TRUE)
-  saveRDS(case, file.path(out, "case.rds"))
-  # Main figures use scenario responses and frozen fits. Complete atlases and
-  # extra diagnostics remain available through 04_REPLOT.R.
-  timed("environmental_response_products", case_figures(comparison, out, scenarios$report,
-    result = result, cfg = cfg, current = current,
-    future = scenarios$future[[scenarios$report]], prepare_only = TRUE))
+  case_file <- file.path(out, "case.rds")
+  castSDM:::.cast_atomic_rds(case, case_file)
+  # Shiny computes the selected factor on demand; publication figure 03 can
+  # be exported separately from the same frozen models and scenario rasters.
+  figures <- c("01_model_validation", "02_habitat_change", "04_support_and_disagreement")
   timed("figure_exports", case_figures(comparison, out, scenarios$report,
-    result = result, cfg = cfg, render_only = TRUE))
+    result = result, cfg = cfg, include = figures))
   sensitivity <- summary(comparison, thresholds = cfg$diagnostic_thresholds)
   utils::write.csv(sensitivity, file.path(out, "threshold_sensitivity.csv"), row.names = FALSE)
-  saveRDS(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-    package_version = as.character(utils::packageVersion("castSDM")), case = "case.rds"), completion)
+  castSDM:::.cast_atomic_rds(list(finished_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    package_version = as.character(utils::packageVersion("castSDM")), case = "case.rds",
+    analysis_key = claim$key, case_md5 = unname(tools::md5sum(case_file))), completion)
+  message("Single-predictor change maps are available in Shiny or through 04_REPLOT.R.")
   message("Outputs: ", out)
   invisible(out)
 }

@@ -304,9 +304,7 @@ analysis_domain_label <- function(mode) {
     stop("Unknown domain_mode: ", mode))
 }
 
-# Prepare the case data once, independently of fitted models and future inputs.
-prepare_species <- function(cfg) {
-  ensure_workflow_tempdir()
+case_preparation_inputs <- function(cfg, current) {
   # A target-group background is a different sampling design, not a fallback
   # option. Silently reverting to random background would mislabel every
   # downstream product, so an enabled-but-unusable source is a hard error.
@@ -317,20 +315,18 @@ prepare_species <- function(cfg) {
          if (length(tg_file)) tg_file else "<not set>")
   }
   tg_md5 <- if (length(tg_file) == 1L && file.exists(tg_file)) unname(tools::md5sum(tg_file)) else NA_character_
+  prep_fingerprint_inputs(cfg, case_file_manifest(current), tg_file, tg_md5)
+}
+
+# Prepare the case data once, independently of fitted models and future inputs.
+prepare_species <- function(cfg, current, prep_inputs) {
+  ensure_workflow_tempdir()
+  tg_file <- prep_inputs$target_group$file
   preparation_parent <- file.path(cfg$preparation_root, cfg$species_name)
   dir.create(preparation_parent, recursive = TRUE, showWarnings = FALSE)
   lock <- filelock::lock(file.path(preparation_parent, ".preparation.lock"), timeout = 0)
   if (is.null(lock)) stop("Another process is preparing this case: ", preparation_parent)
   on.exit(filelock::unlock(lock), add = TRUE)
-  # Prepare the eligible current pool once. The screen, the fitted model and
-  # the scenario table all operate on subsets of this same prepared table, so a
-  # change of model variables never rebuilds the occurrence/background data.
-  current <- wf_load_current_stack(cfg, verbose = TRUE)
-  # Every field that can change the prepared occurrence/background table must
-  # be inside this fingerprint. The claim guard protects a normal resume, but
-  # the fingerprint is the second line of defence and must be complete.
-  prep_inputs <- prep_fingerprint_inputs(cfg, case_file_manifest(current),
-                                         tg_file, tg_md5)
   prep_fp <- digest::digest(prep_inputs, algo = "sha256")
   # A new cohort/domain never replaces the preparation referenced by an old run.
   out_dir <- file.path(preparation_parent, prep_fp)
@@ -606,14 +602,22 @@ case_domain_qualification <- function(current, domain, minimum, manifest = NULL,
   mask <- terra::values(domain, mat = FALSE)
   cells <- which(is.finite(mask) & mask != 0)
   if (!length(cells)) stop("The analysis mask has no active cells.")
-  path <- NULL; counts <- NULL
+  path <- NULL; keys <- NULL; previous <- numeric()
+  counts <- rep(NA_real_, terra::nlyr(current))
   if (!is.null(cache_dir)) {
     if (is.null(manifest)) manifest <- case_file_manifest(current)
-    key <- digest::digest(list(names(current), manifest, cells,
-      terra::crs(domain), as.vector(terra::ext(domain)), terra::res(domain),
+    key <- digest::digest(list(cells, terra::crs(domain), as.vector(terra::ext(domain)),
+      dim(domain), terra::res(domain), as.character(utils::packageVersion("terra")),
       castSDM:::.cast_code_identity(case_domain_qualification)), algo = "sha256")
     path <- file.path(cache_dir, paste0(key, ".rds"))
-    counts <- castSDM:::.cast_cache_read(path, key)
+    lock <- castSDM:::.cast_lock(paste0(path, ".lock"))
+    on.exit(filelock::unlock(lock), add = TRUE)
+    previous <- castSDM:::.cast_cache_read(path, key) %||% numeric()
+    sources <- terra::sources(current, bands = TRUE)
+    ix <- match(normalizePath(sources$source, winslash = "/"), manifest$path)
+    if (nrow(sources) != length(counts) || anyNA(ix)) stop("Coverage cache needs all source layer identities.")
+    keys <- paste(manifest$sha256[ix], sources$bands, sep = ":")
+    counts <- unname(previous[keys])
   }
   nc <- terra::ncol(current)
   # Open each source once. Repeated 100,000-cell extraction reopened a national
@@ -630,21 +634,22 @@ case_domain_qualification <- function(current, domain, minimum, manifest = NULL,
       index=((at-1L) %/% nc)*width + col-left+1L)
   })
   windows <- Filter(Negate(is.null), windows)
-  if (is.null(counts)) {
-    counts <- vapply(seq_len(terra::nlyr(current)), function(i) {
+  missing <- which(is.na(counts))
+  message("Exact analysis-mask coverage: ", length(counts)-length(missing),
+    " cached; ", length(missing), " layers to scan.")
+  for (i in missing) {
     layer <- current[[i]]
     terra::readStart(layer)
-    n <- tryCatch(sum(vapply(windows, function(w) {
+    counts[i] <- tryCatch(sum(vapply(windows, function(w) {
       z <- terra::readValues(layer, row=w$first, nrows=w$count,
         col=w$left, ncols=w$width, mat=FALSE)
       sum(is.finite(z[w$index]))
     }, numeric(1))), finally=terra::readStop(layer))
-    if (i %% 25L == 0L || i == terra::nlyr(current))
-      message("Analysis-mask coverage: ", i, "/", terra::nlyr(current), " layers checked.")
-    n
-    }, numeric(1))
-    if (!is.null(path)) castSDM:::.cast_cache_write(counts, path, key)
-  } else message("Verified exact analysis-mask coverage cache: ", length(counts), " layers.")
+  }
+  if (!is.null(path) && length(missing)) {
+    previous[keys[missing]] <- counts[missing]
+    castSDM:::.cast_cache_write(previous, path, key)
+  }
   coverage <- counts/length(cells)
   data.frame(layer = names(current), n_domain = length(cells), n_finite = counts,
     coverage = coverage, minimum = minimum, eligible = coverage >= minimum,

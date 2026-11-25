@@ -1,7 +1,6 @@
 # Reuse is optional and strictly tied to the frozen model and physical inputs.
 # This is internal plumbing; public attribution calls need no cache settings.
-.cast_scenario_readback <- function(value, path, template, models) {
-  paired <- identical(value$design, "paired")
+.cast_scenario_bands <- function(paired, models) {
   layers <- c(if (paired) c("current", "joint") else c("current", "joint", "climate", "lulc"),
     if (paired) "joint_change" else .cast_factorial_names())
   effects <- if (paired) "joint_change" else .cast_factorial_names()
@@ -9,9 +8,28 @@
     unlist(lapply(c("current_", "future_", "change_"), paste0, models)))
   expected <- c(layers, paste0("sd_", effects), "support", "common_support",
     "sign_agreement_joint", "sign_conflict_joint", setdiff(valid, layers))
+  list(layers = expected, finite = valid)
+}
+
+.cast_scenario_readback <- function(value, path, template, models) {
+  bands <- .cast_scenario_bands(identical(value$design, "paired"), models)
   n <- unique(value$summary$n_valid)
   if (length(n) != 1L || !is.finite(n)) cli::cli_abort("Saved scenario lacks valid-cell counts.")
-  .cast_raster_validate(path, template, expected, valid_layers = valid, n_valid = n)
+  .cast_raster_validate(path, template, bands$layers, valid_layers = bands$finite, n_valid = n)
+}
+
+.cast_compare_input_receipt <- function(receipt, key, template, bands) {
+  value <- .cast_cache_read(receipt, key)
+  if (is.null(value) || isTRUE(attr(value, "raster_verified"))) return(value)
+  paths <- file.path(dirname(receipt), unlist(value, use.names = FALSE))
+  ok <- tryCatch({
+    for (i in seq_along(paths)) .cast_raster_validate(paths[i], template, bands[[i]])
+    TRUE
+  }, error = function(e) FALSE)
+  if (!ok) return(NULL)
+  attr(value, "raster_verified") <- TRUE
+  .cast_cache_write(value, receipt, key, paths)
+  value
 }
 
 .cast_legacy_scenarios <- function(path, model, current, future, mask, groups, weights,

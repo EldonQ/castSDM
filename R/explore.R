@@ -1,17 +1,32 @@
 # AI-assisted development (2026-11-11); see inst/AI_ASSISTANCE.md.
 # File paths and ordinary parameters cross process boundaries; rasters do not.
 
-.cast_explore_project <- function(directory) {
+.cast_completed_case <- function(directory) {
   if (!is.character(directory) || length(directory) != 1L || is.na(directory))
     cli::cli_abort("Supply a completed single-species case directory.")
   directory <- normalizePath(directory, winslash = "/", mustWork = TRUE)
   path <- file.path(directory, "case.rds")
   if (!file.exists(path)) cli::cli_abort("No case.rds in {.path {directory}}. Run the configured workflow first.")
-  if (!file.exists(file.path(directory, "completion.rds")))
+  marker <- file.path(directory, "completion.rds")
+  if (!file.exists(marker))
     cli::cli_abort("This case is incomplete or is being updated. Finish the research workflow first.")
   case <- readRDS(path)
   if (!identical(case$schema, "cast_single_species/1"))
     cli::cli_abort("Unsupported case schema.")
+  completed <- readRDS(marker)
+  if (!is.null(case$analysis_key) || !is.null(completed$analysis_key)) {
+    claim <- readRDS(file.path(directory, "run_claim.rds"))
+    if (is.null(case$analysis_key) || !identical(completed$analysis_key, case$analysis_key) ||
+        !identical(claim$key, case$analysis_key) ||
+        !identical(completed$case_md5, unname(tools::md5sum(path))))
+      cli::cli_abort("The saved case and completion record belong to different analysis inputs.")
+  }
+  case
+}
+
+.cast_explore_project <- function(directory) {
+  directory <- normalizePath(directory, winslash = "/", mustWork = TRUE)
+  case <- .cast_completed_case(directory)
   run <- readRDS(file.path(directory, case$training))
   comparison <- readRDS(file.path(directory, case$comparison))
   fit <- run$fit_full %||% run$fit
@@ -63,6 +78,11 @@
   a <- terra::rast(paths); b <- terra::rast(future)
   names(a) <- names(b) <- vars
   terra::compareGeom(a, b, lyrs = FALSE, stopOnError = TRUE)
+  proven <- project$comparison$provenance
+  memo <- new.env(parent = emptyenv())
+  if (!identical(.cast_data_identity(a, memo), proven$current) ||
+      !identical(.cast_data_identity(b, memo), proven$future[[scenario]]))
+    cli::cli_abort("Environmental inputs have changed since the saved comparison. Use a completed case with matching files to compute a response.")
   list(current = a, future = b)
 }
 

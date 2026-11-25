@@ -186,9 +186,9 @@ cast_predict <- function(fit, new_data, models = NULL,
 #' Clamp predictors to the training range
 #' @keywords internal
 #' @noRd
-.cast_clamp <- function(X, reference) {
-  for (col in intersect(names(X), names(reference))) {
-    rng <- range(reference[[col]], na.rm = TRUE)
+.cast_clamp <- function(X, reference, ranges = lapply(reference[intersect(names(X), names(reference))], range, na.rm = TRUE)) {
+  for (col in intersect(names(X), names(ranges))) {
+    rng <- ranges[[col]]
     if (all(is.finite(rng))) {
       X[[col]] <- pmin(pmax(X[[col]], rng[1]), rng[2])
     }

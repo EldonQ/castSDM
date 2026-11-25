@@ -776,11 +776,8 @@ make_spatial_folds <- function(lon, lat, k,
   n <- length(lon)
   k_use <- min(k, n)
   if (k_use < 2L) return(.cast_fold_design(rep(1L, n), method, "insufficient_rows"))
-  if (method == "blockcv") {
-    folds <- .cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size, coords_crs))
-    if (!is.null(folds)) return(folds)
-    cli::cli_abort("The declared blockCV design could not be built. Review CRS/block size or explicitly choose grid blocking; no different design is substituted inside a fold.")
-  }
+  if (method == "blockcv")
+    return(.cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size, coords_crs)))
   if (method == "env") {
     if (is.null(env) || nrow(env) != n) {
       cli::cli_abort("{.code block_method = \"env\"} requires a predictor matrix with one row per record.")
@@ -802,7 +799,7 @@ make_spatial_folds <- function(lon, lat, k,
     )$cluster)))
     return(.cast_fold_design(ids, method, "env"))
   }
-  # "grid" (also the blockcv fallback): spatially contiguous folds. Cells are
+  # "grid": spatially contiguous folds. Cells are
   # the atoms; their centroids are clustered into k spatial groups and each
   # group becomes one fold. Degenerate coordinates (few distinct values)
   # collapse to a coarser grid rather than erroring.
@@ -837,12 +834,20 @@ make_spatial_folds <- function(lon, lat, k,
 #' @keywords internal
 #' @noRd
 .cast_blockcv_folds <- function(lon, lat, k, seed, y, block_size, coords_crs = NULL) {
-  if (!requireNamespace("blockCV", quietly = TRUE) ||
-      !requireNamespace("sf", quietly = TRUE)) {
-    return(NULL)
-  }
+  check_suggested("blockCV", "for spatial blocking")
+  check_suggested("sf", "for spatial blocking")
   ok <- is.finite(lon) & is.finite(lat)
-  if (sum(ok) < 2L * k) return(NULL)
+  source <- if (is.null(block_size)) "response_autocorrelation_range" else "caller"
+  fail <- function(message, parent = NULL, occupied = NA_integer_) {
+    size <- if (is.null(size)) NA_real_ else size
+    scale <- if (is.na(size)) "unavailable" else paste(format(round(size), big.mark = ","), "m")
+    cli::cli_abort(c("blockCV could not assign {k} spatial folds at block size {scale} ({source}).",
+      i = "{message}"), parent = parent, class = "cast_spatial_design_error",
+      block_size_m = size, size_source = source, requested_folds = k, occupied_blocks = occupied)
+  }
+  size <- block_size
+  if (sum(ok) < 2L * k || !all(ok))
+    fail("Supply finite coordinates and at least two records per requested fold.")
   geographic <- all(lon[ok] >= -180 & lon[ok] <= 180) &&
     all(lat[ok] >= -90 & lat[ok] <= 90)
   .cast_check_coords_crs(coords_crs)
@@ -851,14 +856,10 @@ make_spatial_folds <- function(lon, lat, k,
   crs <- coords_crs %||% "EPSG:4326"
   df <- data.frame(.lon = lon, .lat = lat)
   if (!is.null(y)) df$.response <- as.integer(y)
-  pts <- tryCatch(
-    sf::st_as_sf(df, coords = c(".lon", ".lat"),
-                 crs = crs),
-    error = function(e) NULL
-  )
-  if (is.null(pts) || any(sf::st_is_empty(pts))) return(NULL)
+  pts <- tryCatch(sf::st_as_sf(df, coords = c(".lon", ".lat"), crs = crs),
+    error = function(e) fail("Check the declared source coordinate system.", e))
+  if (any(sf::st_is_empty(pts))) fail("At least one input geometry is empty.")
   column <- if (!is.null(y)) ".response" else NULL
-  size <- block_size
   range_error <- NULL
   range_warnings <- character()
   if (is.null(size)) {
@@ -878,27 +879,32 @@ make_spatial_folds <- function(lon, lat, k,
       }
     }, error = function(e) { range_error <<- conditionMessage(e); NULL })
   }
-  if (is.null(size)) cli::cli_abort("Spatial range estimation failed: {range_error}. Supply a justified block_size or explicitly choose grid blocking.")
+  if (is.null(size)) fail(paste("Spatial range estimation failed:", range_error))
   blk <- tryCatch(
     blockCV::cv_spatial(
       x = pts, column = column, k = k, size = size,
       hexagon = FALSE, selection = "random", iteration = 100L,
       seed = seed, progress = FALSE, report = FALSE, plot = FALSE, extend = 0.5
     ),
-    error = function(e) NULL
+    error = function(e) {
+      msg <- conditionMessage(e)
+      match <- regmatches(msg, regexec("number of spatial blocks: ([0-9]+)", msg))[[1L]]
+      occupied <- if (length(match)) as.integer(match[2L]) else NA_integer_
+      fail("Inspect the sampling geography and specify a justified spatial scale.", e, occupied)
+    }
   )
-  if (is.null(blk)) return(NULL)
   ids <- as.integer(blk$folds_ids)
-  if (length(ids) != length(lon) || anyNA(ids)) return(NULL)
   # blockCV may return fewer than k non-empty folds on degenerate extents.
-  if (!all(seq_len(k) %in% unique(ids))) return(NULL)
+  if (length(ids) != length(lon) || anyNA(ids) || !all(seq_len(k) %in% ids))
+    fail("At least one record or fold has no assignment.")
   # Keep physical block boundaries and point membership for honest maps and
   # a block-level hold-out. IDs refer to these polygons, never row-random folds.
   membership <- sf::st_intersects(pts, blk$blocks)
-  if (any(lengths(membership) == 0L)) return(NULL)
+  if (any(lengths(membership) == 0L)) fail("Some records fall outside the physical blocks.")
   block_ids <- vapply(membership, `[`, integer(1), 1L)
   out <- .cast_fold_design(ids, "blockcv", "blockcv", size)
-  attr(out, "design")$size_source <- if (!is.null(block_size)) "caller" else "response_autocorrelation_range"
+  attr(out, "design")$size_source <- source
+  attr(out, "design")$occupied_blocks <- length(unique(block_ids))
   attr(out, "design")$range_warnings <- range_warnings
   attr(out, "design")$scale_interpretation <- "Response autocorrelation is an exploratory scale guide, not a validated residual range or a species dispersal distance."
   attr(out, "design")$coords_crs <- sf::st_crs(pts)$wkt

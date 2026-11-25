@@ -175,12 +175,13 @@ cast_run <- function(species_data,
   # ---- 1. Prepare: spatial hold-out split --------------------------------
   if (verbose) cli::cli_h2("Prep: spatial hold-out split")
   stage_started <- Sys.time()
+  holdout_size <- protocol$holdout_block_size %||% protocol$block_size
   split <- stage("01_prepare", list(species_data, protocol$train_fraction,
-    protocol$block_method, protocol$holdout_blocks, protocol$coords_crs, protocol$block_size, protocol$seed, prepared), if (is.null(prepared)) cast_prepare(
+    protocol$block_method, protocol$holdout_blocks, protocol$coords_crs, holdout_size, protocol$seed, prepared), if (is.null(prepared)) cast_prepare(
     species_data, train_fraction = protocol$train_fraction,
     seed = protocol$seed, split = "spatial",
     block_method = protocol$block_method, n_blocks = protocol$holdout_blocks, verbose = verbose,
-    coords_crs = protocol$coords_crs, block_size = protocol$block_size
+    coords_crs = protocol$coords_crs, block_size = holdout_size
   ) else .cast_verify_prepared(species_data, prepared))
   if (verbose) {
     cli::cli_inform("Train: {nrow(split$train)} | Hold-out: {nrow(split$test)} | Predictors: {length(split$env_vars)}")
@@ -188,28 +189,35 @@ cast_run <- function(species_data,
   add_receipt("01_prepare",
     .cast_digest(list(species_data, protocol$train_fraction,
                       protocol$block_method, protocol$holdout_blocks,
-                      protocol$coords_crs, protocol$block_size, protocol$seed)),
+                      protocol$coords_crs, holdout_size, protocol$seed)),
     split, tables = list(split_class_balance = split$fold_design$class_balance))
-
-  response_data <- .cast_response_validation_data(response_data, split$env_vars)
-  if (!is.null(response_data) && !isTRUE(all.equal(
-      response_data$current[, split$env_vars, drop = FALSE],
-      split$test[, split$env_vars, drop = FALSE], check.attributes = FALSE)))
-    cli::cli_abort("cast_run response_data$current must match the prepared hold-out predictors in row order; hold-out labels are never used for explanation fitting.")
 
   # Freeze and inspect every spatial split before any model is fitted.
   stage_started <- Sys.time()
   design_inputs <- list(split$train, protocol$cv_k, protocol$block_method,
     protocol$block_size, protocol$coords_crs, protocol$buffer,
     protocol$buffer_unit, protocol$n_repeat, protocol$seed)
-  cv_plan <- stage("01_cv_design", design_inputs, .cast_cv_plan(split$train,
+  cv_plan <- tryCatch(stage("01_cv_design", design_inputs, .cast_cv_plan(split$train,
     k = protocol$cv_k, block_method = protocol$block_method,
     block_size = protocol$block_size, coords_crs = protocol$coords_crs,
     buffer = protocol$buffer, buffer_unit = protocol$buffer_unit,
-    n_repeat = protocol$n_repeat, seed = protocol$seed))
+    n_repeat = protocol$n_repeat, seed = protocol$seed)), cast_spatial_design_error = function(e) {
+      if (!is.null(out)) utils::write.csv(data.frame(block_size_m = e$block_size_m,
+        size_source = e$size_source, requested_folds = e$requested_folds,
+        occupied_blocks = e$occupied_blocks, error = conditionMessage(e)),
+        file.path(out$tables, "cv_design_failure.csv"), row.names = FALSE)
+      stop(e)
+    })
+  if (!is.null(out)) unlink(file.path(out$tables, "cv_design_failure.csv"))
   add_receipt("01_cv_design", .cast_digest(design_inputs), cv_plan,
     tables = list(cv_fold_design = cv_plan$balance))
   .cast_cv_check_plan(cv_plan, verbose)
+
+  response_data <- .cast_response_validation_data(response_data, split$env_vars)
+  if (!is.null(response_data) && !isTRUE(all.equal(
+      response_data$current[, split$env_vars, drop = FALSE],
+      split$test[, split$env_vars, drop = FALSE], check.attributes = FALSE)))
+    cli::cli_abort("cast_run response_data$current must match the prepared hold-out predictors in row order; hold-out labels are never used for explanation fitting.")
 
   # ---- 2. Variable selection (training split only) ------------------------
   if (verbose) cli::cli_h2("Select: {protocol$select_method} on the training split")

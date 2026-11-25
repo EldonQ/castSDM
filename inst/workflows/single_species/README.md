@@ -1,4 +1,4 @@
-# CHELSA 单物种工作流（castSDM 0.44.1）
+# CHELSA 单物种工作流（castSDM 0.45.0）
 
 模型协议不按物种名调参：物种标识用于区分输入和输出，研究域、记录格式和统计设置由项目显式声明。变量筛选保持训练侧 VIF，并在每个空间折内重复，不规定保留数量。
 
@@ -33,7 +33,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 物种名不决定坐标格式或分析域；应按实际数据明确指定。
 
 该文件按环境网格 CRS 的 `lon,lat,year` 读取；来源、采样努力和年份含义未经独立核实，不自动标记为审核后的 GBIF 记录。松鼠默认使用全国陆地掩膜，与鱼类的河流局地范围不同；两者不能仅按 AUC 排名。两例均使用 GLU 当前土地利用指标。
-新结果写入 `output/cast043_chelsa_ensmean/<物种>`，不覆盖既有研究结果。
+新结果写入 `output/cast045_chelsa_ensmean/<物种>`。输入文件内容或科学设置变化时，使用新的 `CAST_RUN_ID` 保留已有研究结果。
 `CAST_DRY_RUN=1` 只做输入检查；正常运行前应取消该环境变量。
 
 ## 流程与解释
@@ -51,16 +51,17 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 
 ## 查看与重绘
 
-运行 `05_SHINY.R` 浏览结果。高级设置允许填写有生态依据的空间块边长（米）；留空保留自动估计，不设置人为默认边长。匹配的出版响应栅格会被复用；地图统计使用原生共同支持网格，记录位置统计单列。预览按有效网格聚合，支持域在聚合前应用；点击读取原始网格。
+运行 `05_SHINY.R` 浏览结果。高级设置可选 blockCV 或地理网格，程序遵循声明的设计。blockCV 的 `block_size` 用于内层，`holdout_block_size` 可覆盖外层尺度。没有指定边长时使用自动估计。失败时打印底层错误及尝试的尺度；内层失败另存 `training/tables/cv_design_failure.csv`。地图统计使用原生共同支持网格，记录位置统计单列。预览按有效网格聚合，支持域在聚合前应用；点击读取原始网格。
 
-默认输出四组主图：空间验证、连续适宜度变化、主要因子响应及其证据、环境范围与模型分歧。保留 PNG/PDF 和既有底图。阈值分类、ALE 曲线和完整图集按需输出：
+默认输出空间验证、连续适宜度变化、环境范围与模型分歧三组主图。保留 PNG/PDF 和既有底图。在 Shiny 点选环境因子即可计算该因子的地图。出版用单因子响应图、阈值分类、ALE 曲线和完整图集通过重绘入口按需输出：
 
 ```r
-Sys.setenv(CAST_FIGURES = "all") # 或 responses、maps、drivers
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast045_chelsa_ensmean/Callosciurus_erythraeus",
+           CAST_FIGURES = "03_environmental_driver") # 也可选 all、responses、maps、drivers
 source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
 ```
 
-`workflow_timings.csv` 将 `environmental_response_products`（响应计算与显示数据准备）和 `figure_exports`（仅出图）分开；`figures/phase_timings.csv` 保留更细的计时。两阶段使用同一份内容校验后的数值产品，不重新拟合。
+`workflow_timings.csv` 单列输入指纹校验、数据准备和情景投影；`comparison/tables/timings.csv` 记录分引擎预测耗时。`figures/phase_timings.csv` 分别记录数值准备与图表导出的用时；重绘使用已拟合模型。
 `comparison/tables/support_scope.csv` 和 `diagnostics/response_spatial_sensitivity.csv` 分别列出中央分位数包络与实际观测范围；包络外不必然是范围外推，两者都不证明联合支持。跨空间拟合的共同解释位置同时报告存在点和背景点数量，不能只看方向一致比例。
 `predictor_qualification.csv`、`predictor_missing_qc.csv`、`predictor_semantics.csv` 保留覆盖、记录损失和来源尺度依据；`gam_concurvity.csv` 报告 GAM 响应替代性。
 未完成比较不生成完成标记；同配置重跑校验并复用成功阶段。不要通过改名旧结果假装兼容新分析。

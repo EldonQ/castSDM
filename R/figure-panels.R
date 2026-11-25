@@ -258,29 +258,31 @@
     source <- if (common) data$attribution_supported_display else data$attribution_display
     scope_summary <- if (common) att$common_summary else att$summary
     only <- scope_summary[scope_summary$contrast == "only", ]
-    changing <- only$driver[is.finite(only$mean_abs) & only$mean_abs > 0]
-    top <- if (length(changing)) changing[which.max(only$mean_abs[match(changing, only$driver)])] else att$drivers[1L]
+    top <- data$focus_driver
     limits <- .cast_figure_bound(data$attribution_display, paste0("effect_", top), signed = TRUE)
-    response <- map(paste0("effect_", top), paste("Only", .cast_var_label(top), "changes"),
-      "signed", limits, source = source, legend = "Suitability change")
     d <- data$diagnostics$response_spatial_sensitivity
     evidence <- "Spatial refit evidence is unavailable for this scenario."
+    evidence_title <- NULL
     if (is.data.frame(d) && "n_direction_agree_when_selected" %in% names(d)) {
       d <- d[which(d$scenario == data$scenario & d$contrast == "only" &
         d$driver == top & d$model == "ensemble"), , drop = FALSE]
       if (nrow(d)) {
         agreement <- ifelse(is.na(d$n_direction_agree_when_selected), "unavailable",
           paste0(d$n_direction_agree_when_selected, "/", d$n_common))
-        evidence <- paste0("Selected in ", d$n_driver_selected[1L], "/", d$n_available[1L],
-          " spatial fits. ", paste0(ifelse(d$criterion == "observed_training_range",
+        evidence_title <- paste0("Selected in ", d$n_driver_selected[1L], "/", d$n_available[1L], " spatial fits")
+        evidence <- paste0(ifelse(d$criterion == "observed_training_range",
             "Observed range", "Quantile envelope"), ": ", d$n_common, " common locations (",
             d$n_common_presence, " presences), same nonzero direction in selected fits ", agreement,
-            ".", collapse = " "))
+            ".", collapse = " ")
       }
     }
+    response <- map(paste0("effect_", top),
+      paste(c(paste("Only", .cast_var_label(top), "changes"), evidence_title), collapse = "\n"),
+      "signed", limits, source = source, legend = "Suitability change")
     patchwork::wrap_plots(response) + .cast_figure_annotation("Where the fitted model responds",
       paste(if (common) sprintf("Displayed within paired quantile coverage (%s native cells).",
         format(only$n[match(top, only$driver)], big.mark = ",")) else "Displayed across the full paired domain.",
+        if (common) "Uncoloured areas lack a mapped comparison under this criterion.",
         sprintf("Mean suitability change: %+.4f.", only$mean_signed[match(top, only$driver)]),
         evidence, "These contrasts describe model responses to the supplied environment."))
   }, 125, !is.null(att) && length(att$drivers) > 0L && !is.null(data$attribution_display) &&

@@ -1,3 +1,16 @@
+# castSDM 0.45.0
+
+- Report failed spatial designs with the original blockCV error, the attempted
+  scale and the available block count. Outer hold-out and inner CV can use
+  separately declared scales.
+- Bind completed case outputs to input fingerprints. Shiny and replotting
+  share the same completion check. Record pending scenario ownership before
+  dispatch so a run can safely recover an interrupted publication.
+- Reuse exact coverage counts per layer and avoid repeatedly clamping identical
+  scenario columns. Record prediction timing by engine.
+- Calculate individual environmental response maps on request in the example
+  workflow. Model validation and the paired scenario maps still export directly.
+
 # castSDM 0.44.1
 
 - Verify the written raster before publication, checking every band and valid-cell

@@ -215,11 +215,13 @@
 }
 
 .cast_compare_block <- function(fit, a, b, groups, static, weights, base, bounds, clamp,
-    gam_current = NULL, supported = NULL) {
+    gam_current = NULL, supported = NULL, clamp_ranges = NULL,
+    measure = function(phase, expr) force(expr)) {
   if (length(static)) for (v in static) {
     if (any(a[[v]] != b[[v]])) cli::cli_abort("Static predictor {.val {v}} changes in future; include it in a group or fix its input.")
   }
-  context <- if (length(groups) == 1L && !length(groups[[1L]])) NULL else .cast_prediction_context(fit, weights, a, b, clamp, gam_current)
+  context <- if (length(groups) == 1L && !length(groups[[1L]])) NULL else
+    .cast_prediction_context(fit, weights, a, b, clamp, gam_current, clamp_ranges, measure)
   if (length(groups) == 1L) {
     future <- if (length(groups[[1L]])) context$predict(groups[[1L]]) else base
     if (any(!is.finite(base)) || any(!is.finite(future)))
@@ -295,9 +297,7 @@
   paired <- identical(plan$design, "paired")
   components <- if (paired) "joint_change" else .cast_factorial_names()
   faces <- if (paired) c("current", "joint") else c("current", "joint", "climate", "lulc")
-  layers <- c(faces, components, paste0("sd_", components), "support", "common_support",
-              "sign_agreement_joint", "sign_conflict_joint",
-              if (paired) unlist(lapply(c("current_", "future_", "change_"), paste0, names(weights))))
+  layers <- .cast_scenario_bands(paired, names(weights))$layers
   acc <- .cast_factorial_accumulator(components, length(faces))
   common_acc <- .cast_factorial_accumulator(components, length(faces))
   cuts <- .cast_threshold_accumulator(unique(c(threshold, thresholds)), length(faces))
@@ -306,13 +306,15 @@
   scope_counts <- range_counts <- stats::setNames(numeric(6), scope_names)
   if (!length(changing)) { scope_counts[3:5] <- NA_real_; range_counts[3:5] <- NA_real_ }
   range_bounds <- if (!is.null(bounds)) .cast_support_bounds(fit$scaling$reference, c(0, 1))
+  clamp_ranges <- if (clamp) lapply(fit$scaling$reference, range, na.rm = TRUE)
   scope_n <- 0L
   model_sums <- NULL
   previous_context <- options(castSDM.read_context = scenario)
   on.exit(options(previous_context), add = TRUE)
   last_progress <- 0
   seconds <- c(read_current = 0, read_future = 0, read_baseline = 0,
-    read_gam_cache = 0, predict = 0, support_diagnostics = 0, write = 0)
+    read_gam_cache = 0, predict = 0, support_diagnostics = 0, write = 0,
+    stats::setNames(numeric(length(weights)), paste0("predict_", names(weights))))
   timed <- function(phase, expr) {
     start <- proc.time()[["elapsed"]]
     prior <- options(castSDM.read_context = paste(scenario, phase, sep = " / "))
@@ -374,7 +376,7 @@
         })
         p <- timed("predict", .cast_compare_block(fit, aa, bb,
           plan$groups, if (!shared_static) plan$static, weights, base[keep, , drop = FALSE],
-          bounds, clamp, gam, support))
+          bounds, clamp, gam, support, clamp_ranges, timed))
         model_sums <- .cast_model_response_add(model_sums, p$model_sums)
         .cast_factorial_accumulate(acc, p$faces, p$effects, p$support,
           if (!is.null(threshold)) (p$faces >= threshold)*1, model_sd = p$sd)
@@ -689,7 +691,10 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   base_key <- .cast_digest(list(fit_key, current_key, mask_key, names(weights), clamp, gam_current$key,
     .cast_code_identity(.cast_compare_baseline), .cast_code_identity(.cast_compare_baseline_block)))
   base_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "current.rds")
-  baseline <- if (resume) .cast_cache_read(base_receipt, base_key) else NULL
+  baseline <- if (resume) {
+    if (plan$raster) .cast_compare_input_receipt(base_receipt, base_key, plan$current, list(names(weights))) else
+      .cast_cache_read(base_receipt, base_key)
+  }
   reused <- !is.null(baseline) && (is.null(gam_current) || isTRUE(attr(gam_current, "ready")))
   if (reused && plan$raster) baseline <- file.path(cache_dir, baseline)
   if (!reused) {
@@ -703,7 +708,7 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     baseline <- .cast_compare_input_stage(.cast_compare_baseline(fit, plan, weights, clamp, block_size,
       if (plan$raster) file.path(cache_dir, "current_models.tif"), blocks, gam_current,
       cluster, budget$threads, verbose), "current_prediction", output_dir)
-    .cast_cache_write(if (plan$raster) basename(baseline) else baseline, base_receipt, base_key,
+    .cast_cache_write(if (plan$raster) structure(basename(baseline), raster_verified = TRUE) else baseline, base_receipt, base_key,
       if (plan$raster) baseline else character())
   }
   event("current_prediction", start, reused)
@@ -713,19 +718,26 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     .cast_code_identity(.cast_compare_common_mask), .cast_code_identity(.cast_shared_raster_layers)))
   common_receipt <- if (!is.null(cache_dir)) file.path(cache_dir, "domain.rds")
   needs_common <- domain == "common" || !is.null(bounds)
-  common <- if (needs_common && resume) .cast_cache_read(common_receipt, common_key) else NULL
+  common <- if (needs_common && resume) {
+    if (plan$raster) .cast_compare_input_receipt(common_receipt, common_key, plan$current,
+      list("common_domain", "common_support")) else .cast_cache_read(common_receipt, common_key)
+  }
   reused <- !is.null(common)
   if (reused && plan$raster) common <- lapply(common, function(x) if (!is.null(x)) file.path(cache_dir, x))
   if (needs_common && !reused) {
     common <- .cast_compare_input_stage(.cast_compare_common_mask(plan, block_size,
       if (plan$raster) file.path(cache_dir, "common_domain.tif"), bounds,
       if (plan$raster) file.path(cache_dir, "common_support.tif"), blocks), "common_domain", output_dir)
-    .cast_cache_write(if (plan$raster) lapply(common, function(x) if (!is.null(x)) basename(x)) else common,
+    .cast_cache_write(if (plan$raster) structure(lapply(common, function(x) if (!is.null(x)) basename(x)),
+      raster_verified = TRUE) else common,
       common_receipt, common_key, if (plan$raster) unlist(common, use.names = FALSE) else character())
   }
   event("common_domain", start, reused)
   results <- list()
   jobs <- list(); aliases <- list()
+  ownership_file <- if (plan$raster) file.path(raster_dir, ".pending.rds") else NULL
+  ownership <- if (!is.null(ownership_file) && file.exists(ownership_file))
+    tryCatch(readRDS(ownership_file), error = function(e) list()) else list()
   legacy <- if (resume && plan$raster) .cast_legacy_scenarios(file.path(output_dir, "comparison.rds"),
     fit_key, current_key, future_keys, mask_key, plan$groups, weights, threshold,
     support_probs, clamp, domain, gam_current$key)
@@ -744,7 +756,8 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     x <- cached$value
     reused <- !is.null(x)
     if (!reused) {
-      if (!is.null(file) && file.exists(file) && !overwrite && !isTRUE(cached$repair))
+      owned <- resume && identical(ownership[[scenario]], key)
+      if (!is.null(file) && file.exists(file) && !overwrite && !isTRUE(cached$repair) && !owned)
         cli::cli_abort("Stale/unverified scenario {.val {scenario}} exists. Use a new output_dir or overwrite = TRUE.")
       if (isTRUE(cached$repair) && verbose)
         cli::cli_inform("Rebuilding {.val {scenario}}: cached raster failed verification.")
@@ -785,10 +798,15 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
   worker_elapsed <- worker_elapsed + as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
   if (verbose && length(jobs) && !is.null(output_dir))
     cli::cli_inform("Scenario progress records: {.path {file.path(output_dir, 'progress')}}.")
+  if (!is.null(ownership_file) && length(jobs)) {
+    ownership[names(jobs)] <- lapply(jobs, `[[`, "key")
+    .cast_atomic_rds(ownership, ownership_file)
+  }
   dispatch_start <- Sys.time()
   computed <- .cast_compare_tasks(jobs, budget$workers, cluster)
   dispatch_elapsed <- as.numeric(difftime(Sys.time(), dispatch_start, units = "secs"))
   failed <- names(computed)[!vapply(computed, function(x) isTRUE(x$ok), logical(1))]
+  if (!is.null(ownership_file) && !length(failed)) unlink(ownership_file)
   for (scenario in setdiff(names(computed), failed)) {
     if (nzchar(computed[[scenario]]$warnings)) cli::cli_warn("{scenario}: {computed[[scenario]]$warnings}")
     x <- computed[[scenario]]$value

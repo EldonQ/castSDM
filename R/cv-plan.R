@@ -47,7 +47,8 @@
         status = if (!train_both) "single_class_training" else
           if (!test_both) "single_class_test" else "two_class_test",
         block_size_m = design$block_size_m %||% NA_real_,
-        size_source = design$size_source %||% "external",
+        size_source = design$size_source %||% design$effective %||% "external",
+        occupied_blocks = design$occupied_blocks %||% NA_integer_,
         range_warnings = paste(design$range_warnings, collapse = "; "))
     }
   }
@@ -59,7 +60,8 @@
     z <- plan$balance[plan$balance$replicate == ri, , drop = FALSE]
     scale <- if (is.finite(z$block_size_m[1L]))
       paste0(round(z$block_size_m[1L]), " m (", z$size_source[1L], ")") else z$size_source[1L]
-    cli::cli_inform("CV design repeat {ri}: {scale}; test presences [{paste(z$test_presence, collapse = ', ')}]; backgrounds [{paste(z$test_background, collapse = ', ')}].")
+    occupied <- if (is.na(z$occupied_blocks[1L])) "" else paste0("; ", z$occupied_blocks[1L], " occupied blocks")
+    cli::cli_inform("CV design repeat {ri}: {scale}{occupied}; test presences [{paste(z$test_presence, collapse = ', ')}]; backgrounds [{paste(z$test_background, collapse = ', ')}].")
   }
   bad <- plan$balance[!plan$balance$can_fit, , drop = FALSE]
   if (nrow(bad)) cli::cli_abort(

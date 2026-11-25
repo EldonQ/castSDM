@@ -171,26 +171,32 @@
   stats::setNames(labels, vars)
 }
 
-.cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE, gam_current = NULL) {
+.cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE, gam_current = NULL,
+    clamp_ranges = NULL, measure = function(phase, expr) force(expr)) {
   reference <- fit$scaling$reference
   raw_current <- current; raw_future <- future
+  changed_between <- function(a, b, vars) vars[!vapply(vars, function(v) identical(a[[v]], b[[v]]), logical(1))]
+  changed <- changed_between(current, future, names(current))
   if (clamp && !is.null(reference)) {
-    current <- .cast_clamp(current, reference); future <- .cast_clamp(future, reference)
+    ranges <- clamp_ranges %||% lapply(reference, range, na.rm = TRUE)
+    current <- .cast_clamp(current, reference, ranges)
+    future <- current
+    future[changed] <- .cast_clamp(raw_future[changed], reference, ranges[intersect(changed, names(ranges))])
+    changed <- changed_between(current, future, changed)
   }
   active <- names(weights)
   terms <- stats::setNames(lapply(active, function(m) .cast_gam_terms(fit$models[[m]])), active)
   prepared <- lapply(active, function(m) {
     if (is.null(terms[[m]])) return(NULL)
     info <- fit$models[[m]]
-    changed <- names(current)[!vapply(names(current), function(v) identical(current[[v]], future[[v]]), logical(1))]
     cols <- unname(terms[[m]][intersect(changed, names(terms[[m]]))])
     saved <- gam_current[[m]]
     if (is.null(saved) || !all(cols %in% colnames(saved$terms))) {
-      a <- .cast_predict_gam(info$model, current, type = "terms")
+      a <- measure("predict_gam", .cast_predict_gam(info$model, current, type = "terms"))
       saved <- list(eta = rowSums(a) + attr(a, "constant"), terms = a)
     }
     delta <- if (length(cols)) {
-      b <- .cast_predict_gam(info$model, future, type = "terms", terms = cols)
+      b <- measure("predict_gam", .cast_predict_gam(info$model, future, type = "terms", terms = cols))
       b - saved$terms[, colnames(b), drop = FALSE]
     } else matrix(numeric(), nrow(current), 0L)
     list(eta = saved$eta, delta = delta)
@@ -198,8 +204,6 @@
   names(prepared) <- active
   # A cached partial prediction cannot stand in for rows never computed.
   # Include both the environmental combination and requested row subset.
-  changed <- names(current)[!vapply(names(current), function(v)
-    identical(current[[v]], future[[v]]), logical(1))]
   predictions <- new.env(parent = emptyenv())
   predict <- function(switched = character(), base = NULL, changed_rows = NULL) {
     switched <- intersect(names(current), intersect(switched, changed))
@@ -222,12 +226,10 @@
         eta <- p$eta[idx] + if (length(cols)) rowSums(p$delta[idx, cols, drop = FALSE]) else 0
         out[idx, m] <- .cast_apply_offset(info$model$family$linkinv(eta), info$offset)
       } else {
-        if (any(idx)) {
-          p <- tryCatch(predict_single_model(info, X[idx, , drop = FALSE]),
-            error = function(e) cli::cli_abort("Prediction failed for {.val {m}}: {conditionMessage(e)}"))
-          if (!is.numeric(p) || length(p) != sum(idx)) cli::cli_abort("Model {.val {m}} returned invalid prediction dimensions.")
-          out[idx, m] <- p
-        }
+        p <- measure(paste0("predict_", m), tryCatch(predict_single_model(info, X[idx, , drop = FALSE]),
+          error = function(e) cli::cli_abort("Prediction failed for {.val {m}}: {conditionMessage(e)}")))
+        if (!is.numeric(p) || length(p) != sum(idx)) cli::cli_abort("Model {.val {m}} returned invalid prediction dimensions.")
+        out[idx, m] <- p
       }
     }
     assign(key, out, predictions)

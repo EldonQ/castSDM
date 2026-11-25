@@ -1,22 +1,13 @@
 # Complete publication figure collection using the package's established maps.
 # Numerical diagnostic products are cached; render_only never predicts/refits.
-case_figure_stacks <- function(out_dir, result, scenario) {
-  vars <- (result$fit_full %||% result$fit)$env_vars
+case_figure_stacks <- function(out_dir, result, comparison, scenario) {
+  fit <- result$fit_full %||% result$fit
   pool <- utils::read.csv(file.path(out_dir, "training_pool.csv"), stringsAsFactors = FALSE)
-  paths <- pool$path[match(vars, pool$layer)]
-  if (anyNA(paths) || any(!file.exists(paths))) stop("Current figure predictor sources are missing; use render-only with a complete figure-data cache.")
-  current <- terra::rast(paths); names(current) <- vars
-  table <- utils::read.csv(file.path(out_dir, "scenario_table.csv"), stringsAsFactors = FALSE)
-  table <- table[table$scenario == scenario, , drop = FALSE]
-  if (!nrow(table)) stop("No saved predictor mapping for reporting scenario: ", scenario)
-  future_paths <- paths
-  for (i in seq_len(nrow(table))) {
-    hit <- match(table$layer[i], vars)
-    if (!is.na(hit)) future_paths[hit] <- table$path[i]
-  }
-  if (any(!file.exists(future_paths))) stop("Future figure predictor sources are missing; use render-only with a complete figure-data cache.")
-  future <- terra::rast(future_paths); names(future) <- vars
-  list(current = current, future = future)
+  pool <- pool[match(fit$env_vars, pool$layer), , drop = FALSE]
+  if (anyNA(pool$path)) stop("The case inventory lacks fitted predictors.")
+  scenarios <- utils::read.csv(file.path(out_dir, "scenario_table.csv"), stringsAsFactors = FALSE)
+  castSDM:::.cast_explore_stacks(list(fit = fit, pool = pool, scenarios = scenarios,
+    comparison = comparison), scenario)
 }
 
 case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NULL,
@@ -31,7 +22,7 @@ case_figures <- function(comparison, out_dir, scenario, result = NULL, cfg = NUL
   products <- utils::getFromNamespace(".cast_figure_products", "castSDM")(include)
   if (!render_only && any(products %in% c("attribution", "mess")) &&
       (is.null(current) || is.null(future))) {
-    stacks <- case_figure_stacks(out_dir, result, scenario)
+    stacks <- case_figure_stacks(out_dir, result, comparison, scenario)
     current <- stacks$current; future <- stacks$future
   }
   figures <- castSDM::cast_figures(result, comparison,

@@ -12,7 +12,9 @@
       input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
       models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, vif_threshold = cfg$protocol$select_vif_threshold,
       thin_km = cfg$occurrence_thin_km, predictor_min_coverage = cfg$predictor_min_coverage,
-      block_size = cfg$protocol$block_size, predictor_missing = cfg$predictor_missing, resources = cfg$resources)
+      block_method = cfg$protocol$block_method, block_size = cfg$protocol$block_size,
+      holdout_block_size = cfg$protocol$holdout_block_size,
+      predictor_missing = cfg$predictor_missing, resources = cfg$resources)
   }
   settings <- settings %||% list()
   utils::modifyList(list(path = root, data_dir = Sys.getenv("CAST_DATA_ROOT", ""),
@@ -42,7 +44,12 @@
           shiny::numericInput("setup_coverage", "\u5019\u9009\u53d8\u91cf\u6700\u4f4e\u57df\u5185\u8986\u76d6\u7387\uff080\u20131\uff09", defaults$predictor_min_coverage %||% .95, min = 0, max = 1),
           shiny::numericInput("setup_vif", "VIF \u9608\u503c", defaults$vif_threshold %||% 10, min = 1, step = 1),
           shiny::selectInput("setup_missing", "\u7f3a\u5931\u73af\u5883\u6307\u6807", stats::setNames(c("complete_cases", "drop_predictors"), c("\u4fdd\u7559\u6307\u6807\uff0c\u53ea\u7528\u5b8c\u6574\u6837\u672c", "\u4e25\u683c\u5254\u9664\u7f3a\u5931\u6307\u6807\uff0c\u4fdd\u7559\u4f4d\u7f6e")), defaults$predictor_missing %||% "complete_cases"),
-          shiny::numericInput("setup_block_size", "\u7a7a\u95f4\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u7559\u7a7a\u81ea\u52a8\uff09", defaults$block_size %||% NA_real_, min = 1),
+          shiny::selectInput("setup_block_method", "\u7a7a\u95f4\u5206\u5757",
+            stats::setNames(c("blockcv", "grid"), c("blockCV", "\u5730\u7406\u7f51\u683c")),
+            defaults$block_method %||% "blockcv"),
+          shiny::conditionalPanel("input.setup_block_method == 'blockcv'",
+            shiny::numericInput("setup_block_size", "\u5185\u5c42\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u7559\u7a7a\u81ea\u52a8\uff09", defaults$block_size %||% NA_real_, min = 1),
+            shiny::numericInput("setup_holdout_block_size", "\u5916\u5c42\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u53ef\u7559\u7a7a\uff09", defaults$holdout_block_size %||% NA_real_, min = 1)),
           shiny::numericInput("setup_cv", "\u7a7a\u95f4\u4ea4\u53c9\u9a8c\u8bc1\u6298\u6570", defaults$cv_k, min = 3L, step = 1L),
           shiny::numericInput("setup_cores", "\u603b\u8ba1\u7b97\u7ebf\u7a0b", defaults$resources$cores, min = 1L, step = 1L),
           shiny::numericInput("setup_workers", "\u5e76\u884c\u60c5\u666f\u6570", defaults$resources$workers, min = 1L, step = 1L),

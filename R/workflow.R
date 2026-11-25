@@ -41,7 +41,9 @@
 #'   `custom_mask`), `domain_mask` (path to an aligned study-domain raster;
 #'   positive cells are active),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
-#'   `models`, `cv_k`, `block_size` (metres; NULL estimates the range), `background_points`, `thin_km` (distance thinning in km),
+#'   `models`, `cv_k`, `block_method` (`blockcv` or `grid`), `block_size`
+#'   (metres for `blockcv`; NULL estimates the range), `holdout_block_size`
+#'   (optional distinct outer scale), `background_points`, `thin_km` (distance thinning in km),
 #'   `predictor_min_coverage` (actual-domain coverage), `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
 #' @param run Execute preparation, fitting, projections and figures after checks.
 #'   Default `FALSE` only indexes and checks physical inputs.
@@ -68,7 +70,8 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   occurrence_file <- normalizePath(occurrence_file, winslash = "/", mustWork = TRUE)
   if (startsWith(tolower(paste0(path, "/")), tolower(paste0(data_dir, "/"))))
     cli::cli_abort("Keep the workspace outside the environmental data library.")
-  allowed <- c("domain", "domain_mask", "input_type", "lulc_product", "models", "cv_k", "block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
+  allowed <- c("domain", "domain_mask", "input_type", "lulc_product", "models", "cv_k", "block_method",
+    "block_size", "holdout_block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
@@ -76,9 +79,10 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
     input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
     cv_k = 5L, background_points = 10000L, thin_km = 1, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
-  for (n in c("domain", "input_type", "lulc_product")) {
+  for (n in c("domain", "input_type", "lulc_product", "block_method")) {
+    if (n == "block_method" && is.null(settings[[n]])) next
     choices <- switch(n, domain = c("national", "freshwater_river", "custom_mask"),
-      input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"))
+      input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"), block_method = c("blockcv", "grid"))
     if (length(settings[[n]]) != 1L || !settings[[n]] %in% choices) cli::cli_abort("Invalid workflow {.val {n}} setting.")
   }
   if (identical(settings$domain, "custom_mask")) {
@@ -93,7 +97,9 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   }
   # Reuse package validation rather than maintain a second numerical contract.
   cast_protocol(models = settings$models, cv_k = settings$cv_k,
-    block_size = settings$block_size, num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
+    block_method = settings$block_method %||% "blockcv", block_size = settings$block_size,
+    holdout_block_size = settings$holdout_block_size,
+    num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
   if (length(settings$predictor_missing) != 1L || is.na(settings$predictor_missing) || !settings$predictor_missing %in% c("drop_predictors", "complete_cases")) cli::cli_abort("Invalid predictor_missing policy.")
   settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
   settings$thin_km <- .cast_check_scalar(settings$thin_km, "thin_km", lower = 0)
@@ -115,7 +121,7 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   old <- Sys.getenv(variables, unset = NA_character_)
   on.exit({ Sys.unsetenv(variables); present <- !is.na(old)
     if (any(present)) do.call(Sys.setenv, as.list(stats::setNames(old[present], variables[present]))) }, add = TRUE)
-  run_id <- .cast_workflow_run_id()
+  run_id <- Sys.getenv("CAST_RUN_ID", .cast_workflow_run_id())
   Sys.setenv(CAST_EXAMPLE_ROOT = path, CAST_DATA_ROOT = data_dir, CAST_SPECIES = species,
     CAST_RUN_ID = run_id, CAST_OUTPUT_ROOT = file.path(path, "output"),
     CAST_DRY_RUN = if (isTRUE(run)) "0" else "1")
