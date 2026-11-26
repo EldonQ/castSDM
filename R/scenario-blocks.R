@@ -4,6 +4,19 @@
     .cast_code_identity(.cast_raster_cells), .cast_code_identity(.cast_raster_block)))
 }
 
+.cast_write_current_block <- function(value, path, key) {
+  # Keep the regular receipt format readable by earlier releases. Wide
+  # numeric blocks use faster lossless compression without changing keys.
+  payload <- serialize(value, NULL, version = 3L)
+  receipt <- list(schema = "cast_cache/3", key = key, payload = payload,
+    digest = digest::digest(payload, algo = "sha256", serialize = FALSE), files = character())
+  temp <- tempfile(".cast-block-", tmpdir = dirname(path), fileext = ".rds")
+  on.exit(unlink(temp), add = TRUE)
+  con <- gzfile(temp, "wb", compression = 1L)
+  tryCatch(saveRDS(receipt, con, version = 3L), finally = close(con))
+  .cast_publish_raster(temp, path, overwrite = TRUE)
+}
+
 .cast_compare_current_blocks <- function(plan, block_size, directory, key, verbose) {
   rows <- max(1L, as.integer(block_size/terra::ncol(plan$current)))
   starts <- seq.int(1L, terra::nrow(plan$current), by = rows)
@@ -32,7 +45,7 @@
         finite <- .cast_finite_rows(values)
         indices <- indices[finite]; values <- values[finite, , drop = FALSE]
       }
-      .cast_cache_write(list(indices = indices, values = values), paths[i], block_key)
+      .cast_write_current_block(list(indices = indices, values = values), paths[i], block_key)
     }
     if (verbose && (i == 1L || i %% 10L == 0L || i == length(starts)))
       cli::cli_inform("Current environmental blocks: {i}/{length(starts)} ready; reused across all scenarios.")

@@ -212,6 +212,12 @@ cast_run <- function(species_data,
   add_receipt("01_cv_design", .cast_digest(design_inputs), cv_plan,
     tables = list(cv_fold_design = cv_plan$balance))
   .cast_cv_check_plan(cv_plan, verbose)
+  if (verbose) {
+    design <- cv_plan$balance
+    worst <- which.min(design$train_presence)
+    usable <- sum(design$discrimination_defined)
+    cli::cli_inform("Spatial design: {usable}/{nrow(design)} test folds can estimate discrimination; the smallest training presence count is {design$train_presence[worst]} (repeat {design$replicate[worst]}, fold {design$fold[worst]}).")
+  }
 
   response_data <- .cast_response_validation_data(response_data, split$env_vars)
   if (!is.null(response_data) && !isTRUE(all.equal(

@@ -1,3 +1,11 @@
+# castSDM 0.45.1
+
+- Write large current-predictor cache blocks with faster lossless gzip while
+  retaining existing scientific cache keys and integrity checks.
+- Highlight the smallest training presence count and the number of spatial
+  test folds that can estimate discrimination. Report both environmental
+  coverage criteria in the example workflow and mark optional maps on demand.
+
 # castSDM 0.45.0
 
 - Report failed spatial designs with the original blockCV error, the attempted

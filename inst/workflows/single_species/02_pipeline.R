@@ -212,12 +212,14 @@ run_species <- function(cfg) {
   diagnostic <- timed("diagnostics", castSDM::cast_diagnose(result, comparison = comparison,
     output_dir = file.path(out, "diagnostics")))
   sensitivity <- diagnostic$response_spatial_sensitivity
-  if (is.data.frame(sensitivity) && "n_common" %in% names(sensitivity))
-    message("Spatial-refit explanation check: ", sensitivity$n_available[1L], " fits on ",
-      sensitivity$n_locations[1L], " unchanged hold-out locations; ", sensitivity$n_common[1L],
-      " common central-quantile locations (", sensitivity$n_common_presence[1L],
-      " presences; ", sensitivity$n_common_background[1L],
-      " backgrounds). Observed-range counts are reported separately in diagnostics/response_spatial_sensitivity.csv; neither criterion establishes joint support or confidence.")
+  if (is.data.frame(sensitivity) && "n_common" %in% names(sensitivity)) {
+    scope <- unique(sensitivity[sensitivity$scenario == scenarios$report & sensitivity$model == "ensemble",
+      c("criterion", "n_available", "n_locations", "n_common", "n_common_presence", "n_common_background")])
+    for (i in seq_len(nrow(scope))) message("Response evidence (", scope$criterion[i], "): ",
+      scope$n_common[i], "/", scope$n_locations[i], " hold-out locations covered in all ",
+      scope$n_available[i], " spatial fits (", scope$n_common_presence[i], " presences; ",
+      scope$n_common_background[i], " backgrounds). See diagnostics/response_spatial_sensitivity.csv.")
+  }
   terms <- diagnostic$gam_concurvity
   if (is.data.frame(terms) && nrow(terms)) {
     terms <- terms[terms$term != "para", ]

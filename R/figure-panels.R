@@ -249,9 +249,14 @@
   add("02_habitat_change", function() {
     plots <- list(map("current", limits = suitability_limits()), map("joint", limits = suitability_limits()),
       map("joint_change", kind = "signed", legend = "Future - current"))
+    change <- cmp$summary[cmp$summary$scenario == report & cmp$summary$component == "joint_change", ]
+    magnitude <- if (length(change$mean_abs) == 1L && is.finite(change$mean_abs))
+      sprintf("Mean absolute change per native cell is %.4g.", change$mean_abs)
     patchwork::wrap_plots(plots, ncol = 3) + .cast_figure_annotation(
       if (!length(unlist(cmp$groups, use.names = FALSE))) "No changing predictor in the fitted model" else "Predicted environmental suitability change",
-      paste("Reporting scenario:", report, ". Current and future share a suitability scale. Native values are retained in the scientific raster."))
+      paste(c(paste0("Reporting scenario: ", report, ". Current and future share a suitability scale."),
+        "The difference map shows all paired predictions.", magnitude,
+        "See the environmental-coverage and model-disagreement panels for interpretation."), collapse = " "))
   }, 100, !is.null(path))
   add("03_environmental_driver", function() {
     common <- !is.null(att$common_summary)
@@ -289,7 +294,9 @@
       (is.null(att$common_summary) || !is.null(data$attribution_supported_display)) &&
       (is.null(att$common_summary) || any(att$common_summary$n > 0)),
     if (!length(unlist(cmp$groups, use.names = FALSE))) "No fitted predictor changes in the supplied scenario; per-factor scenario maps are inapplicable." else
-      "Driver attribution requires raw scenario predictors and at least one common supported cell; full-domain D_ maps remain available.")
+      if (is.null(att) && !any(data$notes$product == "03_environmental_driver"))
+        "On demand. Select an environmental variable in Shiny or request figure 03 through the replot entry." else
+        "The supported response map needs raw scenario predictors and a nonempty common coverage domain.")
   add("04_support_and_disagreement", function() {
     patchwork::wrap_plots(map("support", "Training quantile envelope", "support", legend = "Quantile envelope"),
       map("sd_joint_change", "Paired cross-model disagreement", limits = .cast_figure_bound(path, "sd_joint_change"),

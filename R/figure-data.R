@@ -352,10 +352,10 @@
     result <- comparison$results[[s]]
     artifact_id <- result$alias_of %||% s
     if (is.null(result$raster_file)) next
-    if (verbose) cli::cli_inform("Display grid {s}: checking cache (scientific raster unchanged).")
     input <- result$raster_file
     requested <- if (s == scenario) display_request$report_layers else display_request$other_layers
     if (!is.null(requested) && !length(requested)) next
+    if (verbose) cli::cli_inform("Display grid {s}: checking cache (scientific raster unchanged).")
     if (!is.null(comparison$threshold) && (is.null(display_request) || isTRUE(display_request$range))) {
       path <- file.path(directory, paste0("range_", artifact_id, ".tif"))
       key <- .cast_digest(list(unname(tools::md5sum(input)), comparison$threshold, .cast_code_identity(.cast_figure_classes)))
