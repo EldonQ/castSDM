@@ -34,7 +34,7 @@ gbif_taxon_ok <- function(raw, target) {
     if (is.logical(tt) || is.numeric(tt)) {
       return(!is.na(tt) & as.logical(tt))
     }
-    return(tolower(trimws(as.character(tt))) == target)
+    return(!is.na(tt) & tolower(trimws(as.character(tt))) == target)
   }
   candidates <- intersect(c("species", "genus", "family", "subfamily"), names(raw))
   if (!length(candidates)) return(rep(FALSE, nrow(raw)))
@@ -147,7 +147,10 @@ read_occurrences <- function(cfg) {
     eligible <- which(raw$qc_reason == "kept")
     eligible <- eligible[order(raw$coordinateUncertaintyInMeters[eligible],
                               raw$gbifID[eligible], na.last = TRUE)]
-    raw$qc_reason[eligible[duplicated(raw$gbifID[eligible])]] <- "duplicate_record"
+    ids <- trimws(raw$gbifID[eligible])
+    known_id <- !is.na(ids) & nzchar(ids)
+    duplicate_id <- which(known_id)[duplicated(ids[known_id])]
+    raw$qc_reason[eligible[duplicate_id]] <- "duplicate_record"
     eligible <- eligible[raw$qc_reason[eligible] == "kept"]
     raw$qc_reason[eligible[duplicated(raw$grid_cell[eligible])]] <- "duplicate_cell"
     kept <- raw$qc_reason == "kept"

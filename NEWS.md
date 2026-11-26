@@ -1,3 +1,10 @@
+# castSDM 0.48.0
+
+- Reuse fitted GAM bases directly for changing smooths in paired comparisons.
+  Fitting, current predictions and climate inputs keep the same definitions.
+- Keep GBIF rows with missing identifiers eligible for location-based duplicate
+  checks and treat missing declared taxon labels as unverified.
+
 # castSDM 0.47.1
 
 - Report a distance-only hold-out AUC and nearest-training-presence distances

@@ -171,6 +171,23 @@
   stats::setNames(labels, vars)
 }
 
+.cast_selected_gam_terms <- function(model, newdata, terms) {
+  smooth <- model$smooth
+  index <- match(terms, vapply(smooth, `[[`, character(1), "label"))
+  if (anyNA(index) || !is.null(model$Xcentre) || length(attr(model$nsdf, "drop.ind")))
+    return(.cast_predict_gam(model, newdata, type = "terms", terms = terms))
+  # Use the fitted bases and coefficients that predict.gam uses. Computing
+  # only the selected smooths avoids its full, mostly zero design matrix.
+  out <- matrix(NA_real_, nrow(newdata), length(terms), dimnames = list(NULL, terms))
+  for (j in seq_along(index)) {
+    term <- smooth[[index[j]]]
+    basis <- mgcv::PredictMat(term, newdata)
+    coefficients <- model$coefficients[seq.int(term$first.para, term$last.para)]
+    out[, j] <- basis %*% coefficients + (attr(basis, "offset") %||% 0)
+  }
+  out
+}
+
 .cast_prediction_context <- function(fit, weights, current, future, clamp = FALSE, gam_current = NULL,
     clamp_ranges = NULL, measure = function(phase, expr) force(expr)) {
   reference <- fit$scaling$reference
@@ -196,7 +213,7 @@
       saved <- list(eta = rowSums(a) + attr(a, "constant"), terms = a)
     }
     delta <- if (length(cols)) {
-      b <- measure("predict_gam", .cast_predict_gam(info$model, future, type = "terms", terms = cols))
+      b <- measure("predict_gam", .cast_selected_gam_terms(info$model, future, cols))
       b - saved$terms[, colnames(b), drop = FALSE]
     } else matrix(numeric(), nrow(current), 0L)
     list(eta = saved$eta, delta = delta)

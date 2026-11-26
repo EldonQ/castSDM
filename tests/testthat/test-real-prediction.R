@@ -22,6 +22,12 @@ test_that("ordinary, accelerated, tabular and scenario predictions share one cla
   outside <- Reduce(`|`, lapply(x$variables, function(v)
     future[[v]] < min(ref[[v]]) | future[[v]] > max(ref[[v]])))
   expect_true(any(outside))
+  gam <- fit$models$gam$model
+  selected <- gam$smooth[[1L]]$label
+  regular <- castSDM:::.cast_predict_gam(gam, future, type = "terms", terms = selected)
+  direct <- castSDM:::.cast_selected_gam_terms(gam, future, selected)
+  expect_equal(colnames(direct), colnames(regular))
+  expect_equal(as.numeric(direct), as.numeric(regular), tolerance = 1e-12)
   for (clamp in c(FALSE, TRUE)) {
     context <- castSDM:::.cast_prediction_context(fit, weights, current, future, clamp)
     scenario <- context$predict(x$variables)
