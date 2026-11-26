@@ -266,6 +266,7 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
     occurrence_metadata = if (!is.null(cfg$occurrence_metadata_file) && file.exists(cfg$occurrence_metadata_file))
       tools::md5sum(cfg$occurrence_metadata_file),
     pool = tools::md5sum(cfg$nsdm_pool_csv),
+    predictor_list = if (!is.null(cfg$predictor_file)) tools::md5sum(cfg$predictor_file),
     rasters = raster_manifest,
     target_group = list(
       enabled = isTRUE(cfg$bg_target_group),
@@ -302,6 +303,22 @@ analysis_domain_label <- function(mode) {
     freshwater_river = "river-containing grid cells within observed-locality scope",
     custom_mask = "custom analysis-domain mask",
     stop("Unknown domain_mode: ", mode))
+}
+
+case_target_group <- function(path, domain) {
+  tg <- data.table::fread(path, data.table = FALSE)
+  if (!all(c("X", "Y") %in% names(tg)) || !all(vapply(tg[c("X", "Y")], is.numeric, logical(1))))
+    stop("Target-group records need numeric X and Y in the environmental raster CRS.")
+  xy <- as.matrix(tg[c("X", "Y")])
+  xy <- xy[rowSums(!is.finite(xy)) == 0L, , drop = FALSE]
+  cells <- sort(unique(terra::cellFromXY(domain, xy)))
+  values <- if (length(cells)) terra::extract(domain, cells)[[1L]] else numeric()
+  cells <- cells[is.finite(values) & values > 0]
+  if (!length(cells)) stop("Target-group background has no points inside the analysis domain. Verify the CRS and survey coverage.")
+  xy <- terra::xyFromCell(domain, cells)
+  message("Declared target-group pool: ", nrow(tg), " records -> ", nrow(xy),
+    " unique cells inside the declared domain.")
+  data.frame(lon = xy[, 1L], lat = xy[, 2L])
 }
 
 case_preparation_inputs <- function(cfg, current) {
@@ -435,46 +452,7 @@ prepare_species <- function(cfg, current, prep_inputs) {
   domain_cells_value <- as.integer(domain_area$n_cells)
   # Optional target-group locations must be supplied for a comparable survey
   # group; no all-taxa source is treated automatically as fish survey effort.
-  tg_table <- NULL
-  if (isTRUE(cfg$bg_target_group) && length(cfg$bg_target_group_file) &&
-      file.exists(cfg$bg_target_group_file)) {
-    tg_table <- {
-      tg <- data.table::fread(cfg$bg_target_group_file, sep = "|",
-                              select = c("X", "Y"))
-      names(tg) <- c("lon", "lat")
-      # Snap to the 1 km template grid and keep unique valid cells.
-      tmpl <- current[[1]]
-      res_x <- terra::res(tmpl)[1]; res_y <- terra::res(tmpl)[2]
-      col <- floor((tg$lon - terra::xmin(tmpl)) / res_x) + 1
-      row <- floor((tg$lat - terra::ymin(tmpl)) / res_y) + 1
-      ncol_g <- terra::ncol(tmpl); nrow_g <- terra::nrow(tmpl)
-      inside <- col >= 1 & col <= ncol_g & row >= 1 & row <= nrow_g &
-        is.finite(tg$lon) & is.finite(tg$lat)
-      cell <- (row[inside] - 1) * ncol_g + col[inside]
-      # National land mask: keep cells that are non-NA in the stack.
-      land <- !is.na(terra::values(tmpl, mat = FALSE))
-      valid_cell <- sort(unique(cell[land[cell] %in% TRUE]))
-      cell_xy <- data.frame(
-        lon = terra::xFromCol(tmpl, (valid_cell - 1) %% ncol_g + 1),
-        lat = terra::yFromRow(tmpl, (valid_cell - 1) %/% ncol_g + 1))
-      message(sprintf(
-        "Target-group background pool: %s records -> %d unique 1 km cells on the national mask.",
-        format(nrow(tg), big.mark = ","), nrow(cell_xy)))
-      cell_xy
-    }
-  }
-  if (!is.null(tg_table)) {
-    tg_cells <- terra::cellFromXY(domain, as.matrix(tg_table[, c("lon", "lat")]))
-    in_domain_tg <- !is.na(tg_cells) &
-      terra::values(domain, mat = FALSE)[tg_cells] == 1
-    in_domain_tg[is.na(in_domain_tg)] <- FALSE
-    tg_table <- tg_table[in_domain_tg, , drop = FALSE]
-    if (!nrow(tg_table)) {
-      stop("Target-group background has no points inside the analysis domain.")
-    }
-    message("Target-group background restricted to the analysis domain: ",
-            nrow(tg_table), " candidate cells.")
-  }
+  tg_table <- if (isTRUE(cfg$bg_target_group)) case_target_group(tg_file, domain) else NULL
   model_data <- castSDM::cast_background(
     occ, domain_area, current, strategy = cfg$bg_strategy,
     bin_k = cfg$bg_bin_k, sre_quantile = cfg$bg_sre_quantile,
@@ -496,7 +474,9 @@ prepare_species <- function(cfg, current, prep_inputs) {
     actual_background = sum(model_data$presence == 0L),
     actual_presence = sum(model_data$presence == 1L),
     ratio = sum(model_data$presence == 0L)/sum(model_data$presence == 1L),
-    strategy = cfg$bg_strategy), file.path(out_dir, "background_summary.csv"))
+    strategy = if (is.null(tg_table)) cfg$bg_strategy else "declared_target_group",
+    target_group_candidates = if (is.null(tg_table)) NA_integer_ else nrow(tg_table)),
+    file.path(out_dir, "background_summary.csv"))
   vars <- castSDM::get_env_vars(model_data)
   missing_file <- file.path(out_dir, "predictor_missing_qc.csv")
   if (file.exists(missing_file)) {

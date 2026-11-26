@@ -1,6 +1,6 @@
 # AI-assisted maintenance (2026-11-07); scope and verification: inst/AI_ASSISTANCE.md.
 # source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
-# or Rscript 00_RUN_ALL.R [--dry-run]
+# or Rscript 00_RUN_ALL.R [--dry-run | --design-only]
 local({
   sources <- vapply(sys.frames(), function(frame)
     if (is.character(frame$ofile) && length(frame$ofile) == 1L) frame$ofile else
@@ -13,10 +13,15 @@ local({
   roots <- roots[file.exists(file.path(roots, "runtime.R"))]
   if (!length(roots)) stop("Cannot locate runtime.R; source 00_RUN_ALL.R using its full path.")
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
+  args <- commandArgs(TRUE)
+  design_only <- identical(Sys.getenv("CAST_DESIGN_ONLY"), "1") || "--design-only" %in% args
+  dry <- identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% args
+  if (dry && design_only) stop("Choose either --dry-run or --design-only.")
   sys.source(file.path(root, "runtime.R"), envir = environment())
   runtime <- case_runtime_setup(root, packages = c("castSDM", "terra", "sf", "data.table",
-    "digest", "filelock", "ranger", "maxnet", "mgcv", "iml", "pROC", "blockCV", "FNN",
-    "ggplot2", "patchwork", "scales", "ragg"), minimum_cast = "0.45.1")
+    "digest", "filelock", "blockCV", "FNN",
+    if (!design_only) c("ranger", "maxnet", "mgcv", "iml", "pROC", "ggplot2", "patchwork", "scales", "ragg")),
+    minimum_cast = "0.46.0")
   for (file in c("01_config.R", "prepare_data.R", "data_adapter.R", "inventory.R",
                  "scenario_case.R", "02_pipeline.R", "03_figures.R"))
     sys.source(file.path(root, file), envir = environment(), keep.source = FALSE)
@@ -32,20 +37,21 @@ local({
     "; spatial CV=", cfg$protocol$cv_k, " (", cfg$protocol$block_method,
     "); models=", paste(cfg$protocol$models, collapse=","))
   message("Species training cache: ", cfg$cache_root)
-  case_inventory_ensure(root, cfg$nsdm_data_root)
+  case_inventory_ensure(root, cfg$nsdm_data_root, include_future = !design_only)
   cfg$runtime <- runtime
   cfg$runtime$script_hashes <- tools::md5sum(list.files(root, pattern = "\\.R$", full.names = TRUE))
-  for (path in c(cfg$occurrence_file, cfg$nsdm_pool_csv, cfg$future_layers_csv))
+  for (path in c(cfg$occurrence_file, cfg$nsdm_pool_csv, if (!design_only) cfg$future_layers_csv))
     if (!file.exists(path)) stop("Missing input: ", path, ". Check paths or run 00_INVENTORY.R.")
-  case_runtime_preflight(cfg)
+  case_runtime_preflight(cfg, include_future = !design_only)
   if (cfg$input_type == "gbif" && !nzchar(Sys.which("cs2cs")))
     stop("Add PROJ cs2cs to PATH for this data adapter before running.")
-  if (identical(Sys.getenv("CAST_DRY_RUN"), "1") || "--dry-run" %in% commandArgs(TRUE)) {
+  if (dry) {
     message("Preflight OK: ", taxon, "; no preparation, training or raster projection started.")
     invisible(cfg)
   } else {
-    out <- run_species(cfg)
-    message("Interactive exploration: source(\"", file.path(root, "05_SHINY.R"), "\", encoding = \"UTF-8\")")
+    out <- run_species(cfg, design_only = design_only)
+    if (!design_only)
+      message("Interactive exploration: source(\"", file.path(root, "05_SHINY.R"), "\", encoding = \"UTF-8\")")
     invisible(out)
   }
 })

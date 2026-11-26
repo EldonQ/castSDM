@@ -1,4 +1,4 @@
-# CHELSA 单物种工作流（castSDM 0.45.1）
+# CHELSA 单物种工作流（castSDM 0.46.0）
 
 模型协议不按物种名调参：物种标识用于区分输入和输出，研究域、记录格式和统计设置由项目显式声明。变量筛选保持训练侧 VIF，并在每个空间折内重复，不规定保留数量。
 
@@ -33,8 +33,12 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 物种名不决定坐标格式或分析域；应按实际数据明确指定。
 
 该文件按环境网格 CRS 的 `lon,lat,year` 读取；来源、采样努力和年份含义未经独立核实，不自动标记为审核后的 GBIF 记录。松鼠默认使用全国陆地掩膜，与鱼类的河流局地范围不同；两者不能仅按 AUC 排名。两例均使用 GLU 当前土地利用指标。
-新结果写入 `output/cast045_chelsa_ensmean/<物种>`。输入文件内容或科学设置变化时，使用新的 `CAST_RUN_ID` 保留已有研究结果。
+新结果写入 `output/cast046_chelsa_ensmean/<物种>`。输入文件内容或科学设置变化时，使用新的 `CAST_RUN_ID` 保留已有研究结果。
 `CAST_DRY_RUN=1` 只做输入检查；正常运行前应取消该环境变量。
+
+可先在 Shiny 点击「检查数据与空间折」，或设置 `CAST_DESIGN_ONLY=1` 后运行入口。预检使用正式流程的实际出现点、背景和候选变量，从 `output/.design` 查看各折记录数、最近训练位置距离和边际训练范围覆盖。预检完成后，取消 `CAST_DESIGN_ONLY` 再拟合。`cast_workflow(..., design_only = TRUE)` 提供同一入口。
+
+候选变量可用 `settings$predictor_file` 声明，CSV 的 `layer` 列使用当前清单的 ID，先应用清单再检查覆盖和取样。`target_group_file` 可提供同一坐标系下同类调查的 `X,Y` 背景位置。`validation_target` 记录验证用途。`projection_cores` 可单独设置情景预测预算，`resources$cores` 仍控制训练预算。
 
 ## 流程与解释
 
@@ -56,7 +60,7 @@ source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "U
 默认输出空间验证、连续适宜度变化、环境范围与模型分歧三组主图。保留 PNG/PDF 和既有底图。在 Shiny 点选环境因子即可计算该因子的地图。出版用单因子响应图、阈值分类、ALE 曲线和完整图集通过重绘入口按需输出：
 
 ```r
-Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast045_chelsa_ensmean/Callosciurus_erythraeus",
+Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast046_chelsa_ensmean/Callosciurus_erythraeus",
            CAST_FIGURES = "03_environmental_driver") # 也可选 all、responses、maps、drivers
 source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
 ```

@@ -45,9 +45,17 @@
 #'   (metres for `blockcv`; NULL estimates the range), `holdout_block_size`
 #'   (optional distinct outer scale), `background_points`, `thin_km` (distance thinning in km),
 #'   `predictor_min_coverage` (actual-domain coverage), `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
+#'   Optional `predictor_file` is a CSV of current inventory `layer` IDs.
+#'   Optional `target_group_file` contains comparable survey locations with
+#'   projected `X` and `Y` coordinates in the environmental grid CRS.
+#'   `validation_target` records `within_domain` or `spatial_transfer`.
+#'   Optional `projection_cores` sets the separate raster-stage core budget.
 #' @param run Execute preparation, fitting, projections and figures after checks.
 #'   Default `FALSE` only indexes and checks physical inputs.
-#' @return Workspace, entry, case directory and checked settings, invisibly.
+#' @param design_only Prepare the real cohort and check geographic separation,
+#'   sample counts and marginal candidate coverage before fitting. The design
+#'   report is saved separately and contains no projections.
+#' @return Workspace, entry, case/design directory and checked settings, invisibly.
 #' @details Future files must be CHELSA v2.1 ensemble-mean climate for SSP126,
 #'   SSP370 and SSP585 in 2011-2040, 2041-2070 and 2071-2100, relative to
 #'   1981-2010. Predictions at mean climate do not estimate GCM uncertainty.
@@ -56,11 +64,13 @@
 #'   outputs are preserved. Source inputs are read only.
 #' @export
 cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
-                          settings = list(), run = FALSE) {
+                          settings = list(), run = FALSE, design_only = FALSE) {
+  if (!is.logical(design_only) || length(design_only) != 1L || is.na(design_only) ||
+      (design_only && isTRUE(run))) cli::cli_abort("Set design_only = TRUE or run = TRUE for one run mode.")
   if (!is.character(species) || length(species) != 1L || is.na(species) || !grepl("^[A-Za-z][A-Za-z0-9_-]*$", species))
     cli::cli_abort("Use a taxon identifier with letters, digits, underscores or hyphens.")
-  for (p in c("terra", "data.table", "sf", "blockCV", "ranger", "maxnet", "mgcv",
-              "iml", "pROC", "FNN", "ggplot2", "patchwork", "scales", "ragg"))
+  for (p in c("terra", "data.table", "sf", "blockCV", "FNN",
+              if (!design_only) c("ranger", "maxnet", "mgcv", "iml", "pROC", "ggplot2", "patchwork", "scales", "ragg")))
     check_suggested(p, "for the CHELSA workflow")
   paths <- list(path = path, data_dir = data_dir, occurrence_file = occurrence_file)
   if (any(!vapply(paths, function(x) is.character(x) && length(x) == 1L &&
@@ -70,20 +80,29 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   occurrence_file <- normalizePath(occurrence_file, winslash = "/", mustWork = TRUE)
   if (startsWith(tolower(paste0(path, "/")), tolower(paste0(data_dir, "/"))))
     cli::cli_abort("Keep the workspace outside the environmental data library.")
-  allowed <- c("domain", "domain_mask", "input_type", "lulc_product", "models", "cv_k", "block_method",
+  allowed <- c("domain", "domain_mask", "validation_target", "predictor_file", "target_group_file", "projection_cores",
+    "input_type", "lulc_product", "models", "cv_k", "block_method",
     "block_size", "holdout_block_size", "background_points", "thin_km", "predictor_min_coverage", "vif_threshold", "predictor_missing", "resources")
   if (!is.list(settings) || (length(settings) && (is.null(names(settings)) ||
       any(!names(settings) %in% allowed) || anyDuplicated(names(settings)))))
     cli::cli_abort("Unknown or duplicated workflow settings.")
-  defaults <- list(domain = "national",
+  defaults <- list(domain = "national", validation_target = "spatial_transfer",
     input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
     cv_k = 5L, background_points = 10000L, thin_km = 1, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
-  for (n in c("domain", "input_type", "lulc_product", "block_method")) {
+  for (n in c("domain", "input_type", "lulc_product", "block_method", "validation_target")) {
     if (n == "block_method" && is.null(settings[[n]])) next
     choices <- switch(n, domain = c("national", "freshwater_river", "custom_mask"),
-      input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"), block_method = c("blockcv", "grid"))
+      input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"),
+      block_method = c("blockcv", "grid"), validation_target = c("within_domain", "spatial_transfer"))
     if (length(settings[[n]]) != 1L || !settings[[n]] %in% choices) cli::cli_abort("Invalid workflow {.val {n}} setting.")
+  }
+  for (n in c("predictor_file", "target_group_file")) {
+    file <- settings[[n]]
+    if (is.null(file)) next
+    if (!is.character(file) || length(file) != 1L || is.na(file) ||
+        !file.exists(file) || dir.exists(file)) cli::cli_abort("{.val {n}} must be an existing input file.")
+    settings[[n]] <- normalizePath(file, winslash = "/", mustWork = TRUE)
   }
   if (identical(settings$domain, "custom_mask")) {
     if (!is.character(settings$domain_mask) || length(settings$domain_mask) != 1L ||
@@ -105,6 +124,10 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   settings$thin_km <- .cast_check_scalar(settings$thin_km, "thin_km", lower = 0)
   settings$predictor_min_coverage <- .cast_check_scalar(settings$predictor_min_coverage, "predictor_min_coverage", lower = 0, upper = 1, min_inclusive = FALSE)
   .cast_resources(settings$resources)
+  if (!is.null(settings$projection_cores)) {
+    settings$projection_cores <- .cast_check_scalar(settings$projection_cores, "projection_cores",
+      lower = settings$resources$workers %||% 1L, integer = TRUE)
+  }
   settings <- c(list(species = species, data_dir = data_dir, occurrence_file = occurrence_file), settings)
   template <- system.file("workflows", "single_species", package = "castSDM", mustWork = TRUE)
   scripts <- list.files(template, full.names = TRUE)
@@ -117,16 +140,18 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   lock <- .cast_lock(file.path(path, ".workflow.lock"))
   on.exit(filelock::unlock(lock), add = TRUE)
   .cast_atomic_rds(settings, file.path(path, "workflow_settings.rds"))
-  variables <- c("CAST_EXAMPLE_ROOT", "CAST_DATA_ROOT", "CAST_SPECIES", "CAST_RUN_ID", "CAST_OUTPUT_ROOT", "CAST_DRY_RUN")
+  variables <- c("CAST_EXAMPLE_ROOT", "CAST_DATA_ROOT", "CAST_SPECIES", "CAST_RUN_ID",
+    "CAST_OUTPUT_ROOT", "CAST_DRY_RUN", "CAST_DESIGN_ONLY")
   old <- Sys.getenv(variables, unset = NA_character_)
   on.exit({ Sys.unsetenv(variables); present <- !is.na(old)
     if (any(present)) do.call(Sys.setenv, as.list(stats::setNames(old[present], variables[present]))) }, add = TRUE)
   run_id <- Sys.getenv("CAST_RUN_ID", .cast_workflow_run_id())
   Sys.setenv(CAST_EXAMPLE_ROOT = path, CAST_DATA_ROOT = data_dir, CAST_SPECIES = species,
     CAST_RUN_ID = run_id, CAST_OUTPUT_ROOT = file.path(path, "output"),
-    CAST_DRY_RUN = if (isTRUE(run)) "0" else "1")
+    CAST_DRY_RUN = if (isTRUE(run) || design_only) "0" else "1",
+    CAST_DESIGN_ONLY = if (design_only) "1" else "0")
   entry <- file.path(path, "00_RUN_ALL.R")
-  sys.source(entry, envir = new.env(parent = globalenv()), keep.source = FALSE)
+  value <- source(entry, local = new.env(parent = globalenv()), encoding = "UTF-8", keep.source = FALSE)$value
   invisible(list(path = path, entry = entry, case_dir = file.path(path, "output", run_id, species),
-    checked = TRUE, run = isTRUE(run), settings = settings))
+    design_dir = if (design_only) value, checked = TRUE, run = isTRUE(run), settings = settings))
 }

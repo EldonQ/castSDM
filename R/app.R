@@ -270,11 +270,17 @@
     })
     setup_result <- shiny::reactiveVal(NULL)
     setup_request <- function(run) {
+      optional_path <- function(value) if (nzchar(trimws(value %||% ""))) trimws(value)
       list(operation = "setup", path = input$setup_path, data_dir = input$setup_data,
         occurrence_file = input$setup_occurrence, species = input$setup_species,
+        design_only = !run,
         settings = list(domain = input$setup_domain,
           domain_mask = if (identical(input$setup_domain, "custom_mask")) input$setup_domain_mask else NULL,
           input_type = input$setup_input,
+          validation_target = input$setup_validation_target,
+          predictor_file = optional_path(input$setup_predictor_file),
+          target_group_file = optional_path(input$setup_target_group),
+          projection_cores = if (is.finite(input$setup_projection_cores %||% NA_real_)) input$setup_projection_cores else NULL,
           lulc_product = input$setup_lulc, models = input$setup_models, cv_k = input$setup_cv,
           block_method = input$setup_block_method,
           block_size = if (identical(input$setup_block_method, "blockcv") && is.finite(input$setup_block_size %||% NA_real_)) input$setup_block_size else NULL,
@@ -300,9 +306,13 @@
     })
     output$setup_summary <- shiny::renderUI({
       x <- setup_result(); if (is.null(x)) return(NULL)
-      shiny::tags$p(class = "cast-setup-receipt", if (isTRUE(x$run)) "Analysis completed." else
-        "Input checks passed. No preparation, fitting or projection started.",
-        shiny::tags$br(), x$case_dir)
+      if (isTRUE(x$run)) return(shiny::tags$p(class = "cast-setup-receipt", "Analysis completed.", shiny::tags$br(), x$case_dir))
+      if (is.null(x$design_dir)) return(NULL)
+      balance <- utils::read.csv(file.path(x$design_dir, "cv_fold_design.csv"))
+      shiny::tags$p(class = "cast-setup-receipt",
+        sprintf("\u7a7a\u95f4\u9884\u68c0\u5b8c\u6210\uff0c%d/%d \u6298\u53ef\u8ba1\u7b97\u533a\u5206\u5ea6\uff0c\u6700\u5c11\u8bad\u7ec3\u51fa\u73b0\u70b9\u4e3a %d\u3002",
+          sum(balance$discrimination_defined), nrow(balance), min(balance$train_presence)),
+        shiny::tags$br(), x$design_dir)
     })
     shiny::observe({
       shiny::invalidateLater(750, session)
@@ -330,7 +340,7 @@
             shiny::updateTextInput(session, "case_dir", value = value$case_dir)
             load_project(directory = value$case_dir)
           } else {
-            status_kind("ready"); status("Input checks passed; ready to run.")
+            status_kind("ready"); status("Spatial design checked; review fold balance before fitting.")
           }
         } else {
           previous <- active()

@@ -796,6 +796,12 @@ cast_compare <- function(fit, current, future, groups, cv = NULL, weights = NULL
     if (verbose) cli::cli_inform("Verified {length(cluster)} scenario workers against the calling installation.")
   }
   worker_elapsed <- worker_elapsed + as.numeric(difftime(Sys.time(), worker_start, units = "secs"))
+  if (length(jobs)) {
+    active_workers <- min(budget$workers, length(jobs))
+    threads <- max(1L, budget$cores %/% active_workers)
+    for (scenario in names(jobs)) jobs[[scenario]]$threads <- threads
+    if (verbose) cli::cli_inform("Scenario prediction budget: {active_workers} active worker{?s}, up to {threads} threads per worker.")
+  }
   if (verbose && length(jobs) && !is.null(output_dir))
     cli::cli_inform("Scenario progress records: {.path {file.path(output_dir, 'progress')}}.")
   if (!is.null(ownership_file) && length(jobs)) {

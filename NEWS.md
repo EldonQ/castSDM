@@ -1,3 +1,12 @@
+# castSDM 0.46.0
+
+- Preview the real spatial validation design before fitting or projecting. The
+  report includes geographic separation, class counts and marginal coverage.
+- Accept a declared predictor CSV and an optional comparable survey background.
+  Qualify candidate variables before sampling and retain fold-local VIF.
+- Allocate projection threads across active scenario workers. The example can
+  use a separate raster-stage core budget without changing fitting threads.
+
 # castSDM 0.45.1
 
 - Write large current-predictor cache blocks with faster lossless gzip while

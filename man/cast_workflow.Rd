@@ -10,7 +10,8 @@ cast_workflow(
   occurrence_file,
   species = NULL,
   settings = list(),
-  run = FALSE
+  run = FALSE,
+  design_only = FALSE
 )
 }
 \arguments{
@@ -31,13 +32,22 @@ positive cells are active),
 \code{models}, \code{cv_k}, \code{block_method} (\code{blockcv} or \code{grid}), \code{block_size}
 (metres for \code{blockcv}; NULL estimates the range), \code{holdout_block_size}
 (optional distinct outer scale), \code{background_points}, \code{thin_km} (distance thinning in km),
-\code{predictor_min_coverage} (actual-domain coverage), \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).}
+\code{predictor_min_coverage} (actual-domain coverage), \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).
+Optional \code{predictor_file} is a CSV of current inventory \code{layer} IDs.
+Optional \code{target_group_file} contains comparable survey locations with
+projected \code{X} and \code{Y} coordinates in the environmental grid CRS.
+\code{validation_target} records \code{within_domain} or \code{spatial_transfer}.
+Optional \code{projection_cores} sets the separate raster-stage core budget.}
 
 \item{run}{Execute preparation, fitting, projections and figures after checks.
 Default \code{FALSE} only indexes and checks physical inputs.}
+
+\item{design_only}{Prepare the real cohort and check geographic separation,
+sample counts and marginal candidate coverage before fitting. The design
+report is saved separately and contains no projections.}
 }
 \value{
-Workspace, entry, case directory and checked settings, invisibly.
+Workspace, entry, case/design directory and checked settings, invisibly.
 }
 \description{
 Creates a workspace from the installed, versioned workflow. Checks the real

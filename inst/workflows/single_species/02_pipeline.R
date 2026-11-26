@@ -50,16 +50,59 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
   list(data = data[, cols, drop = FALSE], split = split, meta = meta, matching = matching)
 }
 
-run_species <- function(cfg) {
+case_point_design <- function(split, protocol, out) {
+  plan <- tryCatch(castSDM:::.cast_cv_plan(split$train, k = protocol$cv_k,
+    block_method = protocol$block_method, block_size = protocol$block_size,
+    coords_crs = protocol$coords_crs, buffer = protocol$buffer,
+    buffer_unit = protocol$buffer_unit, n_repeat = protocol$n_repeat, seed = protocol$seed),
+    error = function(e) {
+      writeLines(conditionMessage(e), file.path(out, "cv_design_error.txt"))
+      stop(e)
+    })
+  utils::write.csv(plan$balance, file.path(out, "cv_fold_design.csv"), row.names = FALSE)
+  castSDM:::.cast_cv_check_plan(plan)
+  xy <- c("lon", "lat")
+  crs <- if (!is.null(protocol$coords_crs)) sf::st_crs(protocol$coords_crs)
+  metric <- isTRUE(crs$units_gdal %in% c("metre", "meter"))
+  if (!metric) message("Distance columns are unavailable without a projected metre CRS.")
+  # Keep the recorded presences separate from sampled background labels.
+  assess <- function(train, test, stage, replicate, fold) {
+    nearest <- if (metric)
+      FNN::get.knnx(as.matrix(train[, xy]), as.matrix(test[, xy]), k = 1)$nn.dist[, 1L]/1000 else
+      rep(NA_real_, nrow(test))
+    bounds <- castSDM:::.cast_support_bounds(train[, split$env_vars, drop = FALSE], c(0, 1))
+    inside <- castSDM:::.cast_attribution_inside(test, bounds)
+    do.call(rbind, lapply(c(0L, 1L), function(label) {
+      i <- test$presence == label
+      data.frame(stage = stage, replicate = replicate, fold = fold,
+        response = label, n_training = sum(train$presence == label), n_test = sum(i),
+        nearest_training_record_median_km = if (any(i)) stats::median(nearest[i]) else NA_real_,
+        n_test_within_marginal_candidate_ranges = sum(inside & i),
+        n_candidates = length(bounds))
+    }))
+  }
+  challenge <- list(assess(split$train, split$test, "outer_holdout", NA_integer_, NA_integer_))
+  locations <- vector("list", length(plan$folds))
+  for (ri in seq_along(plan$folds)) {
+    ids <- plan$folds[[ri]]
+    for (i in seq_len(protocol$cv_k)) challenge[[length(challenge)+1L]] <- assess(
+      split$train[plan$train_indices[[ri]][[i]], , drop = FALSE],
+      split$train[ids == i, , drop = FALSE], "inner_cv", ri, i)
+    locations[[ri]] <- rbind(
+      data.frame(split$train[, xy], presence = split$train$presence, split = "training",
+        row = split$train_index, replicate = ri, fold = as.integer(ids)),
+      data.frame(split$test[, xy], presence = split$test$presence, split = "holdout",
+        row = split$test_index, replicate = ri, fold = NA_integer_))
+  }
+  utils::write.csv(do.call(rbind, challenge), file.path(out, "validation_design.csv"), row.names = FALSE)
+  utils::write.csv(do.call(rbind, locations), file.path(out, "validation_locations.csv"), row.names = FALSE)
+  invisible(plan$balance)
+}
+
+run_species <- function(cfg, design_only = FALSE) {
   run_id <- Sys.getenv("CAST_RUN_ID", castSDM:::.cast_workflow_run_id())
   if (!grepl("^[A-Za-z0-9_-]+$", run_id)) stop("CAST_RUN_ID must contain only letters, digits, _ and -.")
-  out <- file.path(cfg$output_root, run_id, cfg$species_name)
-  dir.create(out, recursive = TRUE, showWarnings = FALSE)
-  lock <- filelock::lock(file.path(out, ".case.lock"), timeout = 0)
-  if (is.null(lock)) stop("Another process is writing this case: ", out)
-  on.exit(filelock::unlock(lock), add = TRUE)
-  claim_file <- file.path(out, "run_claim.rds")
-  scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "example_root",
+  scientific_cfg <- cfg[setdiff(names(cfg), c("runtime", "resources", "projection_cores", "example_root",
     "output_root", "cache_root", "preparation_root", "diagnostic_thresholds",
     "figure_response_method", "figure_response_grid", "figure_display_resolution"))]
   scientific_cfg$protocol$num_threads <- NULL
@@ -67,22 +110,30 @@ run_species <- function(cfg) {
   input_clock <- proc.time()[["elapsed"]]
   current_pool <- wf_load_current_stack(cfg, verbose = TRUE)
   prep_inputs <- case_preparation_inputs(cfg, current_pool)
-  future <- case_inventory_read_future(cfg)
-  future_files <- future$path[future$product == "chelsa21-ensmean" &
-    future$ssp %in% cfg$scenario_ssps & future$period %in% cfg$scenario_periods]
-  claim <- list(schema = "cast_case_claim/3", config = scientific_cfg,
-    preparation = prep_inputs, future = case_file_manifest(future_files),
-    future_inventory = tools::md5sum(cfg$future_layers_csv),
+  claim <- list(schema = "cast_case_claim/4", config = scientific_cfg,
+    preparation = prep_inputs,
     sources = unname(tools::md5sum(file.path(cfg$example_root,
       c("prepare_data.R", "data_adapter.R", "scenario_case.R")))))
+  if (!design_only) {
+    future <- case_inventory_read_future(cfg)
+    future_files <- future$path[future$product == "chelsa21-ensmean" &
+      future$ssp %in% cfg$scenario_ssps & future$period %in% cfg$scenario_periods]
+    claim$future <- case_file_manifest(future_files)
+    claim$future_inventory <- tools::md5sum(cfg$future_layers_csv)
+  }
   claim$key <- digest::digest(claim, algo = "sha256")
+  out <- if (design_only) file.path(cfg$output_root, ".design", cfg$species_name, substr(claim$key, 1L, 16L)) else
+    file.path(cfg$output_root, run_id, cfg$species_name)
+  lock <- castSDM:::.cast_lock(file.path(out, ".case.lock"))
+  on.exit(filelock::unlock(lock), add = TRUE)
+  claim_file <- file.path(out, "run_claim.rds")
   previous <- if (file.exists(claim_file)) readRDS(claim_file) else NULL
   if ((!is.null(previous) && !identical(previous$key, claim$key)) ||
       (is.null(previous) && file.exists(file.path(out, "case.rds"))))
     stop("The declared analysis or input files changed. Choose a new CAST_RUN_ID. Prior results are preserved at ", out)
   if (is.null(previous)) castSDM:::.cast_atomic_rds(claim, claim_file)
   # A failed rerun must never leave a previous completion marker.
-  completion <- file.path(out, "completion.rds")
+  completion <- file.path(out, if (design_only) "design_complete.rds" else "completion.rds")
   if (file.exists(completion)) unlink(completion)
   timings <- list()
   record_time <- function(stage, start, seconds, status) {
@@ -128,7 +179,10 @@ run_species <- function(cfg) {
     declared_first_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[1L],
     declared_last_year = (cfg$occurrence_year_range %||% c(NA_real_, NA_real_))[2L],
     preprocessing_scope = cfg$preprocessing_scope,
-    domain = cfg$domain_mode, n_taxon_names = length(unique(taxon_names[used])),
+    domain = cfg$domain_mode, validation_target = cfg$validation_target,
+    background = prep_inputs$background_mode,
+    candidate_pool = if (is.null(cfg$predictor_file)) "eligible_inventory" else cfg$predictor_file,
+    n_taxon_names = length(unique(taxon_names[used])),
     n_possible_coarse_coordinates = if ("qc_tenth_degree_grid" %in% names(qc)) sum(qc$qc_tenth_degree_grid[used], na.rm = TRUE) else NA_integer_,
     source_metadata_available = "sampling_year_verified" %in% names(qc),
     interpretation = "Pooled historical records; spatial hold-out is not external or temporal validation."),
@@ -154,6 +208,13 @@ run_species <- function(cfg) {
     source = if (is.null(year)) "unavailable" else temporal_reference$source,
     method = cfg$select_temporal_match), file.path(out, "temporal_matching.csv"), row.names = FALSE)
   utils::write.csv(meta, file.path(out, "training_pool.csv"), row.names = FALSE)
+  if (design_only) {
+    balance <- timed("validation_design", case_point_design(matched$split, p, out))
+    castSDM:::.cast_atomic_rds(list(key = claim$key, preparation = preparation,
+      balance = balance), completion)
+    message("Validation design ready: ", out, ". No models fitted or scenarios projected.")
+    return(invisible(out))
+  }
   result <- timed("training_validation", castSDM::cast_run(matched$data, prepared = matched$split, protocol = p,
     select_var_id = stats::setNames(meta$construct_id, meta$layer),
     select_category = stats::setNames(meta$group, meta$layer),
@@ -197,9 +258,11 @@ run_species <- function(cfg) {
   current <- timed("selected_environment", wf_load_current_stack(cfg, varnames = selected))
   scenarios <- timed("scenario_inputs", case_scenarios(cfg, selected, current, out))
   mask <- terra::rast(file.path(preparation, "analysis_domain_mask.tif"))
+  projection_resources <- cfg$resources
+  projection_resources$cores <- cfg$projection_cores %||% cfg$resources$cores
   comparison <- timed("scenario_comparison", castSDM::cast_compare(result, current, scenarios$future,
     groups = scenarios$groups, mask = mask, support_probs = cfg$support_probs,
-    domain = "common", resources = cfg$resources,
+    domain = "common", resources = projection_resources,
     output_dir = file.path(out, "comparison"), thresholds = cfg$diagnostic_thresholds))
   footprint <- comparison$summary[, c("scenario", "n_valid", "n_supported", "support_share")]
   domain_summary <- utils::read.csv(file.path(preparation, "analysis_domain_summary.csv"))

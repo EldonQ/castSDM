@@ -220,7 +220,7 @@ case_coverage <- function(paths, mask, verbose = TRUE) {
 #' @return A list of output paths and summary counts.
 case_inventory_build <- function(root, data_root,
                                 coverage_csv = NULL, check_geom = TRUE,
-                                verbose = TRUE) {
+                                verbose = TRUE, include_future = TRUE) {
   if (!requireNamespace("terra", quietly = TRUE)) {
     stop("Package 'terra' is required to build the environmental inventory.")
   }
@@ -309,6 +309,10 @@ case_inventory_build <- function(root, data_root,
                    files$eligible_glu, row.names = FALSE)
   utils::write.csv(current[current$eligible_hlu, , drop = FALSE],
                    files$eligible_hlu, row.names = FALSE)
+  if (!include_future) {
+    if (verbose) message("Current inventory written: ", nrow(current), " layers; future inputs not inspected.")
+    return(invisible(list(paths = files, current = current)))
+  }
 
   if (isTRUE(verbose)) message("Scanning future layers ...")
   future <- case_scan_future(cov_root)
@@ -407,10 +411,10 @@ case_inventory_metadata <- function(root, data_root, current) {
   metadata
 }
 
-case_inventory_signature <- function(data_root) {
+case_inventory_signature <- function(data_root, include_future = TRUE) {
   cov <- file.path(data_root, "covariates", case_covariate_scope(data_root))
   current <- case_scan_current(cov)$path
-  future <- case_scan_future(cov)$path
+  future <- if (include_future) case_scan_future(cov)$path
   paths <- c(current, future, file.path(data_root, "mask_china.tif"),
     file.path(dirname(data_root), "00_docs", c("variable_dictionary.csv", "provenance_table.csv")))
   info <- file.info(paths)
@@ -419,16 +423,18 @@ case_inventory_signature <- function(data_root) {
     paths = paths, size = info$size, modified = as.numeric(info$mtime))
 }
 
-case_inventory_ensure <- function(root, data_root) {
-  signature <- case_inventory_signature(data_root)
-  receipt <- file.path(root, "config", "inventory_signature.rds")
-  files <- unlist(case_inventory_files(root), use.names = FALSE)
+case_inventory_ensure <- function(root, data_root, include_future = TRUE) {
+  signature <- case_inventory_signature(data_root, include_future)
+  receipt <- file.path(root, "config", if (include_future) "inventory_signature.rds" else "current_inventory_signature.rds")
+  files <- case_inventory_files(root)
+  if (!include_future) files <- files[c("current_all", "eligible_glu", "eligible_hlu")]
+  files <- unlist(files, use.names = FALSE)
   files <- c(files, file.path(root, "config", "predictor_metadata.csv"))
   signature$script <- unname(tools::md5sum(file.path(root, "inventory.R")))
   previous <- if (file.exists(receipt)) readRDS(receipt) else NULL
   if (all(file.exists(files)) && identical(previous$inputs, signature) &&
       identical(previous$outputs, unname(tools::md5sum(files)))) return(invisible(FALSE))
-  case_inventory_build(root, data_root)
+  case_inventory_build(root, data_root, include_future = include_future)
   saveRDS(list(inputs = signature, outputs = unname(tools::md5sum(files))), receipt)
   invisible(TRUE)
 }

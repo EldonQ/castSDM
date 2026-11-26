@@ -123,13 +123,17 @@ case_runtime_setup <- function(root, packages, minimum_cast = NULL) {
 }
 
 # Validate physical inputs even in --dry-run mode, before preparation or fitting.
-case_runtime_preflight <- function(cfg) {
-  tables <- lapply(c(cfg$nsdm_pool_csv, cfg$future_layers_csv), function(path) {
+case_runtime_preflight <- function(cfg, include_future = TRUE) {
+  declared <- case_declared_layers(cfg)
+  pool <- nsdm_pool_layers(cfg$nsdm_pool_csv)
+  if (!is.null(declared)) pool <- case_select_pool(pool, declared)
+  future <- if (include_future) {
+    path <- cfg$future_layers_csv
     x <- utils::read.csv(path, stringsAsFactors = FALSE)
     if (!"path" %in% names(x)) stop("Input inventory lacks its path column: ", path, call. = FALSE)
     x$path
-  })
-  paths <- unique(c(unlist(tables, use.names = FALSE), cfg$occurrence_file,
+  }
+  paths <- unique(c(pool$path, future, cfg$occurrence_file, cfg$bg_target_group_file,
     file.path(cfg$nsdm_data_root, "mask_china.tif"),
     if (identical(cfg$domain_mode, "freshwater_river")) cfg$freshwater_river_distance_raster,
     if (identical(cfg$domain_mode, "custom_mask")) cfg$analysis_domain_mask_file))

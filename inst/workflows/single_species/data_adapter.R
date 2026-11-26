@@ -131,14 +131,7 @@ nsdm_load_current_stack <- function(varnames = NULL,
     stop("Package 'terra' is required to load environmental rasters.")
   }
   pool <- nsdm_pool_layers(pool_csv)
-  if (!is.null(varnames)) {
-    missing_vars <- setdiff(varnames, pool$layer)
-    if (length(missing_vars)) {
-      stop("Requested variables missing from the pool: ",
-           paste(missing_vars, collapse = ", "))
-    }
-    pool <- pool[match(varnames, pool$layer), , drop = FALSE]
-  }
+  if (!is.null(varnames)) pool <- case_select_pool(pool, varnames)
   if (isTRUE(check_geom)) {
     nsdm_check_geom(pool$path, file.path(data_root, "mask_china.tif"),
                     label = "pool layer")
@@ -148,6 +141,15 @@ nsdm_load_current_stack <- function(varnames = NULL,
   names(r) <- pool$layer
   attr(r, "nsdm_layers") <- pool
   r
+}
+
+case_select_pool <- function(pool, layers) {
+  if (!is.character(layers) || !length(layers) || anyNA(layers) ||
+      any(!nzchar(layers)) || anyDuplicated(layers))
+    stop("Declare a nonempty list of unique layer IDs from the current inventory.")
+  missing <- setdiff(layers, pool$layer)
+  if (length(missing)) stop("Requested variables missing from the pool: ", paste(missing, collapse = ", "))
+  pool[match(layers, pool$layer), , drop = FALSE]
 }
 
 # ---- Future stacks (resolved scenario table only) ------------------------------
@@ -272,10 +274,18 @@ nsdm_custom_domain <- function(mask_file, template, verbose = TRUE) {
 # ---- Workflow dispatchers (called by 02_pipeline.R) ---------------------------
 
 wf_load_current_stack <- function(cfg, varnames = NULL, verbose = TRUE) {
-  nsdm_load_current_stack(varnames = varnames,
+  nsdm_load_current_stack(varnames = varnames %||% case_declared_layers(cfg),
                           pool_csv = cfg$nsdm_pool_csv,
                           data_root = cfg$nsdm_data_root,
                           verbose = verbose)
+}
+
+case_declared_layers <- function(cfg) {
+  if (is.null(cfg$predictor_file)) return(NULL)
+  file <- utils::read.csv(cfg$predictor_file, stringsAsFactors = FALSE,
+    colClasses = "character", fileEncoding = "UTF-8-BOM")
+  if (!"layer" %in% names(file)) stop("The predictor list needs a 'layer' column.")
+  trimws(file$layer)
 }
 
 wf_analysis_domain <- function(cfg, occ, raster_template, verbose = TRUE) {

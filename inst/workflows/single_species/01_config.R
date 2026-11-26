@@ -16,6 +16,7 @@ castsdm_species_configs <- function(root) {
     cache_root = file.path(root, "output", ".training-cache"),
     future_layers_csv = file.path(root, "config", "future_layers.csv"),
     input_type = "gbif", domain_mode = "national",
+    validation_target = "spatial_transfer", predictor_file = NULL, projection_cores = NULL,
     analysis_domain_mask_file = NULL,
     freshwater_river_distance_raster = NULL,
     freshwater_river_buffer_m = 100, freshwater_occurrence_buffer_km = 10,
@@ -78,6 +79,10 @@ castsdm_species_configs <- function(root) {
     base$nsdm_data_root <- data_root
     base$domain_mode <- settings$domain %||% base$domain_mode
     base$analysis_domain_mask_file <- settings$domain_mask
+    base$validation_target <- settings$validation_target %||% base$validation_target
+    base$predictor_file <- settings$predictor_file
+    base$bg_target_group_file <- settings$target_group_file
+    base$bg_target_group <- !is.null(settings$target_group_file)
     base$input_type <- settings$input_type %||% base$input_type
     base$current_lulc_product <- settings$lulc_product %||% base$current_lulc_product
     base$nsdm_pool_csv <- file.path(root, "config", paste0("pool_current_eligible_", base$current_lulc_product, ".csv"))
@@ -89,6 +94,7 @@ castsdm_species_configs <- function(root) {
     base$occurrence_thin_km <- settings$thin_km %||% base$occurrence_thin_km
     base$predictor_min_coverage <- settings$predictor_min_coverage %||% base$predictor_min_coverage
     base$resources <- settings$resources %||% base$resources
+    base$projection_cores <- settings$projection_cores
     base$protocol$models <- settings$models %||% base$protocol$models
     base$protocol$cv_k <- settings$cv_k %||% base$protocol$cv_k
     base$protocol$block_method <- settings$block_method %||% base$protocol$block_method
