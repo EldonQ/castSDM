@@ -17,7 +17,8 @@
 #' @param k Number of outer spatial folds.
 #' @param models Models passed to [cast_fit()].
 #' @param block_method Spatial blocking strategy:
-#'   - `"blockcv"` (default): \pkg{blockCV} spatial blocks
+#'   - `"auto"` (default): physical block size from sample geometry and class counts.
+#'   - `"blockcv"`: \pkg{blockCV} spatial blocks
 #'     ([blockCV::cv_spatial()]) with square blocks. The block size follows
 #'     the range of spatial autocorrelation estimated by
 #'     [blockCV::cv_spatial_autocor()] (Roberts et al. 2017), or the
@@ -136,7 +137,7 @@ cast_cv <- function(data,
                     select_args = list(),
                     k = 5L,
                     models = c("rf"),
-                    block_method = c("blockcv", "grid", "env"),
+                    block_method = c("auto", "blockcv", "grid", "env"),
                     block_size = NULL,
                     buffer = 0,
                     buffer_unit = c("deg", "km"),
@@ -769,13 +770,23 @@ cast_cv <- function(data,
 #' @keywords internal
 #' @noRd
 make_spatial_folds <- function(lon, lat, k,
-                               method = c("blockcv", "grid", "env"),
+                               method = c("auto", "blockcv", "grid", "env"),
                                seed = NULL, env = NULL,
                                y = NULL, block_size = NULL, coords_crs = NULL) {
   method <- match.arg(method)
   n <- length(lon)
   k_use <- min(k, n)
   if (k_use < 2L) return(.cast_fold_design(rep(1L, n), method, "insufficient_rows"))
+  if (method == "auto") {
+    if (!is.null(block_size))
+      return(.cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size, coords_crs)))
+    size <- .cast_auto_block_size(lon, lat, k_use, y, coords_crs)
+    fold <- .cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, size, coords_crs))
+    attr(fold, "design")$requested <- attr(fold, "design")$effective <- "auto"
+    attr(fold, "design")$size_source <- "sample_geometry_and_class_counts"
+    attr(fold, "design")$scale_interpretation <- "Geometry and class-count design; assess measured geographic separation for the intended prediction task."
+    return(fold)
+  }
   if (method == "blockcv")
     return(.cast_with_seed(seed, .cast_blockcv_folds(lon, lat, k_use, seed, y, block_size, coords_crs)))
   if (method == "env") {
@@ -818,6 +829,37 @@ make_spatial_folds <- function(lon, lat, k,
     stats::kmeans(cbind(cell_lon, cell_lat), centers = k, nstart = 10L))
   fold_of_cell <- stats::setNames(km$cluster, names(counts))
   .cast_fold_design(as.integer(fold_of_cell[as.character(cell)]), method, "grid")
+}
+
+.cast_auto_block_size <- function(lon, lat, k, response, coords_crs) {
+  check_suggested("sf", "for automatic spatial blocks")
+  if (any(!is.finite(lon)) || any(!is.finite(lat))) cli::cli_abort("Automatic blocking needs finite coordinates.")
+  .cast_check_coords_crs(coords_crs)
+  if (is.null(coords_crs) && (any(abs(lon) > 180) || any(abs(lat) > 90)))
+    cli::cli_abort("Projected coordinates require their source CRS.")
+  pts <- sf::st_as_sf(data.frame(lon = lon, lat = lat), coords = c("lon", "lat"), crs = coords_crs %||% 4326)
+  if (!isTRUE(sf::st_crs(pts)$units_gdal %in% c("metre", "meter"))) pts <- sf::st_transform(pts, 6933)
+  xy <- sf::st_coordinates(pts)
+  if (any(!is.finite(xy))) cli::cli_abort("Source coordinates could not be projected for the automatic grid.")
+  xy <- sweep(xy, 2L, apply(xy, 2L, min), "-")
+  size <- max(xy) * (1 + sqrt(.Machine$double.eps))
+  labels <- factor(response %||% rep(1L, nrow(xy)))
+  if (anyNA(labels)) cli::cli_abort("Automatic blocking needs complete response labels.")
+  atom <- paste(xy[, 1L], xy[, 2L], sep = ":")
+  exact <- table(atom, labels)
+  if (nrow(exact) < k || any(colSums(exact > 0L) < k))
+    cli::cli_abort("Too few distinct locations per class for the requested automatic folds. Inspect the point data or declare fewer folds.")
+  limit <- pmax(ceiling(colSums(exact)/k), apply(exact, 2L, max))
+  # Refine the observed extent only until every class spans enough blocks.
+  # This is a geometry rule and never looks at predictors or performance.
+  repeat {
+    cell <- floor(xy/size)
+    counts <- table(paste(cell[, 1L], cell[, 2L], sep = ":"), labels)
+    if (all(colSums(counts > 0L) >= k) && all(apply(counts, 2L, max) <= limit)) return(size)
+    size <- size/2
+    if (size < max(xy) * .Machine$double.eps)
+      cli::cli_abort("No numerically stable automatic grid can represent the requested folds.")
+  }
 }
 
 #' blockCV-Backed Fold Assignment

@@ -27,7 +27,7 @@ ensure_workflow_tempdir <- function() {
 }
 
 gbif_taxon_ok <- function(raw, target) {
-  target <- tolower(trimws(as.character(target)[1]))
+  target <- tolower(trimws(gsub("_", " ", as.character(target)[1], fixed = TRUE)))
   if (!nzchar(target)) return(rep(FALSE, nrow(raw)))
   if ("target_taxon" %in% names(raw)) {
     tt <- raw$target_taxon
@@ -57,62 +57,6 @@ case_year_checks <- function(year, cfg) {
     unknown_year = !known & !isTRUE(cfg$occurrence_keep_unknown_year %||% TRUE))
 }
 
-case_source_metadata <- function(raw, cfg) {
-  file <- cfg$occurrence_metadata_file
-  if (is.null(file) || !file.exists(file) || !"datasetKey" %in% names(raw)) return(raw)
-  use <- which(grepl("^SchiSOFT_24638538", raw$datasetKey))
-  if (!length(use)) return(raw)
-  if (!all(c("gbifID", "species", "decimalLongitude", "decimalLatitude") %in% names(raw)))
-    stop("SchiSOFT metadata matching requires IDs, species names and original coordinates.")
-  original <- data.table::fread(file, data.table = FALSE, colClasses = "character", na.strings = c("NA", ""))
-  required <- c("occurrenceID", "scientificName", "genus", "taxonomicStatus", "longitudeX", "latitudeY", "sampledDate", "remarksOfSampledDate", "sourceType")
-  if (!all(required %in% names(original)) || anyDuplicated(original$occurrenceID))
-    stop("Invalid original SchiSOFT metadata: ", file)
-  at <- match(as.character(raw$gbifID[use]), original$occurrenceID)
-  if (anyNA(at) || any(raw$species[use] != original$scientificName[at]) ||
-      any(abs(as.numeric(raw$decimalLongitude[use])-as.numeric(original$longitudeX[at])) > 1e-6) ||
-      any(abs(as.numeric(raw$decimalLatitude[use])-as.numeric(original$latitudeY[at])) > 1e-6))
-    stop("SchiSOFT IDs, names or coordinates do not match the original source. No metadata were inferred.")
-  fields <- c(sampled_date = "sampledDate", sampling_date_remarks = "remarksOfSampledDate", source_type = "sourceType")
-  for (name in names(fields)) {
-    raw[[name]] <- NA_character_
-    raw[[name]][use] <- original[[fields[[name]]]][at]
-  }
-  if (!"genus" %in% names(raw)) raw$genus <- NA_character_
-  if (!"taxonRank" %in% names(raw)) raw$taxonRank <- NA_character_
-  if (!"subfamily" %in% names(raw)) raw$subfamily <- NA_character_
-  raw$genus[use] <- original$genus[at]
-  raw$taxonRank[use] <- toupper(original$taxonomicStatus[at])
-  raw$subfamily[use] <- "Schizothoracinae"
-  raw$sampling_date_status <- "unverified_record_year"
-  single <- !is.na(raw$sampled_date) & grepl("^[0-9]{4}([0-9]{2}){0,2}$", raw$sampled_date)
-  actual <- use[is.na(raw$sampling_date_remarks[use]) & single[use]]
-  raw$sampling_date_status[use] <- ifelse(is.na(raw$sampled_date[use]), "unknown_sampling_date",
-    ifelse(!is.na(raw$sampling_date_remarks[use]), "source_date_substitute", "reported_sampling_interval"))
-  raw$sampling_date_status[actual] <- "reported_sampling_date"
-  raw$sampling_year_verified <- NA_real_
-  raw$sampling_year_verified[actual] <- as.numeric(substr(raw$sampled_date[actual], 1L, 4L))
-  intervals <- use[is.na(raw$sampling_date_remarks[use]) & !single[use] & !is.na(raw$sampled_date[use])]
-  for (j in intervals) {
-    ends <- strsplit(raw$sampled_date[j], "_", fixed = TRUE)[[1L]]
-    if (length(ends) == 2L && all(grepl("^[0-9]{4}([0-9]{2}){0,2}$", ends)) &&
-        length(unique(substr(ends, 1L, 4L))) == 1L) {
-      raw$sampling_year_verified[j] <- as.numeric(substr(ends[1L], 1L, 4L))
-      raw$sampling_date_status[j] <- "reported_interval_within_one_year"
-    }
-  }
-  # This is a precision warning, not a claim that a coordinate was rounded.
-  raw$qc_tenth_degree_grid <- abs(as.numeric(raw$decimalLongitude)*10-round(as.numeric(raw$decimalLongitude)*10)) < 1e-7 &
-    abs(as.numeric(raw$decimalLatitude)*10-round(as.numeric(raw$decimalLatitude)*10)) < 1e-7
-  raw$source_metadata_file <- raw$source_metadata_md5 <- NA_character_
-  raw$source_metadata_file[use] <- normalizePath(file, winslash = "/")
-  raw$source_metadata_md5[use] <- unname(tools::md5sum(file))
-  message("Original SchiSOFT metadata matched: ", length(use), " records; reported single sampling dates: ", length(actual),
-    "; additional intervals within one calendar year: ", sum(raw$sampling_date_status == "reported_interval_within_one_year"),
-    ". Multi-year intervals and substitute dates are not converted to precise sampling years.")
-  raw
-}
-
 read_occurrences <- function(cfg) {
   if (!length(cfg$occurrence_file) || any(!file.exists(cfg$occurrence_file))) {
     stop("Occurrence files are missing for ", cfg$species_name)
@@ -124,10 +68,9 @@ read_occurrences <- function(cfg) {
     d$source_file <- normalizePath(p, winslash = "/")
     d
   }), fill = TRUE))
-  raw <- case_source_metadata(raw, cfg)
   if (cfg$input_type == "gbif") {
     required <- c("gbifID", "decimalLongitude", "decimalLatitude",
-                  "countryCode", "occurrenceStatus", "hasGeospatialIssues",
+                  "occurrenceStatus", "hasGeospatialIssues",
                   "coordinateUncertaintyInMeters", "basisOfRecord")
     if (!all(required %in% names(raw))) stop("Missing GBIF fields: ",
       paste(setdiff(required, names(raw)), collapse = ", "))
@@ -158,7 +101,6 @@ read_occurrences <- function(cfg) {
       rep(FALSE, nrow(raw))
     }
     status_norm <- tolower(trimws(as.character(raw$occurrenceStatus)))
-    country_norm <- toupper(trimws(as.character(raw$countryCode)))
     geo_fields <- intersect(c("georeferenceSources", "georeferenceRemarks", "locality"), names(raw))
     geo <- if (length(geo_fields)) {
       do.call(paste, c(as.list(raw[, geo_fields, drop = FALSE]), sep = " "))
@@ -170,17 +112,22 @@ read_occurrences <- function(cfg) {
     valid_xy <- is.finite(raw$decimalLongitude) & is.finite(raw$decimalLatitude) &
       abs(raw$decimalLongitude) <= 180 & abs(raw$decimalLatitude) < 90
     raw$year <- if ("year" %in% names(raw)) suppressWarnings(as.numeric(raw$year)) else NA_real_
+    if ("eventDate" %in% names(raw)) {
+      iso <- grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", raw$eventDate)
+      dates <- as.Date(ifelse(iso, raw$eventDate, NA_character_), format = "%Y-%m-%d")
+      verified <- !is.na(dates) & format(dates, "%Y-%m-%d") == raw$eventDate
+      raw$sampling_year_verified <- ifelse(verified, as.numeric(format(dates, "%Y")), NA_real_)
+    }
     checks <- list(
       invalid_coordinates = !valid_xy,
       wrong_taxon = !taxon_ok,
-      outside_country = is.na(country_norm) | country_norm != "CN",
       not_present = is.na(status_norm) | status_norm != "present",
       unsupported_basis = unsupported_basis,
       geospatial_issue = raw$hasGeospatialIssues %in% TRUE,
       centroid_coordinates = raw$qc_centroid,
       excessive_uncertainty = !raw$qc_unknown_uncertainty &
         (raw$coordinateUncertaintyInMeters < 0 |
-         raw$coordinateUncertaintyInMeters > cfg$occurrence_uncertainty_m),
+         raw$coordinateUncertaintyInMeters > (cfg$occurrence_uncertainty_m %||% Inf)),
       unknown_uncertainty = raw$qc_unknown_uncertainty & !cfg$occurrence_keep_unknown_uncertainty)
     checks <- c(checks, case_year_checks(raw$year, cfg))
     raw$qc_reason <- "kept"
@@ -207,9 +154,8 @@ read_occurrences <- function(cfg) {
     fields <- intersect(c("source_file", "gbifID", "datasetKey", "species", "genus", "subfamily",
       "taxonRank", "basisOfRecord", "decimalLongitude", "decimalLatitude", "year", "eventDate",
       "coordinateUncertaintyInMeters", "georeferenceSources", "georeferenceRemarks",
-      "locality", "countryCode", "occurrenceStatus", "hasGeospatialIssues",
-      "sampled_date", "sampling_date_remarks", "sampling_date_status", "sampling_year_verified",
-      "source_type", "source_metadata_file", "source_metadata_md5", "qc_tenth_degree_grid",
+      "locality", "occurrenceStatus", "hasGeospatialIssues",
+      "sampling_year_verified",
       "x_albers", "y_albers", "grid_cell", "qc_centroid", "qc_unknown_uncertainty", "qc_reason"), names(raw))
     out <- data.frame(lon = raw$x_albers[kept], lat = raw$y_albers[kept])
     attr(out, "occurrence_audit") <- raw[, fields, drop = FALSE]
@@ -249,7 +195,6 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
   domain_source <- switch(
     domain_mode,
     national = file.path(cfg$nsdm_data_root, "mask_china.tif"),
-    freshwater_river = cfg$freshwater_river_distance_raster %||% NA_character_,
     custom_mask = cfg$analysis_domain_mask_file %||% NA_character_,
     NA_character_)
   domain_md5 <- if (length(domain_source) &&
@@ -263,8 +208,6 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
   list(
     species = cfg$species_name,
     occurrence = tools::md5sum(cfg$occurrence_file),
-    occurrence_metadata = if (!is.null(cfg$occurrence_metadata_file) && file.exists(cfg$occurrence_metadata_file))
-      tools::md5sum(cfg$occurrence_metadata_file),
     pool = tools::md5sum(cfg$nsdm_pool_csv),
     predictor_list = if (!is.null(cfg$predictor_file)) tools::md5sum(cfg$predictor_file),
     rasters = raster_manifest,
@@ -286,11 +229,9 @@ prep_fingerprint_inputs <- function(cfg, raster_manifest,
                    "occurrence_year_range", "occurrence_keep_unknown_year", "occurrence_year_semantics",
                    "occurrence_thin_km", "occurrence_thin_order", "occurrence_basis_of_record",
                    "preprocessing_scope",
-                   "domain_mode", "freshwater_river_distance_raster",
-                   "freshwater_river_buffer_m", "freshwater_occurrence_buffer_km",
-                   "analysis_domain_mask_file", "domain_min_presence_coverage",
+                   "domain_mode", "analysis_domain_mask_file",
                    "bg_n", "predictor_min_coverage", "predictor_missing",
-                   "bg_strategy", "bg_bin_k", "bg_sre_quantile",
+                   "bg_strategy",
                    "bg_target_group", "bg_target_group_file", "seed")],
     source = case_preparation_source(cfg)
   )
@@ -300,7 +241,6 @@ analysis_domain_label <- function(mode) {
   switch(
     mode,
     national = "national China land mask",
-    freshwater_river = "river-containing grid cells within observed-locality scope",
     custom_mask = "custom analysis-domain mask",
     stop("Unknown domain_mode: ", mode))
 }
@@ -409,7 +349,7 @@ prepare_species <- function(cfg, current, prep_inputs) {
     if (nrow(occ) < 10L) stop("Fewer than 10 occurrence cells survive thinning; lower occurrence_thin_km.")
   }
   # One analysis domain for background, projection, attribution and maps.
-  domain_info <- wf_analysis_domain(cfg, occ, current[[1]], verbose = TRUE)
+  domain_info <- wf_analysis_domain(cfg, current[[1]], verbose = TRUE)
   domain <- domain_info$mask
   terra::writeRaster(domain, domain_file, overwrite = TRUE,
                      wopt = list(datatype = "INT1U", gdal = "COMPRESS=LZW"))
@@ -418,16 +358,6 @@ prepare_species <- function(cfg, current, prep_inputs) {
   in_domain <- terra::extract(domain, as.matrix(occ[, c("lon", "lat"), drop = FALSE]))[[1L]]
   in_domain <- is.finite(in_domain) & in_domain == 1L
   occurrence_coverage_input <- mean(in_domain)
-  if (!is.finite(occurrence_coverage_input) ||
-      (occurrence_coverage_input < cfg$domain_min_presence_coverage &&
-       !identical(cfg$domain_mode, "custom_mask"))) {
-    stop(sprintf(
-      paste0("Analysis domain covers only %.1f%% of occurrence cells (%d/%d); ",
-             "minimum is %.1f%%. Use a broader domain mask or fix the occurrence ",
-             "coordinates before rerunning."),
-      100 * occurrence_coverage_input, sum(in_domain), length(in_domain),
-      100 * cfg$domain_min_presence_coverage), call. = FALSE)
-  }
   n_outside_domain <- sum(!in_domain)
   if (n_outside_domain > 0L) {
     if (!is.null(occurrence_audit)) {
@@ -453,11 +383,14 @@ prepare_species <- function(cfg, current, prep_inputs) {
   # Optional target-group locations must be supplied for a comparable survey
   # group; no all-taxa source is treated automatically as fish survey effort.
   tg_table <- if (isTRUE(cfg$bg_target_group)) case_target_group(tg_file, domain) else NULL
+  budget <- cfg$bg_n %||% if (is.null(tg_table)) nrow(occ) else nrow(tg_table)
+  if (is.null(cfg$bg_n)) message("Background budget from ",
+    if (is.null(tg_table)) "the number of eligible occurrence cells" else "all available target-group cells",
+    ": ", budget, ".")
   model_data <- castSDM::cast_background(
     occ, domain_area, current, strategy = cfg$bg_strategy,
-    bin_k = cfg$bg_bin_k, sre_quantile = cfg$bg_sre_quantile,
     user_table = tg_table,
-    n_bg = cfg$bg_n, missing = cfg$predictor_missing %||% "complete_cases",
+    n_bg = budget, missing = cfg$predictor_missing %||% "complete_cases",
     cell_thin = TRUE, exclude_presence = TRUE, seed = cfg$seed, verbose = TRUE
   )
   data.table::fwrite(attr(model_data, "missing_qc"), file.path(out_dir, "predictor_missing_qc.csv"))
@@ -470,7 +403,7 @@ prepare_species <- function(cfg, current, prep_inputs) {
   qualification$presence_coverage <- observed$presence_coverage[at]
   data.table::fwrite(qualification, file.path(out_dir, "predictor_qualification.csv"))
   current <- current[[intersect(names(current), names(model_data))]]
-  data.table::fwrite(data.frame(requested_background = cfg$bg_n,
+  data.table::fwrite(data.frame(requested_background = budget,
     actual_background = sum(model_data$presence == 0L),
     actual_presence = sum(model_data$presence == 1L),
     ratio = sum(model_data$presence == 0L)/sum(model_data$presence == 1L),
@@ -557,18 +490,6 @@ prepare_species <- function(cfg, current, prep_inputs) {
                      file.path(out_dir, "analysis_domain_summary.csv"))
   message("Analysis domain covers ", sprintf("%.2f%%", 100*domain_cells_value/national_cells),
     " of national-mask cells. Blank areas outside this domain were not predicted; coloured grid area is not occupied habitat area.")
-  if (!is.finite(presence_coverage) ||
-      presence_coverage < cfg$domain_min_presence_coverage) {
-    stop(sprintf(
-      paste0("Analysis domain covers only %.1f%% of presence cells (%d/%d); ",
-             "minimum is %.1f%%. The supplied domain excludes occurrence ",
-             "records and would invalidate fitting. Use a domain that covers ",
-             "the data (larger water buffer, river-network/catchment mask, or ",
-             "the accessible land area) and rerun with a new output_root."),
-      100 * presence_coverage, sum(presence_in_domain == 1, na.rm = TRUE),
-      length(presence_in_domain), 100 * cfg$domain_min_presence_coverage),
-      call. = FALSE)
-  }
   prep_inputs$dropped_layers <- dropped
   saveRDS(list(fingerprint = prep_fp, inputs = prep_inputs,
     artifacts = unname(tools::md5sum(artifacts))), manifest_file)

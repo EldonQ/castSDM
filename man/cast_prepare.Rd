@@ -10,7 +10,7 @@ cast_prepare(
   seed = NULL,
   env_vars = NULL,
   split = c("spatial", "stratified", "random"),
-  block_method = c("blockcv", "grid", "env"),
+  block_method = c("auto", "blockcv", "grid", "env"),
   n_blocks = 20L,
   verbose = TRUE,
   coords_crs = NULL,
@@ -36,10 +36,10 @@ to use. If \code{NULL} (default), auto-detected from \code{data}. Useful when
 auto-detection picks up metadata columns (e.g., occurrence indicators).}
 
 \item{split}{Hold-out strategy: \code{"spatial"} (default), \code{"stratified"}, or
-\code{"random"}. Degenerate spatial/stratified splits fall back automatically.}
+\code{"random"}. Spatial splits require a feasible block design.}
 
-\item{block_method}{Spatial blocking for \code{split = "spatial"}: \code{"blockcv"}
-(default; \pkg{blockCV} square blocks with autocorrelation-range sizing),
+\item{block_method}{Spatial blocking for \code{split = "spatial"}: \code{"auto"} (default,
+block size from sample geometry and class counts), \code{"blockcv"} (physical size or autocorrelation range),
 \code{"grid"} (k-means on grid-cell centroids; dependency-free fallback), or
 \code{"env"} (k-means on the scaled predictor matrix, so blocks are contiguous
 in environmental space; Roberts et al. 2017-style environmental

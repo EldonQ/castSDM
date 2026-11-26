@@ -301,9 +301,7 @@ cast_background <- function(occurrences,
   bg_once <- function(rep_i) {
   # ---- Background cell selection -----------------------------------------------
   if (use_user) {
-    # User-defined background: exactly the supplied points. Filtered only by
-    # raster coverage, duplicate cells, presence-cell exclusion and, later,
-    # NA environments; the study-area mask does not apply.
+    # Only supplied points in the declared domain may enter the draw.
     u_cells <- terra::cellFromXY(raster_stack,
                                  as.matrix(user_table[, c("lon", "lat")]))
     n_outside <- sum(is.na(u_cells))
@@ -313,6 +311,10 @@ cast_background <- function(occurrences,
       )
     }
     u_cells <- unique(stats::na.omit(u_cells))
+    if (!is.null(study_area) && length(u_cells)) {
+      inside <- terra::extract(study_area$mask, u_cells)[[1L]]
+      u_cells <- u_cells[is.finite(inside) & inside != 0]
+    }
     if (exclude_presence) u_cells <- setdiff(u_cells, occ_cells)
     if (!length(u_cells)) {
       cli::cli_abort("No usable points in {.arg user_table} after filtering.")
@@ -329,7 +331,7 @@ cast_background <- function(occurrences,
       }
     }
     valid_cells <- u_cells  # the top-up pool is the remaining user points
-    bg_cells <- if (length(u_cells) > n_bg) sample(u_cells, n_bg) else u_cells
+    bg_cells <- if (length(u_cells) > n_bg) u_cells[sample.int(length(u_cells), n_bg)] else u_cells
   } else {
     # ---- Determine number of background points ----------------------------------
     if (is.null(n_bg)) {
@@ -350,9 +352,10 @@ cast_background <- function(occurrences,
     # Get all valid cell indices: inside the mask AND non-NA in every layer
     # (per-cell anyNA across layers, not just the first).
     lazy_random <- strategy == "random" && !use_bias
-    valid_r <- if (lazy_random || missing == "drop_predictors") !is.na(ref_mask) else {
+    inside <- is.finite(ref_mask) & ref_mask != 0
+    valid_r <- if (lazy_random || missing == "drop_predictors") inside else {
       n_na_layers <- terra::app(is.na(raster_stack), fun = "sum")
-      !is.na(ref_mask) & (n_na_layers == 0)
+      inside & (n_na_layers == 0)
     }
     valid_cells <- which(as.logical(terra::values(valid_r, mat = FALSE)))
 
@@ -393,41 +396,34 @@ cast_background <- function(occurrences,
       ))
     }
 
-    if (length(valid_cells) < n_bg) {
-      if (verbose) {
-        cli::cli_warn(
-          "Only {length(valid_cells)} valid cells available; sampling with replacement."
-        )
-      }
-      sample_replace <- TRUE
-    } else {
-      sample_replace <- FALSE
-    }
-
-    # ---- Sample background cells ------------------------------------------------
     if (use_bias) {
       # Target-group background (Phillips et al. 2009): cells are drawn with
       # probability proportional to the bias surface.
       bias_vals <- as.numeric(terra::values(bias_raster, mat = FALSE))
-      w <- bias_vals[valid_cells]
-      w[!is.finite(w) | w < 0] <- 0
-      if (sum(w) <= 0) {
+      valid_cells <- valid_cells[is.finite(bias_vals[valid_cells]) & bias_vals[valid_cells] > 0]
+      if (!length(valid_cells)) {
         cli::cli_abort(
           "{.arg bias_raster} has no positive weights inside the valid sampling area."
         )
       }
-      bg_cells <- sample(valid_cells, size = n_bg, prob = w,
-                         replace = sample_replace)
+    }
+    if (length(valid_cells) < n_bg) {
+      cli::cli_warn("Only {length(valid_cells)} unique sampling cells are available for {n_bg} requested backgrounds.")
+      n_bg <- length(valid_cells)
+    }
+    # ---- Sample background cells ------------------------------------------------
+    if (use_bias) {
+      bg_cells <- valid_cells[sample.int(length(valid_cells), size = n_bg, prob = bias_vals[valid_cells])]
     } else if (strategy == "random" || strategy == "sre" || strategy == "disk") {
       # sre / disk pools are already restricted; the draw is uniform within.
       bg_cells <- if (lazy_random && missing == "complete_cases") {
         .cast_random_complete_cells(raster_stack, valid_cells, n_bg, verbose)
-      } else sample(valid_cells, size = n_bg, replace = sample_replace)
+      } else valid_cells[sample.int(length(valid_cells), size = n_bg)]
 
     } else if (strategy == "environmental") {
       # Environmental stratification via PCA-grid or k-means binning
       bg_cells <- .sample_environmental(
-        raster_stack, valid_cells, n_bg, seed, sample_replace,
+        raster_stack, valid_cells, n_bg,
         bin_method = bin_method, bin_k = bin_k
       )
     }
@@ -490,18 +486,7 @@ cast_background <- function(occurrences,
     if (!length(pool)) break
     topup_rounds <- topup_rounds + 1L
     take_n <- min(length(pool), n_bg - n_bg_ok)
-    add <- if (use_bias) {
-      # Top-up follows the same bias surface as the initial draw.
-      wp <- bias_vals[pool]
-      wp[!is.finite(wp) | wp < 0] <- 0
-      if (sum(wp) > 0) {
-        sample(pool, take_n, prob = wp)
-      } else {
-        sample(pool, take_n)
-      }
-    } else {
-      sample(pool, take_n)
-    }
+    add <- pool[sample.int(length(pool), take_n, prob = if (use_bias) bias_vals[pool])]
     used_cells <- c(used_cells, add)
     add_xy <- terra::xyFromCell(raster_stack, add)
     add_env <- as.data.frame(raster_stack[add])
@@ -598,8 +583,8 @@ cast_background <- function(occurrences,
   }
   if (!length(accepted)) cli::cli_abort("No complete finite background cells inside the sampling domain.")
   if (length(accepted) < n) {
-    cli::cli_warn("Only {length(accepted)} complete background cells; sampling with replacement.")
-    return(accepted[sample.int(length(accepted), n, replace = TRUE)])
+    cli::cli_warn("Only {length(accepted)} unique complete background cells are available for {n} requested backgrounds.")
+    return(accepted)
   }
   accepted[seq_len(n)]
 }
@@ -668,7 +653,7 @@ cast_background <- function(occurrences,
 #' @keywords internal
 #' @noRd
 .sample_environmental <- function(raster_stack, valid_cells, n_bg,
-                                  seed, replace, bin_method = "pca2d",
+                                  bin_method = "pca2d",
                                   bin_k = 20L) {
   # Extract env values at valid cells (sample subset if too many)
   max_extract <- min(length(valid_cells), 50000L)
@@ -686,8 +671,7 @@ cast_background <- function(occurrences,
   sub_cells_clean <- sub_cells[env_complete]
 
   if (nrow(env_vals) < n_bg) {
-    # Not enough valid cells after NA removal; fall back to random
-    return(sample(sub_cells_clean, size = n_bg, replace = TRUE))
+    return(sub_cells_clean)
   }
 
   if (identical(bin_method, "kmeans")) {
@@ -702,7 +686,7 @@ cast_background <- function(occurrences,
       error = function(e) NULL
     )
     if (is.null(km)) {
-      return(sample(sub_cells_clean, size = n_bg, replace = replace))
+      return(sub_cells_clean[sample.int(length(sub_cells_clean), size = n_bg)])
     }
     bin_ids <- as.integer(km$cluster)
   } else {
@@ -713,7 +697,7 @@ cast_background <- function(occurrences,
     )
 
     if (is.null(pca)) {
-      return(sample(sub_cells_clean, size = n_bg, replace = replace))
+      return(sub_cells_clean[sample.int(length(sub_cells_clean), size = n_bg)])
     }
 
     # Bin PC1 x PC2 space into a grid
@@ -742,15 +726,15 @@ cast_background <- function(occurrences,
     in_bin <- which(bin_ids == b)
     take <- min(per_bin, length(in_bin))
     sampled_idx <- c(sampled_idx,
-                     sample(in_bin, size = take, replace = replace))
+                     in_bin[sample.int(length(in_bin), size = take)])
   }
 
   # Trim to exactly n_bg
   if (length(sampled_idx) > n_bg) {
-    sampled_idx <- sample(sampled_idx, n_bg)
+    sampled_idx <- sampled_idx[sample.int(length(sampled_idx), n_bg)]
   } else if (length(sampled_idx) < n_bg) {
-    extra <- sample(seq_along(sub_cells_clean),
-                    n_bg - length(sampled_idx), replace = TRUE)
+    available <- setdiff(seq_along(sub_cells_clean), sampled_idx)
+    extra <- available[sample.int(length(available), n_bg - length(sampled_idx))]
     sampled_idx <- c(sampled_idx, extra)
   }
 

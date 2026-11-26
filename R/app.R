@@ -285,8 +285,8 @@
           block_method = input$setup_block_method,
           block_size = if (identical(input$setup_block_method, "blockcv") && is.finite(input$setup_block_size %||% NA_real_)) input$setup_block_size else NULL,
           holdout_block_size = if (identical(input$setup_block_method, "blockcv") && is.finite(input$setup_holdout_block_size %||% NA_real_)) input$setup_holdout_block_size else NULL,
-          thin_km = input$setup_thin %||% 1, predictor_min_coverage = input$setup_coverage %||% .95,
-          background_points = input$setup_background, vif_threshold = input$setup_vif %||% 10,
+          thin_km = input$setup_thin %||% 0, predictor_min_coverage = input$setup_coverage %||% .95,
+          background_points = if (is.finite(input$setup_background %||% NA_real_)) input$setup_background else NULL, vif_threshold = input$setup_vif %||% 10,
           predictor_missing = input$setup_missing %||% "complete_cases",
           resources = list(cores = input$setup_cores, workers = input$setup_workers, memory_mb = input$setup_memory)), run = run)
     }
@@ -410,8 +410,7 @@
     output$status <- shiny::renderUI(shiny::tags$span(class = paste0("cast-status-", status_kind()), status()))
     output$case_label <- shiny::renderUI({
       p <- project()
-      label <- if (is.null(p)) "\u672a\u6253\u5f00\u6848\u4f8b" else if (identical(p$case$species, "Schizothoracinae"))
-        "\u88c2\u8179\u9c7c\u4e9a\u79d1" else gsub("_", " ", p$case$species)
+      label <- if (is.null(p)) "\u672a\u6253\u5f00\u6848\u4f8b" else gsub("_", " ", p$case$species)
       shiny::tags$span(class = "cast-case-label", label)
     })
     output$log <- shiny::renderUI(shiny::tags$pre(log_text()))

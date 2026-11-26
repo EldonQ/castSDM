@@ -42,8 +42,8 @@
 #'   scores (default). See [cast_fit()] for weighting and score semantics.
 #' @param cv_k Number of outer spatial folds. Default `5`.
 #' @param n_repeat Number of independent spatial-blocking repeats. Default `1`.
-#' @param block_method `"blockcv"` (default; blockCV spatial blocks with
-#'   autocorrelation-range sizing), `"grid"` or `"env"` (see [cast_cv()]).
+#' @param block_method `"auto"` (default; derives the physical block size from sample
+#'   geometry and class counts), `"blockcv"` (autocorrelation-range sizing), `"grid"` or `"env"` (see [cast_cv()]).
 #'   Missing CRS or failed designs stop instead of silently changing strategy.
 #' @param block_size Optional block edge length in metres for `"blockcv"`.
 #' @param holdout_block_size Optional separate outer hold-out block edge length
@@ -84,7 +84,7 @@ cast_protocol <- function(
   prevalence_target = NULL,
   cv_k = 5L,
   n_repeat = 1L,
-  block_method = c("blockcv", "grid", "env"),
+  block_method = c("auto", "blockcv", "grid", "env"),
   block_size = NULL,
   buffer = 0,
   buffer_unit = c("deg", "km"),
@@ -234,7 +234,9 @@ cast_protocol <- function(
   p$n_repeat <- .cast_check_scalar(p$n_repeat, "protocol$n_repeat",
     lower = 1, integer = TRUE)
   p$block_method <- enum_value(p$block_method, "block_method",
-                               c("blockcv", "grid", "env"))
+                               c("auto", "blockcv", "grid", "env"))
+  if (p$block_method == "auto" && (!is.null(p$block_size) || !is.null(p$holdout_block_size)))
+    p$block_method <- "blockcv"
   if (!is.null(p$block_size)) {
     p$block_size <- .cast_check_scalar(p$block_size, "protocol$block_size",
       lower = 0, min_inclusive = FALSE)

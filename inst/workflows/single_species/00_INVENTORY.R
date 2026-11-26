@@ -14,5 +14,9 @@ local({
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, "terra")
   sys.source(file.path(root, "inventory.R"), envir = environment())
-  case_inventory_build(root, Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data"))
+  `%||%` <- function(x, y) if (is.null(x)) y else x
+  settings <- castSDM:::.cast_workflow_selection(root, allow_unconfigured = TRUE)$settings
+  data <- Sys.getenv("CAST_DATA_ROOT", settings$data_dir %||% "")
+  if (!nzchar(data)) stop("Configure an environmental library or set CAST_DATA_ROOT.")
+  case_inventory_build(root, data)
 })

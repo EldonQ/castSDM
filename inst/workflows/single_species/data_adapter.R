@@ -11,8 +11,8 @@
 #     layers ordered and named exactly as `selected_vars`; climate layers
 #     come from the scenario table, static layers are reused from the current
 #     stack.
-#   * wf_analysis_domain(): one binary analysis domain (national land mask,
-#     river-network buffer with a local occurrence envelope, or a custom mask)
+#   * wf_analysis_domain(): one binary analysis domain (supplied library mask
+#     or an explicit aligned custom mask)
 #     used by background sampling, projection, attribution and maps.
 #
 # Data source: the national 1 km Albers environmental library. Current and
@@ -25,7 +25,6 @@
 
 if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
 
-nsdm_default_data_root <- function() Sys.getenv("CAST_DATA_ROOT", "E:/CHECO26/N-SDM/data")
 
 nsdm_project_occurrences <- function(lonlat, target_crs) {
   exe <- Sys.which("cs2cs")
@@ -124,7 +123,7 @@ nsdm_check_geom <- function(paths, reference, label = "layer") {
 # there is no separate LULC merge.
 nsdm_load_current_stack <- function(varnames = NULL,
                                     pool_csv = nsdm_default_pool_csv(),
-                                    data_root = nsdm_default_data_root(),
+                                    data_root,
                                     check_geom = TRUE,
                                     verbose = TRUE) {
   if (!requireNamespace("terra", quietly = TRUE)) {
@@ -190,65 +189,6 @@ nsdm_national_domain <- function(template, national_mask_file, verbose = TRUE) {
   m
 }
 
-nsdm_freshwater_river_domain <- function(occ, river_distance_raster, template,
-                                         national_mask_file,
-                                         river_buffer_m = 100,
-                                         occurrence_buffer_km = 10,
-                                         min_cells = 1000L, verbose = TRUE) {
-  if (!file.exists(river_distance_raster)) {
-    stop("Freshwater river-distance raster not found: ", river_distance_raster)
-  }
-  if (!is.numeric(river_buffer_m) || length(river_buffer_m) != 1L ||
-      !is.finite(river_buffer_m) || river_buffer_m < 0) {
-    stop("freshwater_river_buffer_m must be one non-negative number.")
-  }
-  if (!is.numeric(occurrence_buffer_km) || length(occurrence_buffer_km) != 1L ||
-      !is.finite(occurrence_buffer_km) || occurrence_buffer_km < 0) {
-    stop("freshwater_occurrence_buffer_km must be one non-negative number.")
-  }
-  d <- terra::rast(river_distance_raster)
-  if (terra::nlyr(d) > 1L) d <- d[[1L]]
-  if (!isTRUE(tryCatch(terra::compareGeom(template, d, stopOnError = FALSE,
-                                           messages = FALSE),
-                       error = function(e) FALSE))) {
-    stop("Freshwater river-distance raster is not aligned with the current raster grid: ",
-         river_distance_raster)
-  }
-  # Native minimum-distance aggregation identifies 1 km cells containing a
-  # river subcell. This is a grid-cell domain, not an aquatic-area estimate.
-  # The observation envelope is a separate scope mask; coordinates are never moved.
-  river <- is.finite(d) & d <= river_buffer_m
-  pts <- terra::vect(as.matrix(occ[, c("lon", "lat"), drop = FALSE]),
-                     type = "points", crs = terra::crs(template))
-  local <- terra::rasterize(
-    terra::buffer(pts, width = occurrence_buffer_km * 1000),
-    template, field = 1L, background = NA)
-  local <- terra::ifel(!is.na(local), 1L, NA)
-  m <- terra::ifel(river & !is.na(local), 1L, NA)
-  if (!is.null(national_mask_file) && file.exists(national_mask_file)) {
-    land <- terra::rast(national_mask_file)
-    if (terra::nlyr(land) > 1L) land <- land[[1L]]
-    if (!isTRUE(tryCatch(terra::compareGeom(template, land, stopOnError = FALSE,
-                                             messages = FALSE),
-                         error = function(e) FALSE))) {
-      stop("National land mask is not aligned with the freshwater river raster.")
-    }
-    m <- terra::mask(m, land, maskvalues = c(0, NA))
-  }
-  n_cells <- terra::global(m, "sum", na.rm = TRUE)[[1]][1]
-  if (!is.finite(n_cells) || n_cells < min_cells) {
-    stop("Freshwater river domain has only ", n_cells,
-         " cells; minimum is ", min_cells, ".")
-  }
-  if (verbose) {
-    message("Analysis domain: river-containing grid cells (minimum distance <= ",
-            format(river_buffer_m, big.mark = ","), " m) intersected with ",
-            occurrence_buffer_km, " km observed-locality scope; ",
-            format(n_cells, big.mark = ","), " cells")
-  }
-  m
-}
-
 nsdm_custom_domain <- function(mask_file, template, verbose = TRUE) {
   if (!file.exists(mask_file)) stop("analysis_domain_mask_file not found: ", mask_file)
   m <- terra::rast(mask_file)
@@ -288,25 +228,12 @@ case_declared_layers <- function(cfg) {
   trimws(file$layer)
 }
 
-wf_analysis_domain <- function(cfg, occ, raster_template, verbose = TRUE) {
+wf_analysis_domain <- function(cfg, raster_template, verbose = TRUE) {
   mode <- cfg$domain_mode %||% "national"
   national_mask <- file.path(cfg$nsdm_data_root, "mask_china.tif")
   if (identical(mode, "national")) {
     mask <- nsdm_national_domain(raster_template, national_mask, verbose = verbose)
     source <- national_mask
-  } else if (identical(mode, "freshwater_river")) {
-    if (is.null(cfg$freshwater_river_distance_raster) ||
-        !nzchar(cfg$freshwater_river_distance_raster)) {
-      stop("domain_mode = 'freshwater_river' requires ",
-           "freshwater_river_distance_raster.")
-    }
-    mask <- nsdm_freshwater_river_domain(
-      occ, cfg$freshwater_river_distance_raster, raster_template,
-      national_mask_file = national_mask,
-      river_buffer_m = cfg$freshwater_river_buffer_m %||% 100,
-      occurrence_buffer_km = cfg$freshwater_occurrence_buffer_km %||% 10,
-      verbose = verbose)
-    source <- cfg$freshwater_river_distance_raster
   } else if (identical(mode, "custom_mask")) {
     if (is.null(cfg$analysis_domain_mask_file) ||
         !nzchar(cfg$analysis_domain_mask_file)) {
@@ -317,7 +244,7 @@ wf_analysis_domain <- function(cfg, occ, raster_template, verbose = TRUE) {
     source <- cfg$analysis_domain_mask_file
   } else {
     stop("Unknown domain_mode: ", mode,
-         " (use 'national', 'freshwater_river' or 'custom_mask').")
+         " (use 'national' or supply a 'custom_mask').")
   }
   list(mask = mask, mode = mode, source = source)
 }

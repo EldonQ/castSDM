@@ -2,17 +2,15 @@
 # One package pipeline, followed by one paired scenario comparison.
 case_training_year <- function(preparation, split) {
   qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
-  if (!all(c("x_albers", "y_albers", "year", "used_in_model") %in% names(qc))) return(NULL)
+  if (!all(c("x_albers", "y_albers", "sampling_year_verified", "used_in_model") %in% names(qc))) return(NULL)
   qc <- qc[qc$used_in_model %in% TRUE, , drop = FALSE]
   key <- function(x, y) paste(round(x, 3), round(y, 3), sep = "|")
   pres <- split$train[split$train$presence == 1L, ]
   idx <- match(key(pres$lon, pres$lat), key(qc$x_albers, qc$y_albers))
-  column <- if ("sampling_year_verified" %in% names(qc)) "sampling_year_verified" else "year"
-  year <- suppressWarnings(as.numeric(qc[[column]][idx]))
-  year <- year[is.finite(year) & year > 1500 & year < 2100]
+  year <- suppressWarnings(as.numeric(qc$sampling_year_verified[idx]))
+  year <- year[is.finite(year) & year > 0]
   if (!length(year)) return(NULL)
-  list(year = stats::median(year), source = if (column == "sampling_year_verified")
-    "reported_unambiguous_sampling_years_in_training_presences" else "unverified_record_years_in_training_presences")
+  list(year = stats::median(year), source = "reported_sampling_dates_in_training_presences")
 }
 
 case_match_training_layers <- function(data, split, meta, reference_year, mode) {
@@ -27,12 +25,15 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
       ix <- which(meta$construct_id == id & is.finite(meta$year))
       if (!length(ix)) next
       years <- meta$year[ix]
-      chosen <- if (mode == "npts") {
-        if (any(years <= reference_year)) max(years[years <= reference_year]) else min(years)
-      } else years[which.min(abs(years-reference_year))]
+      earlier <- years[years <= reference_year]
+      if (mode == "npts" && !length(earlier)) {
+        keep[ix] <- FALSE
+        rule[ix] <- "no_past_slice_available"
+        next
+      }
+      chosen <- if (mode == "npts") max(earlier) else years[which.min(abs(years-reference_year))]
       keep[ix[years != chosen]] <- FALSE
-      rule[ix] <- ifelse(years != chosen, "other_time_slice",
-        if (mode == "npts" && chosen > reference_year) "no_past_slice_available" else mode)
+      rule[ix] <- ifelse(years != chosen, "other_time_slice", mode)
     }
   } else rule[is.finite(meta$year)] <- "no_reference_year_or_matching_disabled"
   matching <- data.frame(layer = meta$layer, construct = meta$construct_id,
@@ -41,9 +42,6 @@ case_match_training_layers <- function(data, split, meta, reference_year, mode) 
   before <- nrow(meta); meta <- meta[keep, , drop = FALSE]
   message("Temporal layers: ", before, " -> ", nrow(meta), "; method=", mode,
     "; reference year=", reference_year %||% "unavailable", ".")
-  future_only <- sum(keep & rule == "no_past_slice_available")
-  if (future_only) message("Temporal matching: ", future_only,
-    " retained layers have no earlier time slice; retained source years are later than the reference. This is not contemporaneous matching; see temporal_layer_matching.csv.")
   vars <- meta$layer; cols <- c("lon", "lat", "presence", vars)
   split$train <- split$train[, cols, drop = FALSE]
   split$test <- split$test[, cols, drop = FALSE]; split$env_vars <- vars
@@ -163,9 +161,6 @@ run_species <- function(cfg, design_only = FALSE) {
   qc <- data.table::fread(file.path(preparation, "occurrence_qc.csv"), data.table = FALSE)
   used <- qc$used_in_model %in% TRUE
   taxon_names <- if ("species" %in% names(qc)) qc$species else rep(cfg$species_name, nrow(qc))
-  if ("sampling_date_status" %in% names(qc)) utils::write.csv(as.data.frame(table(
-    sampling_date_status = qc$sampling_date_status[used], useNA = "always")),
-    file.path(out, "sampling_date_quality.csv"), row.names = FALSE)
   excluded_taxa <- as.data.frame(table(taxon = taxon_names[!used], reason = qc$qc_reason[!used]))
   utils::write.csv(excluded_taxa[excluded_taxa$Freq > 0, ], file.path(out, "excluded_records_by_taxon.csv"), row.names = FALSE)
   years <- suppressWarnings(as.numeric(qc$year[qc$used_in_model %in% TRUE]))
@@ -183,7 +178,6 @@ run_species <- function(cfg, design_only = FALSE) {
     background = prep_inputs$background_mode,
     candidate_pool = if (is.null(cfg$predictor_file)) "eligible_inventory" else cfg$predictor_file,
     n_taxon_names = length(unique(taxon_names[used])),
-    n_possible_coarse_coordinates = if ("qc_tenth_degree_grid" %in% names(qc)) sum(qc$qc_tenth_degree_grid[used], na.rm = TRUE) else NA_integer_,
     source_metadata_available = "sampling_year_verified" %in% names(qc),
     interpretation = "Pooled historical records; spatial hold-out is not external or temporal validation."),
     file.path(out, "case_design.csv"), row.names = FALSE)
@@ -229,11 +223,6 @@ run_species <- function(cfg, design_only = FALSE) {
   semantics <- meta[, intersect(c("layer", "group", "product", "construct_id", "scale", "stat", "year", "role"), names(meta)), drop = FALSE]
   semantics$selected <- semantics$layer %in% selected
   semantics$construct_variants <- as.integer(table(meta$construct_id)[meta$construct_id])
-  semantics$spatial_context <- if (cfg$domain_mode != "freshwater_river")
-    rep("Gridded environmental predictor; inspect source, scale and date for ecological relevance", nrow(semantics)) else ifelse(semantics$group == "soil",
-    "Terrestrial grid property; not a measured in-stream condition",
-    ifelse(semantics$group == "bioclim", "Gridded atmospheric climate; not measured water temperature",
-      "See source definition for grid, neighbourhood or upstream aggregation"))
   utils::write.csv(semantics, file.path(out, "predictor_semantics.csv"), row.names = FALSE)
   groups <- sort(unique(prepared_meta$group))
   pool_summary <- data.frame(group = groups,

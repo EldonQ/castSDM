@@ -203,9 +203,10 @@ cast_vif <- function(data,
 #'   to use. If `NULL` (default), auto-detected from `data`. Useful when
 #'   auto-detection picks up metadata columns (e.g., occurrence indicators).
 #' @param split Hold-out strategy: `"spatial"` (default), `"stratified"`, or
-#'   `"random"`. Degenerate spatial/stratified splits fall back automatically.
-#' @param block_method Spatial blocking for `split = "spatial"`: `"blockcv"`
-#'   (default; \pkg{blockCV} square blocks with autocorrelation-range sizing),
+#'   `"random"`. Spatial splits require a feasible block design.
+#' @param block_method Spatial blocking for `split = "spatial"`: `"auto"` (default,
+#'   block size from sample geometry and class counts), `"blockcv"` (physical
+#'   size or autocorrelation range),
 #'   `"grid"` (k-means on grid-cell centroids; dependency-free fallback), or
 #'   `"env"` (k-means on the scaled predictor matrix, so blocks are contiguous
 #'   in environmental space; Roberts et al. 2017-style environmental
@@ -234,10 +235,11 @@ cast_vif <- function(data,
 cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
                          env_vars = NULL,
                          split = c("spatial", "stratified", "random"),
-                         block_method = c("blockcv", "grid", "env"),
+                         block_method = c("auto", "blockcv", "grid", "env"),
                          n_blocks = 20L, verbose = TRUE, coords_crs = NULL, block_size = NULL) {
   split <- match.arg(split)
   block_method <- match.arg(block_method)
+  if (block_method == "auto" && !is.null(block_size)) block_method <- "blockcv"
   # Documented as a fraction; unenforced, 0 built an empty training set and 1
   # produced all-NA evaluation metrics instead of an error.
   train_fraction <- .cast_check_scalar(
@@ -415,7 +417,8 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
     cand <- cand[vapply(data[cand], is.numeric, logical(1))]
     as.matrix(data[, cand, drop = FALSE])
   } else NULL
-  blocks <- make_spatial_folds(data$lon, data$lat, k = if (block_method == "blockcv") 2L else n_blocks,
+  k <- switch(block_method, auto = ceiling(1/min(train_fraction, 1-train_fraction)), blockcv = 2L, n_blocks)
+  blocks <- make_spatial_folds(data$lon, data$lat, k = k,
                        method = block_method, env = env_block, y = y,
                        block_size = block_size, coords_crs = coords_crs)
   if (is.null(blocks) || length(unique(blocks)) < 2L) {
@@ -424,7 +427,7 @@ cast_prepare <- function(data, train_fraction = 0.7, seed = NULL,
   design <- attr(blocks, "design")
   # Hold out physical blocks, not arbitrary groups formed only to reach k.
   # blockCV's two-fold assignment is used only to construct its block geometry.
-  if (block_method == "blockcv") blocks <- design$block_ids
+  if (block_method %in% c("auto", "blockcv")) blocks <- design$block_ids
   ub <- sample(unique(blocks))
   # Stratify at the physical-block level, with equal relative weight for
   # each response class. Optimising only total rows can leave nearly every

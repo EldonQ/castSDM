@@ -1,3 +1,13 @@
+# castSDM 0.47.0
+
+- Resolve workflow inputs from the project settings, without taxon-specific
+  paths, masking rules or metadata assignments.
+- Derive automatic physical blocks from point geometry and class counts.
+  Explicit blockCV designs remain supported.
+- Sample unique background cells without replacement, including singleton pools
+  and bias rasters. The workflow derives its default budget from eligible data.
+- Use reported sampling dates for temporal matching and keep source years visible.
+
 # castSDM 0.46.0
 
 - Preview the real spatial validation design before fitting or projecting. The

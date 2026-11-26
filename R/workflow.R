@@ -19,11 +19,11 @@
   if (nzchar(override) && !valid(override)) cli::cli_abort("Invalid CAST_SPECIES identifier.")
   if (!is.null(settings) && nzchar(override) && !identical(override, settings$species))
     cli::cli_abort("CAST_SPECIES ({override}) conflicts with the saved species ({settings$species}). Unset CAST_SPECIES or reconfigure this workspace with cast_workflow(); no other species will be run.")
-  species <- settings$species %||% if (nzchar(override)) override else NULL
+  species <- settings$species
   if (is.null(species) && !allow_unconfigured)
     cli::cli_abort("No species is configured. Use cast_workflow(path, data_dir, occurrence_file, species, run = FALSE) or the Shiny setup form. There is no default fish or squirrel analysis.")
   list(species = species, settings = settings,
-    source = if (!is.null(settings)) "saved project settings" else if (!is.null(species)) "session override (not persistent)" else "unconfigured")
+    source = if (!is.null(settings)) "saved project settings" else "unconfigured")
 }
 
 #' Initialise, Check or Run the CHELSA Workflow
@@ -37,13 +37,12 @@
 #' @param species Explicit taxon identifier. Required; no species is inferred
 #'   from a filename or a previous case. Input format and domain are separate
 #'   settings and are never inferred from the taxon name.
-#' @param settings Named list: `domain` (`national`, `freshwater_river` or
-#'   `custom_mask`), `domain_mask` (path to an aligned study-domain raster;
+#' @param settings Named list: `domain` (`national` or `custom_mask`), `domain_mask` (path to an aligned study-domain raster;
 #'   positive cells are active),
 #'   `input_type` (`gbif` or `nsdm_occ`), `lulc_product` (`glu` or `hlu`),
-#'   `models`, `cv_k`, `block_method` (`blockcv` or `grid`), `block_size`
+#'   `models`, `cv_k`, `block_method` (`auto`, `blockcv` or `grid`), `block_size`
 #'   (metres for `blockcv`; NULL estimates the range), `holdout_block_size`
-#'   (optional distinct outer scale), `background_points`, `thin_km` (distance thinning in km),
+#'   (optional distinct outer scale), `background_points` (optional, defaults to the count of eligible occurrence cells or supplied target-group cells), `thin_km` (optional additional thinning in km),
 #'   `predictor_min_coverage` (actual-domain coverage), `vif_threshold`, `predictor_missing`, and `resources` (cores, workers, memory_mb).
 #'   Optional `predictor_file` is a CSV of current inventory `layer` IDs.
 #'   Optional `target_group_file` contains comparable survey locations with
@@ -88,13 +87,13 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
     cli::cli_abort("Unknown or duplicated workflow settings.")
   defaults <- list(domain = "national", validation_target = "spatial_transfer",
     input_type = "gbif", lulc_product = "glu", models = c("rf", "maxent", "gam"),
-    cv_k = 5L, background_points = 10000L, thin_km = 1, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
+    cv_k = 5L, thin_km = 0, predictor_min_coverage = .95, vif_threshold = 10, predictor_missing = "complete_cases", resources = list(cores = 4L, workers = 1L, memory_mb = 4096))
   settings <- utils::modifyList(defaults, settings)
   for (n in c("domain", "input_type", "lulc_product", "block_method", "validation_target")) {
     if (n == "block_method" && is.null(settings[[n]])) next
-    choices <- switch(n, domain = c("national", "freshwater_river", "custom_mask"),
+    choices <- switch(n, domain = c("national", "custom_mask"),
       input_type = c("gbif", "nsdm_occ"), lulc_product = c("glu", "hlu"),
-      block_method = c("blockcv", "grid"), validation_target = c("within_domain", "spatial_transfer"))
+      block_method = c("auto", "blockcv", "grid"), validation_target = c("within_domain", "spatial_transfer"))
     if (length(settings[[n]]) != 1L || !settings[[n]] %in% choices) cli::cli_abort("Invalid workflow {.val {n}} setting.")
   }
   for (n in c("predictor_file", "target_group_file")) {
@@ -116,11 +115,11 @@ cast_workflow <- function(path, data_dir, occurrence_file, species = NULL,
   }
   # Reuse package validation rather than maintain a second numerical contract.
   cast_protocol(models = settings$models, cv_k = settings$cv_k,
-    block_method = settings$block_method %||% "blockcv", block_size = settings$block_size,
+    block_method = settings$block_method %||% "auto", block_size = settings$block_size,
     holdout_block_size = settings$holdout_block_size,
     num_threads = settings$resources$cores, select_vif_threshold = settings$vif_threshold)
   if (length(settings$predictor_missing) != 1L || is.na(settings$predictor_missing) || !settings$predictor_missing %in% c("drop_predictors", "complete_cases")) cli::cli_abort("Invalid predictor_missing policy.")
-  settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
+  if (!is.null(settings$background_points)) settings$background_points <- .cast_check_scalar(settings$background_points, "background_points", lower = 1, integer = TRUE)
   settings$thin_km <- .cast_check_scalar(settings$thin_km, "thin_km", lower = 0)
   settings$predictor_min_coverage <- .cast_check_scalar(settings$predictor_min_coverage, "predictor_min_coverage", lower = 0, upper = 1, min_inclusive = FALSE)
   .cast_resources(settings$resources)

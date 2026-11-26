@@ -19,7 +19,7 @@ cast_protocol(
   prevalence_target = NULL,
   cv_k = 5L,
   n_repeat = 1L,
-  block_method = c("blockcv", "grid", "env"),
+  block_method = c("auto", "blockcv", "grid", "env"),
   block_size = NULL,
   buffer = 0,
   buffer_unit = c("deg", "km"),
@@ -72,8 +72,8 @@ scores (default). See \code{\link[=cast_fit]{cast_fit()}} for weighting and scor
 
 \item{n_repeat}{Number of independent spatial-blocking repeats. Default \code{1}.}
 
-\item{block_method}{\code{"blockcv"} (default; blockCV spatial blocks with
-autocorrelation-range sizing), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).
+\item{block_method}{\code{"auto"} (default; derives the physical block size from sample
+geometry and class counts), \code{"blockcv"} (autocorrelation-range sizing), \code{"grid"} or \code{"env"} (see \code{\link[=cast_cv]{cast_cv()}}).
 Missing CRS or failed designs stop instead of silently changing strategy.}
 
 \item{block_size}{Optional block edge length in metres for \code{"blockcv"}.}

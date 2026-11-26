@@ -2,23 +2,6 @@
   root <- if (!is.null(workflow)) dirname(workflow) else file.path(getwd(), "castSDM_analysis")
   selection <- .cast_workflow_selection(root, allow_unconfigured = TRUE)
   settings <- selection$settings
-  if (is.null(settings) && !is.null(selection$species) && !is.null(workflow)) {
-    env <- new.env(parent = environment())
-    for (f in c("inventory.R", "01_config.R")) sys.source(file.path(root, f), env)
-    cfg <- tryCatch(env$castsdm_species_configs(root)[[selection$species]], error = function(e) NULL)
-    if (!is.null(cfg)) settings <- list(data_dir = cfg$nsdm_data_root,
-      occurrence_file = cfg$occurrence_file, species = cfg$species_name,
-      domain = cfg$domain_mode, domain_mask = cfg$analysis_domain_mask_file,
-      validation_target = cfg$validation_target, predictor_file = cfg$predictor_file,
-      target_group_file = cfg$bg_target_group_file,
-      projection_cores = cfg$projection_cores,
-      input_type = cfg$input_type, lulc_product = cfg$current_lulc_product,
-      models = cfg$protocol$models, cv_k = cfg$protocol$cv_k, background_points = cfg$bg_n, vif_threshold = cfg$protocol$select_vif_threshold,
-      thin_km = cfg$occurrence_thin_km, predictor_min_coverage = cfg$predictor_min_coverage,
-      block_method = cfg$protocol$block_method, block_size = cfg$protocol$block_size,
-      holdout_block_size = cfg$protocol$holdout_block_size,
-      predictor_missing = cfg$predictor_missing, resources = cfg$resources)
-  }
   settings <- settings %||% list()
   utils::modifyList(list(path = root, data_dir = Sys.getenv("CAST_DATA_ROOT", ""),
     occurrence_file = "", species = "", domain = "national",
@@ -35,7 +18,7 @@
       shiny::textInput("setup_occurrence", "\u7269\u79cd\u8bb0\u5f55\u6587\u4ef6", defaults$occurrence_file),
       shiny::div(class = "cast-setup-grid",
         shiny::textInput("setup_species", "\u5206\u6790\u7c7b\u7fa4\uff08\u82f1\u6587\u6807\u8bc6\uff09", defaults$species),
-        shiny::selectInput("setup_domain", "\u5206\u6790\u57df", stats::setNames(c("national", "freshwater_river", "custom_mask"), c("\u5168\u56fd\u9646\u57df", "\u6cb3\u7f51\u4e0e\u8bb0\u5f55\u9644\u8fd1", "\u81ea\u5b9a\u4e49\u7814\u7a76\u57df")), defaults$domain)),
+        shiny::selectInput("setup_domain", "\u5206\u6790\u57df", stats::setNames(c("national", "custom_mask"), c("\u5168\u56fd\u9646\u57df", "\u81ea\u5b9a\u4e49\u7814\u7a76\u57df")), defaults$domain)),
       shiny::conditionalPanel("input.setup_domain == 'custom_mask'",
         shiny::textInput("setup_domain_mask", "\u7814\u7a76\u57df\u6805\u683c\u8def\u5f84\uff08\u6b63\u503c\u7f51\u683c\u6709\u6548\uff09", defaults$domain_mask %||% "")),
       shiny::textInput("setup_path", "\u5de5\u4f5c\u4e0e\u8f93\u51fa\u76ee\u5f55", defaults$path),
@@ -47,14 +30,14 @@
             defaults$validation_target %||% "spatial_transfer"),
           shiny::textInput("setup_predictor_file", "\u5019\u9009\u53d8\u91cf CSV\uff08\u53ef\u9009\uff09", defaults$predictor_file %||% ""),
           shiny::textInput("setup_target_group", "\u540c\u7c7b\u8c03\u67e5\u80cc\u666f\u70b9\u6587\u4ef6\uff08\u53ef\u9009\uff09", defaults$target_group_file %||% ""),
-          shiny::numericInput("setup_background", "\u80cc\u666f\u70b9\u6570\u91cf", defaults$background_points %||% 10000L, min = 1L, step = 1000L),
-          shiny::numericInput("setup_thin", "\u8ddd\u79bb\u7a00\u758f\u5316\uff08km\uff1b0 \u4e3a\u4e0d\u7a00\u758f\uff09", defaults$thin_km %||% 1, min = 0),
+          shiny::numericInput("setup_background", "\u80cc\u666f\u70b9\u6570\u91cf\uff08\u7559\u7a7a\u81ea\u52a8\uff09", defaults$background_points %||% NA_real_, min = 1L, step = 1000L),
+          shiny::numericInput("setup_thin", "\u8ddd\u79bb\u7a00\u758f\u5316\uff08km\uff1b0 \u4e3a\u4e0d\u7a00\u758f\uff09", defaults$thin_km %||% 0, min = 0),
           shiny::numericInput("setup_coverage", "\u5019\u9009\u53d8\u91cf\u6700\u4f4e\u57df\u5185\u8986\u76d6\u7387\uff080\u20131\uff09", defaults$predictor_min_coverage %||% .95, min = 0, max = 1),
           shiny::numericInput("setup_vif", "VIF \u9608\u503c", defaults$vif_threshold %||% 10, min = 1, step = 1),
           shiny::selectInput("setup_missing", "\u7f3a\u5931\u73af\u5883\u6307\u6807", stats::setNames(c("complete_cases", "drop_predictors"), c("\u4fdd\u7559\u6307\u6807\uff0c\u53ea\u7528\u5b8c\u6574\u6837\u672c", "\u4e25\u683c\u5254\u9664\u7f3a\u5931\u6307\u6807\uff0c\u4fdd\u7559\u4f4d\u7f6e")), defaults$predictor_missing %||% "complete_cases"),
           shiny::selectInput("setup_block_method", "\u7a7a\u95f4\u5206\u5757",
-            stats::setNames(c("blockcv", "grid"), c("blockCV", "\u5730\u7406\u7f51\u683c")),
-            defaults$block_method %||% "blockcv"),
+            stats::setNames(c("auto", "blockcv", "grid"), c("\u81ea\u52a8", "blockCV", "\u5730\u7406\u7f51\u683c")),
+            defaults$block_method %||% "auto"),
           shiny::conditionalPanel("input.setup_block_method == 'blockcv'",
             shiny::numericInput("setup_block_size", "\u5185\u5c42\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u7559\u7a7a\u81ea\u52a8\uff09", defaults$block_size %||% NA_real_, min = 1),
             shiny::numericInput("setup_holdout_block_size", "\u5916\u5c42\u5757\u8fb9\u957f\uff08\u7c73\uff1b\u53ef\u7559\u7a7a\uff09", defaults$holdout_block_size %||% NA_real_, min = 1)),

@@ -25,13 +25,13 @@ cast_workflow(
 from a filename or a previous case. Input format and domain are separate
 settings and are never inferred from the taxon name.}
 
-\item{settings}{Named list: \code{domain} (\code{national}, \code{freshwater_river} or
+\item{settings}{Named list: \code{domain} (\code{national} or
 \code{custom_mask}), \code{domain_mask} (path to an aligned study-domain raster;
 positive cells are active),
 \code{input_type} (\code{gbif} or \code{nsdm_occ}), \code{lulc_product} (\code{glu} or \code{hlu}),
-\code{models}, \code{cv_k}, \code{block_method} (\code{blockcv} or \code{grid}), \code{block_size}
+\code{models}, \code{cv_k}, \code{block_method} (\code{auto}, \code{blockcv} or \code{grid}), \code{block_size}
 (metres for \code{blockcv}; NULL estimates the range), \code{holdout_block_size}
-(optional distinct outer scale), \code{background_points}, \code{thin_km} (distance thinning in km),
+(optional distinct outer scale), \code{background_points} (optional, defaults to the count of eligible occurrence cells or supplied target-group cells), \code{thin_km} (optional additional thinning in km),
 \code{predictor_min_coverage} (actual-domain coverage), \code{vif_threshold}, \code{predictor_missing}, and \code{resources} (cores, workers, memory_mb).
 Optional \code{predictor_file} is a CSV of current inventory \code{layer} IDs.
 Optional \code{target_group_file} contains comparable survey locations with

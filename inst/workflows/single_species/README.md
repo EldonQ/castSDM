@@ -1,75 +1,21 @@
-# CHELSA 单物种工作流（castSDM 0.46.0）
+# CHELSA 单物种工作流（castSDM 0.47.0）
 
-模型协议不按物种名调参：物种标识用于区分输入和输出，研究域、记录格式和统计设置由项目显式声明。变量筛选保持训练侧 VIF，并在每个空间折内重复，不规定保留数量。
-
-支持 `settings = list(domain = "custom_mask", domain_mask = "研究域栅格完整路径")`。掩膜需与环境库网格对齐，正值为域内；仅使用该域内记录。程序不会为了提高指标而自动缩小研究域或修改空间块长。
-
-拟合前保存 `training/tables/cv_fold_design.csv`。单类测试折保留预测和 Brier/log loss，AUC/TSS 为 NA，各指标分别报告有效折数；训练侧缺类则提前停止。经过校验的完整折结果可在中断后复用。数据准备同时保存 `occurrence_environment_qc.csv` 和观测位置覆盖率；全域覆盖率不代表每个观测地区都有覆盖。
-
-规范源码在 `cast/inst/workflows/single_species`；外部工作目录是部署副本。
-请在重启的 R 会话运行。入口检查并使用对应版本的隔离 R 库；环境库仅被读取。
-
-## 运行
-
-工作目录的 `workflow_settings.rds` 持久保存明确选择的物种及记录文件，重启 R 不会丢失。入口和 Shiny 使用同一个选择；未配置时不会默认运行裂腹鱼。若旧的 `CAST_SPECIES` 与已保存物种冲突，入口在准备数据前停止并说明冲突。
-
-配置或切换物种只需调用一次（`run=FALSE` 只检查输入，不训练）：
+用实际记录和环境库启动一个项目。这个示例适配 CHELSA 集成气候情景；包的 `cast_run()` 与 `cast_compare()` 可直接使用对齐的表格或栅格。
 
 ```r
 castSDM::cast_workflow(
-  "E:/Package/castSDM_workflows/single_species",
-  "E:/CHECO26/N-SDM/data",
-  "E:/Package/castSDM_workflows/species_occ/Callosciurus_erythraeus.csv",
-  species = "Callosciurus_erythraeus",
-  settings = list(input_type = "nsdm_occ", domain = "national"), run = FALSE)
+  path = project_dir, data_dir = environmental_library,
+  occurrence_file = occurrence_csv, species = taxon_id,
+  settings = list(input_type = "nsdm_occ"), design_only = TRUE)
 ```
 
-之后每次都使用同一入口，无需额外环境变量：
+`nsdm_occ` 的坐标使用环境网格的 CRS。`gbif` 使用其标准 WGS84 字段，并按输入的分类信息和分析掩膜质控。项目保存选择的记录和数据路径，Shiny 和命令行共用该设置。
 
-```r
-source("E:/Package/castSDM_workflows/single_species/00_RUN_ALL.R", encoding = "UTF-8")
-```
+- 默认使用环境库掩膜，可显式传入对齐的 `domain_mask`。分析掩膜定义预测范围，实际生态可达范围需由记录和生态证据判断。
+- 默认只按原生栅格去重。背景从可用真实格点无放回抽样，默认数量由域内合格出现格决定。若提供同类调查点，则可用全部域内去重的调查格点。背景标签代表抽样背景。
+- 默认从合格环境清单取样，VIF 在各训练折内执行。用户明确声明的 `predictor_file` 适用于已有研究设计。仅有含义未核实的记录年时，保留实际环境图层年代和来源。
+- 自动空间分块由点坐标和类别计数确定。先通过 Shiny 的「检查数据与空间折」核对样本分布、距离和训练边际覆盖，再判断能支持多远的预测。
 
-物种名不决定坐标格式或分析域；应按实际数据明确指定。
+在配置目录中运行 `00_RUN_ALL.R` 或通过 Shiny 一键运行。设置 `CAST_DESIGN_ONLY=1` 可单独检查点位设计。完整结果位于 `output/cast047_chelsa_ensmean/<taxon>`。
 
-该文件按环境网格 CRS 的 `lon,lat,year` 读取；来源、采样努力和年份含义未经独立核实，不自动标记为审核后的 GBIF 记录。松鼠默认使用全国陆地掩膜，与鱼类的河流局地范围不同；两者不能仅按 AUC 排名。两例均使用 GLU 当前土地利用指标。
-新结果写入 `output/cast046_chelsa_ensmean/<物种>`。输入文件内容或科学设置变化时，使用新的 `CAST_RUN_ID` 保留已有研究结果。
-`CAST_DRY_RUN=1` 只做输入检查；正常运行前应取消该环境变量。
-
-可先在 Shiny 点击「检查数据与空间折」，或设置 `CAST_DESIGN_ONLY=1` 后运行入口。预检使用正式流程的实际出现点、背景和候选变量，从 `output/.design` 查看各折记录数、最近训练位置距离和边际训练范围覆盖。预检完成后，取消 `CAST_DESIGN_ONLY` 再拟合。`cast_workflow(..., design_only = TRUE)` 提供同一入口。
-
-候选变量可用 `settings$predictor_file` 声明，CSV 的 `layer` 列使用当前清单的 ID，先应用清单再检查覆盖和取样。`target_group_file` 可提供同一坐标系下同类调查的 `X,Y` 背景位置。`validation_target` 记录验证用途。`projection_cores` 可单独设置情景预测预算，`resources$cores` 仍控制训练预算。
-
-## 流程与解释
-
-质控与 1 km 稀疏化 → 明确分析域和缺失策略 → 空间留出 → 训练折内 VIF≤10 → RF、MaxEnt、GAM → 五折空间验证 → 全数据重拟合 → CHELSA 气候预测与环境响应地图。
-
-- 空间留出按整块、分别考虑两类记录的目标比例，报告 `split_class_balance.csv`。若某一空间块集中了超过训练比例的存在记录，目标比例本身不可达，会明确警告；不会拆散空间块凑数。
-- VIF 只检查线性冗余，不规定变量数量，也不证明生态相关性。
-- 背景点案例设置为 10,000；背景标签不等于观测缺失或真实缺席。
-- 默认完整样本策略不插补。验证群体在分割前固定，不在查看留出结果后追加记录。`excluded_cohort_final_predictors.csv` 明确哪些预先排除的记录在最终变量上完整；改变候选库或缺失政策应另开分析。
-- 鱼类分析域保持河流相关网格与记录周围 10 km 范围的交集。域外没有预测；网格覆盖面积不等于实际河道水面面积。松鼠的全国背景也不自动构成其生态可达范围。
-- 当前气候为 CHELSA 基线，未来仅为 ensmean 的 SSP126、SSP370、SSP585 × 2011–2040、2041–2070、2071–2100；其他变量静态。平均气候上的预测不等于各 GCM 预测的平均，也不包括 GCM 间不确定性。
-- 环境地图表示固定模型的适宜度响应。单因子响应不必相加为总变化；边际范围支持不等于联合支持或因果识别。加性 GAM 和 lq MaxEnt 的背景方向一致可能来自模型结构。
-- 使用现有空间训练折的拟合，在同一批原始留出位置、真实未来协变量上检查解释敏感性，不再增加五次拟合。`diagnostics/response_spatial_sensitivity.csv` 报告共同支持位置、各折变量入选、全零响应、方向一致性与幅度变化；不是独立重复、置信区间或因果效应。
-
-## 查看与重绘
-
-运行 `05_SHINY.R` 浏览结果。高级设置可选 blockCV 或地理网格，程序遵循声明的设计。blockCV 的 `block_size` 用于内层，`holdout_block_size` 可覆盖外层尺度。没有指定边长时使用自动估计。失败时打印底层错误及尝试的尺度；内层失败另存 `training/tables/cv_design_failure.csv`。地图统计使用原生共同支持网格，记录位置统计单列。预览按有效网格聚合，支持域在聚合前应用；点击读取原始网格。
-
-默认输出空间验证、连续适宜度变化、环境范围与模型分歧三组主图。保留 PNG/PDF 和既有底图。在 Shiny 点选环境因子即可计算该因子的地图。出版用单因子响应图、阈值分类、ALE 曲线和完整图集通过重绘入口按需输出：
-
-```r
-Sys.setenv(CAST_CASE_DIR = "E:/Package/castSDM_workflows/single_species/output/cast046_chelsa_ensmean/Callosciurus_erythraeus",
-           CAST_FIGURES = "03_environmental_driver") # 也可选 all、responses、maps、drivers
-source("E:/Package/castSDM_workflows/single_species/04_REPLOT.R", encoding = "UTF-8")
-```
-
-`workflow_timings.csv` 单列输入指纹校验、数据准备和情景投影；`comparison/tables/timings.csv` 记录分引擎预测耗时。`figures/phase_timings.csv` 分别记录数值准备与图表导出的用时；重绘使用已拟合模型。
-`comparison/tables/support_scope.csv` 和 `diagnostics/response_spatial_sensitivity.csv` 分别列出中央分位数包络与实际观测范围；包络外不必然是范围外推，两者都不证明联合支持。跨空间拟合的共同解释位置同时报告存在点和背景点数量，不能只看方向一致比例。
-`predictor_qualification.csv`、`predictor_missing_qc.csv`、`predictor_semantics.csv` 保留覆盖、记录损失和来源尺度依据；`gam_concurvity.csv` 报告 GAM 响应替代性。
-未完成比较不生成完成标记；同配置重跑校验并复用成功阶段。不要通过改名旧结果假装兼容新分析。
-
-裂腹鱼来源为 [SchiSOFT v1](https://doi.org/10.6084/m9.figshare.24638538.v1)，CC BY 4.0。保留原始年份并审计采样日期、区间及替代值，不将不明确日期转换成精确采样年。
-
-原始环境栅格目录和输入清单可以共用；准备数据目录和训练缓存按物种隔离，并继续核对记录文件、分析域、数据内容及计算规则。1 km 稀疏、10,000 背景、95% 覆盖和 VIF 10 是声明的默认设置，不是从物种自动学习的生态最优值；入口会打印，主要设置可在 Shiny 或 cast_workflow() 中修改。
+`05_SHINY.R` 浏览结果与按需计算单因子响应。重绘时设置 `CAST_CASE_DIR` 指向已完成的案例，`CAST_FIGURES="03_environmental_driver"` 请求单因子图，再运行 `04_REPLOT.R`。

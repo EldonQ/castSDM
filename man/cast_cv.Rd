@@ -11,7 +11,7 @@ cast_cv(
   select_args = list(),
   k = 5L,
   models = c("rf"),
-  block_method = c("blockcv", "grid", "env"),
+  block_method = c("auto", "blockcv", "grid", "env"),
   block_size = NULL,
   buffer = 0,
   buffer_unit = c("deg", "km"),
@@ -60,7 +60,8 @@ Cannot override \code{data}, \code{response}, or \code{method}.}
 
 \item{block_method}{Spatial blocking strategy:
 \itemize{
-\item \code{"blockcv"} (default): \pkg{blockCV} spatial blocks
+\item \code{"auto"} (default): physical block size from sample geometry and class counts.
+\item \code{"blockcv"}: \pkg{blockCV} spatial blocks
 (\code{\link[blockCV:cv_spatial]{blockCV::cv_spatial()}}) with square blocks. The block size follows
 the range of spatial autocorrelation estimated by
 \code{\link[blockCV:cv_spatial_autocor]{blockCV::cv_spatial_autocor()}} (Roberts et al. 2017), or the

@@ -1,5 +1,4 @@
 # AI-assisted development (2026-11-11); scope: inst/AI_ASSISTANCE.md.
-# source("E:/Package/castSDM_workflows/single_species/05_SHINY.R", encoding = "UTF-8")
 # Rscript 05_SHINY.R [case-directory]
 local({
   sources <- vapply(sys.frames(), function(frame)
@@ -15,7 +14,7 @@ local({
   root <- normalizePath(roots[1L], winslash = "/", mustWork = TRUE)
   sys.source(file.path(root, "runtime.R"), envir = environment())
   case_runtime_setup(root, packages = c("castSDM", "terra", "ranger", "maxnet", "mgcv",
-    "shiny", "bslib", "leaflet", "callr", "zip"), minimum_cast = "0.46.0")
+    "shiny", "bslib", "leaflet", "callr", "zip"), minimum_cast = "0.47.0")
   sys.source(file.path(root, "01_config.R"), envir = environment())
   sys.source(file.path(root, "inventory.R"), envir = environment())
   configs <- castsdm_species_configs(root)

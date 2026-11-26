@@ -135,7 +135,6 @@ case_runtime_preflight <- function(cfg, include_future = TRUE) {
   }
   paths <- unique(c(pool$path, future, cfg$occurrence_file, cfg$bg_target_group_file,
     file.path(cfg$nsdm_data_root, "mask_china.tif"),
-    if (identical(cfg$domain_mode, "freshwater_river")) cfg$freshwater_river_distance_raster,
     if (identical(cfg$domain_mode, "custom_mask")) cfg$analysis_domain_mask_file))
   missing <- paths[is.na(paths) | !nzchar(paths) | !file.exists(paths)]
   if (length(missing)) stop("Missing physical input files (", length(missing), "):\n  ",
@@ -144,7 +143,7 @@ case_runtime_preflight <- function(cfg, include_future = TRUE) {
     "Keep input files in place until the run finishes. No preparation or fitting started.", call. = FALSE)
   columns <- names(data.table::fread(cfg$occurrence_file[1L], nrows = 0L, data.table = FALSE))
   required <- if (cfg$input_type == "gbif") c("gbifID", "decimalLongitude", "decimalLatitude",
-    "countryCode", "occurrenceStatus", "hasGeospatialIssues", "coordinateUncertaintyInMeters", "basisOfRecord") else character()
+    "occurrenceStatus", "hasGeospatialIssues", "coordinateUncertaintyInMeters", "basisOfRecord") else character()
   if (any(!required %in% columns)) stop("Occurrence input lacks required fields: ",
     paste(setdiff(required, columns), collapse = ", "), call. = FALSE)
   if (cfg$input_type != "gbif" && (!any(grepl("^lon|^longitude$", columns, ignore.case = TRUE)) ||
