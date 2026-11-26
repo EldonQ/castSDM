@@ -22,6 +22,11 @@
 #' before its logit shift; it is not a fit with different class weights.
 #' These comparisons are descriptive, as are CV metrics at a pooled OOF
 #' threshold. A new policy needs new validation; this function never chooses it.
+#' Where coordinates are available, `spatial_baseline` scores the hold-out rows
+#' by decreasing distance to the nearest training presence. Its AUC measures
+#' how well geography alone separates the sampled labels. It uses Euclidean
+#' distance for a projected metre CRS and great-circle distance otherwise
+#' (Hijmans, 2012, <https://doi.org/10.1890/11-0826.1>).
 #'
 #' Brier scores, log loss and reliability bins concern the sampled binary
 #' response. With presence/background data they do not measure calibration of
@@ -125,7 +130,13 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
       detail = "This older result evaluated unclamped predictors while its map protocol clamps. Historical evaluation is preserved; a new declared run is needed for matching validation."))
   if (nrow(folds %||% data.frame()) && any(folds$n_presence == 0 | folds$n_background == 0))
     notes <- rbind(notes, data.frame(code = "single_class_fold", detail = "At least one spatial fold lacks a response class; inspect coverage before using thresholds."))
-  d <- structure(list(holdout = bind(holdout), score_views_oof = bind(score_views),
+  spatial <- object$spatial_baseline
+  if (is.null(spatial) && !is.null(object$output_dir)) {
+    split <- tryCatch(.cast_figure_split(object), error = function(e) NULL)
+    spatial <- .cast_spatial_baseline(split, object$protocol$coords_crs)
+  }
+  d <- structure(list(holdout = bind(holdout), spatial_baseline = spatial,
+    score_views_oof = bind(score_views),
     reliability_oof = bind(reliability), folds = folds, fold_metrics = cv$fold_metrics,
     response_spatial_sensitivity = .cast_response_validation_summary(cv, policy$weights),
     selection_frequency = cv$selection_freq, score_offsets = cv$offsets,
@@ -147,6 +158,46 @@ cast_diagnose <- function(object, comparison = NULL, test_data = NULL,
     .cast_atomic_rds(d, file.path(output_dir, "diagnostics.rds"))
   }
   d
+}
+
+.cast_spatial_baseline <- function(split, coords_crs) {
+  train <- split$train
+  test <- split$test
+  cols <- c("lon", "lat", "presence")
+  if (!all(cols %in% names(train)) || !all(cols %in% names(test)) ||
+      !requireNamespace("FNN", quietly = TRUE) || !requireNamespace("sf", quietly = TRUE)) return(NULL)
+  pres <- which(train$presence == 1L)
+  y <- test$presence
+  if (!length(pres) || !all(y %in% c(0L, 1L)) || length(unique(y)) != 2L) return(NULL)
+  from <- cbind(train$lon[pres], train$lat[pres])
+  to <- cbind(test$lon, test$lat)
+  xy <- rbind(from, to)
+  if (!is.numeric(xy) || any(!is.finite(xy))) return(NULL)
+  if (is.null(coords_crs) && (any(abs(xy[, 1L]) > 180) || any(abs(xy[, 2L]) > 90))) return(NULL)
+  crs <- tryCatch(sf::st_crs(coords_crs %||% 4326), error = function(e) NULL)
+  if (is.null(crs) || is.na(crs)) return(NULL)
+  if (isTRUE(crs$units_gdal %in% c("metre", "meter"))) {
+    distance <- FNN::get.knnx(from, to, k = 1L)$nn.dist[, 1L]/1000
+    geometry <- "projected_euclidean"
+  } else {
+    lonlat <- tryCatch(sf::sf_project(crs$wkt, sf::st_crs(4326)$wkt, xy,
+      warn = FALSE, authority_compliant = FALSE), error = function(e) NULL)
+    if (is.null(lonlat) || any(!is.finite(lonlat)) || any(abs(lonlat[, 2L]) > 90)) return(NULL)
+    # Chord distance orders the neighbors identically to great-circle distance.
+    rad <- lonlat * pi/180
+    sphere <- cbind(cos(rad[, 2L]) * cos(rad[, 1L]), cos(rad[, 2L]) * sin(rad[, 1L]), sin(rad[, 2L]))
+    i <- seq_len(nrow(from))
+    nearest <- FNN::get.knnx(sphere[i, , drop = FALSE], sphere[-i, , drop = FALSE],
+      k = 1L)$nn.index[, 1L]
+    heldout <- lonlat[-i, , drop = FALSE]
+    distance <- .haversine_km(heldout[, 2L], heldout[, 1L], lonlat[nearest, 2L], lonlat[nearest, 1L])
+    geometry <- "great_circle"
+  }
+  data.frame(baseline = "nearest_training_presence", distance = geometry,
+    auc = compute_auc(y, -distance), n_training_presence = length(pres),
+    n_test_presence = sum(y == 1L), n_test_background_or_absence = sum(y == 0L),
+    median_presence_km = stats::median(distance[y == 1L]),
+    median_background_or_absence_km = stats::median(distance[y == 0L]))
 }
 
 .cast_diagnostic_policy <- function(object) {

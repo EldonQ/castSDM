@@ -35,6 +35,11 @@ declared ensemble weights held fixed. Native means the same fitted engine
 before its logit shift; it is not a fit with different class weights.
 These comparisons are descriptive, as are CV metrics at a pooled OOF
 threshold. A new policy needs new validation; this function never chooses it.
+Where coordinates are available, \code{spatial_baseline} scores the hold-out rows
+by decreasing distance to the nearest training presence. Its AUC measures
+how well geography alone separates the sampled labels. It uses Euclidean
+distance for a projected metre CRS and great-circle distance otherwise
+(Hijmans, 2012, \url{https://doi.org/10.1890/11-0826.1}).
 
 Brier scores, log loss and reliability bins concern the sampled binary
 response. With presence/background data they do not measure calibration of

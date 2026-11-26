@@ -477,8 +477,13 @@ cast_run <- function(species_data,
     fit_full = fit_full, call = cl, protocol = protocol,
     projection = projection, output_dir = output_dir, receipts = receipts
   )
+  result["spatial_baseline"] <- list(.cast_spatial_baseline(split, protocol$coords_crs))
   result$diagnostics <- cast_diagnose(result,
     output_dir = if (!is.null(out)) file.path(output_dir, "diagnostics"))
+  if (verbose && !is.null(result$spatial_baseline)) {
+    baseline_auc <- formatC(result$spatial_baseline$auc, format = "f", digits = 4L)
+    cli::cli_inform("Hold-out AUC using only distance to the nearest training presence: {baseline_auc}.")
+  }
   if (!is.null(out)) {
     stage_started <- Sys.time()
     report_path <- file.path(output_dir, "odmap_report.md")

@@ -59,6 +59,12 @@ test_that("changing a declared real CRS representation cannot reuse the previous
     rf_ntree=x$fit_settings$rf_ntree,num_threads=1L,seed=x$fit_settings$seed)
   cache <- tempfile("actual-training-cache-")
   first <- cast_run(data,prepared=prepared,protocol=protocol,cache_dir=cache,verbose=FALSE)
+  if (requireNamespace("FNN", quietly=TRUE)) {
+    benchmark <- cast_diagnose(first)$spatial_baseline
+    expect_equal(benchmark$n_test_presence, sum(prepared$test$presence == 1L))
+    expect_equal(benchmark$n_test_background_or_absence, sum(prepared$test$presence == 0L))
+    expect_true(is.finite(benchmark$auc) && benchmark$auc >= 0 && benchmark$auc <= 1)
+  }
   protocol$coords_crs <- alternative
   second <- cast_run(data,prepared=prepared,protocol=protocol,cache_dir=cache,verbose=FALSE)
   hit <- function(run,stage) {

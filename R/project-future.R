@@ -431,6 +431,7 @@ cast_project <- function(fit, cv, current_env, future_envs,
   dlon <- (lon2 - lon1) * to_rad
   a <- sin(dlat / 2)^2 +
     cos(lat1 * to_rad) * cos(lat2 * to_rad) * sin(dlon / 2)^2
+  a <- pmax(0, pmin(1, a))
   R * 2 * atan2(sqrt(a), sqrt(1 - a))
 }
 

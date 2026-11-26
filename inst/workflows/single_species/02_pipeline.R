@@ -59,6 +59,12 @@ case_point_design <- function(split, protocol, out) {
     })
   utils::write.csv(plan$balance, file.path(out, "cv_fold_design.csv"), row.names = FALSE)
   castSDM:::.cast_cv_check_plan(plan)
+  baseline <- castSDM:::.cast_spatial_baseline(split, protocol$coords_crs)
+  if (!is.null(baseline)) {
+    utils::write.csv(baseline, file.path(out, "spatial_baseline.csv"), row.names = FALSE)
+    message("Preflight hold-out AUC using only distance to the nearest training presence: ",
+      formatC(baseline$auc, format = "f", digits = 4L), ".")
+  }
   xy <- c("lon", "lat")
   crs <- if (!is.null(protocol$coords_crs)) sf::st_crs(protocol$coords_crs)
   metric <- isTRUE(crs$units_gdal %in% c("metre", "meter"))

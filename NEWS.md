@@ -1,3 +1,8 @@
+# castSDM 0.47.1
+
+- Report a distance-only hold-out AUC and nearest-training-presence distances
+  to show how much separation geography alone gives the sampled test labels.
+
 # castSDM 0.47.0
 
 - Resolve workflow inputs from the project settings, without taxon-specific

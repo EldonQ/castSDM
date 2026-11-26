@@ -11,7 +11,9 @@ test_that("sparse native reads preserve actual cell values, order and duplicates
 test_that("display requests prepare only the selected products", {
   core <- castSDM:::.cast_figure_display_request("core")
   expect_false(core$range)
-  expect_identical(core$other_layers, "joint")
+  expect_length(core$other_layers, 0L)
+  expect_true(all(c("current", "joint", "joint_change") %in% core$report_layers))
+  expect_identical(castSDM:::.cast_figure_display_request("10")$other_layers, "joint")
   expect_identical(core$driver_mode, "focus")
   expect_null(castSDM:::.cast_figure_display_request("all"))
   expect_true(castSDM:::.cast_figure_display_request("08")$range)
@@ -27,7 +29,10 @@ test_that("saved real response maps require matching data and numerical policy",
   focus <- attr$drivers[1L]
   display <- castSDM:::.cast_figure_driver_display(attr, file.path(directory,"focus.tif"),
     resolution=.02, drivers=focus, include_diagnostics=FALSE)
-  expect_setequal(names(terra::rast(display)),paste0(c("effect_","retained_"),focus))
+  expect_identical(names(terra::rast(display)), paste0("effect_", focus))
+  full <- castSDM:::.cast_figure_driver_display(attr, file.path(directory,"full.tif"),
+    resolution=.02, drivers=focus)
+  expect_true(all(paste0(c("effect_", "retained_"), focus) %in% names(terra::rast(full))))
   preview <- castSDM:::.cast_explore_preview(attr$raster_file, file.path(directory,"preview.tif"))
   expect_true(all(c("total_change", "supported_total_change", "support_total") %in% names(terra::rast(preview))))
   expect_true(terra::ncell(terra::rast(preview)) <= 250000L)
