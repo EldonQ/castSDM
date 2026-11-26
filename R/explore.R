@@ -63,7 +63,7 @@
     comparison = comparison, pool = selected, scenarios = scenarios, metadata = metadata)
 }
 
-.cast_explore_stacks <- function(project, scenario) {
+.cast_explore_stacks <- function(project, scenario, memo = new.env(parent = emptyenv())) {
   paths <- project$pool$path
   vars <- project$fit$env_vars
   tab <- project$scenarios[project$scenarios$scenario == scenario, , drop = FALSE]
@@ -79,7 +79,6 @@
   names(a) <- names(b) <- vars
   terra::compareGeom(a, b, lyrs = FALSE, stopOnError = TRUE)
   proven <- project$comparison$provenance
-  memo <- new.env(parent = emptyenv())
   if (!identical(.cast_data_identity(a, memo), proven$current) ||
       !identical(.cast_data_identity(b, memo), proven$future[[scenario]]))
     cli::cli_abort("Environmental inputs have changed since the saved comparison. Use a completed case with matching files to compute a response.")
@@ -191,14 +190,15 @@
   output
 }
 
-.cast_explore_pair <- function(project, scenario, variables, shifts, context) {
-  stacks <- .cast_explore_stacks(project, scenario)
+.cast_explore_pair <- function(project, scenario, variables, shifts, context,
+                               memo = new.env(parent = emptyenv())) {
+  stacks <- .cast_explore_stacks(project, scenario, memo)
   # Choosing a factor changes the explanation, not the imported joint scenario.
   if (is.null(shifts)) return(stacks)
   a <- b <- if (context == "current") stacks$current else stacks$future
   for (v in variables) {
     a[[v]] <- stacks$current[[v]]
-    b[[v]] <- if (is.null(shifts)) stacks$future[[v]] else stacks$current[[v]]
+    b[[v]] <- stacks$current[[v]]
   }
   list(current = a, future = b)
 }
@@ -289,10 +289,10 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   if (!is.null(focus) && (!is.character(focus) || length(focus) != 1L ||
       is.na(focus) || !focus %in% variables))
     cli::cli_abort("{.arg focus} must name one of the compared variables.")
-  pair <- .cast_explore_pair(project, scenario, variables, shifts, context)
-  a <- pair$current; b <- pair$future
   # Hash in the worker, with a shared memo so repeated/static files are read once.
   memo <- new.env(parent = emptyenv())
+  pair <- .cast_explore_pair(project, scenario, variables, shifts, context, memo)
+  a <- pair$current; b <- pair$future
   invisible(.cast_resources(resources))
   settings <- list(scenario = scenario, variables = variables, shifts = shifts,
     context = context, sample_n = sample_n, maxdepth = maxdepth, maps = maps, focus = focus, grouping = grouping,
@@ -305,13 +305,17 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   mask_file <- file.path(project$case$preparation, "analysis_domain_mask.tif")
   if (!file.exists(mask_file)) cli::cli_abort("Missing recorded analysis domain: {.path {mask_file}}.")
   mask <- terra::rast(mask_file)
+  mask_key <- .cast_data_identity(mask, memo)
+  recorded_mask <- project$comparison$provenance$mask
+  if (!is.null(recorded_mask) && !identical(mask_key, recorded_mask))
+    cli::cli_abort("The analysis mask has changed since the saved comparison. Use the recorded mask or complete a new comparison.")
   saved <- if (is.null(shifts)) .cast_explore_saved(project, scenario, a, b, memo) else NULL
   if (!is.null(saved) && !all(variables %in% saved$drivers)) saved <- NULL
   key <- .cast_digest(list(schema = "cast_explore/2", settings = settings,
     saved = if (!is.null(saved)) unname(tools::md5sum(saved$raster_file)),
     fit = .cast_fit_identity(project$fit),
     current = .cast_data_identity(a, memo), future = .cast_data_identity(b, memo),
-    mask = .cast_data_identity(mask, memo), folds = project$run$cv$fold_info,
+    mask = mask_key, folds = project$run$cv$fold_info,
     metadata = project$metadata,
     grouping = .cast_code_identity(cast_response_groups),
     membership = .cast_code_identity(.cast_response_nodes),
@@ -384,12 +388,14 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
   if (maps || !is.null(saved)) {
     cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
     raw_file <- if (!is.null(saved)) saved$raster_file else file.path(directory, "response.tif")
-    prepared <- if (is.null(shifts)) .cast_compare_reuse(project$fit, a, b,
-      project$comparison, settings$weights, settings$clamp) else NULL
-    if (is.null(saved)) mapped <- .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
-      shifts = shifts, support_probs = settings$support_probs, clamp = settings$clamp,
-      mask = mask, filename = raw_file, overwrite = TRUE, resources = resources,
-      resume = resume, diagnostics = TRUE, prepared = prepared)
+    if (is.null(saved)) {
+      prepared <- if (is.null(shifts)) .cast_compare_reuse(project$fit, a, b,
+        project$comparison, settings$weights, settings$clamp, memo)
+      mapped <- .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
+        shifts = shifts, support_probs = settings$support_probs, clamp = settings$clamp,
+        mask = mask, filename = raw_file, overwrite = TRUE, resources = resources,
+        resume = resume, diagnostics = TRUE, prepared = prepared)
+    }
     if (!is.null(groups)) group_file <- .cast_explore_group_map(groups, a,
       terra::rast(raw_file)[["support_total"]], file.path(directory, "groups.tif"))
     cli::cli_inform("Preparing a separate interactive preview (not the analysis grid).")

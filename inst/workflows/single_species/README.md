@@ -1,4 +1,4 @@
-# CHELSA 单物种工作流（castSDM 0.48.0）
+# CHELSA 单物种工作流（castSDM 0.48.1）
 
 用实际记录和环境库启动一个项目。这个示例适配 CHELSA 集成气候情景；包的 `cast_run()` 与 `cast_compare()` 可直接使用对齐的表格或栅格。
 

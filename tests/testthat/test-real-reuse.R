@@ -65,6 +65,10 @@ test_that("comparison producers hand real blocks, GAM terms and predictions to e
   expect_false(is.null(prepared$gam_current))
   expect_true(isTRUE(attr(prepared$gam_current, "ready")))
   expect_true(file.exists(prepared$prediction))
+  different_clamp <- castSDM:::.cast_compare_reuse(fit, g$current, g$future, comparison, weights, FALSE)
+  expect_identical(different_clamp$blocks$key, prepared$blocks$key)
+  expect_null(different_clamp$prediction)
+  expect_null(different_clamp$gam_current)
   first <- prepared$blocks$starts[1L]
   count <- min(prepared$blocks$rows, terra::nrow(g$current)-first+1L)
   block <- castSDM:::.cast_compare_current_block(prepared$blocks, first, count)

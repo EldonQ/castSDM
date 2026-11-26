@@ -251,6 +251,7 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
   on.exit(options(old_options), add = TRUE)
   method <- match.arg(method)
   decay <- .cast_check_decay(decay)
+  use_cached_layout <- missing(block_size)
   .cast_check_scalar(block_size, "block_size", lower = 1, integer = TRUE)
   vars <- fit$env_vars
   if (!is.logical(diagnostics) || length(diagnostics) != 1L || is.na(diagnostics))
@@ -305,10 +306,11 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     lock <- .cast_lock(paste0(filename, ".lock"))
     on.exit(filelock::unlock(lock), add = TRUE)
     memo <- new.env(parent = emptyenv())
+    mask_key <- if (!is.null(mask)) .cast_data_identity(mask, memo)
     signature <- list(schema = "cast_attribution/3", fit = .cast_fit_identity(fit), weights = weights,
       current = prepared$current_key %||% .cast_data_identity(current, memo),
       future = prepared$future_key %||% .cast_data_identity(future, memo),
-      mask = if (!is.null(mask)) .cast_data_identity(mask), drivers = drivers,
+      mask = mask_key, drivers = drivers,
       support_probs = support_probs, clamp = clamp,
       core = .cast_code_identity(.cast_attribution_block),
       execution = .cast_code_identity(.cast_attribution),
@@ -335,9 +337,13 @@ cast_attribution <- function(fit, current, future, drivers = NULL, cv = NULL,
     on.exit(.cast_writer_abort(writer), add = TRUE)
     n <- terra::ncell(current)
     blocks <- prepared$blocks
-    if (!is.null(blocks) && blocks$rows*terra::ncol(current) > block_size) blocks <- NULL
+    # A masked cache can omit cells needed by a different requested mask.
+    # Private callers without an explicit block size can adopt the verified layout.
+    compatible_mask <- is.null(prepared$mask_key) || identical(mask_key, prepared$mask_key)
+    cache_limit <- if (use_cached_layout) cells_budget else block_size
+    if (!is.null(blocks) && (!compatible_mask || blocks$rows*terra::ncol(current) > cache_limit)) blocks <- NULL
     rows <- if (!is.null(blocks)) blocks$rows else max(1L, as.integer(block_size / terra::ncol(current)))
-    if (verbose && !is.null(blocks)) cli::cli_inform("Environmental response maps: reusing verified current blocks and matching paired predictions.")
+    if (verbose && !is.null(blocks)) cli::cli_inform("Environmental response maps: reusing verified current predictor blocks ({rows} raster rows per block).")
     starts <- seq.int(1L, terra::nrow(current), by = rows)
   } else {
     if (!is.data.frame(current) || !is.data.frame(future) || !nrow(current) ||

@@ -70,12 +70,10 @@
   list(value = value, repair = FALSE)
 }
 
-.cast_compare_reuse <- function(fit, current, future, comparison, weights, clamp) {
+.cast_compare_reuse <- function(fit, current, future, comparison, weights, clamp,
+                                memo = new.env(parent = emptyenv())) {
   if (!inherits(comparison, "cast_comparison") || !inherits(current, "SpatRaster") ||
-      !inherits(future, "SpatRaster") || !identical(comparison$clamp, clamp) ||
-      !identical(comparison$weights, weights) ||
-      !identical(comparison$provenance$model, .cast_fit_identity(fit))) return(NULL)
-  memo <- new.env(parent = emptyenv())
+      !inherits(future, "SpatRaster")) return(NULL)
   current_key <- .cast_data_identity(current, memo)
   future_key <- .cast_data_identity(future, memo)
   if (!identical(current_key, comparison$provenance$current)) return(NULL)
@@ -91,7 +89,9 @@
       blocks <- manifest; blocks$directory <- directory
     }
   }
-  prediction <- comparison$results[[scenario]]$raster_file
+  reuse_model <- identical(comparison$clamp, clamp) && identical(comparison$weights, weights) &&
+    identical(comparison$provenance$model, .cast_fit_identity(fit))
+  prediction <- if (reuse_model) comparison$results[[scenario]]$raster_file
   layers <- unlist(lapply(c("current_", "future_"), paste0, names(weights)))
   if (!is.character(prediction) || !file.exists(prediction) ||
       !all(layers %in% names(terra::rast(prediction)))) prediction <- NULL
@@ -102,12 +102,12 @@
     if (is.null(result)) prediction <- NULL else if (!isTRUE(result$raster_verified))
       .cast_scenario_readback(result, prediction, current, names(weights))
   }
-  gam <- if (!is.null(blocks) && !is.null(comparison$gam_current))
+  gam <- if (reuse_model && !is.null(blocks) && !is.null(comparison$gam_current))
     .cast_gam_current_cache(fit, weights, comparison$changing_predictors, blocks,
       file.path(comparison$output_dir, ".cache", "gam_current"), clamp)
   if (!isTRUE(attr(gam, "ready"))) gam <- NULL
   list(blocks = blocks, gam_current = gam, prediction = prediction, layers = layers,
-    current_key = current_key, future_key = future_key)
+    current_key = current_key, future_key = future_key, mask_key = comparison$provenance$mask)
 }
 
 .cast_reuse_predictions <- function(prepared, first, count, positions, weights) {

@@ -1,3 +1,11 @@
+# castSDM 0.48.1
+
+- Reuse verified environmental blocks independently of fitted predictions.
+  On-demand response maps adopt a compatible cached layout within memory limits.
+- Check the recorded analysis mask before exploring a completed case and avoid
+  reusing masked predictor blocks for a different analysis domain.
+- Share environmental fingerprints within each exploration request.
+
 # castSDM 0.48.0
 
 - Reuse fitted GAM bases directly for changing smooths in paired comparisons.
