@@ -110,7 +110,7 @@
       finite <- rep(TRUE, length(indices))
       supported_current <- if (!is.null(bounds)) .cast_attribution_inside(a, bounds) else rep(FALSE, length(indices))
       for (x in future) {
-        b <- .cast_raster_block(x, row, count)[indices, , drop = FALSE]
+        b <- .cast_raster_cells(x, row, count, indices)
         finite <- finite & .cast_finite_rows(b)
         if (!is.null(bounds)) supported_current <- supported_current & .cast_attribution_inside(b, bounds[names(b)])
       }

@@ -28,6 +28,11 @@ test_that("ordinary, accelerated, tabular and scenario predictions share one cla
   direct <- castSDM:::.cast_selected_gam_terms(gam, future, selected)
   expect_equal(colnames(direct), colnames(regular))
   expect_equal(as.numeric(direct), as.numeric(regular), tolerance = 1e-12)
+  all_terms <- castSDM:::.cast_predict_gam(gam, future, type = "terms")
+  rebuilt <- castSDM:::.cast_selected_gam_terms(gam, future)
+  expect_identical(colnames(rebuilt), colnames(all_terms))
+  expect_identical(attr(rebuilt, "constant"), attr(all_terms, "constant"))
+  expect_equal(as.numeric(rebuilt), as.numeric(all_terms), tolerance = 1e-12)
   for (clamp in c(FALSE, TRUE)) {
     context <- castSDM:::.cast_prediction_context(fit, weights, current, future, clamp)
     scenario <- context$predict(x$variables)

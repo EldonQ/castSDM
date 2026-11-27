@@ -1,3 +1,13 @@
+# castSDM 0.49.0
+
+- Reuse identical numeric inputs within fitted additive GAM terms for current
+  and future prediction blocks. The fitted bases, coefficients, predictor
+  values and native grid are retained.
+- Read only relevant native raster windows when checking common scenario
+  coverage and training quantile envelopes.
+- Bound random forest prediction workspace using the fitted tree count.
+  Every tree and prediction row is retained.
+
 # castSDM 0.48.2
 
 - Keep Shiny point queries and spatial refit evidence tied to the displayed

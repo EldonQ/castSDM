@@ -216,12 +216,7 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
     return(.cast_prediction_output(rep(NA_real_, nrow(X_raw)), offset, output))
   }
   p <- if (nm == "rf") {
-    # predict.ranger() draws a random seed from R's RNG when `seed` is not
-    # supplied, which would advance the caller's .Random.seed on every
-    # prediction call. Pin it: predictions stay deterministic and the
-    # caller's RNG state untouched.
-    stats::predict(mdl_info$model, data = X_raw, seed = 42L,
-      num.threads = getOption("castSDM.predict_threads"))$predictions[, "1"]
+    .cast_predict_rf(mdl_info$model, X_raw)
   } else if (nm == "maxent") {
     as.numeric(stats::predict(mdl_info$model, X_raw, type = "logistic",
                               clamp = FALSE))
@@ -231,6 +226,26 @@ predict_single_model <- function(mdl_info, X_raw, clamp = FALSE,
     rep(NA_real_, nrow(X_raw))
   }
   .cast_prediction_output(p, offset, output)
+}
+
+.cast_predict_rf <- function(model, newdata) {
+  # Supply a seed so predict.ranger does not advance the caller's RNG.
+  predict <- function(data) stats::predict(model, data = data, seed = 42L,
+    num.threads = getOption("castSDM.predict_threads"))$predictions[, "1"]
+
+  # Ranger stores one terminal-node index per tree and row. Bound that
+  # workspace and input copies without dropping rows or changing the forest.
+  bytes_per_row <- 8 * (model$num.trees + 2L * ncol(newdata))
+  rows_per_call <- max(1L, floor(128 * 1024^2 / bytes_per_row))
+  n <- nrow(newdata)
+  if (n <= rows_per_call) return(predict(newdata))
+
+  result <- numeric(n)
+  for (first in seq.int(1L, n, by = rows_per_call)) {
+    rows <- seq.int(first, min(first + rows_per_call - 1L, n))
+    result[rows] <- predict(newdata[rows, , drop = FALSE])
+  }
+  result
 }
 
 # Discrete BAM fitting is retained; regular prediction evaluates the saved

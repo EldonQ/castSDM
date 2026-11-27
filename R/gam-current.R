@@ -1,5 +1,5 @@
 # Compact, content-verified current GAM contributions shared by future scenarios.
-# All predictions still use the regular, batch-invariant mgcv path.
+# Predictions use the same fitted, batch-invariant mgcv bases.
 .cast_gam_current_cache <- function(fit, weights, variables, blocks, directory, clamp) {
   models <- names(weights)[vapply(names(weights), function(m)
     !is.null(.cast_gam_terms(fit$models[[m]])), logical(1))]
@@ -18,7 +18,7 @@
     cols <- unname(labels[intersect(variables, names(labels))])
     if (!nrow(current)) return(list(eta = numeric(),
       terms = matrix(numeric(), 0L, length(cols), dimnames = list(NULL, cols))))
-    a <- .cast_predict_gam(fit$models[[m]]$model, current, type = "terms")
+    a <- .cast_selected_gam_terms(fit$models[[m]]$model, current)
     list(eta = rowSums(a) + attr(a, "constant"), terms = a[, cols, drop = FALSE])
   }), models)
 }

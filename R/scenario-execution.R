@@ -171,20 +171,42 @@
   stats::setNames(labels, vars)
 }
 
-.cast_selected_gam_terms <- function(model, newdata, terms) {
-  smooth <- model$smooth
-  index <- match(terms, vapply(smooth, `[[`, character(1), "label"))
-  if (anyNA(index) || !is.null(model$Xcentre) || length(attr(model$nsdf, "drop.ind")))
-    return(.cast_predict_gam(model, newdata, type = "terms", terms = terms))
-  # Use the fitted bases and coefficients that predict.gam uses. Computing
-  # only the selected smooths avoids its full, mostly zero design matrix.
+.cast_selected_gam_terms <- function(model, newdata, terms = NULL) {
+  requested <- terms
+  smooths <- model$smooth
+  labels <- vapply(smooths, `[[`, character(1), "label")
+  linear <- attr(model$pterms, "term.labels") %||% character()
+  coefficients <- model$coefficients
+  terms <- terms %||% c(linear, labels)
+  numeric_column <- function(x) is.numeric(x) && is.null(dim(x))
+  if (!all(terms %in% c(linear, labels)) || !is.null(model$Xcentre) ||
+      length(attr(model$nsdf, "drop.ind")) || length(model$nsdf) != 1L ||
+      !identical(names(coefficients)[seq_len(model$nsdf)], c("(Intercept)", linear)) ||
+      !all(linear %in% names(newdata)) || !all(vapply(newdata[linear], numeric_column, logical(1))))
+    return(.cast_predict_gam(model, newdata, type = "terms", terms = requested))
+  # These additive terms use the fitted mgcv bases. Repeated numeric values
+  # share one basis evaluation and are expanded in their original row order.
   out <- matrix(NA_real_, nrow(newdata), length(terms), dimnames = list(NULL, terms))
-  for (j in seq_along(index)) {
-    term <- smooth[[index[j]]]
-    basis <- mgcv::PredictMat(term, newdata)
-    coefficients <- model$coefficients[seq.int(term$first.para, term$last.para)]
-    out[, j] <- basis %*% coefficients + (attr(basis, "offset") %||% 0)
+  for (v in intersect(terms, linear)) out[, v] <- newdata[[v]] * coefficients[[v]]
+  for (v in intersect(terms, labels)) {
+    term <- smooths[[match(v, labels)]]
+    variable <- term$term
+    x <- if (length(variable) == 1L && identical(term$by, "NA")) newdata[[variable]]
+    values <- if (numeric_column(x)) unique(x)
+    data <- if (is.null(values)) newdata else stats::setNames(data.frame(values), variable)
+    term_coef <- coefficients[seq.int(term$first.para, term$last.para)]
+    score <- numeric(nrow(data))
+    # Bound the temporary basis workspace as in predict.gam for new data.
+    block_size <- 1000L
+    for (block in seq_len(ceiling(nrow(data) / block_size))) {
+      first <- (block - 1L) * block_size + 1L
+      rows <- seq.int(first, min(first + block_size - 1L, nrow(data)))
+      basis <- mgcv::PredictMat(term, data[rows, , drop = FALSE])
+      score[rows] <- drop(basis %*% term_coef) + (attr(basis, "offset") %||% 0)
+    }
+    out[, v] <- if (!is.null(values) && length(values) < length(x)) score[match(x, values)] else score
   }
+  attr(out, "constant") <- coefficients[1L]
   out
 }
 
@@ -209,7 +231,7 @@
     cols <- unname(terms[[m]][intersect(changed, names(terms[[m]]))])
     saved <- gam_current[[m]]
     if (is.null(saved) || !all(cols %in% colnames(saved$terms))) {
-      a <- measure("predict_gam", .cast_predict_gam(info$model, current, type = "terms"))
+      a <- measure("predict_gam", .cast_selected_gam_terms(info$model, current))
       saved <- list(eta = rowSums(a) + attr(a, "constant"), terms = a)
     }
     delta <- if (length(cols)) {
