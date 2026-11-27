@@ -94,6 +94,18 @@
   variables
 }
 
+.cast_paired_extract <- function(current, future, xy) {
+  before <- terra::extract(current, xy)
+  if (!identical(names(current), names(future)))
+    return(list(current = before, future = terra::extract(future, xy)))
+  vars <- names(current)
+  changed <- vars[!vapply(vars, function(v)
+    .cast_shared_raster_layers(current, future, v), logical(1))]
+  after <- before
+  if (length(changed)) after[changed] <- terra::extract(future[[changed]], xy)
+  list(current = before, future = after)
+}
+
 .cast_explore_sample <- function(project, a, b, n) {
   info <- project$run$cv$fold_info
   if (is.null(info) || !all(c("lon", "lat", "fold") %in% names(info)))
@@ -104,9 +116,7 @@
     unique(as.integer(round(seq(1L, nrow(info), length.out = min(n, nrow(info))))))
   xy <- as.matrix(info[at, c("lon", "lat"), drop = FALSE])
   # The case workflow records these coordinates in the environmental grid CRS.
-  current <- terra::extract(a, xy)
-  future <- terra::extract(b, xy)
-  list(current = current, future = future, xy = xy, fold = info$fold[at], row = at)
+  c(.cast_paired_extract(a, b, xy), list(xy = xy, fold = info$fold[at], row = at))
 }
 
 .cast_explore_group_map <- function(groups, predictors, support, filename, block_size = 50000L) {
@@ -323,7 +333,8 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     direction = .cast_code_identity(.cast_response_direction),
     compute = .cast_code_identity(cast_explore), attribution = .cast_code_identity(cast_attribution),
     attribution_execution = .cast_code_identity(.cast_attribution),
-    sample = .cast_code_identity(.cast_explore_sample), pair = .cast_code_identity(.cast_explore_pair),
+    sample = .cast_code_identity(.cast_explore_sample), extraction = .cast_code_identity(.cast_paired_extract),
+    pair = .cast_code_identity(.cast_explore_pair),
     group_map = .cast_code_identity(.cast_explore_group_map),
     preview = .cast_code_identity(.cast_explore_preview),
     rpart = if (grouping) as.character(utils::packageVersion("rpart"))))
@@ -384,11 +395,12 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     utils::write.csv(groups$fold_losses, file.path(directory, "group_fold_losses.csv"), row.names = FALSE)
   }
   mapped <- saved
-  raw_file <- preview <- group_file <- NULL
-  if (maps || !is.null(saved)) {
-    cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
-    raw_file <- if (!is.null(saved)) saved$raster_file else file.path(directory, "response.tif")
+  raw_file <- saved$raster_file
+  preview <- group_file <- NULL
+  if (maps) {
     if (is.null(saved)) {
+      cli::cli_inform("Computing native-grid paired responses in bounded blocks.")
+      raw_file <- file.path(directory, "response.tif")
       prepared <- if (is.null(shifts)) .cast_compare_reuse(project$fit, a, b,
         project$comparison, settings$weights, settings$clamp, memo)
       mapped <- .cast_attribution(project$fit, a, b, drivers = focus %||% character(), weights = settings$weights,
@@ -418,7 +430,7 @@ cast_explore <- function(case_dir, scenario = NULL, variables = NULL, shifts = N
     if (!is.null(mapped$model_summary_common)) utils::write.csv(mapped$model_summary_common,
       file.path(directory,"native_response_by_model.csv"), row.names=FALSE)
   }
-  settings$response_limits <- .cast_app_response_limits(project, raw_file)
+  if (!is.null(preview)) settings$response_limits <- .cast_app_response_limits(project, raw_file)
   result <- list(schema = "cast_explore/1", directory = directory, key = key,
     case_dir = project$directory, settings = settings, summary = response$summary,
     model_summary = response$model_summary,

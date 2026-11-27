@@ -1,3 +1,10 @@
+# castSDM 0.48.2
+
+- Keep Shiny point queries and spatial refit evidence tied to the displayed
+  result, including when a saved scenario map is reused after point analysis.
+- Extract unchanged scenario predictors once per location. Point-only requests
+  skip map preview and colour-scale computation and retain verified map links.
+
 # castSDM 0.48.1
 
 - Reuse verified environmental blocks independently of fitted predictions.

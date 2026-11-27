@@ -59,6 +59,14 @@ test_that("comparison producers hand real blocks, GAM terms and predictions to e
   comparison <- cast_compare(fit, g$current, list(actual = g$future),
     groups = list(environment = fit$env_vars), weights = weights, clamp = TRUE,
     output_dir = root, verbose = FALSE)
+  xy <- terra::xyFromCell(g$current, seq_len(terra::ncell(g$current)))
+  values <- castSDM:::.cast_paired_extract(g$current, g$future, xy)
+  expect_identical(values$current, terra::extract(g$current, xy))
+  expect_identical(values$future, terra::extract(g$future, xy))
+  path <- comparison$results$actual$raster_file
+  view <- list(schema = "cast_explore/1", raster_file = path)
+  layer <- castSDM:::.cast_app_layer(view, c("future", "total_change", "support_total"))
+  expect_equal(terra::values(layer), terra::values(terra::rast(path)[[c("joint", "joint_change", "support")]]), ignore_attr = TRUE)
   # Equality alone would miss a fallback that recalculates everything.
   prepared <- castSDM:::.cast_compare_reuse(fit, g$current, g$future, comparison, weights, TRUE)
   expect_false(is.null(prepared$blocks))

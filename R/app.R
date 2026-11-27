@@ -63,17 +63,17 @@
     !is.null(result$model_raster_file)) result$model_raster_file else result$raster_file
   r <- terra::rast(source)
   name <- layer
-  if (identical(result$schema, "cast_app_view/1")) {
-    aliases <- c(future = "joint", total_change = "joint_change", support_total = "support", total_sd = "sd_joint_change")
-    at <- match(layer, names(aliases)); found <- !is.na(at)
-    name[found] <- unname(aliases[at[found]])
-  }
+  aliases <- c(future = "joint", total_change = "joint_change", support_total = "support", total_sd = "sd_joint_change")
+  fallback <- !name %in% names(r) & name %in% names(aliases)
+  name[fallback] <- unname(aliases[name[fallback]])
   out <- r[[name]]; names(out) <- layer
   out
 }
 
 .cast_app_point <- function(project, result, longitude, latitude, driver) {
   settings <- result$settings
+  if (is.null(result$raster_file) && is.null(settings$shifts))
+    result$raster_file <- result$model_raster_file
   source_paths <- c(project$pool$path, project$scenarios$path[project$scenarios$scenario == settings$scenario])
   compatible <- identical(project$comparison$prediction_policy, "regular_gam/1")
   if ((any(!file.exists(source_paths)) || !compatible) && !is.null(result$raster_file)) {
@@ -98,8 +98,9 @@
     settings$shifts, settings$context)
   xy <- matrix(c(longitude, latitude), ncol = 2L)
   xy <- terra::project(xy, "EPSG:4326", terra::crs(pair$current))
-  before <- terra::extract(pair$current, xy)
-  after <- terra::extract(pair$future, xy)
+  inputs <- .cast_paired_extract(pair$current, pair$future, xy)
+  before <- inputs$current
+  after <- inputs$future
   for (v in names(settings$shifts)) after[[v]] <- after[[v]] + settings$shifts[[v]]
   vars <- project$fit$env_vars
   if (!all(is.finite(unlist(before[vars]))) || !all(is.finite(unlist(after[vars]))))
@@ -345,12 +346,15 @@
         } else {
           previous <- active()
           if (is.null(value$preview) && !is.null(previous$preview) &&
+              (is.null(value$raster_file) || identical(value$raster_file, previous$raster_file)) &&
+              (is.null(previous$settings$focus) || identical(value$settings$focus, previous$settings$focus)) &&
               identical(value$settings$scenario, previous$settings$scenario) &&
               identical(value$settings$shifts, previous$settings$shifts) &&
               identical(value$settings$weights, previous$settings$weights) &&
               identical(value$settings$clamp, previous$settings$clamp) &&
               (is.null(value$settings$shifts) || identical(value$settings$context, previous$settings$context))) {
             for (field in c("preview", "raster_file", "model_raster_file")) value[[field]] <- previous[[field]]
+            value$settings$response_limits <- previous$settings$response_limits
           }
           active(value); active_request(pending); point(NULL)
           if (!is.null(value$evidence)) shiny::updateSelectInput(session, "focus_driver",
@@ -379,7 +383,8 @@
           if (!is.null(value$group_file)) {
             layers <- c(layers, "response_group"); labels <- c(labels, "\u73af\u5883\u54cd\u5e94\u5206\u7ec4")
           }
-          selected <- if (!is.null(focus) && !is.null(value$raster_file)) paste0("effect_", focus) else "total_change"
+          effect <- paste0("effect_", focus)
+          selected <- if (!is.null(focus) && effect %in% layers) effect else "total_change"
           shiny::updateSelectInput(session, "layer", choices = stats::setNames(layers, labels), selected = selected)
           if (!is.null(restore_state)) {
             if (restore_state$layer %in% layers) shiny::updateSelectInput(session, "layer", selected = restore_state$layer)
@@ -514,9 +519,13 @@
     output$point <- shiny::renderTable({
       shiny::validate(shiny::need(point(), "\u8bf7\u5728\u5206\u6790\u57df\u5185\u70b9\u51fb\u5730\u56fe\u3002"))
       p <- point(); z <- unlist(p$values)
-      data.frame(item = c("Longitude", "Latitude", "Suitability before", "Suitability after", "Change",
-        "Quantile envelope (1/0)", "Model disagreement", "Response group"),
-        value = c(p$longitude, p$latitude, z, p$group))
+      labels <- c(current = "Suitability before", future = "Suitability after", total_change = "Change",
+        support_total = "Quantile envelope (1/0)", total_sd = "Model disagreement")
+      fields <- names(z)
+      known <- fields %in% names(labels)
+      fields[known] <- unname(labels[fields[known]])
+      data.frame(item = c("Longitude", "Latitude", fields, "Response group"),
+        value = c(p$longitude, p$latitude, unname(z), p$group))
     }, digits = 5)
     output$point_summary <- shiny::renderUI({
       p <- point()
@@ -587,14 +596,20 @@
       d
     }, digits = 5)
     output$spatial_response_validation <- shiny::renderTable({
-      d <- .cast_response_validation_summary(project()$run$cv, project()$comparison$weights)
+      p <- project(); x <- active()
+      shiny::req(p, x)
+      shiny::validate(shiny::need(is.null(x$settings$shifts),
+        "Spatial refit evidence is tied to saved scenarios and is unavailable for a hypothetical change."))
+      d <- p$run$diagnostics$response_spatial_sensitivity %||%
+        .cast_response_validation_summary(p$run$cv, p$comparison$weights)
       shiny::req(d)
       if (!"model" %in% names(d)) return(d)
-      focus <- input$focus_driver %||% active()$settings$focus
-      scenario <- input$scenario %||% project()$case$report_scenario
+      focus <- input$focus_driver %||% x$settings$focus
+      scenario <- x$settings$scenario
       shiny::validate(shiny::need(scenario %in% d$scenario,
         "Spatial refit evidence is available for the reporting scenario only."))
-      d <- d[d$model == "ensemble" & (d$contrast == "total" | d$driver %in% focus), , drop = FALSE]
+      d <- d[d$scenario == scenario & d$model == "ensemble" &
+        (d$contrast == "total" | d$driver %in% focus), , drop = FALSE]
       d$criterion <- ifelse(d$criterion == "observed_training_range",
         "\u5b9e\u9645\u89c2\u6d4b\u8303\u56f4", "\u4e2d\u592e\u5206\u4f4d\u6570\u5305\u7edc")
       d <- d[, c("driver", "contrast", "criterion", "n_locations", "n_common",
